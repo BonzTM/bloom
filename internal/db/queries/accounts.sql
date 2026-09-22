@@ -6,15 +6,20 @@
 -- engine-specific. Regenerate with: go tool sqlc generate.
 
 -- name: CreateAccount :exec
-INSERT INTO accounts (id, username, created_at)
-VALUES (sqlc.arg(id), sqlc.arg(username), sqlc.arg(created_at));
+INSERT INTO accounts (id, username, username_key, password_hash, disabled, created_at)
+VALUES (sqlc.arg(id), sqlc.arg(username), sqlc.arg(username_key), sqlc.arg(password_hash), sqlc.arg(disabled), sqlc.arg(created_at));
 
 -- name: GetAccount :one
-SELECT id, username, created_at
+SELECT id, username, password_hash, disabled, created_at
 FROM accounts
 WHERE id = sqlc.arg(id);
 
 -- name: GetAccountByUsername :one
-SELECT id, username, created_at
+SELECT id, username, password_hash, disabled, created_at
 FROM accounts
-WHERE username = sqlc.arg(username);
+WHERE username_key = sqlc.arg(username_key);
+
+-- name: UpdateAccountPasswordHash :execrows
+UPDATE accounts
+SET password_hash = sqlc.arg(password_hash)
+WHERE id = sqlc.arg(id);

@@ -14,6 +14,8 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -46,6 +48,8 @@ type Config struct {
 	Database DatabaseConfig
 	// Telemetry holds logging, tracing, and metrics configuration.
 	Telemetry TelemetryConfig
+	// Auth holds browser-session and login-rate-limit settings.
+	Auth AuthConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -58,6 +62,28 @@ type Config struct {
 	// ShutdownGrace bounds ordered shutdown. It must exceed worst-case in-flight
 	// work and stay under the platform termination grace.
 	ShutdownGrace time.Duration
+}
+
+// AuthConfig configures local login protection and server-side sessions.
+type AuthConfig struct {
+	// SessionCookieSecure controls the Secure cookie attribute. It defaults to
+	// true and may be disabled only for plaintext local development.
+	SessionCookieSecure bool
+	// SessionLifetime is the absolute browser-session lifetime.
+	SessionLifetime time.Duration
+	// SessionIdleTimeout expires a browser session after inactivity.
+	SessionIdleTimeout time.Duration
+	// LoginRateRefillInterval adds one token to each login bucket per interval.
+	LoginRateRefillInterval time.Duration
+	// LoginRateBurst is the maximum tokens held by an IP or username bucket.
+	LoginRateBurst int
+	// LoginRateMaxKeys bounds the combined IP and username bucket map.
+	LoginRateMaxKeys int
+	// LoginMaxConcurrent bounds memory-intensive password verifications. Work
+	// above this limit is rejected without queueing.
+	LoginMaxConcurrent int
+	// TrustedProxyCIDRs enables forwarded client addresses only for these peers.
+	TrustedProxyCIDRs []netip.Prefix
 }
 
 // HTTPConfig configures the HTTP server and its hardening timeouts.
@@ -130,18 +156,26 @@ const MinSecretKeyBytes = 32
 // Default values. Kept as named constants so the defaults are a single,
 // reviewable source of truth rather than scattered literals.
 const (
-	defaultAddr              = ":8080"
-	defaultReadHeaderTimeout = 5 * time.Second
-	defaultReadTimeout       = 15 * time.Second
-	defaultWriteTimeout      = 15 * time.Second
-	defaultIdleTimeout       = 60 * time.Second
-	defaultMaxBodyBytes      = 1 << 20 // 1 MiB
-	defaultMaxOpenConns      = 25
-	defaultMaxIdleConns      = 25
-	defaultConnMaxLifetime   = 30 * time.Minute
-	defaultConnMaxIdleTime   = 5 * time.Minute
-	defaultShutdownGrace     = 15 * time.Second
-	defaultTraceSampleRatio  = 1.0
+	defaultAddr                    = ":8080"
+	defaultReadHeaderTimeout       = 5 * time.Second
+	defaultReadTimeout             = 15 * time.Second
+	defaultWriteTimeout            = 15 * time.Second
+	defaultIdleTimeout             = 60 * time.Second
+	defaultMaxBodyBytes            = 1 << 20 // 1 MiB
+	defaultMaxOpenConns            = 25
+	defaultMaxIdleConns            = 25
+	defaultConnMaxLifetime         = 30 * time.Minute
+	defaultConnMaxIdleTime         = 5 * time.Minute
+	defaultShutdownGrace           = 15 * time.Second
+	defaultTraceSampleRatio        = 1.0
+	defaultSessionLifetime         = 24 * time.Hour
+	defaultSessionIdleTimeout      = 30 * time.Minute
+	defaultLoginRateRefillInterval = time.Minute
+	defaultLoginRateBurst          = 5
+	defaultLoginRateMaxKeys        = 10_000
+	maxLoginRateMaxKeys            = 100_000
+	defaultLoginMaxConcurrent      = 4
+	maxLoginMaxConcurrent          = 64
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -187,6 +221,16 @@ type rawFlags struct {
 	maxOpenConns, maxIdleConns                                      *int
 	migrateOnStartup, otlpInsecure, migrateMode                     *bool
 	traceSampleRatio                                                *float64
+	auth                                                            authRawFlags
+}
+
+type authRawFlags struct {
+	trustedProxyCIDRs                   *string
+	sessionCookieSecure                 *bool
+	sessionLifetime, sessionIdleTimeout *time.Duration
+	loginRateRefillInterval             *time.Duration
+	loginRateBurst, loginRateMaxKeys    *int
+	loginMaxConcurrent                  *int
 }
 
 // bindFlags declares every flag with its env-seeded default.
@@ -214,11 +258,25 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		otlpEndpoint:     fs.String("otlp-endpoint", env.string("BLOOM_OTLP_ENDPOINT", ""), "OTLP/HTTP trace endpoint host:port (empty disables span export)"),
 		otlpInsecure:     fs.Bool("otlp-insecure", env.bool("BLOOM_OTLP_INSECURE", false), "send spans over plaintext HTTP instead of TLS"),
 		traceSampleRatio: fs.Float64("trace-sample-ratio", env.float64("BLOOM_TRACE_SAMPLE_RATIO", defaultTraceSampleRatio), "head-based trace sampling ratio in [0,1]"),
+		auth:             bindAuthFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
+	}
+}
+
+func bindAuthFlags(fs *flag.FlagSet, env *envReader) authRawFlags {
+	return authRawFlags{
+		sessionCookieSecure:     fs.Bool("session-cookie-secure", env.bool("BLOOM_SESSION_COOKIE_SECURE", true), "set Secure on the session cookie"),
+		sessionLifetime:         fs.Duration("session-lifetime", env.duration("BLOOM_SESSION_LIFETIME", defaultSessionLifetime), "absolute session lifetime"),
+		sessionIdleTimeout:      fs.Duration("session-idle-timeout", env.duration("BLOOM_SESSION_IDLE_TIMEOUT", defaultSessionIdleTimeout), "session inactivity timeout"),
+		loginRateRefillInterval: fs.Duration("login-rate-refill-interval", env.duration("BLOOM_LOGIN_RATE_REFILL_INTERVAL", defaultLoginRateRefillInterval), "login bucket token refill interval"),
+		loginRateBurst:          fs.Int("login-rate-burst", env.int("BLOOM_LOGIN_RATE_BURST", defaultLoginRateBurst), "login bucket burst size"),
+		loginRateMaxKeys:        fs.Int("login-rate-max-keys", env.int("BLOOM_LOGIN_RATE_MAX_KEYS", defaultLoginRateMaxKeys), "maximum tracked login rate-limit keys"),
+		loginMaxConcurrent:      fs.Int("login-max-concurrent", env.int("BLOOM_LOGIN_MAX_CONCURRENT", defaultLoginMaxConcurrent), "maximum concurrent password verifications"),
+		trustedProxyCIDRs:       fs.String("trusted-proxy-cidrs", env.string("BLOOM_TRUSTED_PROXY_CIDRS", ""), "comma-separated trusted reverse-proxy CIDRs"),
 	}
 }
 
@@ -230,6 +288,10 @@ func (r rawFlags) build() (Config, error) {
 		return Config{}, err
 	}
 	driver := Driver(*r.driver)
+	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(*r.auth.trustedProxyCIDRs)
+	if err != nil {
+		return Config{}, err
+	}
 	dsn := *r.dsn
 	if driver == DriverSQLite && dsn == "" {
 		dsn = DefaultSQLiteDSN
@@ -259,10 +321,39 @@ func (r rawFlags) build() (Config, error) {
 			OTLPInsecure:     *r.otlpInsecure,
 			TraceSampleRatio: *r.traceSampleRatio,
 		},
+		Auth: AuthConfig{
+			SessionCookieSecure:     *r.auth.sessionCookieSecure,
+			SessionLifetime:         *r.auth.sessionLifetime,
+			SessionIdleTimeout:      *r.auth.sessionIdleTimeout,
+			LoginRateRefillInterval: *r.auth.loginRateRefillInterval,
+			LoginRateBurst:          *r.auth.loginRateBurst,
+			LoginRateMaxKeys:        *r.auth.loginRateMaxKeys,
+			LoginMaxConcurrent:      *r.auth.loginMaxConcurrent,
+			TrustedProxyCIDRs:       trustedProxyCIDRs,
+		},
 		SecretKey:     NewSecret([]byte(*r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
 	}, nil
+}
+
+func parseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 64 {
+		return nil, errors.New("config: BLOOM_TRUSTED_PROXY_CIDRS must contain at most 64 CIDRs")
+	}
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("config: BLOOM_TRUSTED_PROXY_CIDRS contains %q: %w", part, err)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 // Validate enforces the invariants that must hold before the process opens
@@ -278,11 +369,47 @@ func (c Config) Validate() error {
 	if err := c.Telemetry.validate(); err != nil {
 		return err
 	}
+	if err := c.Auth.validate(); err != nil {
+		return err
+	}
 	if c.SecretKey.Len() < MinSecretKeyBytes {
 		return fmt.Errorf("config: BLOOM_SECRET_KEY must be set and at least %d bytes long (got %d)", MinSecretKeyBytes, c.SecretKey.Len())
 	}
 	if c.ShutdownGrace <= 0 {
 		return fmt.Errorf("config: BLOOM_SHUTDOWN_GRACE must be positive, got %s", c.ShutdownGrace)
+	}
+	return nil
+}
+
+func (a AuthConfig) validate() error {
+	if a.SessionLifetime <= 0 {
+		return fmt.Errorf("config: BLOOM_SESSION_LIFETIME must be positive, got %s", a.SessionLifetime)
+	}
+	if a.SessionIdleTimeout <= 0 || a.SessionIdleTimeout > a.SessionLifetime {
+		return fmt.Errorf("config: BLOOM_SESSION_IDLE_TIMEOUT must be positive and <= BLOOM_SESSION_LIFETIME, got %s", a.SessionIdleTimeout)
+	}
+	if a.LoginRateRefillInterval <= 0 {
+		return fmt.Errorf("config: BLOOM_LOGIN_RATE_REFILL_INTERVAL must be positive, got %s", a.LoginRateRefillInterval)
+	}
+	if a.LoginRateBurst <= 0 {
+		return fmt.Errorf("config: BLOOM_LOGIN_RATE_BURST must be positive, got %d", a.LoginRateBurst)
+	}
+	if a.LoginRateMaxKeys < 2 {
+		return fmt.Errorf("config: BLOOM_LOGIN_RATE_MAX_KEYS must be at least 2, got %d", a.LoginRateMaxKeys)
+	}
+	if a.LoginRateMaxKeys > maxLoginRateMaxKeys {
+		return fmt.Errorf("config: BLOOM_LOGIN_RATE_MAX_KEYS must be <= %d, got %d", maxLoginRateMaxKeys, a.LoginRateMaxKeys)
+	}
+	if a.LoginMaxConcurrent <= 0 || a.LoginMaxConcurrent > maxLoginMaxConcurrent {
+		return fmt.Errorf("config: BLOOM_LOGIN_MAX_CONCURRENT must be in [1,%d], got %d", maxLoginMaxConcurrent, a.LoginMaxConcurrent)
+	}
+	if len(a.TrustedProxyCIDRs) > 64 {
+		return errors.New("config: BLOOM_TRUSTED_PROXY_CIDRS must contain at most 64 CIDRs")
+	}
+	for _, prefix := range a.TrustedProxyCIDRs {
+		if !prefix.IsValid() {
+			return errors.New("config: BLOOM_TRUSTED_PROXY_CIDRS contains an invalid CIDR")
+		}
 	}
 	return nil
 }
@@ -293,6 +420,9 @@ func (h HTTPConfig) validate() error {
 	}
 	if h.ReadHeaderTimeout <= 0 {
 		return fmt.Errorf("config: BLOOM_HTTP_READ_HEADER_TIMEOUT must be positive, got %s", h.ReadHeaderTimeout)
+	}
+	if h.WriteTimeout <= 0 {
+		return fmt.Errorf("config: BLOOM_HTTP_WRITE_TIMEOUT must be positive, got %s", h.WriteTimeout)
 	}
 	if h.MaxBodyBytes <= 0 {
 		return fmt.Errorf("config: BLOOM_HTTP_MAX_BODY_BYTES must be positive, got %d", h.MaxBodyBytes)

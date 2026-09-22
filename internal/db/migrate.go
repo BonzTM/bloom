@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 
 	"github.com/pressly/goose/v3"
 
 	"github.com/BonzTM/bloom/internal/config"
+	"github.com/BonzTM/bloom/internal/core"
 )
 
 // migrationsFS embeds the goose-tagged SQL migrations for BOTH engines so a
@@ -55,7 +57,10 @@ func newProvider(d config.Driver, pool *sql.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := goose.NewProvider(dialect, pool, sub)
+	p, err := goose.NewProvider(dialect, pool, sub,
+		goose.WithGoMigrations(canonicalUsernameMigration()),
+		goose.WithDisableGlobalRegistry(true),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("goose provider for %s: %w", d, err)
 	}
@@ -77,16 +82,124 @@ func Migrate(ctx context.Context, pool *sql.DB, d config.Driver) error {
 	return nil
 }
 
+const (
+	canonicalUsernameMigrationVersion = 4
+	canonicalUsernameMigrationMaxRows = 1_000_000
+)
+
+type usernameMigrationRow struct {
+	id, original, canonical string
+}
+
+func canonicalUsernameMigration() *goose.Migration {
+	return goose.NewGoMigration(canonicalUsernameMigrationVersion,
+		&goose.GoFunc{RunTx: migrateCanonicalUsernamesUp},
+		&goose.GoFunc{RunTx: migrateCanonicalUsernamesDown},
+	)
+}
+
+func migrateCanonicalUsernamesUp(ctx context.Context, tx *sql.Tx) error {
+	rows, err := loadCanonicalUsernames(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return rewriteCanonicalUsernames(ctx, tx, rows)
+}
+
+func migrateCanonicalUsernamesDown(ctx context.Context, tx *sql.Tx) error {
+	statements := [...]string{
+		`UPDATE accounts SET username = (SELECT original_username FROM account_username_migration_backup WHERE account_id = accounts.id) WHERE id IN (SELECT account_id FROM account_username_migration_backup)`,
+		"UPDATE accounts SET username_key = NULL",
+		"DELETE FROM account_username_migration_backup",
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("roll back canonical username migration: %w", err)
+		}
+	}
+	return nil
+}
+
+func loadCanonicalUsernames(ctx context.Context, tx *sql.Tx) (loaded []usernameMigrationRow, retErr error) {
+	query := fmt.Sprintf("SELECT id, username FROM accounts ORDER BY id LIMIT %d", canonicalUsernameMigrationMaxRows+1)
+	result, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list usernames: %w", err)
+	}
+	defer func() {
+		if closeErr := result.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close username rows: %w", closeErr))
+		}
+	}()
+	loaded = make([]usernameMigrationRow, 0)
+	seen := make(map[string]string)
+	for range canonicalUsernameMigrationMaxRows + 1 {
+		if !result.Next() {
+			break
+		}
+		row, err := scanCanonicalUsername(result, seen)
+		if err != nil {
+			return nil, err
+		}
+		loaded = append(loaded, row)
+	}
+	if err := result.Err(); err != nil {
+		return nil, fmt.Errorf("iterate usernames: %w", err)
+	}
+	if len(loaded) > canonicalUsernameMigrationMaxRows {
+		return nil, fmt.Errorf("username migration exceeds %d accounts", canonicalUsernameMigrationMaxRows)
+	}
+	return loaded, nil
+}
+
+func scanCanonicalUsername(rows *sql.Rows, seen map[string]string) (usernameMigrationRow, error) {
+	var row usernameMigrationRow
+	if err := rows.Scan(&row.id, &row.original); err != nil {
+		return row, fmt.Errorf("scan username: %w", err)
+	}
+	canonical, err := core.UsernameKey(row.original)
+	if err != nil {
+		return row, fmt.Errorf("account %q has invalid username %q: %w", row.id, row.original, err)
+	}
+	if priorID, exists := seen[canonical]; exists {
+		return row, fmt.Errorf("canonical username collision %q between accounts %q and %q", canonical, priorID, row.id)
+	}
+	seen[canonical] = row.id
+	row.canonical = canonical
+	return row, nil
+}
+
+func rewriteCanonicalUsernames(ctx context.Context, tx *sql.Tx, rows []usernameMigrationRow) error {
+	for _, row := range rows {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO account_username_migration_backup (account_id, original_username) VALUES ($1, $2)",
+			row.id, row.original,
+		); err != nil {
+			return fmt.Errorf("back up username for account %q: %w", row.id, err)
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE accounts SET username = $1, username_key = $1 WHERE id = $2", row.canonical, row.id); err != nil {
+			return fmt.Errorf("canonicalize username for account %q: %w", row.id, err)
+		}
+	}
+	return nil
+}
+
 // MigrateDownAll rolls every applied migration back to version 0. It exists for
 // the parity test's up/down/up proof; production never rolls back
 // automatically (a contracted change is forward-only, per the handbook's
 // recipes/add-migration.md).
 func MigrateDownAll(ctx context.Context, pool *sql.DB, d config.Driver) error {
+	return MigrateDownTo(ctx, pool, d, 0)
+}
+
+// MigrateDownTo rolls migrations back to target for the database parity proof.
+// Production rollout code never invokes this helper automatically.
+func MigrateDownTo(ctx context.Context, pool *sql.DB, d config.Driver, target int64) error {
 	p, err := newProvider(d, pool)
 	if err != nil {
 		return err
 	}
-	if _, err := p.DownTo(ctx, 0); err != nil {
+	if _, err := p.DownTo(ctx, target); err != nil {
 		return fmt.Errorf("roll back %s migrations: %w", d, err)
 	}
 	return nil

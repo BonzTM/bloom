@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -54,6 +55,10 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 	m := NewPromMetrics("bloomtest")
 	m.IncRequest("GET /api/v1/version", "2xx")
 	m.ObserveRequest("GET /api/v1/version", "2xx", 0.01)
+	m.IncLoginAttempt("success")
+	m.IncCSRFRejection()
+	m.IncAuditWriteFailure()
+	m.IncSessionCleanupFailure()
 
 	families, err := m.Registry().Gather()
 	if err != nil {
@@ -63,7 +68,12 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 	for _, f := range families {
 		names[f.GetName()] = true
 	}
-	for _, want := range []string{"bloomtest_http_requests_total", "bloomtest_http_request_duration_seconds", "go_goroutines"} {
+	for _, want := range []string{
+		"bloomtest_http_requests_total", "bloomtest_http_request_duration_seconds",
+		"bloomtest_login_attempts_total", "bloomtest_csrf_rejections_total",
+		"bloomtest_audit_write_failures_total",
+		"bloomtest_session_cleanup_failures_total", "go_goroutines",
+	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)
 		}
@@ -81,17 +91,24 @@ func TestAuditLoggerSchema(t *testing.T) {
 	var out strings.Builder
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.FixedZone("plus1", 3600))
 	a := NewAuditLogger(&out, fixedClock{t: now})
-	a.Emit(context.Background(), AuditEvent{
-		Actor: "acct-1", Action: "auth.login", Resource: "local", Result: AuditSuccess, RequestID: "req-1",
-	})
+	if err := a.Emit(context.Background(), AuditEvent{
+		Actor: "acct-1", Action: "auth.login", Resource: "account:acct-1", Result: AuditSuccess,
+		Reason: "authenticated", Source: "192.0.2.1", RequestID: "req-1", SubjectID: "username:opaque",
+	}); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if got := strings.Count(out.String(), `"time":`); got != 1 {
+		t.Fatalf("audit time keys = %d, want exactly 1: %s", got, out.String())
+	}
 
 	var rec map[string]any
 	if err := json.Unmarshal([]byte(out.String()), &rec); err != nil {
 		t.Fatalf("audit output %q is not JSON: %v", out.String(), err)
 	}
 	for k, want := range map[string]string{
-		"log_type": "audit", "actor": "acct-1", "action": "auth.login", "resource": "local",
+		"log_type": "audit", "actor": "acct-1", "action": "auth.login", "resource": "account:acct-1",
 		"result": "success", "request_id": "req-1", "time": "2026-09-22T11:00:00Z",
+		"reason": "authenticated", "source": "192.0.2.1", "subject_id": "username:opaque",
 	} {
 		if rec[k] != want {
 			t.Errorf("%s = %v, want %q", k, rec[k], want)
@@ -100,7 +117,21 @@ func TestAuditLoggerSchema(t *testing.T) {
 }
 
 func TestNopAuditLoggerIsSafe(t *testing.T) {
-	NopAuditLogger().Emit(context.Background(), AuditEvent{Action: "noop", Result: AuditDenied})
+	if err := NopAuditLogger().Emit(context.Background(), AuditEvent{Action: "noop", Result: AuditDenied}); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+}
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestAuditLoggerReturnsSinkFailure(t *testing.T) {
+	want := errors.New("audit sink unavailable")
+	a := NewAuditLogger(failingWriter{err: want}, fixedClock{t: time.Now()})
+	if err := a.Emit(context.Background(), AuditEvent{Actor: "anonymous", Action: "auth.login"}); !errors.Is(err, want) {
+		t.Fatalf("Emit error = %v, want %v", err, want)
+	}
 }
 
 func TestTracerProviderOfflineAndShutdown(t *testing.T) {

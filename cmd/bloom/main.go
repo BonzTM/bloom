@@ -6,13 +6,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/BonzTM/bloom/internal/config"
+	"golang.org/x/term"
+
 	"github.com/BonzTM/bloom/internal/runtime"
 )
 
@@ -34,9 +37,42 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	cfg, err := config.Load(os.Args[1:])
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+	return runCommand(ctx, os.Args[1:], resolveBootstrapPassword)
+}
+
+type bootstrapPasswordReader func(io.Writer) ([]byte, error)
+
+func runCommand(ctx context.Context, args []string, readPassword bootstrapPasswordReader) error {
+	streams := runtime.Streams{Log: os.Stdout, Audit: os.Stderr, Console: os.Stdout}
+	input := runtime.CommandInput{ReadPassword: func() ([]byte, error) {
+		return readPassword(streams.Console)
+	}}
+	return runtime.Execute(ctx, args, streams, input)
+}
+
+func resolveBootstrapPassword(console io.Writer) ([]byte, error) {
+	if password, ok := os.LookupEnv("BLOOM_BOOTSTRAP_PASSWORD"); ok && password != "" {
+		return []byte(password), nil
 	}
-	return runtime.Run(ctx, cfg, runtime.Streams{Log: os.Stdout, Audit: os.Stderr})
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return readTerminalPassword(console)
+	}
+	return nil, errors.New("BLOOM_BOOTSTRAP_PASSWORD is unset and stdin is not a terminal")
+}
+
+func readTerminalPassword(console io.Writer) ([]byte, error) {
+	return promptForPassword(console, func() ([]byte, error) {
+		return term.ReadPassword(int(os.Stdin.Fd()))
+	})
+}
+
+func promptForPassword(console io.Writer, read func() ([]byte, error)) ([]byte, error) {
+	if _, err := fmt.Fprint(console, "Password: "); err != nil {
+		return nil, fmt.Errorf("write password prompt: %w", err)
+	}
+	password, err := read()
+	if _, writeErr := fmt.Fprintln(console); writeErr != nil {
+		return password, fmt.Errorf("write password prompt newline: %w", errors.Join(err, writeErr))
+	}
+	return password, err
 }

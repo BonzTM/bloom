@@ -7,19 +7,23 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
 const createAccount = `-- name: CreateAccount :exec
 
-INSERT INTO accounts (id, username, created_at)
-VALUES ($1, $2, $3)
+INSERT INTO accounts (id, username, username_key, password_hash, disabled, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type CreateAccountParams struct {
-	ID        string
-	Username  string
-	CreatedAt time.Time
+	ID           string
+	Username     string
+	UsernameKey  string
+	PasswordHash sql.NullString
+	Disabled     bool
+	CreatedAt    time.Time
 }
 
 // accounts.sql is the sqlc source of truth for the account store. It is SHARED
@@ -29,32 +33,86 @@ type CreateAccountParams struct {
 // (sqlc.arg) are used because both engines accept them, whereas $1 and ? are
 // engine-specific. Regenerate with: go tool sqlc generate.
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) error {
-	_, err := q.db.ExecContext(ctx, createAccount, arg.ID, arg.Username, arg.CreatedAt)
+	_, err := q.db.ExecContext(ctx, createAccount,
+		arg.ID,
+		arg.Username,
+		arg.UsernameKey,
+		arg.PasswordHash,
+		arg.Disabled,
+		arg.CreatedAt,
+	)
 	return err
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT id, username, created_at
+SELECT id, username, password_hash, disabled, created_at
 FROM accounts
 WHERE id = $1
 `
 
-func (q *Queries) GetAccount(ctx context.Context, id string) (Account, error) {
+type GetAccountRow struct {
+	ID           string
+	Username     string
+	PasswordHash sql.NullString
+	Disabled     bool
+	CreatedAt    time.Time
+}
+
+func (q *Queries) GetAccount(ctx context.Context, id string) (GetAccountRow, error) {
 	row := q.db.QueryRowContext(ctx, getAccount, id)
-	var i Account
-	err := row.Scan(&i.ID, &i.Username, &i.CreatedAt)
+	var i GetAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Disabled,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
 const getAccountByUsername = `-- name: GetAccountByUsername :one
-SELECT id, username, created_at
+SELECT id, username, password_hash, disabled, created_at
 FROM accounts
-WHERE username = $1
+WHERE username_key = $1
 `
 
-func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (Account, error) {
-	row := q.db.QueryRowContext(ctx, getAccountByUsername, username)
-	var i Account
-	err := row.Scan(&i.ID, &i.Username, &i.CreatedAt)
+type GetAccountByUsernameRow struct {
+	ID           string
+	Username     string
+	PasswordHash sql.NullString
+	Disabled     bool
+	CreatedAt    time.Time
+}
+
+func (q *Queries) GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error) {
+	row := q.db.QueryRowContext(ctx, getAccountByUsername, usernameKey)
+	var i GetAccountByUsernameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.Disabled,
+		&i.CreatedAt,
+	)
 	return i, err
+}
+
+const updateAccountPasswordHash = `-- name: UpdateAccountPasswordHash :execrows
+UPDATE accounts
+SET password_hash = $1
+WHERE id = $2
+`
+
+type UpdateAccountPasswordHashParams struct {
+	PasswordHash sql.NullString
+	ID           string
+}
+
+func (q *Queries) UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateAccountPasswordHash, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

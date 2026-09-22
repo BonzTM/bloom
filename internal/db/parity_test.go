@@ -15,9 +15,9 @@ import (
 	"github.com/BonzTM/bloom/internal/db/sqlite"
 )
 
-// TestMigrationDirectoriesMatch enforces ADR 0004 item 2: every migration
-// ships as one file per engine with the SAME name, so a schema change that
-// forgets one engine fails the build.
+// TestMigrationDirectoriesMatch enforces ADR 0004 item 2 for SQL migrations:
+// each schema step ships once per engine with the SAME name. Engine-neutral Go
+// data migrations are registered separately through the provider.
 func TestMigrationDirectoriesMatch(t *testing.T) {
 	list := func(dir string) []string {
 		entries, err := fs.ReadDir(db.MigrationsFS(), "migrations/"+dir)
@@ -69,11 +69,15 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	pool := openSQLiteMemory(t)
 	runEngineSuite(t, pool, config.DriverSQLite)
 	assertColumns(t, pool, sqliteColumns, expectedAccountColumns)
+	assertColumns(t, pool, sqliteSessionColumns, expectedSessionColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
 // engines to expose for the accounts table.
-var expectedAccountColumns = []string{"created_at", "id", "username"}
+var (
+	expectedAccountColumns = []string{"created_at", "disabled", "id", "password_hash", "username", "username_key"}
+	expectedSessionColumns = []string{"data", "expiry", "token"}
+)
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
 	t.Helper()
@@ -95,6 +99,15 @@ func openSQLiteMemory(t *testing.T) *sql.DB {
 // sqliteColumns lists the accounts columns via PRAGMA table_info.
 func sqliteColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	rows, err := pool.QueryContext(ctx, "SELECT name FROM pragma_table_info('accounts') ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanStrings(rows)
+}
+
+func sqliteSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	rows, err := pool.QueryContext(ctx, "SELECT name FROM pragma_table_info('sessions') ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +145,7 @@ func TestOpenRejectsUnknownDriver(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open(mysql) succeeded, want error")
 	}
-	if _, err := db.NewAccountStore(nil, "mysql"); err == nil {
-		t.Fatal("NewAccountStore(mysql) succeeded, want error")
+	if _, _, err := db.NewAccountStores(nil, "mysql"); err == nil {
+		t.Fatal("NewAccountStores(mysql) succeeded, want error")
 	}
 }

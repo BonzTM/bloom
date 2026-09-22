@@ -5,11 +5,26 @@
 package postgres
 
 import (
+	"database/sql"
 	"time"
 )
 
 type Account struct {
-	ID        string
-	Username  string
-	CreatedAt time.Time
+	ID           string
+	Username     string
+	CreatedAt    time.Time
+	PasswordHash sql.NullString
+	Disabled     bool
+	UsernameKey  string
+}
+
+type AccountUsernameMigrationBackup struct {
+	AccountID        string
+	OriginalUsername string
+}
+
+type Session struct {
+	Token  string
+	Data   []byte
+	Expiry time.Time
 }

@@ -142,7 +142,7 @@ test-doubles rule. Detail per seam: [research/media-server-apis.md](research/med
 - Bloom **does not replace Jellyfin** or any media server. It manages and observes
   them through their APIs.
 
-## Decisions recorded (Accepted 2026-09-22)
+## Decisions recorded (0001-0006 accepted 2026-09-22; 0007 accepted 2026-09-22)
 
 | ADR | Decision |
 |---|---|
@@ -152,6 +152,7 @@ test-doubles rule. Detail per seam: [research/media-server-apis.md](research/med
 | [0004](../decisions/0004-sqlite-default-postgres-parity.md) | SQLite default, PostgreSQL at full parity, one portable SQL layer |
 | [0005](../decisions/0005-playback-collection-strategy.md) | Sessions poller as baseline, push sources layered on top |
 | [0006](../decisions/0006-auth-and-authorization-model.md) | Pluggable identity providers, server-side sessions, permission RBAC |
+| [0007](../decisions/0007-data-migrations-in-go.md) | Schema stays in per-engine SQL; Go-only data transformations run as goose Go migrations |
 
 ## Research digest: what the evidence says v1 must get right
 

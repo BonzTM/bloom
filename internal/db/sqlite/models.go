@@ -4,8 +4,26 @@
 
 package sqlite
 
+import (
+	"database/sql"
+)
+
 type Account struct {
-	ID        string
-	Username  string
-	CreatedAt string
+	ID           string
+	Username     string
+	CreatedAt    string
+	PasswordHash sql.NullString
+	Disabled     int64
+	UsernameKey  string
+}
+
+type AccountUsernameMigrationBackup struct {
+	AccountID        string
+	OriginalUsername string
+}
+
+type Session struct {
+	Token  string
+	Data   []byte
+	Expiry int64
 }

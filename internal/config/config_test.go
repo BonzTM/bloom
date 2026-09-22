@@ -40,6 +40,24 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Telemetry.LogFormat != LogFormatJSON {
 		t.Errorf("LogFormat = %q, want json", cfg.Telemetry.LogFormat)
 	}
+	if !cfg.Auth.SessionCookieSecure {
+		t.Error("SessionCookieSecure = false, want secure-by-default")
+	}
+	if cfg.Auth.SessionLifetime != defaultSessionLifetime {
+		t.Errorf("SessionLifetime = %s, want %s", cfg.Auth.SessionLifetime, defaultSessionLifetime)
+	}
+	if cfg.Auth.SessionIdleTimeout != defaultSessionIdleTimeout {
+		t.Errorf("SessionIdleTimeout = %s, want %s", cfg.Auth.SessionIdleTimeout, defaultSessionIdleTimeout)
+	}
+	if cfg.Auth.LoginRateBurst != defaultLoginRateBurst || cfg.Auth.LoginRateMaxKeys != defaultLoginRateMaxKeys {
+		t.Errorf("login rate defaults = burst %d max %d", cfg.Auth.LoginRateBurst, cfg.Auth.LoginRateMaxKeys)
+	}
+	if cfg.Auth.LoginMaxConcurrent != defaultLoginMaxConcurrent {
+		t.Errorf("LoginMaxConcurrent = %d, want %d", cfg.Auth.LoginMaxConcurrent, defaultLoginMaxConcurrent)
+	}
+	if len(cfg.Auth.TrustedProxyCIDRs) != 0 {
+		t.Errorf("TrustedProxyCIDRs default = %v, want disabled", cfg.Auth.TrustedProxyCIDRs)
+	}
 	if cfg.ShutdownGrace != defaultShutdownGrace {
 		t.Errorf("ShutdownGrace = %s, want %s", cfg.ShutdownGrace, defaultShutdownGrace)
 	}
@@ -171,6 +189,43 @@ func TestLoadFlagsBeatEnv(t *testing.T) {
 	}
 }
 
+func TestLoadAuthConfigFromEnvironment(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_SESSION_COOKIE_SECURE", "false")
+	t.Setenv("BLOOM_SESSION_LIFETIME", "12h")
+	t.Setenv("BLOOM_SESSION_IDLE_TIMEOUT", "15m")
+	t.Setenv("BLOOM_LOGIN_RATE_REFILL_INTERVAL", "30s")
+	t.Setenv("BLOOM_LOGIN_RATE_BURST", "7")
+	t.Setenv("BLOOM_LOGIN_RATE_MAX_KEYS", "500")
+	t.Setenv("BLOOM_LOGIN_MAX_CONCURRENT", "7")
+	t.Setenv("BLOOM_TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 2001:db8::/32")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.SessionCookieSecure || cfg.Auth.SessionLifetime != 12*time.Hour || cfg.Auth.SessionIdleTimeout != 15*time.Minute {
+		t.Errorf("session config = %+v", cfg.Auth)
+	}
+	if cfg.Auth.LoginRateRefillInterval != 30*time.Second || cfg.Auth.LoginRateBurst != 7 || cfg.Auth.LoginRateMaxKeys != 500 {
+		t.Errorf("rate config = %+v", cfg.Auth)
+	}
+	if cfg.Auth.LoginMaxConcurrent != 7 {
+		t.Errorf("LoginMaxConcurrent = %d, want 7", cfg.Auth.LoginMaxConcurrent)
+	}
+	if len(cfg.Auth.TrustedProxyCIDRs) != 2 {
+		t.Errorf("TrustedProxyCIDRs = %v, want two prefixes", cfg.Auth.TrustedProxyCIDRs)
+	}
+}
+
+func TestLoadRejectsInvalidTrustedProxyCIDR(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_TRUSTED_PROXY_CIDRS", "10.0.0.0/8,not-a-cidr")
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "BLOOM_TRUSTED_PROXY_CIDRS") {
+		t.Fatalf("Load invalid trusted proxy = %v", err)
+	}
+}
+
 func TestLoadInvalidEnums(t *testing.T) {
 	tests := []struct {
 		key, bad string
@@ -203,9 +258,11 @@ func TestLoadMalformedEnvRejected(t *testing.T) {
 		bad  string
 	}{
 		{"malformed int", "BLOOM_DB_MAX_OPEN_CONNS", "abc"},
+		{"malformed auth int", "BLOOM_LOGIN_MAX_CONCURRENT", "many"},
 		{"malformed int64", "BLOOM_HTTP_MAX_BODY_BYTES", "not-a-number"},
 		{"malformed duration", "BLOOM_HTTP_READ_TIMEOUT", "15"}, // no unit
 		{"malformed bool", "BLOOM_DB_MIGRATE_ON_STARTUP", "maybe"},
+		{"malformed auth bool", "BLOOM_SESSION_COOKIE_SECURE", "maybe"},
 		{"malformed float", "BLOOM_TRACE_SAMPLE_RATIO", "half"},
 	}
 	for _, tt := range tests {
@@ -223,40 +280,84 @@ func TestLoadMalformedEnvRejected(t *testing.T) {
 	}
 }
 
-func TestValidatePoolInvariants(t *testing.T) {
-	base := func() Config {
-		return Config{
-			HTTP:     HTTPConfig{Addr: ":0", ReadHeaderTimeout: time.Second, MaxBodyBytes: 1},
-			Database: DatabaseConfig{Driver: DriverSQLite, DSN: "file::memory:", MaxOpenConns: 5, MaxIdleConns: 5, ConnMaxLifetime: time.Minute},
-			Telemetry: TelemetryConfig{
-				LogFormat: LogFormatJSON, TraceSampleRatio: 1,
-			},
-			SecretKey:     NewSecret([]byte(testSecret)),
-			ShutdownGrace: time.Second,
-		}
+func validConfigForTest() Config {
+	return Config{
+		HTTP:      HTTPConfig{Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 1},
+		Database:  DatabaseConfig{Driver: DriverSQLite, DSN: "file::memory:", MaxOpenConns: 5, MaxIdleConns: 5, ConnMaxLifetime: time.Minute},
+		Telemetry: TelemetryConfig{LogFormat: LogFormatJSON, TraceSampleRatio: 1},
+		Auth: AuthConfig{
+			SessionCookieSecure: true, SessionLifetime: time.Hour, SessionIdleTimeout: time.Minute,
+			LoginRateRefillInterval: time.Minute, LoginRateBurst: 5, LoginRateMaxKeys: 100,
+			LoginMaxConcurrent: 4,
+		},
+		SecretKey: NewSecret([]byte(testSecret)), ShutdownGrace: time.Second,
 	}
-	if err := base().Validate(); err != nil {
+}
+
+func TestValidatePoolInvariants(t *testing.T) {
+	if err := validConfigForTest().Validate(); err != nil {
 		t.Fatalf("baseline Validate: %v", err)
 	}
 
-	bad := base()
+	bad := validConfigForTest()
 	bad.Database.MaxIdleConns = 10
 	if err := bad.Validate(); err == nil {
 		t.Error("MaxIdleConns > MaxOpenConns accepted, want error")
 	}
-	bad = base()
+	bad = validConfigForTest()
 	bad.Database.MaxOpenConns = 0
 	if err := bad.Validate(); err == nil {
 		t.Error("MaxOpenConns = 0 accepted, want error")
 	}
-	bad = base()
+	bad = validConfigForTest()
 	bad.Database.ConnMaxLifetime = 0
 	if err := bad.Validate(); err == nil {
 		t.Error("ConnMaxLifetime = 0 accepted, want error")
 	}
-	bad = base()
+	bad = validConfigForTest()
 	bad.ShutdownGrace = 0
 	if err := bad.Validate(); err == nil {
 		t.Error("ShutdownGrace = 0 accepted, want error")
+	}
+}
+
+func TestValidateRequiresWriteTimeoutForBoundedAuthWork(t *testing.T) {
+	bad := validConfigForTest()
+	bad.HTTP.WriteTimeout = 0
+	if err := bad.Validate(); err == nil {
+		t.Error("WriteTimeout = 0 accepted, want error")
+	}
+}
+
+func TestValidateAuthInvariants(t *testing.T) {
+	bad := validConfigForTest()
+	bad.Auth.SessionLifetime = 0
+	if err := bad.Validate(); err == nil {
+		t.Error("SessionLifetime = 0 accepted, want error")
+	}
+	bad = validConfigForTest()
+	bad.Auth.SessionIdleTimeout = 2 * time.Hour
+	if err := bad.Validate(); err == nil {
+		t.Error("SessionIdleTimeout > SessionLifetime accepted, want error")
+	}
+	bad = validConfigForTest()
+	bad.Auth.LoginRateMaxKeys = 1
+	if err := bad.Validate(); err == nil {
+		t.Error("LoginRateMaxKeys = 1 accepted, want error")
+	}
+	bad = validConfigForTest()
+	bad.Auth.LoginRateMaxKeys = maxLoginRateMaxKeys + 1
+	if err := bad.Validate(); err == nil {
+		t.Error("oversized LoginRateMaxKeys accepted, want error")
+	}
+	bad = validConfigForTest()
+	bad.Auth.LoginMaxConcurrent = 0
+	if err := bad.Validate(); err == nil {
+		t.Error("LoginMaxConcurrent = 0 accepted, want error")
+	}
+	bad = validConfigForTest()
+	bad.Auth.LoginMaxConcurrent = maxLoginMaxConcurrent + 1
+	if err := bad.Validate(); err == nil {
+		t.Error("oversized LoginMaxConcurrent accepted, want error")
 	}
 }

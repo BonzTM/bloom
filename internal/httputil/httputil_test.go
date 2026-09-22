@@ -81,6 +81,20 @@ func TestDecodeJSONBounded(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONRejectsExcessiveNesting(t *testing.T) {
+	valid := `{"name":"a","extra":` + strings.Repeat("[", MaxJSONNestingDepth-1) + `0` + strings.Repeat("]", MaxJSONNestingDepth-1) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(valid))
+	if _, err := DecodeJSON[payload](httptest.NewRecorder(), req, 1<<10); errors.Is(err, ErrJSONNestingTooDeep) {
+		t.Fatalf("depth at limit rejected as too deep: %v", err)
+	}
+
+	deep := `{"name":"a","extra":` + strings.Repeat("[", MaxJSONNestingDepth) + `0` + strings.Repeat("]", MaxJSONNestingDepth) + `}`
+	req = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(deep))
+	if _, err := DecodeJSON[payload](httptest.NewRecorder(), req, 1<<10); !errors.Is(err, ErrJSONNestingTooDeep) {
+		t.Fatalf("excessive nesting error = %v, want ErrJSONNestingTooDeep", err)
+	}
+}
+
 func TestMaxBytesMiddleware(t *testing.T) {
 	var readErr error
 	h := MaxBytes(8)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
