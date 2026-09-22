@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ApiClient } from "./lib/api/http-client.js";
 import { readPublicConfig } from "./lib/config.js";
+import { AuthApi } from "./features/auth/api/auth-api.js";
 import { SystemApi } from "./features/system/api/system-api.js";
 import { AppProviders } from "./app/providers.js";
 import { createQueryClient } from "./app/query-client.js";
@@ -18,11 +19,14 @@ async function start(): Promise<void> {
   if (rootElement === null) {
     throw new Error("Application root element is missing");
   }
-  const api = new SystemApi(new ApiClient(new URL(config.apiBaseUrl)));
+  const client = new ApiClient(new URL(config.apiBaseUrl));
+  const api = new SystemApi(client);
+  const authApi = new AuthApi(client);
   createRoot(rootElement).render(
     <StrictMode>
       <AppProviders
         api={api}
+        authApi={authApi}
         queryClient={createQueryClient()}
         router={createAppRouter()}
       />

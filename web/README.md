@@ -30,17 +30,18 @@ Vite proxies `/api`, `/livez`, and `/readyz` to `http://localhost:8080`. To work
 
 ## Package Map
 
-| Path                              | Responsibility                                                                    |
-| --------------------------------- | --------------------------------------------------------------------------------- |
-| `src/app/`                        | router, providers, QueryClient defaults, Suspense, and error-boundary composition |
-| `src/routes/`                     | home, lazy about, and not-found navigation boundaries and page titles             |
-| `src/features/system/api/`        | `/api/v1/version` Zod wire schema and API slice                                   |
-| `src/features/system/hooks/`      | query keys and the version query                                                  |
-| `src/features/system/components/` | the version badge                                                                 |
-| `src/components/`                 | shared presentation-only status UI                                                |
-| `src/lib/api/`                    | bounded fetch, abort propagation, response parsing, and typed errors              |
-| `src/mocks/`                      | shared browser/test MSW handlers                                                  |
-| `src/test/`                       | jsdom polyfills, MSW lifecycle, and application render composition                |
+| Path                              | Responsibility                                                                         |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `src/app/`                        | router, providers, QueryClient defaults, Suspense, and error-boundary composition      |
+| `src/routes/`                     | home, lazy about, lazy sign-in, and not-found navigation boundaries and page titles    |
+| `src/features/auth/`              | sign-in and sign-out: wire schemas, API slice, session query, login form, session menu |
+| `src/features/system/api/`        | `/api/v1/version` Zod wire schema and API slice                                        |
+| `src/features/system/hooks/`      | query keys and the version query                                                       |
+| `src/features/system/components/` | the version badge                                                                      |
+| `src/components/`                 | shared presentation-only status UI                                                     |
+| `src/lib/api/`                    | bounded fetch, abort propagation, response parsing, and typed errors                   |
+| `src/mocks/`                      | shared browser/test MSW handlers                                                       |
+| `src/test/`                       | jsdom polyfills, MSW lifecycle, and application render composition                     |
 
 ## Verification
 

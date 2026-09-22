@@ -141,8 +141,16 @@ async function readHttpError(response: Response): Promise<ApiError> {
   const text = await readBoundedBody(response);
   try {
     const body: unknown = JSON.parse(text);
-    return mapHttpError(response.status, body);
+    return mapHttpError(
+      response.status,
+      body,
+      response.headers.get("retry-after"),
+    );
   } catch {
-    return mapHttpError(response.status, undefined);
+    return mapHttpError(
+      response.status,
+      undefined,
+      response.headers.get("retry-after"),
+    );
   }
 }

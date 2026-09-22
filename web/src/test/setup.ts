@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/jest-globals";
 import { afterAll, afterEach, beforeAll } from "@jest/globals";
 import { cleanup } from "@testing-library/react";
+import { resetMockSession } from "../mocks/handlers.js";
 import { server } from "./server.js";
 
 beforeAll(() => {
@@ -10,6 +11,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  resetMockSession();
 });
 
 afterAll(() => {

@@ -1,6 +1,7 @@
 import { expect, it } from "@jest/globals";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { signInMockSession } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
 
 it("renders the home page with the server version from the API", async () => {
@@ -9,9 +10,7 @@ it("renders the home page with the server version from the API", async () => {
   expect(
     screen.getByRole("heading", { name: "Bloom", level: 1 }),
   ).toBeVisible();
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "Loading server version",
-  );
+  expect(screen.getByText(/Loading server version/)).toHaveRole("status");
   expect(await screen.findByText(/Version 0\.1\.0-dev/)).toBeVisible();
   expect(screen.getByText("0123456")).toBeVisible();
   expect(
@@ -78,4 +77,77 @@ it("renders the not-found route for an unknown path inside the layout", async ()
     screen.getByRole("navigation", { name: "Main navigation" }),
   ).toBeVisible();
   expect(document.title).toBe("Page not found | Bloom");
+});
+
+it("signs in from the login page and shows the account in the navigation", async () => {
+  const user = userEvent.setup();
+  renderApp("/login");
+
+  expect(
+    await screen.findByRole("heading", { name: "Sign in", level: 1 }),
+  ).toBeVisible();
+  expect(document.title).toBe("Sign in | Bloom");
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "Bloom", level: 1 }),
+  ).toBeVisible();
+  expect(screen.getByText("Signed in as admin")).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "Sign in" }),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps the person on the login page after a rejected sign-in", async () => {
+  const user = userEvent.setup();
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "wrong");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The username or password is incorrect.",
+  );
+  expect(screen.getByLabelText("Username")).toHaveValue("admin");
+  expect(document.title).toBe("Sign in | Bloom");
+});
+
+it("shows the retry delay when the server rate limits sign-in", async () => {
+  const user = userEvent.setup();
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "locked");
+  await user.type(screen.getByLabelText("Password"), "anything");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Try again in 30 seconds.",
+  );
+});
+
+it("signs out from the navigation and offers sign-in again", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp();
+
+  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+
+  expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
+  expect(screen.queryByText("Signed in as admin")).not.toBeInTheDocument();
+});
+
+it("sends an already signed-in visitor away from the login page", async () => {
+  signInMockSession();
+  renderApp("/login");
+
+  expect(
+    await screen.findByRole("heading", { name: "Bloom", level: 1 }),
+  ).toBeVisible();
+  expect(document.title).toBe("Home | Bloom");
 });

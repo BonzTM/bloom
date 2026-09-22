@@ -6,6 +6,7 @@ import {
   Outlet,
   useRouteError,
 } from "react-router-dom";
+import { SessionMenu } from "../features/auth/components/session-menu.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
 
 export function AppLayout(): ReactNode {
@@ -21,6 +22,9 @@ export function AppLayout(): ReactNode {
             </li>
             <li>
               <NavLink to="/about">About</NavLink>
+            </li>
+            <li className="session-menu">
+              <SessionMenu />
             </li>
           </ul>
         </nav>

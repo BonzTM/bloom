@@ -42,15 +42,14 @@ it("rejects a response that declares a body over the size cap", async () => {
   );
 });
 
-it("maps an HTTP problem without exposing unchecked response fields", async () => {
+it("maps the backend error envelope without exposing unchecked fields", async () => {
   server.use(
     http.get("*/problem", () =>
       HttpResponse.json(
         {
-          type: "/problems/forbidden",
-          title: "Forbidden",
-          status: 403,
-          detail: "You cannot read this resource",
+          code: "forbidden",
+          message: "You cannot read this resource",
+          request_id: "req-123",
           internal_stack: "secret",
         },
         { status: 403 },
@@ -65,11 +64,46 @@ it("maps an HTTP problem without exposing unchecked response fields", async () =
       kind: "http",
       message: "You cannot read this resource",
       status: 403,
+      code: "forbidden",
+      requestId: "req-123",
     } satisfies Partial<ApiError>),
   );
 });
 
-it("maps a non-problem HTTP failure to a safe status message", async () => {
+it("reads a Retry-After delay from a rate-limited response", async () => {
+  server.use(
+    http.get("*/limited", () =>
+      HttpResponse.json(
+        { code: "rate_limited", message: "slow down", request_id: "req-9" },
+        { status: 429, headers: { "retry-after": "17" } },
+      ),
+    ),
+  );
+
+  await expect(
+    client.requestJson("limited", z.object({})),
+  ).rejects.toMatchObject({ kind: "http", status: 429, retryAfterSeconds: 17 });
+});
+
+it("ignores a Retry-After header it cannot parse", async () => {
+  server.use(
+    http.get("*/limited", () =>
+      HttpResponse.json(
+        { code: "rate_limited", message: "slow down" },
+        {
+          status: 429,
+          headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" },
+        },
+      ),
+    ),
+  );
+
+  await expect(
+    client.requestJson("limited", z.object({})),
+  ).rejects.toMatchObject({ status: 429, retryAfterSeconds: undefined });
+});
+
+it("maps a non-envelope HTTP failure to a safe status message", async () => {
   server.use(
     http.get("*/broken", () => new HttpResponse("oops", { status: 500 })),
   );
