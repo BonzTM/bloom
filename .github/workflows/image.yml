@@ -1,0 +1,248 @@
+name: image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/bonztm/bloom
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      short-sha: ${{ steps.vars.outputs.short-sha }}
+    steps:
+      - name: Check out Bloom
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set image metadata
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:7}"
+          version="main-${short_sha}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+          {
+            echo "short-sha=${short_sha}"
+            echo "version=${version}"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=main-${{ steps.vars.outputs.short-sha }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=tag,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+            COMMIT=${{ github.sha }}
+            CREATED=${{ steps.vars.outputs.created }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and smoke-test image digest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/bonztm/bloom@${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          data_dir="$(mktemp -d)"
+          container_name="bloom-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm --force "${container_name}" >/dev/null 2>&1 || true
+            rm -rf -- "${data_dir}"
+          }
+          trap cleanup EXIT
+          chmod 0777 "${data_dir}"
+
+          docker pull "${IMAGE}"
+          docker run --detach --name "${container_name}" \
+            --publish 127.0.0.1:8080:8080 \
+            --volume "${data_dir}:/data" \
+            --env "BLOOM_SECRET_KEY=$(openssl rand -base64 48)" \
+            --env "BLOOM_DB_DSN=file:/data/smoke.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" \
+            --env BLOOM_DB_MIGRATE_ON_STARTUP=true \
+            "${IMAGE}"
+
+          curl --silent --show-error --fail --retry 30 --retry-all-errors \
+            --retry-delay 1 --retry-max-time 60 --max-time 2 \
+            http://127.0.0.1:8080/livez >/dev/null
+          for endpoint in /livez /readyz /api/v1/version; do
+            response_file="${data_dir}/response"
+            status="$(curl --silent --show-error --output "${response_file}" \
+              --write-out '%{http_code}' "http://127.0.0.1:8080${endpoint}")"
+            printf '%s: %s %s\n' "${endpoint}" "${status}" "$(cat "${response_file}")"
+            [[ "${status}" == 200 ]]
+          done
+
+  deploy-pr:
+    if: github.ref == 'refs/heads/main'
+    needs: [publish, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out homelab
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: bonztm/homelab
+          ref: main
+          token: ${{ secrets.HOMELAB_DEPLOY_TOKEN }}
+          path: homelab
+
+      - name: Check for the Bloom deployment
+        id: manifest
+        working-directory: homelab
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f apps/internal/bloom/deployment.yaml ]]; then
+            echo "::notice title=Deploy skipped::apps/internal/bloom/deployment.yaml does not exist"
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "exists=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Prepare deployment branch
+        if: steps.manifest.outputs.exists == 'true'
+        working-directory: homelab
+        shell: bash
+        env:
+          SHORT_SHA: ${{ needs.publish.outputs.short-sha }}
+        run: |
+          set -euo pipefail
+          branch="chore/bloom-main-${SHORT_SHA}"
+          if git ls-remote --exit-code --heads origin "${branch}" >/dev/null; then
+            git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+          fi
+          git switch --force-create "${branch}" origin/main
+          git config user.name "Joshua Wells"
+          git config user.email "joshdwells@gmail.com"
+
+      - name: Update image references
+        if: steps.manifest.outputs.exists == 'true'
+        working-directory: homelab
+        shell: bash
+        env:
+          IMAGE: ghcr.io/bonztm/bloom:main-${{ needs.publish.outputs.short-sha }}@${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          export IMAGE
+          perl -0pi -e '
+            my $count = 0;
+            $count += s{(^[ ]*-[ ]+name:[ ]+bloom[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
+            $count += s{(^[ ]*-[ ]+name:[ ]+migrate[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
+            die "expected one bloom and one migrate image, updated $count\n" unless $count == 2;
+          ' apps/internal/bloom/deployment.yaml
+
+      - name: Commit and push deployment branch
+        if: steps.manifest.outputs.exists == 'true'
+        working-directory: homelab
+        shell: bash
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          SHORT_SHA: ${{ needs.publish.outputs.short-sha }}
+        run: |
+          set -euo pipefail
+          branch="chore/bloom-main-${SHORT_SHA}"
+          subject="chore(bloom): deploy main-${SHORT_SHA}"
+          git add apps/internal/bloom/deployment.yaml
+          git commit -m "${subject}" \
+            -m "Bloom commit: https://github.com/BonzTM/bloom/commit/${GITHUB_SHA}
+
+          Image digest: ${DIGEST}"
+          git push --force-with-lease origin "${branch}"
+
+      - name: Open or update deployment pull request
+        if: steps.manifest.outputs.exists == 'true'
+        working-directory: homelab
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMELAB_DEPLOY_TOKEN }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          SHORT_SHA: ${{ needs.publish.outputs.short-sha }}
+        run: |
+          set -euo pipefail
+          branch="chore/bloom-main-${SHORT_SHA}"
+          subject="chore(bloom): deploy main-${SHORT_SHA}"
+          existing_url="$(gh pr list --repo bonztm/homelab --head "${branch}" \
+            --state open --json url --jq '.[0].url')"
+          if [[ -n "${existing_url}" ]]; then
+            echo "::notice title=Deploy PR updated::${existing_url}"
+            exit 0
+          fi
+          gh pr create --repo bonztm/homelab --base main --head "${branch}" \
+            --title "${subject}" \
+            --body "- Bloom commit: https://github.com/BonzTM/bloom/commit/${GITHUB_SHA}
+          - Image digest: \`${DIGEST}\`
+          - Changed file: \`apps/internal/bloom/deployment.yaml\`"

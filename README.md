@@ -141,13 +141,41 @@ BLOOM_TEST_POSTGRES_DSN='postgres://bloom:bloom@localhost:5432/bloom?sslmode=dis
 
 CI runs both halves on every push. Every behavior change ships with a test that proves it.
 
-## Deploy
+## Release And Deploy
 
-- **Artifact**: container image, `ghcr.io/BonzTM/bloom` (multi-stage: Node build of `web/`, static Go build, distroless nonroot runtime).
-- **Build**: `make build` for the dev check; release builds add `-trimpath` and stamp `internal/buildinfo` via `-ldflags`.
-- **Release**: tagged `v<major>.<minor>.<patch>`; see [decisions/](decisions/).
-- **Migrations**: run the image with `-migrate` as a Job before rolling the Deployment; SQLite single-container deployments may set `BLOOM_DB_MIGRATE_ON_STARTUP=true`.
-- **Health**: liveness `GET /livez`, readiness `GET /readyz` (database-aware), metrics `GET /metrics`.
+Bloom images are published at `ghcr.io/bonztm/bloom`. A merge to `main` builds
+and smoke-tests an amd64 image, then publishes the mutable `main` tag and the
+immutable `main-<7-character-commit>` tag. The workflow also records provenance
+and an SBOM for the published image.
+
+After the smoke test passes, the workflow opens a pull request in
+`bonztm/homelab`. That pull request pins both the `bloom` container and the
+`migrate` init container in `apps/internal/bloom/deployment.yaml` to the same
+`main-<commit>` tag and image digest. A rerun updates the existing pull request
+for that commit. If the deployment file does not exist yet, the workflow skips
+the pull request without failing the image build.
+
+Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
+deployment. It publishes `v1.2.3`, `1.2.3`, `1.2`, and `latest` tags for a
+`v1.2.3` release, then smoke-tests the published digest. Tagged releases do not
+open homelab pull requests.
+
+The repository needs one secret before the first main deployment:
+
+1. Create a fine-grained personal access token for the `bonztm/homelab`
+   repository.
+2. Grant the token **Contents: Read and write** and **Pull requests: Read and
+   write** repository permissions. Do not grant additional repository access or
+   permissions.
+3. Add the token to the Bloom repository as an Actions secret named
+   `HOMELAB_DEPLOY_TOKEN`.
+
+Release builds add `-trimpath` and stamp `internal/buildinfo` through the
+Dockerfile's `VERSION`, `COMMIT`, and `CREATED` build arguments. Run the image
+with `-migrate` as a Job before rolling the Deployment. SQLite single-container
+deployments may set `BLOOM_DB_MIGRATE_ON_STARTUP=true`. Use `GET /livez` for
+liveness, `GET /readyz` for database-aware readiness, and `GET /metrics` for
+Prometheus metrics.
 
 ## Ownership And Support
 
