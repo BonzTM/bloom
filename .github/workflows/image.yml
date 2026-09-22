@@ -62,6 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
+      attestations: read
       contents: read
       packages: write
     outputs:
@@ -107,6 +108,7 @@ jobs:
         env:
           EXPECTED_TAG: ${{ steps.vars.outputs.immutable-tag }}
           EXPECTED_VERSION: ${{ steps.vars.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           error_file="$(mktemp)"
@@ -131,6 +133,22 @@ jobs:
             '.config.Labels["org.opencontainers.image.version"]' <<<"${image_json}")"
           if [[ "${revision}" != "${GITHUB_SHA}" || "${version}" != "${EXPECTED_VERSION}" ]]; then
             echo "::error title=Immutable image metadata conflict::${IMAGE_NAME}:${EXPECTED_TAG} has revision ${revision} and version ${version}."
+            exit 1
+          fi
+          if ! gh attestation verify "oci://${IMAGE_NAME}@${digest}" \
+            --repo bonztm/bloom >/dev/null; then
+            echo "::error title=Unverifiable immutable image::Could not verify Bloom build provenance for ${IMAGE_NAME}:${EXPECTED_TAG}. Retry transient failures. For a legacy image without an attestation, delete its tag/package version once, then rerun the workflow to rebuild it with provenance and an SBOM."
+            exit 1
+          fi
+          if ! docker buildx imagetools inspect "${IMAGE_NAME}@${digest}" \
+            --format '{{json .SBOM}}' | jq --exit-status '
+              [.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT" and
+                ((.spdxVersion? | type) == "string") and
+                (.spdxVersion | startswith("SPDX-"))
+              )] | length > 0
+            ' >/dev/null; then
+            echo "::error title=Unverifiable image SBOM::Could not verify an SPDX SBOM for ${IMAGE_NAME}:${EXPECTED_TAG}. Retry transient failures. For a legacy image without an SBOM, delete its tag/package version once, then rerun the workflow to rebuild it with provenance and an SBOM."
             exit 1
           fi
           {
@@ -404,6 +422,24 @@ jobs:
             [[ "${promoted_digest}" == "${DIGEST}" ]]
           done
 
+      - name: Verify promoted image provenance and SBOM
+        shell: bash
+        env:
+          DIGEST: ${{ needs.build.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://${IMAGE_NAME}@${DIGEST}" \
+            --repo bonztm/bloom >/dev/null
+          docker buildx imagetools inspect "${IMAGE_NAME}@${DIGEST}" \
+            --format '{{json .SBOM}}' | jq --exit-status '
+              [.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT" and
+                ((.spdxVersion? | type) == "string") and
+                (.spdxVersion | startswith("SPDX-"))
+              )] | length > 0
+            ' >/dev/null
+
   deploy-pr:
     if: github.ref == 'refs/heads/main' && needs.promote.outputs.main-current == 'true'
     needs: [build, promote]
@@ -444,7 +480,7 @@ jobs:
           fi
           echo "exists=true" >> "${GITHUB_OUTPUT}"
 
-      - name: Prepare deployment branch
+      - name: Configure deployment branch
         if: steps.manifest.outputs.exists == 'true'
         id: branch
         working-directory: homelab
@@ -452,42 +488,9 @@ jobs:
         run: |
           set -euo pipefail
           branch="chore/bloom-main"
-          remote_branch_oid="$(git ls-remote --heads origin "refs/heads/${branch}" | awk '{print $1}')"
-          git fetch --no-tags origin \
-            refs/heads/main:refs/remotes/origin/main
-          base_oid="$(git rev-parse refs/remotes/origin/main)"
-          git switch --force-create "${branch}" refs/remotes/origin/main
           git config user.name "Joshua Wells"
           git config user.email "joshdwells@gmail.com"
-          {
-            echo "base-oid=${base_oid}"
-            echo "name=${branch}"
-            echo "remote-oid=${remote_branch_oid}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Update image references
-        if: steps.manifest.outputs.exists == 'true'
-        working-directory: homelab
-        shell: bash
-        env:
-          IMAGE: ${{ env.IMAGE_NAME }}:main-${{ github.sha }}@${{ needs.promote.outputs.digest }}
-        run: |
-          set -euo pipefail
-          export IMAGE
-          perl -0pi -e '
-            my $count = 0;
-            $count += s{(^[ ]*-[ ]+name:[ ]+bloom[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
-            $count += s{(^[ ]*-[ ]+name:[ ]+migrate[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
-            die "expected one bloom and one migrate image, updated $count\n" unless $count == 2;
-          ' apps/internal/bloom/deployment.yaml
-
-      - name: Render Bloom manifests
-        if: steps.manifest.outputs.exists == 'true'
-        working-directory: homelab
-        shell: bash
-        run: |
-          set -euo pipefail
-          kubectl kustomize apps/internal/bloom >/dev/null
+          echo "name=${branch}" >> "${GITHUB_OUTPUT}"
 
       - name: Commit and push deployment branch
         if: steps.manifest.outputs.exists == 'true'
@@ -495,33 +498,56 @@ jobs:
         working-directory: homelab
         shell: bash
         env:
-          BASE_OID: ${{ steps.branch.outputs.base-oid }}
           BRANCH: ${{ steps.branch.outputs.name }}
           DIGEST: ${{ needs.promote.outputs.digest }}
-          REMOTE_BRANCH_OID: ${{ steps.branch.outputs.remote-oid }}
+          IMAGE: ${{ env.IMAGE_NAME }}:main-${{ github.sha }}@${{ needs.promote.outputs.digest }}
+          MAX_ATTEMPTS: 3
         run: |
           set -euo pipefail
-          git add apps/internal/bloom/deployment.yaml
-          if git diff --cached --quiet; then
-            echo "::notice title=Deploy unchanged::Homelab main already references this Bloom image."
-            echo "changed=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
           short_sha="${GITHUB_SHA:0:12}"
           subject="chore(bloom): deploy ${short_sha}"
-          git commit -m "${subject}" \
-            -m "Bloom commit: https://github.com/BonzTM/bloom/commit/${GITHUB_SHA}
+          export IMAGE
+          for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+            git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+            base_oid="$(git rev-parse refs/remotes/origin/main)"
+            remote_branch_oid="$(git ls-remote --heads origin \
+              "refs/heads/${BRANCH}" | awk 'NR == 1 {print $1}')"
+            [[ "${base_oid}" =~ ^[0-9a-f]{40}$ ]]
+            [[ -z "${remote_branch_oid}" || "${remote_branch_oid}" =~ ^[0-9a-f]{40}$ ]]
+            git switch --force-create "${BRANCH}" "${base_oid}"
+            perl -0pi -e '
+              my $count = 0;
+              $count += s{(^[ ]*-[ ]+name:[ ]+bloom[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
+              $count += s{(^[ ]*-[ ]+name:[ ]+migrate[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
+              die "expected one bloom and one migrate image, updated $count\n" unless $count == 2;
+            ' apps/internal/bloom/deployment.yaml
+            kubectl kustomize apps/internal/bloom >/dev/null
+            git add apps/internal/bloom/deployment.yaml
+            if git diff --cached --quiet; then
+              echo "::notice title=Deploy unchanged::Homelab main already references this Bloom image."
+              echo "changed=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            git commit -m "${subject}" \
+              -m "Bloom commit: https://github.com/BonzTM/bloom/commit/${GITHUB_SHA}
 
-          Image digest: ${DIGEST}"
-
-          git push --atomic \
-            --force-with-lease="refs/heads/main:${BASE_OID}" \
-            --force-with-lease="refs/heads/${BRANCH}:${REMOTE_BRANCH_OID}" \
-            origin \
-            "${BASE_OID}:refs/heads/main" \
-            "HEAD:refs/heads/${BRANCH}"
-          echo "changed=true" >> "${GITHUB_OUTPUT}"
+            Image digest: ${DIGEST}"
+            git push \
+              --force-with-lease="refs/heads/${BRANCH}:${remote_branch_oid}" \
+              origin "HEAD:refs/heads/${BRANCH}"
+            current_base_oid="$(git ls-remote --exit-code --heads origin \
+              refs/heads/main | awk 'NR == 1 {print $1}')"
+            [[ "${current_base_oid}" =~ ^[0-9a-f]{40}$ ]]
+            if [[ "${current_base_oid}" == "${base_oid}" ]]; then
+              echo "changed=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            if (( attempt < MAX_ATTEMPTS )); then
+              echo "::notice title=Homelab main moved::Retrying deployment branch from ${current_base_oid} after attempt ${attempt}."
+            fi
+          done
+          echo "::error title=Homelab main kept moving::Could not publish a deployment branch from a current main base after ${MAX_ATTEMPTS} attempts."
+          exit 1
 
       - name: Open or update deployment pull request
         if: steps.push.outputs.changed == 'true'

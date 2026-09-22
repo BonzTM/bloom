@@ -154,16 +154,21 @@ revision is an ancestor of the incoming commit. A stale rerun leaves `main`
 unchanged and does not open a deployment pull request. The build starts only
 after the reusable CI workflow passes both `make verify` and the PostgreSQL
 integration suite for the same commit. Before building, the workflow resolves
-the immutable tag. A rerun reuses its existing digest, skips the build and smoke
-test, and continues promotion and deployment without replacing the immutable
-image. New images include provenance and an SBOM.
+the immutable tag. A rerun reuses its existing digest only after verifying its
+repository-bound build provenance and attached SPDX SBOM, then skips the build
+and smoke test without replacing the immutable image. A legacy image without
+either proof must be deleted once and rebuilt. Promotion repeats both checks as
+a self-test.
 
-A weekly cleanup inspects at most 1,000 package versions and deletes at most 100
-versions older than seven days only when every tag on that version starts with
-`candidate-`. It reports when either cap leaves work for the next run. GHCR
-stores tags on a shared digest version, so promoted versions carry both their
-candidate tag and public tags. Those promoted candidates remain in the registry
-because deleting their package version would also delete the promoted image.
+A weekly cleanup inspects a rotating window of at most 1,000 package versions and
+deletes at most 100 versions older than seven days only when every tag on that
+version starts with `candidate-`. A repository variable persists the next page,
+so later runs advance through the package history and wrap to page one after
+reaching the end. It reports the next page when the scan cap is reached and notes
+when the delete cap leaves candidates for a later rotation. GHCR stores tags on a
+shared digest version, so promoted versions carry both their candidate tag and
+public tags. Those promoted candidates remain in the registry because deleting
+their package version would also delete the promoted image.
 
 After a new image passes the smoke test, or after a rerun reuses the immutable
 digest, the workflow opens a pull request in `bonztm/homelab`. That pull request
@@ -172,12 +177,14 @@ pins both the `bloom` container and the `migrate` init container in
 digest. A rerun updates the existing pull request on the workflow-owned
 `chore/bloom-main` branch. Each run recreates that branch from the current
 homelab `main`, renders the Bloom manifests, and skips the commit when the
-manifest is already current. If homelab `main` changes before the atomic branch
-push, its exact-OID lease rejects both ref updates and a rerun starts from the
-newer base. If it changes after the push, GitHub may mark the pull request behind
-or conflicting; the next Bloom run recreates the branch from the new base. If
-the deployment file does not exist yet, the workflow skips the pull request
-without failing the image build.
+manifest is already current. The branch push uses an exact-OID lease. After each
+push, the workflow re-reads homelab `main`; if it moved, the workflow recreates
+the branch from the newer base, reapplies and renders the change, and retries up
+to three times before failing. It opens or updates the pull request only after a
+push whose base still matches the re-read `main`. If `main` changes after that
+check, GitHub may mark the pull request behind or conflicting; the next Bloom run
+recreates the branch from the new base. If the deployment file does not exist
+yet, the workflow skips the pull request without failing the image build.
 
 Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
 deployment. A `v1.2.3` release publishes immutable `v1.2.3` and `1.2.3` tags.
