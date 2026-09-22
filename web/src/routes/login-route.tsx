@@ -9,7 +9,7 @@ import { pageTitle, usePageTitle } from "./use-page-title.js";
 export default function LoginRoute(): ReactNode {
   usePageTitle(pageTitle("Sign in"));
   const session = useSession();
-  const login = useLogin();
+  const { login, isPending, reset } = useLogin();
   const location = useLocation();
   const [serverError, setServerError] = useState<unknown>(null);
   const destination = safeDestination(location.state, window.location.origin);
@@ -19,25 +19,20 @@ export default function LoginRoute(): ReactNode {
   }
   // The session cache is the single owner of the redirect: a successful login
   // writes the account there, and this declarative redirect follows. Nothing
-  // navigates imperatively, so Strict Mode cannot navigate twice.
-  if (session.data !== undefined && session.data !== null && !login.isPending) {
+  // navigates imperatively, so Strict Mode cannot navigate twice, and a
+  // pending sign-in is never cut short by a stale cached account.
+  if (session.data !== undefined && session.data !== null && !isPending) {
     return <Navigate to={destination} replace />;
   }
   return (
     <>
       <h1>Sign in</h1>
       <LoginForm
-        pending={login.isPending}
+        pending={isPending}
         serverError={serverError}
         onSubmit={(input) => {
           setServerError(null);
-          login.mutate(input, {
-            onError: setServerError,
-            // Drop the variables (the password) as soon as the request settles.
-            onSettled: () => {
-              login.reset();
-            },
-          });
+          login(input, { onError: setServerError, onSettled: reset });
         }}
       />
     </>

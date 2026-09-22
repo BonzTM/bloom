@@ -12,22 +12,11 @@ import {
   signInMockSession,
   jsonApi,
 } from "../../../mocks/handlers.js";
+import { createGate } from "../../../test/gate.js";
 import { server } from "../../../test/server.js";
 import { AuthApi } from "../api/auth-api.js";
 import { AuthApiContext } from "../auth-context.js";
 import { authKeys, useLogin, useLogout, useSession } from "./auth-queries.js";
-
-type Gate = Readonly<{ wait: Promise<void>; open: () => void }>;
-
-// A promise the test opens by hand, so a "slow" response is held exactly as
-// long as the test needs and never depends on the wall clock.
-function createGate(): Gate {
-  let open = (): void => undefined;
-  const wait = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-  return { wait, open };
-}
 
 // A session-check handler that reports when it has started and then blocks
 // until released, so a test can prove the request was truly in flight.
@@ -69,6 +58,21 @@ function useAuth() {
   return { session: useSession(), login: useLogin(), logout: useLogout() };
 }
 
+// Drives the callback-style login as a promise for the tests below.
+function signIn(
+  login: ReturnType<typeof useLogin>,
+  input: typeof mockCredentials,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    login.login(input, {
+      onError: reject,
+      onSettled: () => {
+        resolve();
+      },
+    });
+  });
+}
+
 it("keeps the signed-in account when a session check started earlier answers late", async () => {
   const { queryClient, wrapper } = createHarness();
   const slow = slowSessionCheck(() =>
@@ -79,7 +83,7 @@ it("keeps the signed-in account when a session check started earlier answers lat
   expect(result.current.session.isPending).toBe(true);
 
   await act(async () => {
-    await result.current.login.mutateAsync(mockCredentials);
+    await signIn(result.current.login, mockCredentials);
   });
   expect(queryClient.getQueryData(authKeys.session())).toEqual(mockAccount);
 
@@ -131,9 +135,7 @@ it("re-checks the session when sign-in fails after the server may have acted", a
   });
 
   await act(async () => {
-    await result.current.login
-      .mutateAsync(mockCredentials)
-      .catch(() => undefined);
+    await signIn(result.current.login, mockCredentials).catch(() => undefined);
   });
 
   await waitFor(() => {
@@ -219,12 +221,12 @@ it("ignores a session check that starts during sign-in and answers after it", as
     envelope(401, "unauthenticated", "sign in required"),
   );
 
-  const signIn = act(() => result.current.login.mutateAsync(mockCredentials));
+  const signingIn = act(() => signIn(result.current.login, mockCredentials));
   await login.started;
   const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
   await me.started;
   login.release();
-  await signIn;
+  await signingIn;
   expect(queryClient.getQueryData(authKeys.session())).toEqual(mockAccount);
 
   me.release();
@@ -265,4 +267,25 @@ it("ignores a session check that starts during sign-out and answers after it", a
     expect(result.current.session.isFetching).toBe(false);
   });
   expect(result.current.session.data).toBeNull();
+});
+
+it("never stores the credentials in the mutation cache", async () => {
+  const { queryClient, wrapper } = createHarness();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+  const login = heldResponse("post", "*/api/v1/auth/login", () =>
+    Response.json({ account: mockAccount }),
+  );
+
+  const signingIn = act(() => signIn(result.current.login, mockCredentials));
+  await login.started;
+  const [mutation] = queryClient.getMutationCache().getAll();
+  expect(mutation?.state.status).toBe("pending");
+  expect(mutation?.state.variables).toBeUndefined();
+  expect(JSON.stringify(mutation?.state)).not.toContain("correct horse");
+
+  login.release();
+  await signingIn;
 });

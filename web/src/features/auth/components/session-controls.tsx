@@ -4,7 +4,7 @@ import { useLogout, useSession } from "../hooks/auth-queries.js";
 
 // Who is signed in, with sign-in and sign-out actions. Lives in the site
 // navigation so every page shows the current session. A failed refresh keeps
-// showing the last known account with a warning rather than discarding it.
+// showing the last known answer with a warning rather than discarding it.
 export function SessionControls(): ReactNode {
   const session = useSession();
   const logout = useLogout();
@@ -19,6 +19,9 @@ export function SessionControls(): ReactNode {
       <span role="status">Checking sign-in…</span>
     );
   }
+  const refreshFailed = session.isError ? (
+    <RefreshFailed retrying={session.isFetching} onRetry={session.refetch} />
+  ) : null;
   if (session.data === null) {
     // Remember where the person was so sign-in can bring them back.
     const from = `${location.pathname}${location.search}${location.hash}`;
@@ -27,7 +30,7 @@ export function SessionControls(): ReactNode {
         <NavLink to="/login" state={{ from }}>
           Sign in
         </NavLink>
-        {session.isError ? <RefreshFailed onRetry={session.refetch} /> : null}
+        {refreshFailed}
       </>
     );
   }
@@ -46,26 +49,7 @@ export function SessionControls(): ReactNode {
       <span role="status">
         {logoutStatus(logout.isPending, logout.isError)}
       </span>
-      {session.isError ? <RefreshFailed onRetry={session.refetch} /> : null}
-    </>
-  );
-}
-
-// A background refresh failed but the last known answer is still shown.
-function RefreshFailed({
-  onRetry,
-}: Readonly<{ onRetry: () => Promise<unknown> }>): ReactNode {
-  return (
-    <>
-      <span role="alert">Sign-in status could not be refreshed.</span>
-      <button
-        type="button"
-        onClick={() => {
-          void onRetry();
-        }}
-      >
-        Retry
-      </button>
+      {refreshFailed}
     </>
   );
 }
@@ -84,6 +68,31 @@ function SessionUnavailable({
       >
         Retry
       </button>
+    </>
+  );
+}
+
+type RefreshFailedProps = Readonly<{
+  retrying: boolean;
+  onRetry: () => Promise<unknown>;
+}>;
+
+// A background refresh failed but the last known answer is still shown. While
+// a retry runs the cached answer stays, so the button itself reports progress.
+function RefreshFailed({ retrying, onRetry }: RefreshFailedProps): ReactNode {
+  return (
+    <>
+      <span role="alert">Sign-in status could not be refreshed.</span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={() => {
+          void onRetry();
+        }}
+      >
+        {retrying ? "Retrying…" : "Retry"}
+      </button>
+      <span role="status">{retrying ? "Checking sign-in again." : ""}</span>
     </>
   );
 }

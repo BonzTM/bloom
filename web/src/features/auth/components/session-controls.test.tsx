@@ -8,16 +8,9 @@ import {
   jsonApi,
 } from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
+import { createGate } from "../../../test/gate.js";
 import { server } from "../../../test/server.js";
 import { authKeys } from "../hooks/auth-queries.js";
-
-function createGate() {
-  let open = (): void => undefined;
-  const wait = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-  return { wait, open };
-}
 
 it("offers a retry when the session cannot be checked", async () => {
   const user = userEvent.setup();
@@ -197,3 +190,56 @@ it("warns when a refresh fails while signed out and keeps the sign-in link", asy
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
+
+it.each([
+  [
+    "signed in",
+    () => HttpResponse.json({ account: { id: "1", username: "admin" } }),
+    "Signed in as admin",
+  ],
+  [
+    "signed out",
+    () => envelope(401, "unauthenticated", "sign in required"),
+    "Sign in",
+  ],
+])(
+  "disables and announces the retry of a failed refresh while %s",
+  async (_label, healthy, visibleText) => {
+    const user = userEvent.setup();
+    const gate = createGate();
+    let mode: "healthy" | "failing" | "held" = "healthy";
+    server.use(
+      http.get(
+        "*/api/v1/auth/me",
+        jsonApi(async () => {
+          if (mode === "failing") {
+            return new HttpResponse("upstream down", { status: 502 });
+          }
+          if (mode === "held") {
+            await gate.wait;
+          }
+          return healthy();
+        }),
+      ),
+    );
+    const { queryClient } = renderApp();
+    await screen.findByText(visibleText);
+
+    mode = "failing";
+    await queryClient.refetchQueries({ queryKey: authKeys.session() });
+    await screen.findByRole("button", { name: "Retry" });
+
+    mode = "held";
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Retrying…" }),
+    ).toBeDisabled();
+    expect(screen.getByText("Checking sign-in again.")).toHaveRole("status");
+    expect(screen.getByText(visibleText)).toBeVisible();
+    gate.open();
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  },
+);

@@ -7,21 +7,21 @@ import type { SystemApi } from "../features/system/api/system-api.js";
 import { SystemApiContext } from "../features/system/system-context.js";
 
 type AppProvidersProps = Readonly<{
-  api: SystemApi;
+  systemApi: SystemApi;
   authApi: AuthApi;
   queryClient: QueryClient;
   router: RouterProviderProps["router"];
 }>;
 
 export function AppProviders({
-  api,
+  systemApi,
   authApi,
   queryClient,
   router,
 }: AppProvidersProps): ReactNode {
   return (
     <QueryClientProvider client={queryClient}>
-      <SystemApiContext value={api}>
+      <SystemApiContext value={systemApi}>
         <AuthApiContext value={authApi}>
           <RouterProvider router={router} />
         </AuthApiContext>

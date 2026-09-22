@@ -22,12 +22,12 @@ export function renderApp(initialEntry: InitialEntry = "/"): AppRender {
     },
   });
   const client = new ApiClient(new URL("http://localhost/"));
-  const api = new SystemApi(client);
+  const systemApi = new SystemApi(client);
   const authApi = new AuthApi(client);
   const result = render(
     <StrictMode>
       <AppProviders
-        api={api}
+        systemApi={systemApi}
         authApi={authApi}
         queryClient={queryClient}
         router={createTestRouter([initialEntry])}

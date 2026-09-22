@@ -20,12 +20,12 @@ async function start(): Promise<void> {
     throw new Error("Application root element is missing");
   }
   const client = new ApiClient(new URL(config.apiBaseUrl));
-  const api = new SystemApi(client);
+  const systemApi = new SystemApi(client);
   const authApi = new AuthApi(client);
   createRoot(rootElement).render(
     <StrictMode>
       <AppProviders
-        api={api}
+        systemApi={systemApi}
         authApi={authApi}
         queryClient={createQueryClient()}
         router={createAppRouter()}

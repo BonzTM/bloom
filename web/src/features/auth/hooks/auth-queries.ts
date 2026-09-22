@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useRef } from "react";
 import { ApiError } from "../../../lib/api/errors.js";
 import type { Account, LoginInput } from "../api/auth-schemas.js";
 import { useAuthApi } from "../auth-context.js";
@@ -31,16 +32,27 @@ export function useSession() {
   });
 }
 
-// Sign in. The password is a mutation variable only for the duration of the
-// request: `gcTime: 0` drops the mutation from the cache as soon as nothing
-// observes it, and callers reset it after it settles. An in-flight session
-// check is cancelled first so a late answer cannot overwrite the result.
+type LoginCallbacks = Readonly<{
+  onError?: (error: Error) => void;
+  onSettled?: () => void;
+}>;
+
+// Sign in. The credentials never become mutation variables: they sit in a ref
+// only until the request is built, so the mutation cache holds nothing worth
+// stealing no matter how long the request or its reconciliation takes.
 export function useLogin() {
   const api = useAuthApi();
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: LoginInput) => api.login(input),
-    gcTime: 0,
+  const pending = useRef<LoginInput | null>(null);
+  const mutation = useMutation({
+    mutationFn: () => {
+      const input = pending.current;
+      pending.current = null;
+      if (input === null) {
+        throw new Error("login called without credentials");
+      }
+      return api.login(input);
+    },
     onMutate: () => cancelSessionCheck(queryClient),
     // Cancel again right before writing: a focus-triggered check may have
     // started after onMutate and must not land after the canonical answer.
@@ -50,6 +62,15 @@ export function useLogin() {
     },
     onError: (error) => reconcileAfterAmbiguousFailure(queryClient, error),
   });
+  const { mutate } = mutation;
+  const login = useCallback(
+    (input: LoginInput, callbacks: LoginCallbacks = {}): void => {
+      pending.current = input;
+      mutate(undefined, callbacks);
+    },
+    [mutate],
+  );
+  return { login, isPending: mutation.isPending, reset: mutation.reset };
 }
 
 // Sign out. The cache only forgets the account when the server confirms the

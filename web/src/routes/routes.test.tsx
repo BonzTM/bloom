@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { mockAccount, signInMockSession, jsonApi } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { createGate } from "../test/gate.js";
 import { server } from "../test/server.js";
 
 it("renders the home page with the server version from the API", async () => {
@@ -230,4 +231,38 @@ it("brings the person back to the page where they chose to sign in", async () =>
     await screen.findByRole("heading", { name: "About Bloom", level: 1 }),
   ).toBeVisible();
   expect(screen.getByText("Signed in as admin")).toBeVisible();
+});
+
+it("does not redirect while a sign-in is still pending, then redirects once", async () => {
+  const user = userEvent.setup();
+  const gate = createGate();
+  server.use(
+    http.post(
+      "*/api/v1/auth/login",
+      jsonApi(async () => {
+        await gate.wait;
+        signInMockSession();
+        return HttpResponse.json({ account: mockAccount });
+      }),
+    ),
+  );
+  const { queryClient } = renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByRole("button", { name: "Signing in…" });
+
+  // A stale cached account must not eject the person mid sign-in.
+  queryClient.setQueryData(["auth", "session"], mockAccount);
+  expect(
+    screen.getByRole("heading", { name: "Sign in", level: 1 }),
+  ).toBeVisible();
+
+  gate.open();
+  expect(
+    await screen.findByRole("heading", { name: "Bloom", level: 1 }),
+  ).toBeVisible();
+  expect(document.title).toBe("Home | Bloom");
 });
