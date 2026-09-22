@@ -27,6 +27,13 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      # The lint and transform toolchain moves deliberately with the handbook:
+      # typescript-eslint 8 pins ESLint 9, and the Jest transform pins Babel 7.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@babel/*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         applies-to: version-updates
@@ -57,3 +64,8 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      # Bloom pins the Node 24 LTS line (web/.nvmrc); Current is not the
+      # production pin. Patch and minor updates within the line still arrive.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
