@@ -144,21 +144,33 @@ CI runs both halves on every push. Every behavior change ships with a test that 
 ## Release And Deploy
 
 Bloom images are published at `ghcr.io/bonztm/bloom`. A merge to `main` builds
-and smoke-tests an amd64 image, then publishes the mutable `main` tag and the
-immutable `main-<7-character-commit>` tag. The workflow also records provenance
-and an SBOM for the published image.
+an amd64 image under a run-specific `candidate-<run>-<attempt>` tag. It tests
+that image by digest before promoting the same digest to the mutable `main` tag
+and the immutable `main-<full-commit>` tag. Candidate tags remain in the
+registry as build records. A rerun uses the commit's timestamp as the image
+creation time. It fails instead of replacing an existing immutable tag that
+points to another digest. The workflow records provenance and an SBOM for the
+published image.
 
 After the smoke test passes, the workflow opens a pull request in
 `bonztm/homelab`. That pull request pins both the `bloom` container and the
 `migrate` init container in `apps/internal/bloom/deployment.yaml` to the same
 `main-<commit>` tag and image digest. A rerun updates the existing pull request
-for that commit. If the deployment file does not exist yet, the workflow skips
-the pull request without failing the image build.
+on the workflow-owned `chore/bloom-main` branch. Each run recreates that branch
+from the current homelab `main`, renders the Bloom manifests, and skips the
+commit when the manifest is already current. If homelab `main` changes before
+the branch is pushed, the run fails and a rerun starts from the newer base. If
+it changes after the push, GitHub may mark the pull request behind or
+conflicting; the next Bloom run recreates the branch from the new base. If the
+deployment file does not exist yet, the workflow skips the pull request without
+failing the image build.
 
 Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
 deployment. It publishes `v1.2.3`, `1.2.3`, `1.2`, and `latest` tags for a
-`v1.2.3` release, then smoke-tests the published digest. Tagged releases do not
-open homelab pull requests.
+`v1.2.3` release. A prerelease such as `v1.2.3-rc.1` publishes only that exact
+tag. Invalid release tags fail before an image is pushed. Manual runs accept
+only `main` or a valid release tag. Tagged releases do not open homelab pull
+requests.
 
 The repository needs one secret before the first main deployment:
 

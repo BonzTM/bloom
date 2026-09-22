@@ -11,8 +11,9 @@ contracts) gets an entry here.
 
 ### Added
 
-- Main-branch and tagged-release image publishing with provenance, an SBOM,
-  digest-based smoke tests, and automated homelab deployment pull requests.
+- Main-branch and tagged-release image publishing with candidate-first smoke
+  tests, immutable commit tags, provenance, an SBOM, and one reusable automated
+  homelab deployment pull request.
 - Bootstrap of the service: Go HTTP server with `/livez`, `/readyz`, `/metrics`,
   and `GET /api/v1/version`; embedded React UI; SQLite (default) and PostgreSQL
   storage at parity; container image and CI.
