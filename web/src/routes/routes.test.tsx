@@ -233,7 +233,7 @@ it("brings the person back to the page where they chose to sign in", async () =>
   expect(screen.getByText("Signed in as admin")).toBeVisible();
 });
 
-it("does not redirect while a sign-in is still pending, then redirects once", async () => {
+it("does not redirect while a sign-in is still pending, then redirects exactly once", async () => {
   const user = userEvent.setup();
   const gate = createGate();
   server.use(
@@ -246,8 +246,18 @@ it("does not redirect while a sign-in is still pending, then redirects once", as
       }),
     ),
   );
-  const { queryClient } = renderApp("/login");
+  const { queryClient, router } = renderApp("/login");
   await screen.findByRole("heading", { name: "Sign in", level: 1 });
+  let arrivals = 0;
+  let previous = router.state.location.key;
+  const unsubscribe = router.subscribe((state) => {
+    if (state.location.key !== previous) {
+      previous = state.location.key;
+      if (state.location.pathname === "/") {
+        arrivals += 1;
+      }
+    }
+  });
 
   await user.type(screen.getByLabelText("Username"), "admin");
   await user.type(screen.getByLabelText("Password"), "correct horse");
@@ -265,4 +275,26 @@ it("does not redirect while a sign-in is still pending, then redirects once", as
     await screen.findByRole("heading", { name: "Bloom", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Home | Bloom");
+  expect(arrivals).toBe(1);
+  unsubscribe();
+});
+
+it("lets the person correct a rejected password and sign in with Enter", async () => {
+  const user = userEvent.setup();
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "wrong{Enter}");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The username or password is incorrect.",
+  );
+
+  await user.clear(screen.getByLabelText("Password"));
+  await user.type(screen.getByLabelText("Password"), "correct horse{Enter}");
+
+  expect(
+    await screen.findByRole("heading", { name: "Bloom", level: 1 }),
+  ).toBeVisible();
+  expect(screen.getByText("Signed in as admin")).toBeVisible();
 });

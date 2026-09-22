@@ -18,14 +18,17 @@ import { AuthApi } from "../api/auth-api.js";
 import { AuthApiContext } from "../auth-context.js";
 import { authKeys, useLogin, useLogout, useSession } from "./auth-queries.js";
 
-// A session-check handler that reports when it has started and then blocks
-// until released, so a test can prove the request was truly in flight.
-function slowSessionCheck(respond: () => Response) {
+// Holds a request until released and reports when it started, for any path.
+function heldResponse(
+  method: "get" | "post",
+  path: string,
+  respond: () => Response,
+) {
   const started = createGate();
   const release = createGate();
   server.use(
-    http.get(
-      "*/api/v1/auth/me",
+    http[method](
+      path,
       jsonApi(async () => {
         started.open();
         await release.wait;
@@ -75,7 +78,7 @@ function signIn(
 
 it("keeps the signed-in account when a session check started earlier answers late", async () => {
   const { queryClient, wrapper } = createHarness();
-  const slow = slowSessionCheck(() =>
+  const slow = heldResponse("get", "*/api/v1/auth/me", () =>
     envelope(401, "unauthenticated", "sign in required"),
   );
   const { result } = renderHook(useAuth, { wrapper });
@@ -102,7 +105,9 @@ it("stays signed out when a session check started before sign-out answers late",
     expect(result.current.session.data).toEqual(mockAccount);
   });
 
-  const slow = slowSessionCheck(() => Response.json({ account: mockAccount }));
+  const slow = heldResponse("get", "*/api/v1/auth/me", () =>
+    Response.json({ account: mockAccount }),
+  );
   const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
   await slow.started;
   await act(async () => {
@@ -187,27 +192,6 @@ it("re-checks the session when the tab regains focus", async () => {
   });
 });
 
-// Holds a request until released and reports when it started, for any path.
-function heldResponse(
-  method: "get" | "post",
-  path: string,
-  respond: () => Response,
-) {
-  const started = createGate();
-  const release = createGate();
-  server.use(
-    http[method](
-      path,
-      jsonApi(async () => {
-        started.open();
-        await release.wait;
-        return respond();
-      }),
-    ),
-  );
-  return { started: started.wait, release: release.open };
-}
-
 it("ignores a session check that starts during sign-in and answers after it", async () => {
   const { queryClient, wrapper } = createHarness();
   const { result } = renderHook(useAuth, { wrapper });
@@ -288,4 +272,42 @@ it("never stores the credentials in the mutation cache", async () => {
 
   login.release();
   await signingIn;
+});
+
+it("drops a second sign-in while the first is in flight", async () => {
+  const { wrapper } = createHarness();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+  let requests = 0;
+  const login = heldResponse("post", "*/api/v1/auth/login", () => {
+    requests += 1;
+    return Response.json({ account: mockAccount });
+  });
+
+  let first: Promise<void> = Promise.resolve();
+  let secondSettled = false;
+  await act(async () => {
+    first = signIn(result.current.login, mockCredentials);
+    result.current.login.login(
+      { username: "other", password: "other" },
+      {
+        onSettled: () => {
+          secondSettled = true;
+        },
+      },
+    );
+    await login.started;
+  });
+  login.release();
+  await act(async () => {
+    await first;
+  });
+
+  expect(requests).toBe(1);
+  expect(secondSettled).toBe(false);
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockAccount);
+  });
 });

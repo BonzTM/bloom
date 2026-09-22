@@ -9,7 +9,11 @@ import { AuthApi } from "../features/auth/api/auth-api.js";
 import { SystemApi } from "../features/system/api/system-api.js";
 import { ApiClient } from "../lib/api/http-client.js";
 
-type AppRender = RenderResult & Readonly<{ queryClient: QueryClient }>;
+type AppRender = RenderResult &
+  Readonly<{
+    queryClient: QueryClient;
+    router: ReturnType<typeof createTestRouter>;
+  }>;
 
 // Renders the whole application under Strict Mode, as production does, so
 // double-invoked effects and renders are exercised by every route test. The
@@ -24,15 +28,16 @@ export function renderApp(initialEntry: InitialEntry = "/"): AppRender {
   const client = new ApiClient(new URL("http://localhost/"));
   const systemApi = new SystemApi(client);
   const authApi = new AuthApi(client);
+  const router = createTestRouter([initialEntry]);
   const result = render(
     <StrictMode>
       <AppProviders
         systemApi={systemApi}
         authApi={authApi}
         queryClient={queryClient}
-        router={createTestRouter([initialEntry])}
+        router={router}
       />
     </StrictMode>,
   );
-  return { ...result, queryClient };
+  return { ...result, queryClient, router };
 }

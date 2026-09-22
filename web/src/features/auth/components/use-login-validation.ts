@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { loginInputSchema, type LoginInput } from "../api/auth-schemas.js";
 
 type LoginFieldErrors = Readonly<Partial<Record<keyof LoginInput, string>>>;
@@ -19,9 +19,23 @@ const FIELD_ORDER = ["username", "password"] as const;
 // from rendering so the decisions are testable without a full DOM tree.
 export function useLoginValidation(): LoginValidation {
   const [errors, setErrors] = useState<LoginFieldErrors>({});
+  const pendingFocus = useRef<keyof LoginInput | null>(null);
   const username = useRef<HTMLInputElement>(null);
   const password = useRef<HTMLInputElement>(null);
   const refs: FieldRefs = { username, password };
+
+  // Focus moves after React commits the error text, so the field's accessible
+  // description is already in place when assistive technology reads it. The
+  // errors state is the trigger; the target rides in a ref so the effect sets
+  // no state of its own.
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (target === null) {
+      return;
+    }
+    pendingFocus.current = null;
+    (target === "username" ? username : password).current?.focus();
+  }, [errors]);
 
   function validate(form: HTMLFormElement): LoginInput | undefined {
     const parsed = loginInputSchema.safeParse(
@@ -32,8 +46,8 @@ export function useLoginValidation(): LoginValidation {
       return parsed.data;
     }
     const next = collectFieldErrors(parsed.error.issues);
+    pendingFocus.current = firstInvalid(next);
     setErrors(next);
-    focusFirstInvalid(next, refs);
     return undefined;
   }
 
@@ -59,9 +73,6 @@ function isLoginField(
   return value === "username" || value === "password";
 }
 
-function focusFirstInvalid(errors: LoginFieldErrors, refs: FieldRefs): void {
-  const first = FIELD_ORDER.find((field) => errors[field] !== undefined);
-  if (first !== undefined) {
-    refs[first].current?.focus();
-  }
+function firstInvalid(errors: LoginFieldErrors): keyof LoginInput | null {
+  return FIELD_ORDER.find((field) => errors[field] !== undefined) ?? null;
 }

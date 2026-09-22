@@ -22,10 +22,16 @@ export function safeDestination(state: unknown, origin: string): string {
     return "/";
   }
   const url = new URL(from, origin);
-  if (url.origin !== origin || url.pathname === LOGIN_PATH) {
+  if (url.origin !== origin || isLoginPath(url.pathname)) {
     return "/";
   }
   return `${url.pathname}${url.search}${url.hash}`;
+}
+
+// React Router matches paths case-insensitively and tolerates trailing
+// slashes, so "/Login/" would land on the sign-in page and bounce again.
+function isLoginPath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, "").toLowerCase() === LOGIN_PATH;
 }
 
 // Backslashes and control characters let some parsers read "/\evil" as an

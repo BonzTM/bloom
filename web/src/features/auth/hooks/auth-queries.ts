@@ -44,6 +44,7 @@ export function useLogin() {
   const api = useAuthApi();
   const queryClient = useQueryClient();
   const pending = useRef<LoginInput | null>(null);
+  const inFlight = useRef(false);
   const mutation = useMutation({
     mutationFn: () => {
       const input = pending.current;
@@ -63,10 +64,24 @@ export function useLogin() {
     onError: (error) => reconcileAfterAmbiguousFailure(queryClient, error),
   });
   const { mutate } = mutation;
+  // The guard is synchronous: a second call while one is in flight is dropped
+  // before it can overwrite the credentials the first call has not yet read.
   const login = useCallback(
     (input: LoginInput, callbacks: LoginCallbacks = {}): void => {
+      if (inFlight.current) {
+        return;
+      }
+      inFlight.current = true;
       pending.current = input;
-      mutate(undefined, callbacks);
+      mutate(undefined, {
+        onError: (error) => {
+          callbacks.onError?.(error);
+        },
+        onSettled: () => {
+          inFlight.current = false;
+          callbacks.onSettled?.();
+        },
+      });
     },
     [mutate],
   );

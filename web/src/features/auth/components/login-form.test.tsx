@@ -121,3 +121,13 @@ it("gives a connection hint for network failures", () => {
     "The server could not be reached.",
   );
 });
+
+it("submits with the Enter key", async () => {
+  const user = userEvent.setup();
+  const { onSubmit } = renderForm();
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse{Enter}");
+
+  expect(onSubmit).toHaveBeenCalledTimes(1);
+});
