@@ -26,5 +26,7 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Image publishing now skips unsupported artifact attestation steps for private
+  repositories while retaining metadata, smoke, and SBOM verification.
 - CI now builds and scans with the same Go toolchain as local and container
   builds (`toolchain go1.27.1` in go.mod).

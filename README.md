@@ -148,18 +148,26 @@ Every behavior change ships with a test that proves it.
 Bloom images are published at `ghcr.io/bonztm/bloom`. For a commit without an
 existing immutable tag, a merge to `main` builds an amd64 image under a
 run-specific `candidate-<run>-<attempt>` tag. It tests that image by digest and
-records its provenance before promoting the same digest to the immutable
-`main-<full-commit>` tag. The mutable `main` tag moves only when its current
-revision is an ancestor of the incoming commit. A stale rerun leaves `main`
+promotes the same digest to the immutable `main-<full-commit>` tag. The mutable
+`main` tag moves only when its current revision is an ancestor of the incoming
+commit. A stale rerun leaves `main`
 unchanged and does not open a deployment pull request. The build starts only
 after the reusable CI workflow passes both `make verify` and the PostgreSQL
 integration suite for the same commit. Before building, the workflow resolves
-the immutable tag. A rerun reuses its existing digest only after verifying its
-build provenance against the exact source commit, source ref, and image workflow
-signer and validating its attached SPDX SBOM. It then skips the build and smoke
-test without replacing the immutable image. A legacy image without either proof
-must be deleted once and rebuilt. Promotion repeats the source-commit and signer
-checks plus the SBOM check as a self-test.
+the immutable tag.
+
+Release proof has two repository-visibility modes. In a public repository, the
+workflow records signed provenance before promotion. A rerun reuses an existing
+immutable digest only after verifying that provenance against the exact source
+commit, source ref, and image workflow signer. Promotion repeats the
+source-commit and signer checks as a self-test. In a private repository, GitHub
+artifact attestations are unavailable without GitHub Enterprise, so the
+workflow reports and skips only those provenance steps. In both modes, fresh
+candidates are built and smoke-tested by digest, image labels and versions are
+checked, and an attached SPDX SBOM must be present. Private-mode reuse therefore
+rejects a legacy immutable image without an SBOM or with mismatched labels.
+Making the repository public enables signed provenance on the next run with no
+workflow change.
 
 A weekly cleanup inspects a rotating window of at most 1,000 package versions and
 deletes at most 100 versions older than seven days only when every tag on that
