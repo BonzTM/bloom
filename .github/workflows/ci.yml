@@ -25,7 +25,7 @@ jobs:
         with:
           go-version-file: go.mod # single source of truth for the Go version
           cache: true # build + module cache, keyed off go.sum
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: web/.nvmrc # single source of truth for the Node version
           cache: npm
