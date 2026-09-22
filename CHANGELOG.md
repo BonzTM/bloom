@@ -26,5 +26,8 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Image publishing skips the artifact attestation steps, with a notice, when
+  attestations are unavailable for the repository's plan, and keeps every other
+  proof step; a public repository gets signed provenance automatically.
 - CI now builds and scans with the same Go toolchain as local and container
   builds (`toolchain go1.27.1` in go.mod).
