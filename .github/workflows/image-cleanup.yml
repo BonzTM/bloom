@@ -1,0 +1,92 @@
+name: image cleanup
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: image-cleanup
+  cancel-in-progress: false
+  # Queue scheduled and manual cleanups instead of replacing a pending one,
+  # so none is silently dropped.
+  queue: max
+
+jobs:
+  delete-expired-candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Delete candidate-only package versions older than seven days
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_DELETIONS: 100
+          MAX_PAGES: 10
+          PAGE_COUNT: 100
+          PACKAGE_NAME: bloom
+          PACKAGE_OWNER: ${{ github.repository_owner }}
+          PAGE_SIZE: 100
+        run: |
+          set -euo pipefail
+          versions_file="$(mktemp)"
+          page_file="$(mktemp)"
+          candidates_file="$(mktemp)"
+          cleanup() {
+            rm -f -- "${candidates_file}" "${page_file}" "${versions_file}"
+          }
+          trap cleanup EXIT
+
+          if [[ ! "${GITHUB_RUN_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error title=Invalid workflow run number::GITHUB_RUN_NUMBER must be a positive integer."
+            exit 1
+          fi
+          start_page=$(( ((GITHUB_RUN_NUMBER - 1) * MAX_PAGES) % PAGE_COUNT + 1 ))
+
+          pagination_capped=true
+          last_page="${start_page}"
+          for ((offset = 0; offset < MAX_PAGES; offset++)); do
+            page=$((start_page + offset))
+            last_page="${page}"
+            gh api \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions?per_page=${PAGE_SIZE}&page=${page}" \
+              >"${page_file}"
+            jq --exit-status 'type == "array"' "${page_file}" >/dev/null
+            jq --compact-output '.[]' "${page_file}" >>"${versions_file}"
+            page_count="$(jq 'length' "${page_file}")"
+            if (( page_count < PAGE_SIZE )); then
+              pagination_capped=false
+              break
+            fi
+          done
+          if [[ "${pagination_capped}" == true ]]; then
+            echo "::notice title=Cleanup pagination capped::Inspected pages ${start_page}-${last_page} in the deterministic ${PAGE_COUNT}-page rotation."
+          fi
+
+          cutoff="$(date --utc --date='7 days ago' +%s)"
+          jq --compact-output --argjson cutoff "${cutoff}" '
+            select((.created_at | fromdateiso8601) < $cutoff)
+            | select((.metadata.container.tags | length) > 0)
+            | select(all(.metadata.container.tags[]; startswith("candidate-")))
+            | {id, created_at, tags: .metadata.container.tags}
+          ' "${versions_file}" >"${candidates_file}"
+          mapfile -t candidates <"${candidates_file}"
+
+          deletion_count="${#candidates[@]}"
+          if (( deletion_count > MAX_DELETIONS )); then
+            deletion_count="${MAX_DELETIONS}"
+            echo "::notice title=Cleanup deletions capped::$(( ${#candidates[@]} - MAX_DELETIONS )) eligible package versions were not deleted; a future run can revisit them when the deterministic rotation repeats."
+          fi
+          for ((index = 0; index < deletion_count; index++)); do
+            version="${candidates[index]}"
+            id="$(jq --exit-status --raw-output .id <<<"${version}")"
+            created_at="$(jq --exit-status --raw-output .created_at <<<"${version}")"
+            tags="$(jq --exit-status --compact-output .tags <<<"${version}")"
+            echo "Deleting package version ${id}, created ${created_at}, tags ${tags}"
+            gh api --method DELETE \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions/${id}"
+          done

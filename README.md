@@ -139,15 +139,92 @@ BLOOM_TEST_POSTGRES_DSN='postgres://bloom:bloom@localhost:5432/bloom?sslmode=dis
   go test -tags=integration ./internal/db/...
 ```
 
-CI runs both halves on every push. Every behavior change ships with a test that proves it.
+CI runs both halves for pull requests and `main` pushes. The image workflow also
+calls the same gate for each `main` or release-tag commit before building.
+Every behavior change ships with a test that proves it.
 
-## Deploy
+## Release And Deploy
 
-- **Artifact**: container image, `ghcr.io/BonzTM/bloom` (multi-stage: Node build of `web/`, static Go build, distroless nonroot runtime).
-- **Build**: `make build` for the dev check; release builds add `-trimpath` and stamp `internal/buildinfo` via `-ldflags`.
-- **Release**: tagged `v<major>.<minor>.<patch>`; see [decisions/](decisions/).
-- **Migrations**: run the image with `-migrate` as a Job before rolling the Deployment; SQLite single-container deployments may set `BLOOM_DB_MIGRATE_ON_STARTUP=true`.
-- **Health**: liveness `GET /livez`, readiness `GET /readyz` (database-aware), metrics `GET /metrics`.
+Bloom images are published at `ghcr.io/bonztm/bloom`. For a commit without an
+existing immutable tag, a merge to `main` builds an amd64 image under a
+run-specific `candidate-<run>-<attempt>` tag. It tests that image by digest and
+records its provenance before promoting the same digest to the immutable
+`main-<full-commit>` tag. The mutable `main` tag moves only when its current
+revision is an ancestor of the incoming commit. A stale rerun leaves `main`
+unchanged and does not open a deployment pull request. The build starts only
+after the reusable CI workflow passes both `make verify` and the PostgreSQL
+integration suite for the same commit. Before building, the workflow resolves
+the immutable tag. A rerun reuses its existing digest only after verifying its
+build provenance against the exact source commit, source ref, and image workflow
+signer and validating its attached SPDX SBOM. It then skips the build and smoke
+test without replacing the immutable image. A legacy image without either proof
+must be deleted once and rebuilt. Promotion repeats the source-commit and signer
+checks plus the SBOM check as a self-test.
+
+A weekly cleanup inspects a rotating window of at most 1,000 package versions and
+deletes at most 100 versions older than seven days only when every tag on that
+version starts with `candidate-`. It computes the first page as
+`(((GITHUB_RUN_NUMBER - 1) * 10) modulo 100) + 1`. Successive runs start at pages
+1, 11, through 91, scan at most ten consecutive pages, then repeat without stored
+cursor state. Cleanup runs never overlap: an active run finishes, and further
+runs wait in a bounded queue (GitHub keeps up to 100 pending) rather than
+replacing one another.
+It reports when the scan or delete cap defers work to a later rotation. GHCR
+stores tags on a shared digest version, so promoted versions carry both their
+candidate tag and public tags. Those promoted candidates remain in the registry
+because deleting their package version would also delete the promoted image.
+
+After a new image passes the smoke test, or after a rerun reuses the immutable
+digest, the workflow opens a pull request in `bonztm/homelab`. That pull request
+pins both the `bloom` container and the `migrate` init container in
+`apps/internal/bloom/deployment.yaml` to the same `main-<commit>` tag and image
+digest. A rerun updates the existing pull request on the workflow-owned
+`chore/bloom-main` branch. Each run recreates that branch from the current
+homelab `main`, renders the Bloom manifests, and skips the commit when the
+manifest is already current. The branch push uses an exact-OID lease. After each
+push, the workflow re-reads homelab `main`; if it moved, the workflow recreates
+the branch from the newer base, reapplies and renders the change, and retries up
+to three times before failing. It opens or updates the pull request only after a
+push whose base still matches the re-read `main`. If `main` changes after that
+check, GitHub may mark the pull request behind or conflicting; the next Bloom run
+recreates the branch from the new base. If the deployment file does not exist
+yet, the workflow skips the pull request without failing the image build.
+
+Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
+deployment. A `v1.2.3` release publishes immutable `v1.2.3` and `1.2.3` tags.
+It moves `1.2` and `latest` only when `1.2.3` is newer than the version that the
+alias already references. A prerelease such as `v1.2.3-rc.1` publishes only
+that exact tag. Invalid release tags fail before an image is pushed. Manual runs
+accept only `main` or an actual valid release tag; a similarly named branch is
+rejected. Tagged releases do not open homelab pull requests. Image runs share a
+serialized queue so promotion and the reusable deployment branch cannot race.
+
+[GitHub creates a newly published container package as private by
+default](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#about-visibility-of-packages).
+After the first image is published, open the
+[`bonztm/bloom` package settings](https://github.com/users/BonzTM/packages/container/bloom/settings)
+and change its visibility to public. This is a one-time bootstrap step. The
+deploy job pulls the promoted digest without logging in before it opens or
+updates a pull request. It fails with an actionable error while anonymous pulls
+are disabled. If the first deploy job reaches that check before the visibility
+change, make the package public and rerun the failed workflow.
+
+The repository also needs one secret before the first main deployment:
+
+1. Create a fine-grained personal access token for the `bonztm/homelab`
+   repository.
+2. Grant the token **Contents: Read and write** and **Pull requests: Read and
+   write** repository permissions. Do not grant additional repository access or
+   permissions.
+3. Add the token to the Bloom repository as an Actions secret named
+   `HOMELAB_DEPLOY_TOKEN`.
+
+Release builds add `-trimpath` and stamp `internal/buildinfo` through the
+Dockerfile's `VERSION`, `COMMIT`, and `CREATED` build arguments. Run the image
+with `-migrate` as a Job before rolling the Deployment. SQLite single-container
+deployments may set `BLOOM_DB_MIGRATE_ON_STARTUP=true`. Use `GET /livez` for
+liveness, `GET /readyz` for database-aware readiness, and `GET /metrics` for
+Prometheus metrics.
 
 ## Ownership And Support
 

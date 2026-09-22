@@ -1,0 +1,586 @@
+name: image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: image-promotion
+  cancel-in-progress: false
+  # Keep every pending run instead of replacing it, so rapid pushes or
+  # tags are all published in order.
+  queue: max
+
+env:
+  IMAGE_NAME: ghcr.io/bonztm/bloom
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      release-kind: ${{ steps.ref.outputs.release-kind }}
+    steps:
+      - name: Validate source ref
+        id: ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "release-kind=main" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "::error title=Unsupported image ref::Manual image builds must select main or an existing release tag."
+            exit 1
+          fi
+
+          core='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+          identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+          if [[ "${GITHUB_REF_NAME}" =~ ^v${core}$ ]]; then
+            echo "release-kind=stable" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ "${GITHUB_REF_NAME}" =~ ^v${core}-${identifier}(\.${identifier})*$ ]]; then
+            echo "release-kind=prerelease" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "::error title=Unsupported image ref::Select main or a tag such as v1.2.3 or v1.2.3-rc.1."
+          exit 1
+
+  verification:
+    needs: validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [validate, verification]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      attestations: read
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.resolve.outputs.digest || steps.build.outputs.digest }}
+      reused: ${{ steps.resolve.outputs.exists }}
+      version: ${{ steps.vars.outputs.version }}
+    steps:
+      - name: Check out Bloom
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set image metadata
+        id: vars
+        shell: bash
+        env:
+          RELEASE_KIND: ${{ needs.validate.outputs.release-kind }}
+        run: |
+          set -euo pipefail
+          version="main-${GITHUB_SHA}"
+          if [[ "${RELEASE_KIND}" != "main" ]]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+          commit_epoch="$(git show -s --format=%ct "${GITHUB_SHA}")"
+          {
+            echo "candidate=${IMAGE_NAME}:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            echo "created=$(date --utc --date="@${commit_epoch}" +%Y-%m-%dT%H:%M:%SZ)"
+            echo "immutable-tag=${version}"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Resolve immutable image
+        id: resolve
+        shell: bash
+        env:
+          EXPECTED_TAG: ${{ steps.vars.outputs.immutable-tag }}
+          EXPECTED_VERSION: ${{ steps.vars.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          error_file="$(mktemp)"
+          trap 'rm -f -- "${error_file}"' EXIT
+          if ! digest="$({
+            docker buildx imagetools inspect "${IMAGE_NAME}:${EXPECTED_TAG}" \
+              --format '{{json .Manifest}}' | jq --exit-status --raw-output .digest
+          } 2>"${error_file}")"; then
+            if grep -Eqi 'manifest unknown|not found' "${error_file}"; then
+              echo "exists=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            cat "${error_file}" >&2
+            exit 1
+          fi
+
+          image_json="$(docker buildx imagetools inspect "${IMAGE_NAME}:${EXPECTED_TAG}" \
+            --format '{{json .Image}}')"
+          revision="$(jq --exit-status --raw-output \
+            '.config.Labels["org.opencontainers.image.revision"]' <<<"${image_json}")"
+          version="$(jq --exit-status --raw-output \
+            '.config.Labels["org.opencontainers.image.version"]' <<<"${image_json}")"
+          if [[ "${revision}" != "${GITHUB_SHA}" || "${version}" != "${EXPECTED_VERSION}" ]]; then
+            echo "::error title=Immutable image metadata conflict::${IMAGE_NAME}:${EXPECTED_TAG} has revision ${revision} and version ${version}."
+            exit 1
+          fi
+          if ! gh attestation verify "oci://${IMAGE_NAME}@${digest}" \
+            --repo bonztm/bloom \
+            --source-digest "${GITHUB_SHA}" \
+            --source-ref "${GITHUB_REF}" \
+            --signer-workflow BonzTM/bloom/.github/workflows/image.yml >/dev/null; then
+            echo "::error title=Unverifiable immutable image::Could not verify Bloom build provenance for ${IMAGE_NAME}:${EXPECTED_TAG}. Retry transient failures. For a legacy image without an attestation, delete its tag/package version once, then rerun the workflow to rebuild it with provenance and an SBOM."
+            exit 1
+          fi
+          if ! docker buildx imagetools inspect "${IMAGE_NAME}@${digest}" \
+            --format '{{json .SBOM}}' | jq --exit-status '
+              [.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT" and
+                ((.spdxVersion? | type) == "string") and
+                (.spdxVersion | startswith("SPDX-"))
+              )] | length > 0
+            ' >/dev/null; then
+            echo "::error title=Unverifiable image SBOM::Could not verify an SPDX SBOM for ${IMAGE_NAME}:${EXPECTED_TAG}. Retry transient failures. For a legacy image without an SBOM, delete its tag/package version once, then rerun the workflow to rebuild it with provenance and an SBOM."
+            exit 1
+          fi
+          {
+            echo "digest=${digest}"
+            echo "exists=true"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice title=Immutable image reused::${IMAGE_NAME}:${EXPECTED_TAG} already exists at ${digest}; build and smoke test are skipped."
+
+      - name: Build and push candidate
+        id: build
+        if: steps.resolve.outputs.exists == 'false'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.vars.outputs.candidate }}
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+            COMMIT=${{ github.sha }}
+            CREATED=${{ steps.vars.outputs.created }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+  smoke:
+    if: needs.build.outputs.reused == 'false'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: read
+    steps:
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and smoke-test candidate digest
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+          IMAGE: ${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          response_dir="$(mktemp -d)"
+          container_name="bloom-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if (( status != 0 )) && docker inspect "${container_name}" >/dev/null 2>&1; then
+              docker inspect "${container_name}" --format \
+                '{"state":{"status":{{json .State.Status}},"running":{{json .State.Running}},"error":{{json .State.Error}},"startedAt":{{json .State.StartedAt}},"finishedAt":{{json .State.FinishedAt}}},"exitCode":{{.State.ExitCode}},"mounts":{{json .Mounts}},"network":{"ports":{{json .NetworkSettings.Ports}},"networks":{{json .NetworkSettings.Networks}}}}' || true
+              docker logs "${container_name}" || true
+            fi
+            docker rm --force "${container_name}" >/dev/null 2>&1 || true
+            rm -rf -- "${response_dir}"
+            exit "${status}"
+          }
+          trap cleanup EXIT
+
+          docker pull "${IMAGE}"
+          label_version="$(docker image inspect "${IMAGE}" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          label_revision="$(docker image inspect "${IMAGE}" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          [[ "${label_version}" == "${EXPECTED_VERSION}" ]]
+          [[ "${label_revision}" == "${GITHUB_SHA}" ]]
+
+          docker run --detach --name "${container_name}" \
+            --publish 127.0.0.1::8080 \
+            --tmpfs /data:rw,noexec,nosuid,size=64m,uid=65532,gid=65532,mode=0700 \
+            --env "BLOOM_SECRET_KEY=$(openssl rand -base64 48)" \
+            --env "BLOOM_DB_DSN=file:/data/smoke.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" \
+            --env BLOOM_DB_MIGRATE_ON_STARTUP=true \
+            "${IMAGE}"
+
+          host_port="$(docker port "${container_name}" 8080/tcp | awk -F: 'NR == 1 {print $NF}')"
+          [[ "${host_port}" =~ ^[0-9]+$ ]]
+          base_url="http://127.0.0.1:${host_port}"
+          curl --silent --show-error --fail --retry 30 --retry-all-errors \
+            --retry-delay 1 --retry-max-time 60 --connect-timeout 1 --max-time 2 \
+            "${base_url}/readyz" >/dev/null
+
+          for endpoint in /livez /readyz; do
+            response_file="${response_dir}/response"
+            status="$(curl --silent --show-error --output "${response_file}" \
+              --write-out '%{http_code}' --connect-timeout 2 --max-time 5 \
+              "${base_url}${endpoint}")"
+            printf '%s: %s %s\n' "${endpoint}" "${status}" "$(cat "${response_file}")"
+            [[ "${status}" == 200 ]]
+          done
+
+          version_file="${response_dir}/version.json"
+          curl --silent --show-error --fail --connect-timeout 2 --max-time 5 \
+            --output "${version_file}" "${base_url}/api/v1/version"
+          cat "${version_file}"
+          jq --exit-status --arg version "${EXPECTED_VERSION}" --arg commit "${GITHUB_SHA}" \
+            '.name == "bloom" and .version == $version and .commit == $commit' \
+            "${version_file}" >/dev/null
+
+  promote:
+    if: >-
+      ${{ always() && needs.build.result == 'success' &&
+          ((needs.build.outputs.reused == 'true' && needs.smoke.result == 'skipped') ||
+           (needs.build.outputs.reused == 'false' && needs.smoke.result == 'success')) }}
+    needs: [validate, build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ needs.build.outputs.digest }}
+      main-current: ${{ steps.promote.outputs.main-current }}
+    steps:
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest candidate image provenance
+        if: needs.build.outputs.reused == 'false'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
+          # Storage records exist only for organisation-owned repositories.
+          create-storage-record: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Check out Bloom history
+        if: needs.validate.outputs.release-kind == 'main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Promote image digest
+        id: promote
+        shell: bash
+        env:
+          DIGEST: ${{ needs.build.outputs.digest }}
+          RELEASE_KIND: ${{ needs.validate.outputs.release-kind }}
+        run: |
+          set -euo pipefail
+          inspect_digest() {
+            tag=$1
+            error_file="$(mktemp)"
+            if existing="$({
+              docker buildx imagetools inspect "${IMAGE_NAME}:${tag}" \
+                --format '{{json .Manifest}}' | jq --exit-status --raw-output .digest
+            } 2>"${error_file}")"; then
+              rm -f -- "${error_file}"
+              printf '%s\n' "${existing}"
+              return 0
+            fi
+            if ! grep -Eqi 'manifest unknown|not found' "${error_file}"; then
+              cat "${error_file}" >&2
+              rm -f -- "${error_file}"
+              return 1
+            fi
+            rm -f -- "${error_file}"
+            return 2
+          }
+
+          check_immutable_tag() {
+            tag=$1
+            if existing="$(inspect_digest "${tag}")"; then
+              if [[ "${existing}" != "${DIGEST}" ]]; then
+                echo "::error title=Immutable image tag conflict::${IMAGE_NAME}:${tag} is ${existing}, expected ${DIGEST}."
+                return 1
+              fi
+              return 0
+            else
+              status=$?
+              [[ "${status}" == 2 ]]
+            fi
+          }
+
+          add_newer_alias() {
+            alias=$1
+            incoming_version=$2
+            if existing_digest="$(inspect_digest "${alias}")"; then
+              existing_version="$(docker buildx imagetools inspect "${IMAGE_NAME}:${alias}" \
+                --format '{{json .Image}}' | jq --exit-status --raw-output \
+                '.config.Labels["org.opencontainers.image.version"]')"
+            else
+              status=$?
+              if [[ "${status}" == 2 ]]; then
+                tags+=("${alias}")
+                return 0
+              fi
+              return "${status}"
+            fi
+
+            existing_version="${existing_version#v}"
+            if [[ ! "${existing_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error title=Invalid alias version::${IMAGE_NAME}:${alias} at ${existing_digest} has version ${existing_version}."
+              return 1
+            fi
+            newest="$(printf '%s\n%s\n' "${existing_version}" "${incoming_version}" | sort -V | tail -n 1)"
+            if [[ "${newest}" != "${incoming_version}" || "${existing_version}" == "${incoming_version}" ]]; then
+              echo "::notice title=Image alias unchanged::${IMAGE_NAME}:${alias} remains at ${existing_version}; incoming ${incoming_version} is not newer."
+              return 0
+            fi
+            tags+=("${alias}")
+          }
+
+          add_main_alias() {
+            if existing_digest="$(inspect_digest main)"; then
+              existing_revision="$(docker buildx imagetools inspect "${IMAGE_NAME}:main" \
+                --format '{{json .Image}}' | jq --exit-status --raw-output \
+                '.config.Labels["org.opencontainers.image.revision"]')"
+            else
+              status=$?
+              if [[ "${status}" == 2 ]]; then
+                tags+=(main)
+                echo "main-current=true" >> "${GITHUB_OUTPUT}"
+                return 0
+              fi
+              return "${status}"
+            fi
+
+            if [[ ! "${existing_revision}" =~ ^[0-9a-f]{40}$ ]] || \
+              ! git cat-file -e "${existing_revision}^{commit}" 2>/dev/null || \
+              ! git merge-base --is-ancestor "${existing_revision}" "${GITHUB_SHA}"; then
+              echo "main-current=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice title=Main image alias unchanged::${IMAGE_NAME}:main remains at ${existing_digest}; revision ${existing_revision} is not a known ancestor of ${GITHUB_SHA}."
+              return 0
+            fi
+
+            tags+=(main)
+            echo "main-current=true" >> "${GITHUB_OUTPUT}"
+          }
+
+          tags=()
+          if [[ "${RELEASE_KIND}" == "main" ]]; then
+            immutable_tag="main-${GITHUB_SHA}"
+            check_immutable_tag "${immutable_tag}"
+            tags=("${immutable_tag}")
+            add_main_alias
+          else
+            check_immutable_tag "${GITHUB_REF_NAME}"
+            tags=("${GITHUB_REF_NAME}")
+            if [[ "${RELEASE_KIND}" == "stable" ]]; then
+              bare_version="${GITHUB_REF_NAME#v}"
+              minor_version="${bare_version%.*}"
+              check_immutable_tag "${bare_version}"
+              tags+=("${bare_version}")
+              add_newer_alias "${minor_version}" "${bare_version}"
+              add_newer_alias latest "${bare_version}"
+            fi
+          fi
+
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            tag_args+=(--tag "${IMAGE_NAME}:${tag}")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${IMAGE_NAME}@${DIGEST}"
+          for tag in "${tags[@]}"; do
+            promoted_digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:${tag}" \
+              --format '{{json .Manifest}}' | jq --exit-status --raw-output .digest)"
+            [[ "${promoted_digest}" == "${DIGEST}" ]]
+          done
+
+      - name: Verify promoted image provenance and SBOM
+        shell: bash
+        env:
+          DIGEST: ${{ needs.build.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Repeat the source digest and signer checks so fresh and reused digests
+          # satisfy the same promotion policy.
+          gh attestation verify "oci://${IMAGE_NAME}@${DIGEST}" \
+            --repo bonztm/bloom \
+            --source-digest "${GITHUB_SHA}" \
+            --signer-workflow BonzTM/bloom/.github/workflows/image.yml >/dev/null
+          docker buildx imagetools inspect "${IMAGE_NAME}@${DIGEST}" \
+            --format '{{json .SBOM}}' | jq --exit-status '
+              [.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT" and
+                ((.spdxVersion? | type) == "string") and
+                (.spdxVersion | startswith("SPDX-"))
+              )] | length > 0
+            ' >/dev/null
+
+  deploy-pr:
+    if: github.ref == 'refs/heads/main' && needs.promote.outputs.main-current == 'true'
+    needs: [build, promote]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Verify anonymous image access
+        shell: bash
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}@${{ needs.promote.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          if ! docker pull "${IMAGE}"; then
+            echo "::error title=Promoted image is not public::Make the bonztm/bloom package public in GitHub Package settings, then rerun this workflow."
+            exit 1
+          fi
+
+      - name: Check out homelab
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: bonztm/homelab
+          ref: main
+          token: ${{ secrets.HOMELAB_DEPLOY_TOKEN }}
+          path: homelab
+
+      - name: Check for the Bloom deployment
+        id: manifest
+        working-directory: homelab
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f apps/internal/bloom/deployment.yaml ]]; then
+            echo "::notice title=Deploy skipped::apps/internal/bloom/deployment.yaml does not exist"
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "exists=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure deployment branch
+        if: steps.manifest.outputs.exists == 'true'
+        id: branch
+        working-directory: homelab
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="chore/bloom-main"
+          git config user.name "Joshua Wells"
+          git config user.email "joshdwells@gmail.com"
+          echo "name=${branch}" >> "${GITHUB_OUTPUT}"
+
+      - name: Commit and push deployment branch
+        if: steps.manifest.outputs.exists == 'true'
+        id: push
+        working-directory: homelab
+        shell: bash
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          DIGEST: ${{ needs.promote.outputs.digest }}
+          IMAGE: ${{ env.IMAGE_NAME }}:main-${{ github.sha }}@${{ needs.promote.outputs.digest }}
+          MAX_ATTEMPTS: 3
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:12}"
+          subject="chore(bloom): deploy ${short_sha}"
+          export IMAGE
+          for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+            git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+            base_oid="$(git rev-parse refs/remotes/origin/main)"
+            remote_branch_oid="$(git ls-remote --heads origin \
+              "refs/heads/${BRANCH}" | awk 'NR == 1 {print $1}')"
+            [[ "${base_oid}" =~ ^[0-9a-f]{40}$ ]]
+            [[ -z "${remote_branch_oid}" || "${remote_branch_oid}" =~ ^[0-9a-f]{40}$ ]]
+            git switch --force-create "${BRANCH}" "${base_oid}"
+            perl -0pi -e '
+              my $count = 0;
+              $count += s{(^[ ]*-[ ]+name:[ ]+bloom[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
+              $count += s{(^[ ]*-[ ]+name:[ ]+migrate[ ]*\r?\n[ ]+image:[ ]*)\S+}{$1$ENV{IMAGE}}gm;
+              die "expected one bloom and one migrate image, updated $count\n" unless $count == 2;
+            ' apps/internal/bloom/deployment.yaml
+            kubectl kustomize apps/internal/bloom >/dev/null
+            git add apps/internal/bloom/deployment.yaml
+            if git diff --cached --quiet; then
+              echo "::notice title=Deploy unchanged::Homelab main already references this Bloom image."
+              echo "changed=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            git commit -m "${subject}" \
+              -m "Bloom commit: https://github.com/BonzTM/bloom/commit/${GITHUB_SHA}
+
+            Image digest: ${DIGEST}"
+            git push \
+              --force-with-lease="refs/heads/${BRANCH}:${remote_branch_oid}" \
+              origin "HEAD:refs/heads/${BRANCH}"
+            current_base_oid="$(git ls-remote --exit-code --heads origin \
+              refs/heads/main | awk 'NR == 1 {print $1}')"
+            [[ "${current_base_oid}" =~ ^[0-9a-f]{40}$ ]]
+            if [[ "${current_base_oid}" == "${base_oid}" ]]; then
+              echo "changed=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            if (( attempt < MAX_ATTEMPTS )); then
+              echo "::notice title=Homelab main moved::Retrying deployment branch from ${current_base_oid} after attempt ${attempt}."
+            fi
+          done
+          echo "::error title=Homelab main kept moving::Could not publish a deployment branch from a current main base after ${MAX_ATTEMPTS} attempts."
+          exit 1
+
+      - name: Open or update deployment pull request
+        if: steps.push.outputs.changed == 'true'
+        working-directory: homelab
+        shell: bash
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          DIGEST: ${{ needs.promote.outputs.digest }}
+          GH_TOKEN: ${{ secrets.HOMELAB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:12}"
+          subject="chore(bloom): deploy ${short_sha}"
+          body="- Bloom commit: https://github.com/BonzTM/bloom/commit/${GITHUB_SHA}
+          - Image digest: \`${DIGEST}\`
+          - Changed file: \`apps/internal/bloom/deployment.yaml\`"
+          existing_url="$(gh pr list --repo bonztm/homelab --head "${BRANCH}" \
+            --state open --json url --jq '.[0].url')"
+          if [[ -n "${existing_url}" ]]; then
+            gh pr edit "${existing_url}" --title "${subject}" --body "${body}"
+            echo "::notice title=Deploy PR updated::${existing_url}"
+            exit 0
+          fi
+          gh pr create --repo bonztm/homelab --base main --head "${BRANCH}" \
+            --title "${subject}" --body "${body}"
