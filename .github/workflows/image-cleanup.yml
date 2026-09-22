@@ -5,12 +5,15 @@ on:
     - cron: "17 4 * * 1"
   workflow_dispatch:
 
+concurrency:
+  group: image-cleanup
+  cancel-in-progress: false
+
 jobs:
   delete-expired-candidates:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: write
       packages: write
     steps:
       - name: Delete candidate-only package versions older than seven days
@@ -19,10 +22,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAX_DELETIONS: 100
           MAX_PAGES: 10
+          PAGE_COUNT: 100
           PACKAGE_NAME: bloom
           PACKAGE_OWNER: ${{ github.repository_owner }}
           PAGE_SIZE: 100
-          START_PAGE: ${{ vars.IMAGE_CLEANUP_PAGE }}
         run: |
           set -euo pipefail
           versions_file="$(mktemp)"
@@ -33,13 +36,12 @@ jobs:
           }
           trap cleanup EXIT
 
-          start_page="${START_PAGE:-1}"
-          if [[ ! "${start_page}" =~ ^[1-9][0-9]*$ ]] || (( start_page > 1000000 )); then
-            echo "::error title=Invalid cleanup cursor::IMAGE_CLEANUP_PAGE must be an integer from 1 through 1000000."
+          if [[ ! "${GITHUB_RUN_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error title=Invalid workflow run number::GITHUB_RUN_NUMBER must be a positive integer."
             exit 1
           fi
+          start_page=$(( ((GITHUB_RUN_NUMBER - 1) * MAX_PAGES) % PAGE_COUNT + 1 ))
 
-          next_page=1
           pagination_capped=true
           last_page="${start_page}"
           for ((offset = 0; offset < MAX_PAGES; offset++)); do
@@ -58,12 +60,7 @@ jobs:
             fi
           done
           if [[ "${pagination_capped}" == true ]]; then
-            next_page=$((last_page + 1))
-          fi
-          gh variable set IMAGE_CLEANUP_PAGE --repo "${GITHUB_REPOSITORY}" \
-            --body "${next_page}"
-          if [[ "${pagination_capped}" == true ]]; then
-            echo "::notice title=Cleanup pagination capped::Inspected pages ${start_page}-${last_page}; the next run resumes at page ${next_page}."
+            echo "::notice title=Cleanup pagination capped::Inspected pages ${start_page}-${last_page} in the deterministic ${PAGE_COUNT}-page rotation."
           fi
 
           cutoff="$(date --utc --date='7 days ago' +%s)"
@@ -78,7 +75,7 @@ jobs:
           deletion_count="${#candidates[@]}"
           if (( deletion_count > MAX_DELETIONS )); then
             deletion_count="${MAX_DELETIONS}"
-            echo "::notice title=Cleanup deletions capped::$(( ${#candidates[@]} - MAX_DELETIONS )) eligible package versions were not deleted; a future rotating scan will revisit them after the cursor wraps."
+            echo "::notice title=Cleanup deletions capped::$(( ${#candidates[@]} - MAX_DELETIONS )) eligible package versions were not deleted; a future run can revisit them when the deterministic rotation repeats."
           fi
           for ((index = 0; index < deletion_count; index++)); do
             version="${candidates[index]}"

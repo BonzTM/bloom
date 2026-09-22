@@ -155,20 +155,23 @@ unchanged and does not open a deployment pull request. The build starts only
 after the reusable CI workflow passes both `make verify` and the PostgreSQL
 integration suite for the same commit. Before building, the workflow resolves
 the immutable tag. A rerun reuses its existing digest only after verifying its
-repository-bound build provenance and attached SPDX SBOM, then skips the build
-and smoke test without replacing the immutable image. A legacy image without
-either proof must be deleted once and rebuilt. Promotion repeats both checks as
-a self-test.
+build provenance against the exact source commit, source ref, and image workflow
+signer and validating its attached SPDX SBOM. It then skips the build and smoke
+test without replacing the immutable image. A legacy image without either proof
+must be deleted once and rebuilt. Promotion repeats the source-commit and signer
+checks plus the SBOM check as a self-test.
 
 A weekly cleanup inspects a rotating window of at most 1,000 package versions and
 deletes at most 100 versions older than seven days only when every tag on that
-version starts with `candidate-`. A repository variable persists the next page,
-so later runs advance through the package history and wrap to page one after
-reaching the end. It reports the next page when the scan cap is reached and notes
-when the delete cap leaves candidates for a later rotation. GHCR stores tags on a
-shared digest version, so promoted versions carry both their candidate tag and
-public tags. Those promoted candidates remain in the registry because deleting
-their package version would also delete the promoted image.
+version starts with `candidate-`. It computes the first page as
+`(((GITHUB_RUN_NUMBER - 1) * 10) modulo 100) + 1`. Successive runs start at pages
+1, 11, through 91, scan at most ten consecutive pages, then repeat without stored
+cursor state. The workflow allows one pending cleanup while another runs and
+does not cancel the active cleanup; a newer run replaces an older pending run.
+It reports when the scan or delete cap defers work to a later rotation. GHCR
+stores tags on a shared digest version, so promoted versions carry both their
+candidate tag and public tags. Those promoted candidates remain in the registry
+because deleting their package version would also delete the promoted image.
 
 After a new image passes the smoke test, or after a rerun reuses the immutable
 digest, the workflow opens a pull request in `bonztm/homelab`. That pull request

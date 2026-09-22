@@ -8,7 +8,6 @@ on:
 
 concurrency:
   group: image-promotion
-  queue: max
   cancel-in-progress: false
 
 env:
@@ -136,7 +135,10 @@ jobs:
             exit 1
           fi
           if ! gh attestation verify "oci://${IMAGE_NAME}@${digest}" \
-            --repo bonztm/bloom >/dev/null; then
+            --repo bonztm/bloom \
+            --source-digest "${GITHUB_SHA}" \
+            --source-ref "${GITHUB_REF}" \
+            --signer-workflow BonzTM/bloom/.github/workflows/image.yml >/dev/null; then
             echo "::error title=Unverifiable immutable image::Could not verify Bloom build provenance for ${IMAGE_NAME}:${EXPECTED_TAG}. Retry transient failures. For a legacy image without an attestation, delete its tag/package version once, then rerun the workflow to rebuild it with provenance and an SBOM."
             exit 1
           fi
@@ -429,8 +431,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Repeat the source digest and signer checks so fresh and reused digests
+          # satisfy the same promotion policy.
           gh attestation verify "oci://${IMAGE_NAME}@${DIGEST}" \
-            --repo bonztm/bloom >/dev/null
+            --repo bonztm/bloom \
+            --source-digest "${GITHUB_SHA}" \
+            --signer-workflow BonzTM/bloom/.github/workflows/image.yml >/dev/null
           docker buildx imagetools inspect "${IMAGE_NAME}@${DIGEST}" \
             --format '{{json .SBOM}}' | jq --exit-status '
               [.. | objects | select(
