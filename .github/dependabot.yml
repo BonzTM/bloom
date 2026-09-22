@@ -34,6 +34,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@babel/*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/*"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint 8 supports TypeScript 6, not 7; the compiler moves
+      # with the lint toolchain.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         applies-to: version-updates
