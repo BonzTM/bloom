@@ -10,6 +10,7 @@ on:
   push:
     branches: [main] # default branch only; PR builds cover the rest
   pull_request:
+  workflow_call:
 
 # Least privilege. Read source; grant nothing else. Add scopes per-job only when
 # a job genuinely needs them (e.g. release publishing).

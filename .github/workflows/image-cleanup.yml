@@ -1,0 +1,49 @@
+name: image cleanup
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  delete-expired-candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Delete candidate-only package versions older than seven days
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_NAME: bloom
+          PACKAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          versions_file="$(mktemp)"
+          cleanup() {
+            rm -f -- "${versions_file}"
+          }
+          trap cleanup EXIT
+
+          gh api --paginate --slurp \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions?per_page=100" \
+            | jq --exit-status 'flatten' >"${versions_file}"
+
+          cutoff="$(date --utc --date='7 days ago' +%s)"
+          jq --compact-output --argjson cutoff "${cutoff}" '
+            .[]
+            | select((.created_at | fromdateiso8601) < $cutoff)
+            | select((.metadata.container.tags | length) > 0)
+            | select(all(.metadata.container.tags[]; startswith("candidate-")))
+            | {id, created_at, tags: .metadata.container.tags}
+          ' "${versions_file}" | while IFS= read -r version; do
+            id="$(jq --exit-status --raw-output .id <<<"${version}")"
+            created_at="$(jq --exit-status --raw-output .created_at <<<"${version}")"
+            tags="$(jq --exit-status --compact-output .tags <<<"${version}")"
+            echo "Deleting package version ${id}, created ${created_at}, tags ${tags}"
+            gh api --method DELETE \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/users/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions/${id}"
+          done

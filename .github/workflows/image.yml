@@ -8,6 +8,7 @@ on:
 
 concurrency:
   group: image-promotion
+  queue: max
   cancel-in-progress: false
 
 env:
@@ -31,6 +32,11 @@ jobs:
             exit 0
           fi
 
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "::error title=Unsupported image ref::Manual image builds must select main or an existing release tag."
+            exit 1
+          fi
+
           core='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
           identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
           if [[ "${GITHUB_REF_NAME}" =~ ^v${core}$ ]]; then
@@ -45,8 +51,14 @@ jobs:
           echo "::error title=Unsupported image ref::Select main or a tag such as v1.2.3 or v1.2.3-rc.1."
           exit 1
 
-  build:
+  verification:
     needs: validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [validate, verification]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -132,7 +144,8 @@ jobs:
             status=$?
             trap - EXIT
             if (( status != 0 )) && docker inspect "${container_name}" >/dev/null 2>&1; then
-              docker inspect "${container_name}" || true
+              docker inspect "${container_name}" --format \
+                '{"state":{"status":{{json .State.Status}},"running":{{json .State.Running}},"error":{{json .State.Error}},"startedAt":{{json .State.StartedAt}},"finishedAt":{{json .State.FinishedAt}}},"exitCode":{{.State.ExitCode}},"mounts":{{json .Mounts}},"network":{"ports":{{json .NetworkSettings.Ports}},"networks":{{json .NetworkSettings.Networks}}}}' || true
               docker logs "${container_name}" || true
             fi
             docker rm --force "${container_name}" >/dev/null 2>&1 || true
@@ -200,6 +213,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Attest candidate image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -210,7 +230,7 @@ jobs:
           RELEASE_KIND: ${{ needs.validate.outputs.release-kind }}
         run: |
           set -euo pipefail
-          check_immutable_tag() {
+          inspect_digest() {
             tag=$1
             error_file="$(mktemp)"
             if existing="$({
@@ -218,10 +238,7 @@ jobs:
                 --format '{{json .Manifest}}' | jq --exit-status --raw-output .digest
             } 2>"${error_file}")"; then
               rm -f -- "${error_file}"
-              if [[ "${existing}" != "${DIGEST}" ]]; then
-                echo "::error title=Immutable image tag conflict::${IMAGE_NAME}:${tag} is ${existing}, expected ${DIGEST}."
-                return 1
-              fi
+              printf '%s\n' "${existing}"
               return 0
             fi
             if ! grep -Eqi 'manifest unknown|not found' "${error_file}"; then
@@ -230,6 +247,50 @@ jobs:
               return 1
             fi
             rm -f -- "${error_file}"
+            return 2
+          }
+
+          check_immutable_tag() {
+            tag=$1
+            if existing="$(inspect_digest "${tag}")"; then
+              if [[ "${existing}" != "${DIGEST}" ]]; then
+                echo "::error title=Immutable image tag conflict::${IMAGE_NAME}:${tag} is ${existing}, expected ${DIGEST}."
+                return 1
+              fi
+              return 0
+            else
+              status=$?
+              [[ "${status}" == 2 ]]
+            fi
+          }
+
+          add_newer_alias() {
+            alias=$1
+            incoming_version=$2
+            if existing_digest="$(inspect_digest "${alias}")"; then
+              existing_version="$(docker buildx imagetools inspect "${IMAGE_NAME}:${alias}" \
+                --format '{{json .Image}}' | jq --exit-status --raw-output \
+                '.config.Labels["org.opencontainers.image.version"]')"
+            else
+              status=$?
+              if [[ "${status}" == 2 ]]; then
+                tags+=("${alias}")
+                return 0
+              fi
+              return "${status}"
+            fi
+
+            existing_version="${existing_version#v}"
+            if [[ ! "${existing_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error title=Invalid alias version::${IMAGE_NAME}:${alias} at ${existing_digest} has version ${existing_version}."
+              return 1
+            fi
+            newest="$(printf '%s\n%s\n' "${existing_version}" "${incoming_version}" | sort -V | tail -n 1)"
+            if [[ "${newest}" != "${incoming_version}" || "${existing_version}" == "${incoming_version}" ]]; then
+              echo "::notice title=Image alias unchanged::${IMAGE_NAME}:${alias} remains at ${existing_version}; incoming ${incoming_version} is not newer."
+              return 0
+            fi
+            tags+=("${alias}")
           }
 
           tags=()
@@ -243,7 +304,10 @@ jobs:
             if [[ "${RELEASE_KIND}" == "stable" ]]; then
               bare_version="${GITHUB_REF_NAME#v}"
               minor_version="${bare_version%.*}"
-              tags+=("${bare_version}" "${minor_version}" latest)
+              check_immutable_tag "${bare_version}"
+              tags+=("${bare_version}")
+              add_newer_alias "${minor_version}" "${bare_version}"
+              add_newer_alias latest "${bare_version}"
             fi
           fi
 
@@ -258,13 +322,6 @@ jobs:
             [[ "${promoted_digest}" == "${DIGEST}" ]]
           done
 
-      - name: Attest promoted image provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: ${{ env.IMAGE_NAME }}
-          subject-digest: ${{ needs.build.outputs.digest }}
-          push-to-registry: true
-
   deploy-pr:
     if: github.ref == 'refs/heads/main'
     needs: [build, promote]
@@ -272,6 +329,18 @@ jobs:
     timeout-minutes: 10
     permissions: {}
     steps:
+      - name: Verify anonymous image access
+        shell: bash
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}@${{ needs.promote.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          if ! docker pull "${IMAGE}"; then
+            echo "::error title=Promoted image is not public::Make the bonztm/bloom package public in GitHub Package settings, then rerun this workflow."
+            exit 1
+          fi
+
       - name: Check out homelab
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

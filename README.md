@@ -139,18 +139,27 @@ BLOOM_TEST_POSTGRES_DSN='postgres://bloom:bloom@localhost:5432/bloom?sslmode=dis
   go test -tags=integration ./internal/db/...
 ```
 
-CI runs both halves on every push. Every behavior change ships with a test that proves it.
+CI runs both halves for pull requests and `main` pushes. The image workflow also
+calls the same gate for each `main` or release-tag commit before building.
+Every behavior change ships with a test that proves it.
 
 ## Release And Deploy
 
 Bloom images are published at `ghcr.io/bonztm/bloom`. A merge to `main` builds
 an amd64 image under a run-specific `candidate-<run>-<attempt>` tag. It tests
-that image by digest before promoting the same digest to the mutable `main` tag
-and the immutable `main-<full-commit>` tag. Candidate tags remain in the
-registry as build records. A rerun uses the commit's timestamp as the image
-creation time. It fails instead of replacing an existing immutable tag that
-points to another digest. The workflow records provenance and an SBOM for the
-published image.
+that image by digest and records its provenance before promoting the same digest
+to the mutable `main` tag and the immutable `main-<full-commit>` tag. The build
+starts only after the reusable CI workflow passes both `make verify` and the
+PostgreSQL integration suite for the same commit. A rerun uses the commit's
+timestamp as the image creation time. It fails instead of replacing an existing
+immutable tag that points to another digest. The workflow also records an SBOM
+for the published image.
+
+A weekly cleanup deletes package versions older than seven days only when every
+tag on that version starts with `candidate-`. GHCR stores tags on a shared
+digest version, so promoted versions carry both their candidate tag and public
+tags. Those promoted candidates remain in the registry because deleting their
+package version would also delete the promoted image.
 
 After the smoke test passes, the workflow opens a pull request in
 `bonztm/homelab`. That pull request pins both the `bloom` container and the
@@ -166,13 +175,25 @@ deployment file does not exist yet, the workflow skips the pull request without
 failing the image build.
 
 Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
-deployment. It publishes `v1.2.3`, `1.2.3`, `1.2`, and `latest` tags for a
-`v1.2.3` release. A prerelease such as `v1.2.3-rc.1` publishes only that exact
-tag. Invalid release tags fail before an image is pushed. Manual runs accept
-only `main` or a valid release tag. Tagged releases do not open homelab pull
-requests.
+deployment. A `v1.2.3` release publishes immutable `v1.2.3` and `1.2.3` tags.
+It moves `1.2` and `latest` only when `1.2.3` is newer than the version that the
+alias already references. A prerelease such as `v1.2.3-rc.1` publishes only
+that exact tag. Invalid release tags fail before an image is pushed. Manual runs
+accept only `main` or an actual valid release tag; a similarly named branch is
+rejected. Tagged releases do not open homelab pull requests. Image runs share a
+serialized queue so promotion and the reusable deployment branch cannot race.
 
-The repository needs one secret before the first main deployment:
+[GitHub creates a newly published container package as private by
+default](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#about-visibility-of-packages).
+After the first image is published, open the
+[`bonztm/bloom` package settings](https://github.com/users/BonzTM/packages/container/bloom/settings)
+and change its visibility to public. This is a one-time bootstrap step. The
+deploy job pulls the promoted digest without logging in before it opens or
+updates a pull request. It fails with an actionable error while anonymous pulls
+are disabled. If the first deploy job reaches that check before the visibility
+change, make the package public and rerun the failed workflow.
+
+The repository also needs one secret before the first main deployment:
 
 1. Create a fine-grained personal access token for the `bonztm/homelab`
    repository.
