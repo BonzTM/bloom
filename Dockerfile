@@ -3,7 +3,7 @@
 
 # ---- web stage ------------------------------------------------------------
 # Builds the SPA into internal/api/web/dist, which the Go binary embeds.
-FROM node:24.18.0-bookworm-slim AS web
+FROM node:24.21.0-bookworm-slim AS web
 
 WORKDIR /src/web
 
