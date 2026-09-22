@@ -9,6 +9,9 @@ on:
 concurrency:
   group: image-promotion
   cancel-in-progress: false
+  # Keep every pending run instead of replacing it, so rapid pushes or
+  # tags are all published in order.
+  queue: max
 
 env:
   IMAGE_NAME: ghcr.io/bonztm/bloom

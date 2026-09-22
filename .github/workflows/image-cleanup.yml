@@ -8,6 +8,9 @@ on:
 concurrency:
   group: image-cleanup
   cancel-in-progress: false
+  # Keep every pending run instead of replacing it, so rapid pushes or
+  # tags are all published in order.
+  queue: max
 
 jobs:
   delete-expired-candidates:
