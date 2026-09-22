@@ -184,3 +184,85 @@ it("re-checks the session when the tab regains focus", async () => {
     expect(result.current.session.data).toEqual(mockAccount);
   });
 });
+
+// Holds a request until released and reports when it started, for any path.
+function heldResponse(
+  method: "get" | "post",
+  path: string,
+  respond: () => Response,
+) {
+  const started = createGate();
+  const release = createGate();
+  server.use(
+    http[method](
+      path,
+      jsonApi(async () => {
+        started.open();
+        await release.wait;
+        return respond();
+      }),
+    ),
+  );
+  return { started: started.wait, release: release.open };
+}
+
+it("ignores a session check that starts during sign-in and answers after it", async () => {
+  const { queryClient, wrapper } = createHarness();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+  const login = heldResponse("post", "*/api/v1/auth/login", () =>
+    Response.json({ account: mockAccount }),
+  );
+  const me = heldResponse("get", "*/api/v1/auth/me", () =>
+    envelope(401, "unauthenticated", "sign in required"),
+  );
+
+  const signIn = act(() => result.current.login.mutateAsync(mockCredentials));
+  await login.started;
+  const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
+  await me.started;
+  login.release();
+  await signIn;
+  expect(queryClient.getQueryData(authKeys.session())).toEqual(mockAccount);
+
+  me.release();
+  await refetch;
+  await waitFor(() => {
+    expect(result.current.session.isFetching).toBe(false);
+  });
+  expect(result.current.session.data).toEqual(mockAccount);
+});
+
+it("ignores a session check that starts during sign-out and answers after it", async () => {
+  const { queryClient, wrapper } = createHarness();
+  signInMockSession();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockAccount);
+  });
+  const logout = heldResponse(
+    "post",
+    "*/api/v1/auth/logout",
+    () => new Response(null, { status: 204 }),
+  );
+  const me = heldResponse("get", "*/api/v1/auth/me", () =>
+    Response.json({ account: mockAccount }),
+  );
+
+  const signOut = act(() => result.current.logout.mutateAsync());
+  await logout.started;
+  const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
+  await me.started;
+  logout.release();
+  await signOut;
+  expect(queryClient.getQueryData(authKeys.session())).toBeNull();
+
+  me.release();
+  await refetch;
+  await waitFor(() => {
+    expect(result.current.session.isFetching).toBe(false);
+  });
+  expect(result.current.session.data).toBeNull();
+});

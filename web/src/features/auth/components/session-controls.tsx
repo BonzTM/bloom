@@ -23,9 +23,12 @@ export function SessionControls(): ReactNode {
     // Remember where the person was so sign-in can bring them back.
     const from = `${location.pathname}${location.search}${location.hash}`;
     return (
-      <NavLink to="/login" state={{ from }}>
-        Sign in
-      </NavLink>
+      <>
+        <NavLink to="/login" state={{ from }}>
+          Sign in
+        </NavLink>
+        {session.isError ? <RefreshFailed onRetry={session.refetch} /> : null}
+      </>
     );
   }
   return (
@@ -43,9 +46,26 @@ export function SessionControls(): ReactNode {
       <span role="status">
         {logoutStatus(logout.isPending, logout.isError)}
       </span>
-      {session.isError ? (
-        <span role="alert">Sign-in status could not be refreshed.</span>
-      ) : null}
+      {session.isError ? <RefreshFailed onRetry={session.refetch} /> : null}
+    </>
+  );
+}
+
+// A background refresh failed but the last known answer is still shown.
+function RefreshFailed({
+  onRetry,
+}: Readonly<{ onRetry: () => Promise<unknown> }>): ReactNode {
+  return (
+    <>
+      <span role="alert">Sign-in status could not be refreshed.</span>
+      <button
+        type="button"
+        onClick={() => {
+          void onRetry();
+        }}
+      >
+        Retry
+      </button>
     </>
   );
 }

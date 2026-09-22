@@ -42,7 +42,10 @@ export function useLogin() {
     mutationFn: (input: LoginInput) => api.login(input),
     gcTime: 0,
     onMutate: () => cancelSessionCheck(queryClient),
-    onSuccess: (response) => {
+    // Cancel again right before writing: a focus-triggered check may have
+    // started after onMutate and must not land after the canonical answer.
+    onSuccess: async (response) => {
+      await cancelSessionCheck(queryClient);
       writeSession(queryClient, response.account);
     },
     onError: (error) => reconcileAfterAmbiguousFailure(queryClient, error),
@@ -58,15 +61,17 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => api.logout(),
     onMutate: () => cancelSessionCheck(queryClient),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await cancelSessionCheck(queryClient);
       writeSession(queryClient, null);
     },
-    onError: (error) => {
+    onError: async (error) => {
       if (isUnauthorized(error)) {
+        await cancelSessionCheck(queryClient);
         writeSession(queryClient, null);
-        return undefined;
+        return;
       }
-      return reconcileAfterAmbiguousFailure(queryClient, error);
+      await reconcileAfterAmbiguousFailure(queryClient, error);
     },
   });
 }

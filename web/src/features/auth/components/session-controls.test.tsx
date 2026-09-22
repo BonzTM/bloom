@@ -165,3 +165,35 @@ it("keeps showing the last known account when a refresh fails", async () => {
   expect(screen.getByText("Signed in as admin")).toBeVisible();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
+
+it("warns when a refresh fails while signed out and keeps the sign-in link", async () => {
+  const user = userEvent.setup();
+  let failing = false;
+  server.use(
+    http.get(
+      "*/api/v1/auth/me",
+      jsonApi(() =>
+        failing
+          ? new HttpResponse("upstream down", { status: 502 })
+          : envelope(401, "unauthenticated", "sign in required"),
+      ),
+    ),
+  );
+  const { queryClient } = renderApp();
+  await screen.findByRole("link", { name: "Sign in" });
+
+  failing = true;
+  await queryClient.refetchQueries({ queryKey: authKeys.session() });
+
+  await waitFor(() => {
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Sign-in status could not be refreshed.",
+    );
+  });
+  expect(screen.getByRole("link", { name: "Sign in" })).toBeVisible();
+  failing = false;
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => {
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
