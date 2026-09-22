@@ -161,7 +161,7 @@ workflow records signed provenance before promotion. A rerun reuses an existing
 immutable digest only after verifying that provenance against the exact source
 commit, source ref, and image workflow signer. Promotion repeats the
 source-commit and signer checks as a self-test. In a private repository, GitHub
-artifact attestations are unavailable without GitHub Enterprise, so the
+artifact attestations are unavailable without a GitHub Enterprise Cloud plan, so the
 workflow reports and skips only those provenance steps. In both modes, fresh
 candidates are built and smoke-tested by digest, image labels and versions are
 checked, and an attached SPDX SBOM must be present. Private-mode reuse therefore
