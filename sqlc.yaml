@@ -1,0 +1,42 @@
+# sqlc configuration (schema version 2), per ADR 0004 item 3: TWO sql entries,
+# one per supported engine, compiled from the SAME query files against each
+# engine's goose migration directory. sqlc is pinned as a module tool
+# (go get -tool github.com/sqlc-dev/sqlc/cmd/sqlc); regenerate with:
+#   go tool sqlc generate
+#
+# Both entries target database/sql (sql_package: database/sql) so the adapter
+# code in internal/db is shared in shape and the binary stays CGO_ENABLED=0
+# with the pure-Go modernc.org/sqlite and pgx stdlib drivers. Engine-specific
+# query overrides, when one is ever needed, go in a second file listed under
+# that engine's `queries` only; the parity test fails if a query name exists for
+# one engine and not the other.
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/db/migrations/sqlite
+    queries: internal/db/queries
+    gen:
+      go:
+        package: sqlite
+        out: internal/db/sqlite
+        sql_package: database/sql
+        emit_exact_table_names: false
+        emit_json_tags: false
+        emit_db_tags: false
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_empty_slices: true
+  - engine: postgresql
+    schema: internal/db/migrations/postgres
+    queries: internal/db/queries
+    gen:
+      go:
+        package: postgres
+        out: internal/db/postgres
+        sql_package: database/sql
+        emit_exact_table_names: false
+        emit_json_tags: false
+        emit_db_tags: false
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_empty_slices: true

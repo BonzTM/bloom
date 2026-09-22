@@ -1,0 +1,158 @@
+openapi: 3.1.0
+info:
+  title: Bloom API
+  version: 0.1.0
+  summary: Self-hosted Jellyfin companion; invites, statistics, and requests.
+  description: |
+    Bloom's JSON API. It is the only way the embedded SPA (ADR 0002) talks to
+    the backend, so this document is the contract the frontend builds against.
+
+    Conventions (from the Go handbook, foundations/serialization.md):
+
+    - Every error response, on every endpoint, is the `ErrorResponse` envelope.
+      Unknown routes under `/api/` return it too, never HTML.
+    - `code` is a machine-readable string enum the client may branch on. It is
+      not the HTTP status. The set only grows; a code is never repurposed.
+    - 5xx bodies are opaque: a generic `message` plus `request_id`. The detail
+      lives in the server log under that id.
+    - Every response carries `X-Request-ID`. A client may send its own (up to
+      128 characters) and it is echoed; otherwise one is generated.
+    - Field names are `snake_case`. Timestamps are RFC 3339 in UTC.
+    - Authentication is not yet exposed; see ADR 0006 for the model that will
+      land (server-side sessions and per-account API keys).
+servers:
+  - url: /
+    description: Same origin as the SPA.
+tags:
+  - name: meta
+    description: Build metadata.
+  - name: probes
+    description: Platform health probes and the metrics scrape endpoint.
+paths:
+  /api/v1/version:
+    get:
+      tags: [meta]
+      operationId: getVersion
+      summary: Build metadata of the running binary.
+      responses:
+        "200":
+          description: Version information stamped at build time.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+              example:
+                name: bloom
+                version: v0.1.0
+                commit: 0123456789abcdef0123456789abcdef01234567
+  /livez:
+    get:
+      tags: [probes]
+      operationId: livez
+      summary: Liveness probe.
+      description: |
+        Process-up only. Never depends on the database or any downstream, so a
+        dependency outage cannot turn into a restart loop.
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ok
+  /readyz:
+    get:
+      tags: [probes]
+      operationId: readyz
+      summary: Readiness probe.
+      description: |
+        Returns 200 only when the service may receive traffic: the readiness
+        flag is up (it flips down before shutdown drains) and the configured
+        database answers a ping within 2 seconds.
+      responses:
+        "200":
+          description: Ready to serve traffic.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ready
+        "503":
+          description: Not ready. The `code` is `unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: unavailable
+                message: Service Unavailable
+                request_id: 4f1a7c0e9b2d4e6f8a0c1b2d3e4f5a6b
+  /metrics:
+    get:
+      tags: [probes]
+      operationId: metrics
+      summary: Prometheus scrape endpoint.
+      responses:
+        "200":
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    Version:
+      type: object
+      required: [name, version, commit]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Service name; always `bloom`.
+        version:
+          type: string
+          description: Release tag in `vMAJOR.MINOR.PATCH` form, or `dev` for an unstamped build.
+        commit:
+          type: string
+          description: VCS revision the binary was built from, or `unknown`.
+    ErrorResponse:
+      type: object
+      description: The single structured error envelope returned by every endpoint.
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          description: Human-readable and safe to surface. Generic for 5xx.
+        fields:
+          type: array
+          description: Per-field validation failures. Present only when `code` is `validation_failed`.
+          items:
+            $ref: "#/components/schemas/FieldError"
+        request_id:
+          type: string
+          description: Correlation id, also sent as the `X-Request-ID` header.
+    ErrorCode:
+      type: string
+      description: |
+        Machine-readable failure class. Evolves additively.
+      enum:
+        - not_found
+        - already_exists
+        - invalid_argument
+        - unavailable
+        - internal
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+          description: Dotted path into the request body, e.g. `items.0.qty`.
+        code:
+          type: string
+          description: Small machine-readable enum, e.g. `required`, `out_of_range`.
+        message:
+          type: string

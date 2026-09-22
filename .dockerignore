@@ -1,0 +1,50 @@
+# Keep the build context minimal: only what the Node stage and `go build` need.
+# Destination: .dockerignore (repo root).
+
+# VCS
+.git
+.gitignore
+.github
+
+# Local environment and secrets — never enter the image build.
+.env
+.env.*
+*.local
+
+# Build output and binaries
+/bin
+/out
+/dist
+*.exe
+/bloom
+
+# Local SQLite database files
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend dependencies and build output: the Node stage installs and builds
+# them inside the image (ADR 0002), so the host copies must not leak in.
+web/node_modules
+internal/api/web/dist
+
+# Test and coverage artifacts
+*.test
+cover.out
+coverage.out
+coverage.html
+*.prof
+
+# Containers / compose / the Dockerfile itself
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Docs and editor/IDE cruft not needed to compile
+docs
+decisions
+*.md
+.idea
+.vscode
+*.swp
+.DS_Store

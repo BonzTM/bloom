@@ -1,0 +1,41 @@
+# Build output and binaries
+/bin
+/out
+/dist
+*.exe
+# The built binary at the module root only: a bare "bloom" pattern would also
+# ignore the cmd/bloom source directory.
+/bloom
+
+# Frontend build output the Go binary embeds (ADR 0002). Only .gitkeep is
+# tracked so the embed pattern resolves on a checkout with no frontend build.
+/internal/api/web/dist/*
+!/internal/api/web/dist/.gitkeep
+
+# Test and coverage artifacts
+*.test
+cover.out
+coverage.out
+coverage.html
+*.prof
+
+# Local SQLite database files (the default BLOOM_DB_DSN writes bloom.db in the
+# working directory; WAL mode adds -wal and -shm sidecars).
+*.db
+*.db-wal
+*.db-shm
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Editor/IDE cruft
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Per-change git worktrees (see AGENTS.md Workflow)
+/.worktrees/

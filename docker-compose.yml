@@ -1,0 +1,67 @@
+# Local stack. SQLite is the default and needs no other container:
+#   docker compose up --build bloom
+# PostgreSQL variant, the owner's own deployment shape:
+#   docker compose --profile postgres up --build
+# Tear down: docker compose --profile postgres down -v
+
+services:
+  bloom:
+    build:
+      context: .
+      args:
+        VERSION: dev
+        COMMIT: local
+    environment:
+      BLOOM_HTTP_ADDR: ":8080"
+      BLOOM_LOG_LEVEL: debug
+      BLOOM_LOG_FORMAT: text
+      # Dev-only placeholder; generate a real one: openssl rand -base64 48
+      BLOOM_SECRET_KEY: "dev-only-secret-key-change-me-0123456789abcdef"
+      BLOOM_DB_DRIVER: sqlite
+      BLOOM_DB_DSN: "file:/data/bloom.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+    ports:
+      - "8080:8080"
+    volumes:
+      - bloomdata:/data
+
+  bloom-postgres:
+    profiles: ["postgres"]
+    build:
+      context: .
+      args:
+        VERSION: dev
+        COMMIT: local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BLOOM_HTTP_ADDR: ":8080"
+      BLOOM_LOG_LEVEL: debug
+      BLOOM_LOG_FORMAT: text
+      BLOOM_SECRET_KEY: "dev-only-secret-key-change-me-0123456789abcdef"
+      BLOOM_DB_DRIVER: postgres
+      BLOOM_DB_DSN: "postgres://bloom:bloom@postgres:5432/bloom?sslmode=disable"
+    ports:
+      - "8080:8080"
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bloom
+      POSTGRES_PASSWORD: bloom
+      POSTGRES_DB: bloom
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bloom -d bloom"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  bloomdata:
+  pgdata:
