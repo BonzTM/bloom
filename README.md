@@ -166,8 +166,9 @@ deletes at most 100 versions older than seven days only when every tag on that
 version starts with `candidate-`. It computes the first page as
 `(((GITHUB_RUN_NUMBER - 1) * 10) modulo 100) + 1`. Successive runs start at pages
 1, 11, through 91, scan at most ten consecutive pages, then repeat without stored
-cursor state. The workflow allows one pending cleanup while another runs and
-does not cancel the active cleanup; a newer run replaces an older pending run.
+cursor state. Cleanup runs never overlap: an active run finishes, and further
+runs wait in a bounded queue (GitHub keeps up to 100 pending) rather than
+replacing one another.
 It reports when the scan or delete cap defers work to a later rotation. GHCR
 stores tags on a shared digest version, so promoted versions carry both their
 candidate tag and public tags. Those promoted candidates remain in the registry

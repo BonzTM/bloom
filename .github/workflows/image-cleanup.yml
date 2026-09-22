@@ -8,8 +8,8 @@ on:
 concurrency:
   group: image-cleanup
   cancel-in-progress: false
-  # Keep every pending run instead of replacing it, so rapid pushes or
-  # tags are all published in order.
+  # Queue scheduled and manual cleanups instead of replacing a pending one,
+  # so none is silently dropped.
   queue: max
 
 jobs:
