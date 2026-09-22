@@ -66,6 +66,8 @@ export class ApiClient {
       const requestInit: RequestInit = {
         method: options.method ?? "GET",
         headers: buildHeaders(options),
+        // The session cookie only ever travels to our own origin (ADR 0002).
+        credentials: "same-origin",
         signal,
       };
       if (options.body !== undefined) {

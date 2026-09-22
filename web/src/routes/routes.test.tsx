@@ -1,8 +1,10 @@
 import { expect, it } from "@jest/globals";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { signInMockSession } from "../mocks/handlers.js";
+import { delay, http, HttpResponse } from "msw";
+import { envelope, mockAccount, signInMockSession } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { server } from "../test/server.js";
 
 it("renders the home page with the server version from the API", async () => {
   renderApp();
@@ -150,4 +152,84 @@ it("sends an already signed-in visitor away from the login page", async () => {
     await screen.findByRole("heading", { name: "Bloom", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Home | Bloom");
+});
+
+it("returns to the page that asked for sign-in", async () => {
+  const user = userEvent.setup();
+  renderApp({ pathname: "/login", state: { from: "/about" } });
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "About Bloom", level: 1 }),
+  ).toBeVisible();
+});
+
+it("ignores a hostile return destination and goes home", async () => {
+  const user = userEvent.setup();
+  renderApp({ pathname: "/login", state: { from: "https://evil.example/" } });
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "Bloom", level: 1 }),
+  ).toBeVisible();
+  expect(document.title).toBe("Home | Bloom");
+});
+
+it("keeps the signed-in account when a slow session check answers late", async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.get("*/api/v1/auth/me", async () => {
+      await delay(150);
+      return envelope(401, "unauthenticated", "sign in required");
+    }),
+  );
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByText("Signed in as admin")).toBeVisible();
+  await delay(250);
+  expect(screen.getByText("Signed in as admin")).toBeVisible();
+});
+
+it("treats a malformed sign-in response as a failure, not a session", async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.post("*/api/v1/auth/login", () =>
+      HttpResponse.json({ account: { id: mockAccount.id } }),
+    ),
+  );
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Sign-in failed. Please try again.",
+  );
+  expect(document.title).toBe("Sign in | Bloom");
+});
+
+it("moves focus to the main region after navigation", async () => {
+  const user = userEvent.setup();
+  renderApp();
+  await screen.findByText(/Version 0\.1\.0-dev/);
+
+  await user.click(screen.getByRole("link", { name: "About" }));
+  await screen.findByRole("heading", { name: "About Bloom", level: 1 });
+
+  expect(screen.getByRole("main")).toHaveFocus();
 });

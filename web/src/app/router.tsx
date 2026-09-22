@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import {
   createBrowserRouter,
   createMemoryRouter,
+  type InitialEntry,
   type RouteObject,
 } from "react-router-dom";
 import { AsyncStatus } from "../components/async-status.js";
@@ -46,6 +47,6 @@ export function createAppRouter() {
   return createBrowserRouter(routes);
 }
 
-export function createTestRouter(initialEntries: readonly string[]) {
+export function createTestRouter(initialEntries: readonly InitialEntry[]) {
   return createMemoryRouter(routes, { initialEntries: [...initialEntries] });
 }

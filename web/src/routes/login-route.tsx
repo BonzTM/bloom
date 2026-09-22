@@ -1,24 +1,10 @@
-import { useEffect, type ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useState, type ReactNode } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AsyncStatus } from "../components/async-status.js";
 import { LoginForm } from "../features/auth/components/login-form.js";
 import { useLogin, useSession } from "../features/auth/hooks/auth-queries.js";
+import { safeDestination } from "./safe-destination.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
-
-// Where to go after signing in: the page that redirected here, or home.
-function destinationFrom(state: unknown): string {
-  if (typeof state === "object" && state !== null && "from" in state) {
-    const from: unknown = state.from;
-    if (
-      typeof from === "string" &&
-      from.startsWith("/") &&
-      !from.startsWith("//")
-    ) {
-      return from;
-    }
-  }
-  return "/";
-}
 
 export default function LoginRoute(): ReactNode {
   usePageTitle(pageTitle("Sign in"));
@@ -26,26 +12,35 @@ export default function LoginRoute(): ReactNode {
   const login = useLogin();
   const navigate = useNavigate();
   const location = useLocation();
-  const destination = destinationFrom(location.state);
-  const signedIn = session.data !== null && session.data !== undefined;
-
-  useEffect(() => {
-    if (signedIn) {
-      void navigate(destination, { replace: true });
-    }
-  }, [signedIn, destination, navigate]);
+  const [serverError, setServerError] = useState<unknown>(null);
+  const destination = safeDestination(location.state, window.location.origin);
 
   if (session.isPending) {
     return <AsyncStatus>Checking sign-in…</AsyncStatus>;
+  }
+  // Already signed in: a declarative redirect, so Strict Mode's double
+  // effects cannot navigate twice and a pending mutation is never cut short.
+  if (session.isSuccess && session.data !== null && !login.isPending) {
+    return <Navigate to={destination} replace />;
   }
   return (
     <>
       <h1>Sign in</h1>
       <LoginForm
         pending={login.isPending}
-        serverError={login.error}
+        serverError={serverError}
         onSubmit={(input) => {
-          login.mutate(input);
+          setServerError(null);
+          login.mutate(input, {
+            onSuccess: () => {
+              void navigate(destination, { replace: true });
+            },
+            onError: setServerError,
+            // Drop the variables (the password) as soon as the request settles.
+            onSettled: () => {
+              login.reset();
+            },
+          });
         }}
       />
     </>

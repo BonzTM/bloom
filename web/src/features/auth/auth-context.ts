@@ -1,12 +1,7 @@
-import { createContext, useContext } from "react";
+import { createRequiredContext } from "../../lib/react/required-context.js";
 import type { AuthApi } from "./api/auth-api.js";
 
-export const AuthApiContext = createContext<AuthApi | undefined>(undefined);
+const context = createRequiredContext<AuthApi>("AuthApi");
 
-export function useAuthApi(): AuthApi {
-  const api = useContext(AuthApiContext);
-  if (api === undefined) {
-    throw new Error("AuthApi provider is missing");
-  }
-  return api;
-}
+export const AuthApiContext = context.Provider;
+export const useAuthApi = context.useValue;

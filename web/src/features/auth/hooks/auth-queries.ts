@@ -29,11 +29,20 @@ export function useSession() {
   });
 }
 
+// Sign in. The password is a mutation variable only for the duration of the
+// request: `gcTime: 0` drops the mutation from the cache as soon as nothing
+// observes it, and callers reset it after it settles.
 export function useLogin() {
   const api = useAuthApi();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: LoginInput) => api.login(input),
+    gcTime: 0,
+    onMutate: async () => {
+      // A `/me` answer that started before the login must not overwrite the
+      // account the login returns.
+      await queryClient.cancelQueries({ queryKey: authKeys.session() });
+    },
     onSuccess: (response) => {
       queryClient.setQueryData<Account | null>(
         authKeys.session(),
@@ -43,18 +52,26 @@ export function useLogin() {
   });
 }
 
+// Sign out. The cache only forgets the account when the server confirms the
+// session is gone (204) or says there was none (401); any other failure keeps
+// the account so the UI does not claim a sign-out that did not happen.
 export function useLogout() {
   const api = useAuthApi();
   const queryClient = useQueryClient();
+  const forget = (): void => {
+    queryClient.setQueryData<Account | null>(authKeys.session(), null);
+  };
   return useMutation({
     mutationFn: () => api.logout(),
-    onSettled: async () => {
-      queryClient.setQueryData<Account | null>(authKeys.session(), null);
-      await queryClient.invalidateQueries({ queryKey: authKeys.all });
+    onSuccess: forget,
+    onError: (error) => {
+      if (isUnauthorized(error)) {
+        forget();
+      }
     },
   });
 }
 
-function isUnauthorized(error: unknown): boolean {
+export function isUnauthorized(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
 }

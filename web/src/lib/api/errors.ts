@@ -1,11 +1,12 @@
 import { z } from "zod/v4";
 
 // The backend's structured error envelope (internal/httputil.ErrorResponse).
-// Every field is optional here because a proxy or a crash can still produce a
-// non-envelope body, and the client must degrade to a safe message.
+// The body is trusted for display only when the whole envelope parses; any
+// other shape, such as a proxy error page, degrades to a generic message so
+// server internals never reach the screen.
 const envelopeSchema = z.object({
-  code: z.string().max(100).optional(),
-  message: z.string().max(1000).optional(),
+  code: z.string().min(1).max(100),
+  message: z.string().min(1).max(1000),
   request_id: z.string().max(200).optional(),
 });
 
@@ -13,10 +14,10 @@ export type ApiErrorKind = "aborted" | "http" | "invalid-response" | "network";
 
 type ApiErrorOptions = Readonly<{
   cause?: unknown;
-  status?: number | undefined;
-  code?: string | undefined;
-  requestId?: string | undefined;
-  retryAfterSeconds?: number | undefined;
+  status?: number;
+  code?: string;
+  requestId?: string;
+  retryAfterSeconds?: number;
 }>;
 
 export class ApiError extends Error {
@@ -47,15 +48,27 @@ export function mapHttpError(
   retryAfterHeader: string | null = null,
 ): ApiError {
   const envelope = envelopeSchema.safeParse(body);
-  const data = envelope.success ? envelope.data : {};
-  const message =
-    data.message ?? `Request failed with status ${String(status)}`;
-  return new ApiError("http", message, {
+  const options: {
+    -readonly [K in keyof ApiErrorOptions]: ApiErrorOptions[K];
+  } = {
     status,
-    code: data.code,
-    requestId: data.request_id,
-    retryAfterSeconds: parseRetryAfter(retryAfterHeader),
-  });
+  };
+  const retryAfterSeconds = parseRetryAfter(retryAfterHeader);
+  if (retryAfterSeconds !== undefined) {
+    options.retryAfterSeconds = retryAfterSeconds;
+  }
+  if (!envelope.success) {
+    return new ApiError(
+      "http",
+      `Request failed with status ${String(status)}`,
+      options,
+    );
+  }
+  options.code = envelope.data.code;
+  if (envelope.data.request_id !== undefined) {
+    options.requestId = envelope.data.request_id;
+  }
+  return new ApiError("http", envelope.data.message, options);
 }
 
 // Only the delay-seconds form of Retry-After is honoured; the HTTP-date form

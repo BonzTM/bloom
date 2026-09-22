@@ -4,19 +4,27 @@ import userEvent from "@testing-library/user-event";
 import { ApiError } from "../../../lib/api/errors.js";
 import { LoginForm } from "./login-form.js";
 
-function renderForm(overrides: Partial<Parameters<typeof LoginForm>[0]> = {}): {
+type Props = Parameters<typeof LoginForm>[0];
+
+function renderForm(overrides: Partial<Props> = {}): {
   onSubmit: jest.Mock;
+  rerender: (overrides: Partial<Props>) => void;
 } {
   const onSubmit = jest.fn();
-  render(
-    <LoginForm
-      pending={false}
-      serverError={null}
-      onSubmit={onSubmit}
-      {...overrides}
-    />,
-  );
-  return { onSubmit };
+  const props = (extra: Partial<Props>): Props => ({
+    pending: false,
+    serverError: null,
+    onSubmit,
+    ...overrides,
+    ...extra,
+  });
+  const view = render(<LoginForm {...props({})} />);
+  return {
+    onSubmit,
+    rerender: (extra) => {
+      view.rerender(<LoginForm {...props(extra)} />);
+    },
+  };
 }
 
 it("submits trimmed credentials when both fields are filled", async () => {
@@ -48,24 +56,46 @@ it("shows field errors, focuses the first invalid field, and keeps input", async
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
-it("does not submit while a previous attempt is pending", async () => {
+it("announces the pending state and blocks a second submit", async () => {
   const user = userEvent.setup();
   const { onSubmit } = renderForm({ pending: true });
 
   const button = screen.getByRole("button", { name: "Signing in…" });
   expect(button).toBeDisabled();
+  expect(screen.getByRole("form", { name: "Sign in" })).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Signing in, please wait.",
+  );
   await user.click(button);
 
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
-it("explains a rejected sign-in without saying which field was wrong", () => {
-  renderForm({
+it("focuses the explanation and clears the password after a rejection", async () => {
+  const user = userEvent.setup();
+  const { rerender } = renderForm();
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "wrong");
+
+  rerender({
     serverError: new ApiError("http", "invalid credentials", { status: 401 }),
   });
 
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "The username or password is incorrect.",
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("The username or password is incorrect.");
+  expect(alert).toHaveFocus();
+  expect(screen.getByLabelText("Username")).toHaveValue("admin");
+  expect(screen.getByLabelText("Password")).toHaveValue("");
+});
+
+it("does not describe the form by a summary that is not rendered", () => {
+  renderForm();
+
+  expect(screen.getByRole("form", { name: "Sign in" })).not.toHaveAttribute(
+    "aria-describedby",
   );
 });
 

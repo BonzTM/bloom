@@ -1,5 +1,8 @@
 import { http, HttpResponse } from "msw";
-import type { Account } from "../features/auth/api/auth-schemas.js";
+import {
+  loginInputSchema,
+  type Account,
+} from "../features/auth/api/auth-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
 export const mockVersion: VersionInfo = {
@@ -14,13 +17,14 @@ export const mockAccount: Account = {
 };
 
 // Credentials the mock backend accepts. Anything else is a 401, and the
-// reserved username below is always rate limited so the UI path is testable.
+// reserved username below is always rate limited so that UI path is testable.
 export const mockCredentials = { username: "admin", password: "correct horse" };
 export const RATE_LIMITED_USERNAME = "locked";
 export const RATE_LIMIT_RETRY_AFTER_SECONDS = 30;
 
-// One process-wide mock session so `/me` reflects an earlier `/login`. Tests
-// reset it between cases via `resetMockSession`.
+// One process-wide mock session so `/me` reflects an earlier `/login`. It is a
+// stand-in for the cookie the real backend sets; tests reset it between cases.
+// It cannot prove cookie or CSRF behaviour, which the backend suite covers.
 let signedIn = false;
 
 export function resetMockSession(): void {
@@ -31,7 +35,7 @@ export function signInMockSession(): void {
   signedIn = true;
 }
 
-function envelope(
+export function envelope(
   status: number,
   code: string,
   message: string,
@@ -43,6 +47,12 @@ function envelope(
   );
 }
 
+function isJsonRequest(request: Request): boolean {
+  return (
+    request.headers.get("content-type")?.includes("application/json") === true
+  );
+}
+
 export const handlers = [
   http.get("*/api/v1/version", () => HttpResponse.json(mockVersion)),
   http.get("*/api/v1/auth/me", () =>
@@ -51,16 +61,21 @@ export const handlers = [
       : envelope(401, "unauthenticated", "sign in required"),
   ),
   http.post("*/api/v1/auth/login", async ({ request }) => {
-    const body: unknown = await request.json();
-    const input = body as { username?: unknown; password?: unknown };
-    if (input.username === RATE_LIMITED_USERNAME) {
+    if (!isJsonRequest(request)) {
+      return envelope(415, "unsupported_media_type", "expected JSON");
+    }
+    const input = loginInputSchema.safeParse(await request.json());
+    if (!input.success) {
+      return envelope(422, "validation_failed", "invalid input");
+    }
+    if (input.data.username === RATE_LIMITED_USERNAME) {
       return envelope(429, "rate_limited", "too many attempts", {
         "retry-after": String(RATE_LIMIT_RETRY_AFTER_SECONDS),
       });
     }
     if (
-      input.username !== mockCredentials.username ||
-      input.password !== mockCredentials.password
+      input.data.username !== mockCredentials.username ||
+      input.data.password !== mockCredentials.password
     ) {
       return envelope(401, "invalid_credentials", "invalid credentials");
     }

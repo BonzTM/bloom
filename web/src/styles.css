@@ -83,9 +83,13 @@ input[aria-invalid="true"] {
   display: none;
 }
 
-.session-menu {
+.session-controls {
   align-items: center;
   display: flex;
   gap: 0.5rem;
   margin-left: auto;
+}
+
+main:focus {
+  outline: none;
 }

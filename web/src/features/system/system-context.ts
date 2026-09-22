@@ -1,12 +1,7 @@
-import { createContext, useContext } from "react";
+import { createRequiredContext } from "../../lib/react/required-context.js";
 import type { SystemApi } from "./api/system-api.js";
 
-export const SystemApiContext = createContext<SystemApi | undefined>(undefined);
+const context = createRequiredContext<SystemApi>("SystemApi");
 
-export function useSystemApi(): SystemApi {
-  const api = useContext(SystemApiContext);
-  if (api === undefined) {
-    throw new Error("SystemApi provider is missing");
-  }
-  return api;
-}
+export const SystemApiContext = context.Provider;
+export const useSystemApi = context.useValue;

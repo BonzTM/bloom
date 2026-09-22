@@ -1,15 +1,14 @@
 import {
+  useEffect,
   useId,
   useRef,
-  useState,
-  type SyntheticEvent,
   type ReactNode,
-  type RefObject,
+  type SyntheticEvent,
 } from "react";
-import { ApiError } from "../../../lib/api/errors.js";
-import { loginInputSchema, type LoginInput } from "../api/auth-schemas.js";
-import { FieldError, fieldErrorId } from "./field-error.js";
+import type { LoginInput } from "../api/auth-schemas.js";
+import { CredentialField } from "./credential-field.js";
 import { describeLoginError } from "./login-errors.js";
+import { useLoginValidation } from "./use-login-validation.js";
 
 type LoginFormProps = Readonly<{
   pending: boolean;
@@ -17,122 +16,72 @@ type LoginFormProps = Readonly<{
   onSubmit: (input: LoginInput) => void;
 }>;
 
-type FieldErrors = Readonly<Partial<Record<keyof LoginInput, string>>>;
-
 export function LoginForm({
   pending,
   serverError,
   onSubmit,
 }: LoginFormProps): ReactNode {
   const formId = useId();
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const usernameRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const { errors, refs, validate, clearPassword } = useLoginValidation();
+  const summary = describeLoginError(serverError);
+
+  // A rejected sign-in moves focus to the explanation and drops the typed
+  // password; the username stays so the person can simply retry.
+  useEffect(() => {
+    if (summary !== undefined) {
+      clearPassword();
+      summaryRef.current?.focus();
+    }
+  }, [summary, clearPassword]);
 
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (pending) {
       return;
     }
-    const parsed = loginInputSchema.safeParse(
-      Object.fromEntries(new FormData(event.currentTarget)),
-    );
-    if (!parsed.success) {
-      const errors = collectFieldErrors(parsed.error.issues);
-      setFieldErrors(errors);
-      focusFirstInvalid(errors, {
-        username: usernameRef,
-        password: passwordRef,
-      });
-      return;
+    const input = validate(event.currentTarget);
+    if (input !== undefined) {
+      onSubmit(input);
     }
-    setFieldErrors({});
-    onSubmit(parsed.data);
   }
 
-  const summary = describeLoginError(serverError);
+  const summaryId = `${formId}-summary`;
   return (
     <form
       onSubmit={handleSubmit}
+      aria-label="Sign in"
       noValidate
-      aria-describedby={`${formId}-summary`}
+      aria-busy={pending}
+      aria-describedby={summary === undefined ? undefined : summaryId}
     >
       {summary === undefined ? null : (
-        <p id={`${formId}-summary`} role="alert">
+        <p id={summaryId} role="alert" tabIndex={-1} ref={summaryRef}>
           {summary}
         </p>
       )}
-      <div>
-        <label htmlFor={`${formId}-username`}>Username</label>
-        <input
-          ref={usernameRef}
-          id={`${formId}-username`}
-          name="username"
-          type="text"
-          autoComplete="username"
-          required
-          aria-invalid={fieldErrors.username !== undefined}
-          aria-describedby={fieldErrorId(formId, "username")}
-        />
-        <FieldError
-          formId={formId}
-          field="username"
-          message={fieldErrors.username}
-        />
-      </div>
-      <div>
-        <label htmlFor={`${formId}-password`}>Password</label>
-        <input
-          ref={passwordRef}
-          id={`${formId}-password`}
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          aria-invalid={fieldErrors.password !== undefined}
-          aria-describedby={fieldErrorId(formId, "password")}
-        />
-        <FieldError
-          formId={formId}
-          field="password"
-          message={fieldErrors.password}
-        />
-      </div>
-      <button type="submit" disabled={pending} aria-disabled={pending}>
+      <CredentialField
+        formId={formId}
+        name="username"
+        label="Username"
+        type="text"
+        autoComplete="username"
+        error={errors.username}
+        inputRef={refs.username}
+      />
+      <CredentialField
+        formId={formId}
+        name="password"
+        label="Password"
+        type="password"
+        autoComplete="current-password"
+        error={errors.password}
+        inputRef={refs.password}
+      />
+      <button type="submit" disabled={pending}>
         {pending ? "Signing in…" : "Sign in"}
       </button>
+      <p role="status">{pending ? "Signing in, please wait." : ""}</p>
     </form>
   );
-}
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-): FieldErrors {
-  const errors: Partial<Record<keyof LoginInput, string>> = {};
-  for (const issue of issues) {
-    const field = issue.path[0];
-    if (
-      (field === "username" || field === "password") &&
-      errors[field] === undefined
-    ) {
-      errors[field] = issue.message;
-    }
-  }
-  return errors;
-}
-
-function focusFirstInvalid(
-  errors: FieldErrors,
-  refs: Readonly<Record<keyof LoginInput, RefObject<HTMLInputElement | null>>>,
-): void {
-  const first = (["username", "password"] as const).find(
-    (field) => errors[field] !== undefined,
-  );
-  if (first !== undefined) {
-    refs[first].current?.focus();
-  }
-}
-
-export function isRetryableLoginError(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 429;
 }
