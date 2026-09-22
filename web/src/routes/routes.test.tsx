@@ -213,3 +213,20 @@ it("moves focus to the main region after navigation", async () => {
 
   expect(screen.getByRole("main")).toHaveFocus();
 });
+
+it("brings the person back to the page where they chose to sign in", async () => {
+  const user = userEvent.setup();
+  renderApp("/about");
+  await screen.findByRole("heading", { name: "About Bloom", level: 1 });
+
+  await user.click(await screen.findByRole("link", { name: "Sign in" }));
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+  await user.type(screen.getByLabelText("Username"), "admin");
+  await user.type(screen.getByLabelText("Password"), "correct horse");
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "About Bloom", level: 1 }),
+  ).toBeVisible();
+  expect(screen.getByText("Signed in as admin")).toBeVisible();
+});

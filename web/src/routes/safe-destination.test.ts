@@ -20,6 +20,7 @@ it.each([
   ["backslash authority", { from: "/\\evil.example" }],
   ["control character", { from: "/x\r\nSet-Cookie: a=b" }],
   ["the sign-in page itself", { from: "/login?next=1" }],
+  ["an oversized path", { from: `/${"a".repeat(2048)}` }],
 ])("falls back to home for %s", (_label, state) => {
   expect(safeDestination(state, ORIGIN)).toBe("/");
 });

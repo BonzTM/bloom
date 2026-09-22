@@ -8,5 +8,5 @@ export function useRouteFocus(main: RefObject<HTMLElement | null>): void {
   const location = useLocation();
   useEffect(() => {
     main.current?.focus();
-  }, [location.pathname, main]);
+  }, [location.key, main]);
 }

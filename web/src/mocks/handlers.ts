@@ -17,10 +17,10 @@ export const mockAccount: Account = {
 };
 
 // Credentials the mock backend accepts. Anything else is a 401, and the
-// reserved username below is always rate limited so that UI path is testable.
+// username "locked" is always rate limited so that UI path is testable.
 export const mockCredentials = { username: "admin", password: "correct horse" };
-export const RATE_LIMITED_USERNAME = "locked";
-export const RATE_LIMIT_RETRY_AFTER_SECONDS = 30;
+const RATE_LIMITED_USERNAME = "locked";
+const RATE_LIMIT_RETRY_AFTER_SECONDS = 30;
 
 // One process-wide mock session so `/me` reflects an earlier `/login`. It is a
 // stand-in for the cookie the real backend sets; tests reset it between cases.
@@ -47,25 +47,40 @@ export function envelope(
   );
 }
 
-// The real backend expects JSON in and JSON out; the mock holds the client to
-// both headers so a regression in the fetch boundary fails here first.
-function isJsonRequest(request: Request): boolean {
+// The real backend answers JSON only to clients that ask for it; every JSON
+// handler holds the client to that so a regression in the fetch boundary
+// fails here first.
+function acceptsJson(request: Request): boolean {
+  return request.headers.get("accept")?.includes("application/json") === true;
+}
+
+function sendsJson(request: Request): boolean {
   return (
-    request.headers.get("content-type")?.includes("application/json") ===
-      true &&
-    request.headers.get("accept")?.includes("application/json") === true
+    request.headers.get("content-type")?.includes("application/json") === true
   );
 }
 
+function notAcceptable() {
+  return envelope(406, "not_acceptable", "expected accept: application/json");
+}
+
 export const handlers = [
-  http.get("*/api/v1/version", () => HttpResponse.json(mockVersion)),
-  http.get("*/api/v1/auth/me", () =>
-    signedIn
-      ? HttpResponse.json({ account: mockAccount })
-      : envelope(401, "unauthenticated", "sign in required"),
+  http.get("*/api/v1/version", ({ request }) =>
+    acceptsJson(request) ? HttpResponse.json(mockVersion) : notAcceptable(),
   ),
+  http.get("*/api/v1/auth/me", ({ request }) => {
+    if (!acceptsJson(request)) {
+      return notAcceptable();
+    }
+    return signedIn
+      ? HttpResponse.json({ account: mockAccount })
+      : envelope(401, "unauthenticated", "sign in required");
+  }),
   http.post("*/api/v1/auth/login", async ({ request }) => {
-    if (!isJsonRequest(request)) {
+    if (!acceptsJson(request)) {
+      return notAcceptable();
+    }
+    if (!sendsJson(request)) {
       return envelope(415, "unsupported_media_type", "expected JSON");
     }
     const input = loginRequestSchema.safeParse(await request.json());
@@ -86,7 +101,13 @@ export const handlers = [
     signedIn = true;
     return HttpResponse.json({ account: mockAccount });
   }),
-  http.post("*/api/v1/auth/logout", () => {
+  http.post("*/api/v1/auth/logout", async ({ request }) => {
+    if (!acceptsJson(request)) {
+      return notAcceptable();
+    }
+    if ((await request.text()).length !== 0) {
+      return envelope(400, "bad_request", "unexpected body");
+    }
     if (!signedIn) {
       return envelope(401, "unauthenticated", "sign in required");
     }

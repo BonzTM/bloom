@@ -53,7 +53,7 @@ npm run verify
 make verify
 ```
 
-Tests cover the home page and its version badge, navigation to the lazy about route, cold deep links, the not-found route, page-title updates, focus after navigation, sign-in success and every rejection path, the return destination after sign-in including hostile values, session and sign-out races against late responses, sign-out failure, version endpoint failure and contract rejection, Zod response rejection, non-JSON and oversized responses, caller abort, client timeout, backend error-envelope mapping with Retry-After, and MSW's rejection of unhandled requests.
+Tests cover the home page and its version badge, navigation to the lazy about route, cold deep links, the not-found route, page-title updates, focus after navigation, sign-in success, rejected credentials, rate limiting, malformed responses, and validation bounds, the return destination after sign-in including hostile values, session and sign-out races against late responses, sign-out failure, version endpoint failure and contract rejection, Zod response rejection, non-JSON and oversized responses, caller abort, client timeout, backend error-envelope mapping with Retry-After, and MSW's rejection of unhandled requests.
 
 ## Build And Delivery
 

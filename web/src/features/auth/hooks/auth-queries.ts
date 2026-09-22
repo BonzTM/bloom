@@ -4,7 +4,6 @@ import type { Account, LoginInput } from "../api/auth-schemas.js";
 import { useAuthApi } from "../auth-context.js";
 
 export const authKeys = {
-  all: ["auth"] as const,
   session: () => ["auth", "session"] as const,
 };
 

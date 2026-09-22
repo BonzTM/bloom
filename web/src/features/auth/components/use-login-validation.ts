@@ -1,9 +1,7 @@
 import { useRef, useState, type RefObject } from "react";
 import { loginInputSchema, type LoginInput } from "../api/auth-schemas.js";
 
-export type LoginFieldErrors = Readonly<
-  Partial<Record<keyof LoginInput, string>>
->;
+type LoginFieldErrors = Readonly<Partial<Record<keyof LoginInput, string>>>;
 
 type FieldRefs = Readonly<
   Record<keyof LoginInput, RefObject<HTMLInputElement | null>>

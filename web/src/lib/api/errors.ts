@@ -73,7 +73,7 @@ export function mapHttpError(
 
 // Only the delay-seconds form of Retry-After is honoured; the HTTP-date form
 // is rare from our own backend and ignoring it degrades to "try again later".
-export function parseRetryAfter(header: string | null): number | undefined {
+function parseRetryAfter(header: string | null): number | undefined {
   if (header === null) {
     return undefined;
   }

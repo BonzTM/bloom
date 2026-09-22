@@ -27,6 +27,21 @@ function createGate(): Gate {
   return { wait, open };
 }
 
+// A session-check handler that reports when it has started and then blocks
+// until released, so a test can prove the request was truly in flight.
+function slowSessionCheck(respond: () => Response) {
+  const started = createGate();
+  const release = createGate();
+  server.use(
+    http.get("*/api/v1/auth/me", async () => {
+      started.open();
+      await release.wait;
+      return respond();
+    }),
+  );
+  return { started: started.wait, release: release.open };
+}
+
 function createHarness() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -51,14 +66,11 @@ function useAuth() {
 
 it("keeps the signed-in account when a session check started earlier answers late", async () => {
   const { queryClient, wrapper } = createHarness();
-  const gate = createGate();
-  server.use(
-    http.get("*/api/v1/auth/me", async () => {
-      await gate.wait;
-      return envelope(401, "unauthenticated", "sign in required");
-    }),
+  const slow = slowSessionCheck(() =>
+    envelope(401, "unauthenticated", "sign in required"),
   );
   const { result } = renderHook(useAuth, { wrapper });
+  await slow.started;
   expect(result.current.session.isPending).toBe(true);
 
   await act(async () => {
@@ -66,9 +78,9 @@ it("keeps the signed-in account when a session check started earlier answers lat
   });
   expect(queryClient.getQueryData(authKeys.session())).toEqual(mockAccount);
 
-  gate.open();
+  slow.release();
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.isFetching).toBe(false);
   });
   expect(result.current.session.data).toEqual(mockAccount);
 });
@@ -76,29 +88,20 @@ it("keeps the signed-in account when a session check started earlier answers lat
 it("stays signed out when a session check started before sign-out answers late", async () => {
   const { queryClient, wrapper } = createHarness();
   signInMockSession();
-  const gate = createGate();
-  let hold = false;
-  server.use(
-    http.get("*/api/v1/auth/me", async () => {
-      if (hold) {
-        await gate.wait;
-      }
-      return Response.json({ account: mockAccount });
-    }),
-  );
   const { result } = renderHook(useAuth, { wrapper });
   await waitFor(() => {
     expect(result.current.session.data).toEqual(mockAccount);
   });
 
-  hold = true;
+  const slow = slowSessionCheck(() => Response.json({ account: mockAccount }));
   const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
+  await slow.started;
   await act(async () => {
     await result.current.logout.mutateAsync();
   });
   expect(queryClient.getQueryData(authKeys.session())).toBeNull();
 
-  gate.open();
+  slow.release();
   await refetch;
   await waitFor(() => {
     expect(result.current.session.isFetching).toBe(false);

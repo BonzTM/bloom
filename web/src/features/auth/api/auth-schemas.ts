@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 // Wire contracts for the session endpoints under `/api/v1/auth`. Unknown
 // response fields are stripped so the backend can extend payloads without
 // breaking the UI.
-export const accountSchema = z.object({
+const accountSchema = z.object({
   id: z.string().min(1).max(200),
   username: z.string().min(1).max(200),
 });

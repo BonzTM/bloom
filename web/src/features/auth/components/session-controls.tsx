@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useLogout, useSession } from "../hooks/auth-queries.js";
 
 // Who is signed in, with sign-in and sign-out actions. Lives in the site
@@ -8,7 +8,11 @@ import { useLogout, useSession } from "../hooks/auth-queries.js";
 export function SessionControls(): ReactNode {
   const session = useSession();
   const logout = useLogout();
+  const location = useLocation();
   if (session.data === undefined) {
+    // While a retry runs the query is pending again (there is no data to
+    // keep), so the "Checking sign-in" status replaces the retry control and
+    // a second click is impossible.
     return session.isError ? (
       <SessionUnavailable onRetry={session.refetch} />
     ) : (
@@ -16,7 +20,13 @@ export function SessionControls(): ReactNode {
     );
   }
   if (session.data === null) {
-    return <NavLink to="/login">Sign in</NavLink>;
+    // Remember where the person was so sign-in can bring them back.
+    const from = `${location.pathname}${location.search}${location.hash}`;
+    return (
+      <NavLink to="/login" state={{ from }}>
+        Sign in
+      </NavLink>
+    );
   }
   return (
     <>

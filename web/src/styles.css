@@ -89,7 +89,3 @@ input[aria-invalid="true"] {
   gap: 0.5rem;
   margin-left: auto;
 }
-
-main:focus {
-  outline: none;
-}

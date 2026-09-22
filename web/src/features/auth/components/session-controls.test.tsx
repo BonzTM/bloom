@@ -1,10 +1,19 @@
 import { expect, it } from "@jest/globals";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { delay, http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw";
 import { envelope, signInMockSession } from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
 import { server } from "../../../test/server.js";
+import { authKeys } from "../hooks/auth-queries.js";
+
+function createGate() {
+  let open = (): void => undefined;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
 
 it("offers a retry when the session cannot be checked", async () => {
   const user = userEvent.setup();
@@ -26,6 +35,33 @@ it("offers a retry when the session cannot be checked", async () => {
   failing = false;
   await user.click(screen.getByRole("button", { name: "Retry" }));
 
+  expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
+});
+
+it("announces the retry and withdraws the button while it runs", async () => {
+  const user = userEvent.setup();
+  const gate = createGate();
+  let failing = true;
+  server.use(
+    http.get("*/api/v1/auth/me", async () => {
+      if (failing) {
+        return new HttpResponse("upstream down", { status: 502 });
+      }
+      await gate.wait;
+      return envelope(401, "unauthenticated", "sign in required");
+    }),
+  );
+  renderApp();
+  await screen.findByRole("button", { name: "Retry" });
+
+  failing = false;
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect(await screen.findByText("Checking sign-in…")).toHaveRole("status");
+  expect(
+    screen.queryByRole("button", { name: "Retry" }),
+  ).not.toBeInTheDocument();
+  gate.open();
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
@@ -66,12 +102,13 @@ it("forgets the account when the server says there was no session", async () => 
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
-it("announces sign-out while it is pending", async () => {
+it("announces sign-out while it is pending and settles cleanly", async () => {
   const user = userEvent.setup();
   signInMockSession();
+  const gate = createGate();
   server.use(
     http.post("*/api/v1/auth/logout", async () => {
-      await delay("infinite");
+      await gate.wait;
       return new HttpResponse(null, { status: 204 });
     }),
   );
@@ -83,10 +120,11 @@ it("announces sign-out while it is pending", async () => {
     await screen.findByRole("button", { name: "Signing out…" }),
   ).toBeDisabled();
   expect(screen.getByText("Signing out, please wait.")).toHaveRole("status");
+  gate.open();
+  expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
 it("keeps showing the last known account when a refresh fails", async () => {
-  const user = userEvent.setup();
   signInMockSession();
   let failing = false;
   server.use(
@@ -95,19 +133,18 @@ it("keeps showing the last known account when a refresh fails", async () => {
         ? new HttpResponse("upstream down", { status: 502 })
         : HttpResponse.json({ account: { id: "1", username: "admin" } }),
     ),
-    http.post(
-      "*/api/v1/auth/logout",
-      () => new HttpResponse("upstream down", { status: 502 }),
-    ),
   );
-  renderApp();
+  const { queryClient } = renderApp();
   await screen.findByText("Signed in as admin");
 
-  // A failed sign-out invalidates nothing, so force a refresh by failing the
-  // next check the retry path performs.
   failing = true;
-  await user.click(screen.getByRole("button", { name: "Sign out" }));
-  await screen.findByText("Sign-out failed. Please try again.");
+  await queryClient.refetchQueries({ queryKey: authKeys.session() });
 
+  await waitFor(() => {
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Sign-in status could not be refreshed.",
+    );
+  });
   expect(screen.getByText("Signed in as admin")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
