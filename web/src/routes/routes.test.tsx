@@ -2,7 +2,7 @@ import { expect, it } from "@jest/globals";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { mockAccount, signInMockSession } from "../mocks/handlers.js";
+import { mockAccount, signInMockSession, jsonApi } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
 import { server } from "../test/server.js";
 
@@ -186,8 +186,9 @@ it("ignores a hostile return destination and goes home", async () => {
 it("treats a malformed sign-in response as a failure, not a session", async () => {
   const user = userEvent.setup();
   server.use(
-    http.post("*/api/v1/auth/login", () =>
-      HttpResponse.json({ account: { id: mockAccount.id } }),
+    http.post(
+      "*/api/v1/auth/login",
+      jsonApi(() => HttpResponse.json({ account: { id: mockAccount.id } })),
     ),
   );
   renderApp("/login");

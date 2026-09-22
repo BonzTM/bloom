@@ -8,7 +8,9 @@ import {
   envelope,
   mockAccount,
   mockCredentials,
+  resetMockSession,
   signInMockSession,
+  jsonApi,
 } from "../../../mocks/handlers.js";
 import { server } from "../../../test/server.js";
 import { AuthApi } from "../api/auth-api.js";
@@ -33,11 +35,14 @@ function slowSessionCheck(respond: () => Response) {
   const started = createGate();
   const release = createGate();
   server.use(
-    http.get("*/api/v1/auth/me", async () => {
-      started.open();
-      await release.wait;
-      return respond();
-    }),
+    http.get(
+      "*/api/v1/auth/me",
+      jsonApi(async () => {
+        started.open();
+        await release.wait;
+        return respond();
+      }),
+    ),
   );
   return { started: started.wait, release: release.open };
 }
@@ -107,4 +112,75 @@ it("stays signed out when a session check started before sign-out answers late",
     expect(result.current.session.isFetching).toBe(false);
   });
   expect(result.current.session.data).toBeNull();
+});
+
+it("re-checks the session when sign-in fails after the server may have acted", async () => {
+  const { wrapper } = createHarness();
+  server.use(
+    http.post(
+      "*/api/v1/auth/login",
+      jsonApi(() => {
+        signInMockSession();
+        return Response.json({ account: { id: mockAccount.id } });
+      }),
+    ),
+  );
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+
+  await act(async () => {
+    await result.current.login
+      .mutateAsync(mockCredentials)
+      .catch(() => undefined);
+  });
+
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockAccount);
+  });
+});
+
+it("re-checks the session when sign-out fails after the server may have acted", async () => {
+  const { wrapper } = createHarness();
+  signInMockSession();
+  server.use(
+    http.post(
+      "*/api/v1/auth/logout",
+      jsonApi(() => {
+        resetMockSession();
+        return new Response("upstream down", { status: 502 });
+      }),
+    ),
+  );
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockAccount);
+  });
+
+  await act(async () => {
+    await result.current.logout.mutateAsync().catch(() => undefined);
+  });
+
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+});
+
+it("re-checks the session when the tab regains focus", async () => {
+  const { wrapper } = createHarness();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+
+  signInMockSession();
+  // TanStack Query's focus manager listens on window, not document.
+  act(() => {
+    window.dispatchEvent(new Event("visibilitychange"));
+  });
+
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockAccount);
+  });
 });

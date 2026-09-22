@@ -25,6 +25,9 @@ export function useSession() {
       }
     },
     staleTime: 60_000,
+    // The session can change outside this tab (expiry, sign-out elsewhere),
+    // so coming back to the tab always re-checks it.
+    refetchOnWindowFocus: "always",
   });
 }
 
@@ -42,6 +45,7 @@ export function useLogin() {
     onSuccess: (response) => {
       writeSession(queryClient, response.account);
     },
+    onError: (error) => reconcileAfterAmbiguousFailure(queryClient, error),
   });
 }
 
@@ -60,15 +64,39 @@ export function useLogout() {
     onError: (error) => {
       if (isUnauthorized(error)) {
         writeSession(queryClient, null);
+        return undefined;
       }
+      return reconcileAfterAmbiguousFailure(queryClient, error);
     },
   });
 }
 
 type SessionCache = Pick<
   ReturnType<typeof useQueryClient>,
-  "cancelQueries" | "setQueryData"
+  "cancelQueries" | "setQueryData" | "invalidateQueries"
 >;
+
+// A definite rejection (4xx) means the server did nothing. Anything else, a
+// malformed body, a dropped connection, a 5xx, may have changed the session
+// before failing, so the truth is re-read from the server.
+function reconcileAfterAmbiguousFailure(
+  cache: SessionCache,
+  error: unknown,
+): Promise<void> | undefined {
+  if (isDefiniteRejection(error)) {
+    return undefined;
+  }
+  return cache.invalidateQueries({ queryKey: authKeys.session() });
+}
+
+function isDefiniteRejection(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status !== undefined &&
+    error.status >= 400 &&
+    error.status < 500
+  );
+}
 
 function cancelSessionCheck(cache: SessionCache): Promise<void> {
   return cache.cancelQueries({ queryKey: authKeys.session() });

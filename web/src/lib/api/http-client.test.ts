@@ -1,5 +1,5 @@
 import { expect, it, jest } from "@jest/globals";
-import { delay, HttpResponse, http } from "msw";
+import { HttpResponse, http } from "msw";
 import { z } from "zod/v4";
 import { server } from "../../test/server.js";
 import type { ApiError } from "./errors.js";
@@ -129,17 +129,25 @@ it("maps a caller abort separately from network failure", async () => {
 });
 
 it("aborts a request that exceeds the client timeout", async () => {
+  let release = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   server.use(
     http.get("*/slow", async () => {
-      await delay("infinite");
+      await held;
       return HttpResponse.json({});
     }),
   );
   const impatientClient = new ApiClient(new URL("http://localhost/"), 5);
 
-  await expect(
-    impatientClient.requestJson("slow", z.object({})),
-  ).rejects.toMatchObject({ kind: "aborted" });
+  try {
+    await expect(
+      impatientClient.requestJson("slow", z.object({})),
+    ).rejects.toMatchObject({ kind: "aborted" });
+  } finally {
+    release();
+  }
 });
 
 it("fails a request that no MSW handler covers", async () => {

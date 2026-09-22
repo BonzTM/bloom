@@ -2,7 +2,11 @@ import { expect, it } from "@jest/globals";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { envelope, signInMockSession } from "../../../mocks/handlers.js";
+import {
+  envelope,
+  signInMockSession,
+  jsonApi,
+} from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
 import { server } from "../../../test/server.js";
 import { authKeys } from "../hooks/auth-queries.js";
@@ -21,10 +25,13 @@ it("offers a retry when the session cannot be checked", async () => {
   // fetch, so counting requests would make the test depend on that detail.
   let failing = true;
   server.use(
-    http.get("*/api/v1/auth/me", () =>
-      failing
-        ? new HttpResponse("upstream down", { status: 502 })
-        : envelope(401, "unauthenticated", "sign in required"),
+    http.get(
+      "*/api/v1/auth/me",
+      jsonApi(() =>
+        failing
+          ? new HttpResponse("upstream down", { status: 502 })
+          : envelope(401, "unauthenticated", "sign in required"),
+      ),
     ),
   );
   renderApp();
@@ -43,13 +50,16 @@ it("announces the retry and withdraws the button while it runs", async () => {
   const gate = createGate();
   let failing = true;
   server.use(
-    http.get("*/api/v1/auth/me", async () => {
-      if (failing) {
-        return new HttpResponse("upstream down", { status: 502 });
-      }
-      await gate.wait;
-      return envelope(401, "unauthenticated", "sign in required");
-    }),
+    http.get(
+      "*/api/v1/auth/me",
+      jsonApi(async () => {
+        if (failing) {
+          return new HttpResponse("upstream down", { status: 502 });
+        }
+        await gate.wait;
+        return envelope(401, "unauthenticated", "sign in required");
+      }),
+    ),
   );
   renderApp();
   await screen.findByRole("button", { name: "Retry" });
@@ -71,7 +81,7 @@ it("keeps the account when sign-out fails on the server", async () => {
   server.use(
     http.post(
       "*/api/v1/auth/logout",
-      () => new HttpResponse("upstream down", { status: 502 }),
+      jsonApi(() => new HttpResponse("upstream down", { status: 502 })),
     ),
   );
   renderApp();
@@ -91,8 +101,9 @@ it("forgets the account when the server says there was no session", async () => 
   const user = userEvent.setup();
   signInMockSession();
   server.use(
-    http.post("*/api/v1/auth/logout", () =>
-      envelope(401, "unauthenticated", "sign in required"),
+    http.post(
+      "*/api/v1/auth/logout",
+      jsonApi(() => envelope(401, "unauthenticated", "sign in required")),
     ),
   );
   renderApp();
@@ -107,10 +118,13 @@ it("announces sign-out while it is pending and settles cleanly", async () => {
   signInMockSession();
   const gate = createGate();
   server.use(
-    http.post("*/api/v1/auth/logout", async () => {
-      await gate.wait;
-      return new HttpResponse(null, { status: 204 });
-    }),
+    http.post(
+      "*/api/v1/auth/logout",
+      jsonApi(async () => {
+        await gate.wait;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    ),
   );
   renderApp();
 
@@ -128,10 +142,13 @@ it("keeps showing the last known account when a refresh fails", async () => {
   signInMockSession();
   let failing = false;
   server.use(
-    http.get("*/api/v1/auth/me", () =>
-      failing
-        ? new HttpResponse("upstream down", { status: 502 })
-        : HttpResponse.json({ account: { id: "1", username: "admin" } }),
+    http.get(
+      "*/api/v1/auth/me",
+      jsonApi(() =>
+        failing
+          ? new HttpResponse("upstream down", { status: 502 })
+          : HttpResponse.json({ account: { id: "1", username: "admin" } }),
+      ),
     ),
   );
   const { queryClient } = renderApp();

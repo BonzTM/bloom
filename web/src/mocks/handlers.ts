@@ -1,4 +1,4 @@
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, type HttpResponseResolver } from "msw";
 import {
   loginRequestSchema,
   type Account,
@@ -47,11 +47,21 @@ export function envelope(
   );
 }
 
-// The real backend answers JSON only to clients that ask for it; every JSON
-// handler holds the client to that so a regression in the fetch boundary
-// fails here first.
-function acceptsJson(request: Request): boolean {
-  return request.headers.get("accept")?.includes("application/json") === true;
+// The real backend answers JSON only to clients that ask for it. Every JSON
+// handler, default or test override, goes through this wrapper so a regression
+// in the fetch boundary fails here first.
+export function jsonApi(resolver: HttpResponseResolver): HttpResponseResolver {
+  return (info) => {
+    const accept = info.request.headers.get("accept");
+    if (accept?.includes("application/json") !== true) {
+      return envelope(
+        406,
+        "not_acceptable",
+        "expected accept: application/json",
+      );
+    }
+    return resolver(info);
+  };
 }
 
 function sendsJson(request: Request): boolean {
@@ -60,58 +70,55 @@ function sendsJson(request: Request): boolean {
   );
 }
 
-function notAcceptable() {
-  return envelope(406, "not_acceptable", "expected accept: application/json");
-}
-
 export const handlers = [
-  http.get("*/api/v1/version", ({ request }) =>
-    acceptsJson(request) ? HttpResponse.json(mockVersion) : notAcceptable(),
+  http.get(
+    "*/api/v1/version",
+    jsonApi(() => HttpResponse.json(mockVersion)),
   ),
-  http.get("*/api/v1/auth/me", ({ request }) => {
-    if (!acceptsJson(request)) {
-      return notAcceptable();
-    }
-    return signedIn
-      ? HttpResponse.json({ account: mockAccount })
-      : envelope(401, "unauthenticated", "sign in required");
-  }),
-  http.post("*/api/v1/auth/login", async ({ request }) => {
-    if (!acceptsJson(request)) {
-      return notAcceptable();
-    }
-    if (!sendsJson(request)) {
-      return envelope(415, "unsupported_media_type", "expected JSON");
-    }
-    const input = loginRequestSchema.safeParse(await request.json());
-    if (!input.success) {
-      return envelope(422, "validation_failed", "invalid input");
-    }
-    if (input.data.username === RATE_LIMITED_USERNAME) {
-      return envelope(429, "rate_limited", "too many attempts", {
-        "retry-after": String(RATE_LIMIT_RETRY_AFTER_SECONDS),
-      });
-    }
-    if (
-      input.data.username !== mockCredentials.username ||
-      input.data.password !== mockCredentials.password
-    ) {
-      return envelope(401, "invalid_credentials", "invalid credentials");
-    }
-    signedIn = true;
-    return HttpResponse.json({ account: mockAccount });
-  }),
-  http.post("*/api/v1/auth/logout", async ({ request }) => {
-    if (!acceptsJson(request)) {
-      return notAcceptable();
-    }
-    if ((await request.text()).length !== 0) {
-      return envelope(400, "bad_request", "unexpected body");
-    }
-    if (!signedIn) {
-      return envelope(401, "unauthenticated", "sign in required");
-    }
-    signedIn = false;
-    return new HttpResponse(null, { status: 204 });
-  }),
+  http.get(
+    "*/api/v1/auth/me",
+    jsonApi(() =>
+      signedIn
+        ? HttpResponse.json({ account: mockAccount })
+        : envelope(401, "unauthenticated", "sign in required"),
+    ),
+  ),
+  http.post(
+    "*/api/v1/auth/login",
+    jsonApi(async ({ request }) => {
+      if (!sendsJson(request)) {
+        return envelope(415, "unsupported_media_type", "expected JSON");
+      }
+      const input = loginRequestSchema.safeParse(await request.json());
+      if (!input.success) {
+        return envelope(422, "validation_failed", "invalid input");
+      }
+      if (input.data.username === RATE_LIMITED_USERNAME) {
+        return envelope(429, "rate_limited", "too many attempts", {
+          "retry-after": String(RATE_LIMIT_RETRY_AFTER_SECONDS),
+        });
+      }
+      if (
+        input.data.username !== mockCredentials.username ||
+        input.data.password !== mockCredentials.password
+      ) {
+        return envelope(401, "invalid_credentials", "invalid credentials");
+      }
+      signedIn = true;
+      return HttpResponse.json({ account: mockAccount });
+    }),
+  ),
+  http.post(
+    "*/api/v1/auth/logout",
+    jsonApi(async ({ request }) => {
+      if ((await request.text()).length !== 0) {
+        return envelope(400, "bad_request", "unexpected body");
+      }
+      if (!signedIn) {
+        return envelope(401, "unauthenticated", "sign in required");
+      }
+      signedIn = false;
+      return new HttpResponse(null, { status: 204 });
+    }),
+  ),
 ];
