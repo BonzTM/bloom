@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import {
-  loginInputSchema,
+  loginRequestSchema,
   type Account,
 } from "../features/auth/api/auth-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
@@ -47,9 +47,13 @@ export function envelope(
   );
 }
 
+// The real backend expects JSON in and JSON out; the mock holds the client to
+// both headers so a regression in the fetch boundary fails here first.
 function isJsonRequest(request: Request): boolean {
   return (
-    request.headers.get("content-type")?.includes("application/json") === true
+    request.headers.get("content-type")?.includes("application/json") ===
+      true &&
+    request.headers.get("accept")?.includes("application/json") === true
   );
 }
 
@@ -64,7 +68,7 @@ export const handlers = [
     if (!isJsonRequest(request)) {
       return envelope(415, "unsupported_media_type", "expected JSON");
     }
-    const input = loginInputSchema.safeParse(await request.json());
+    const input = loginRequestSchema.safeParse(await request.json());
     if (!input.success) {
       return envelope(422, "validation_failed", "invalid input");
     }

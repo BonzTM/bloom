@@ -31,23 +31,17 @@ export function useSession() {
 
 // Sign in. The password is a mutation variable only for the duration of the
 // request: `gcTime: 0` drops the mutation from the cache as soon as nothing
-// observes it, and callers reset it after it settles.
+// observes it, and callers reset it after it settles. An in-flight session
+// check is cancelled first so a late answer cannot overwrite the result.
 export function useLogin() {
   const api = useAuthApi();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: LoginInput) => api.login(input),
     gcTime: 0,
-    onMutate: async () => {
-      // A `/me` answer that started before the login must not overwrite the
-      // account the login returns.
-      await queryClient.cancelQueries({ queryKey: authKeys.session() });
-    },
+    onMutate: () => cancelSessionCheck(queryClient),
     onSuccess: (response) => {
-      queryClient.setQueryData<Account | null>(
-        authKeys.session(),
-        response.account,
-      );
+      writeSession(queryClient, response.account);
     },
   });
 }
@@ -58,20 +52,33 @@ export function useLogin() {
 export function useLogout() {
   const api = useAuthApi();
   const queryClient = useQueryClient();
-  const forget = (): void => {
-    queryClient.setQueryData<Account | null>(authKeys.session(), null);
-  };
   return useMutation({
     mutationFn: () => api.logout(),
-    onSuccess: forget,
+    onMutate: () => cancelSessionCheck(queryClient),
+    onSuccess: () => {
+      writeSession(queryClient, null);
+    },
     onError: (error) => {
       if (isUnauthorized(error)) {
-        forget();
+        writeSession(queryClient, null);
       }
     },
   });
 }
 
-export function isUnauthorized(error: unknown): boolean {
+type SessionCache = Pick<
+  ReturnType<typeof useQueryClient>,
+  "cancelQueries" | "setQueryData"
+>;
+
+function cancelSessionCheck(cache: SessionCache): Promise<void> {
+  return cache.cancelQueries({ queryKey: authKeys.session() });
+}
+
+function writeSession(cache: SessionCache, account: Account | null): void {
+  cache.setQueryData<Account | null>(authKeys.session(), account);
+}
+
+function isUnauthorized(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
 }

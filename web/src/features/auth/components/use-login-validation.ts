@@ -13,7 +13,6 @@ type LoginValidation = Readonly<{
   errors: LoginFieldErrors;
   refs: FieldRefs;
   validate: (form: HTMLFormElement) => LoginInput | undefined;
-  clearPassword: () => void;
 }>;
 
 const FIELD_ORDER = ["username", "password"] as const;
@@ -40,16 +39,10 @@ export function useLoginValidation(): LoginValidation {
     return undefined;
   }
 
-  function clearPassword(): void {
-    if (password.current !== null) {
-      password.current.value = "";
-    }
-  }
-
-  return { errors, refs, validate, clearPassword };
+  return { errors, refs, validate };
 }
 
-export function collectFieldErrors(
+function collectFieldErrors(
   issues: readonly { path: readonly PropertyKey[]; message: string }[],
 ): LoginFieldErrors {
   const errors: Partial<Record<keyof LoginInput, string>> = {};

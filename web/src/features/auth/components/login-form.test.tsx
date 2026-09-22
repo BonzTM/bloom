@@ -74,7 +74,7 @@ it("announces the pending state and blocks a second submit", async () => {
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
-it("focuses the explanation and clears the password after a rejection", async () => {
+it("focuses the explanation and keeps the typed input after a rejection", async () => {
   const user = userEvent.setup();
   const { rerender } = renderForm();
   await user.type(screen.getByLabelText("Username"), "admin");
@@ -88,7 +88,7 @@ it("focuses the explanation and clears the password after a rejection", async ()
   expect(alert).toHaveTextContent("The username or password is incorrect.");
   expect(alert).toHaveFocus();
   expect(screen.getByLabelText("Username")).toHaveValue("admin");
-  expect(screen.getByLabelText("Password")).toHaveValue("");
+  expect(screen.getByLabelText("Password")).toHaveValue("wrong");
 });
 
 it("does not describe the form by a summary that is not rendered", () => {

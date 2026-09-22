@@ -1,7 +1,7 @@
 import { expect, it } from "@jest/globals";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { envelope, signInMockSession } from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
 import { server } from "../../../test/server.js";
@@ -64,4 +64,50 @@ it("forgets the account when the server says there was no session", async () => 
   await user.click(await screen.findByRole("button", { name: "Sign out" }));
 
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
+});
+
+it("announces sign-out while it is pending", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  server.use(
+    http.post("*/api/v1/auth/logout", async () => {
+      await delay("infinite");
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  renderApp();
+
+  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+
+  expect(
+    await screen.findByRole("button", { name: "Signing out…" }),
+  ).toBeDisabled();
+  expect(screen.getByText("Signing out, please wait.")).toHaveRole("status");
+});
+
+it("keeps showing the last known account when a refresh fails", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  let failing = false;
+  server.use(
+    http.get("*/api/v1/auth/me", () =>
+      failing
+        ? new HttpResponse("upstream down", { status: 502 })
+        : HttpResponse.json({ account: { id: "1", username: "admin" } }),
+    ),
+    http.post(
+      "*/api/v1/auth/logout",
+      () => new HttpResponse("upstream down", { status: 502 }),
+    ),
+  );
+  renderApp();
+  await screen.findByText("Signed in as admin");
+
+  // A failed sign-out invalidates nothing, so force a refresh by failing the
+  // next check the retry path performs.
+  failing = true;
+  await user.click(screen.getByRole("button", { name: "Sign out" }));
+  await screen.findByText("Sign-out failed. Please try again.");
+
+  expect(screen.getByText("Signed in as admin")).toBeVisible();
 });

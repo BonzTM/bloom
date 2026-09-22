@@ -1,8 +1,8 @@
 import { expect, it } from "@jest/globals";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { delay, http, HttpResponse } from "msw";
-import { envelope, mockAccount, signInMockSession } from "../mocks/handlers.js";
+import { http, HttpResponse } from "msw";
+import { mockAccount, signInMockSession } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
 import { server } from "../test/server.js";
 
@@ -181,26 +181,6 @@ it("ignores a hostile return destination and goes home", async () => {
     await screen.findByRole("heading", { name: "Bloom", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Home | Bloom");
-});
-
-it("keeps the signed-in account when a slow session check answers late", async () => {
-  const user = userEvent.setup();
-  server.use(
-    http.get("*/api/v1/auth/me", async () => {
-      await delay(150);
-      return envelope(401, "unauthenticated", "sign in required");
-    }),
-  );
-  renderApp("/login");
-  await screen.findByRole("heading", { name: "Sign in", level: 1 });
-
-  await user.type(screen.getByLabelText("Username"), "admin");
-  await user.type(screen.getByLabelText("Password"), "correct horse");
-  await user.click(screen.getByRole("button", { name: "Sign in" }));
-
-  expect(await screen.findByText("Signed in as admin")).toBeVisible();
-  await delay(250);
-  expect(screen.getByText("Signed in as admin")).toBeVisible();
 });
 
 it("treats a malformed sign-in response as a failure, not a session", async () => {

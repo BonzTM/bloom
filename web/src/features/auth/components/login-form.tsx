@@ -23,17 +23,16 @@ export function LoginForm({
 }: LoginFormProps): ReactNode {
   const formId = useId();
   const summaryRef = useRef<HTMLParagraphElement>(null);
-  const { errors, refs, validate, clearPassword } = useLoginValidation();
+  const { errors, refs, validate } = useLoginValidation();
   const summary = describeLoginError(serverError);
 
-  // A rejected sign-in moves focus to the explanation and drops the typed
-  // password; the username stays so the person can simply retry.
+  // A rejected sign-in moves focus to the explanation. The typed values stay
+  // in the uncontrolled inputs so a retry costs nothing.
   useEffect(() => {
     if (summary !== undefined) {
-      clearPassword();
       summaryRef.current?.focus();
     }
-  }, [summary, clearPassword]);
+  }, [summary]);
 
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
