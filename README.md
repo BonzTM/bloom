@@ -145,34 +145,39 @@ Every behavior change ships with a test that proves it.
 
 ## Release And Deploy
 
-Bloom images are published at `ghcr.io/bonztm/bloom`. A merge to `main` builds
-an amd64 image under a run-specific `candidate-<run>-<attempt>` tag. It tests
-that image by digest and records its provenance before promoting the same digest
-to the mutable `main` tag and the immutable `main-<full-commit>` tag. The build
-starts only after the reusable CI workflow passes both `make verify` and the
-PostgreSQL integration suite for the same commit. A rerun uses the commit's
-timestamp as the image creation time. It fails instead of replacing an existing
-immutable tag that points to another digest. The workflow also records an SBOM
-for the published image.
+Bloom images are published at `ghcr.io/bonztm/bloom`. For a commit without an
+existing immutable tag, a merge to `main` builds an amd64 image under a
+run-specific `candidate-<run>-<attempt>` tag. It tests that image by digest and
+records its provenance before promoting the same digest to the immutable
+`main-<full-commit>` tag. The mutable `main` tag moves only when its current
+revision is an ancestor of the incoming commit. A stale rerun leaves `main`
+unchanged and does not open a deployment pull request. The build starts only
+after the reusable CI workflow passes both `make verify` and the PostgreSQL
+integration suite for the same commit. Before building, the workflow resolves
+the immutable tag. A rerun reuses its existing digest, skips the build and smoke
+test, and continues promotion and deployment without replacing the immutable
+image. New images include provenance and an SBOM.
 
-A weekly cleanup deletes package versions older than seven days only when every
-tag on that version starts with `candidate-`. GHCR stores tags on a shared
-digest version, so promoted versions carry both their candidate tag and public
-tags. Those promoted candidates remain in the registry because deleting their
-package version would also delete the promoted image.
+A weekly cleanup inspects at most 1,000 package versions and deletes at most 100
+versions older than seven days only when every tag on that version starts with
+`candidate-`. It reports when either cap leaves work for the next run. GHCR
+stores tags on a shared digest version, so promoted versions carry both their
+candidate tag and public tags. Those promoted candidates remain in the registry
+because deleting their package version would also delete the promoted image.
 
-After the smoke test passes, the workflow opens a pull request in
-`bonztm/homelab`. That pull request pins both the `bloom` container and the
-`migrate` init container in `apps/internal/bloom/deployment.yaml` to the same
-`main-<commit>` tag and image digest. A rerun updates the existing pull request
-on the workflow-owned `chore/bloom-main` branch. Each run recreates that branch
-from the current homelab `main`, renders the Bloom manifests, and skips the
-commit when the manifest is already current. If homelab `main` changes before
-the branch is pushed, the run fails and a rerun starts from the newer base. If
-it changes after the push, GitHub may mark the pull request behind or
-conflicting; the next Bloom run recreates the branch from the new base. If the
-deployment file does not exist yet, the workflow skips the pull request without
-failing the image build.
+After a new image passes the smoke test, or after a rerun reuses the immutable
+digest, the workflow opens a pull request in `bonztm/homelab`. That pull request
+pins both the `bloom` container and the `migrate` init container in
+`apps/internal/bloom/deployment.yaml` to the same `main-<commit>` tag and image
+digest. A rerun updates the existing pull request on the workflow-owned
+`chore/bloom-main` branch. Each run recreates that branch from the current
+homelab `main`, renders the Bloom manifests, and skips the commit when the
+manifest is already current. If homelab `main` changes before the atomic branch
+push, its exact-OID lease rejects both ref updates and a rerun starts from the
+newer base. If it changes after the push, GitHub may mark the pull request behind
+or conflicting; the next Bloom run recreates the branch from the new base. If
+the deployment file does not exist yet, the workflow skips the pull request
+without failing the image build.
 
 Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
 deployment. A `v1.2.3` release publishes immutable `v1.2.3` and `1.2.3` tags.

@@ -12,8 +12,9 @@ contracts) gets an entry here.
 ### Added
 
 - Main-branch and tagged-release image publishing with candidate-first smoke
-  tests, required CI and PostgreSQL gates, pre-promotion provenance, guarded
-  stable aliases, seven-day cleanup of unpromoted candidates, anonymous-pull
+  tests, immutable-image reuse on reruns, required CI and PostgreSQL gates,
+  pre-promotion provenance, ancestry-guarded `main` and version-guarded stable
+  aliases, bounded seven-day cleanup of unpromoted candidates, anonymous-pull
   validation, an SBOM, and one reusable automated homelab deployment pull
   request.
 - Bootstrap of the service: Go HTTP server with `/livez`, `/readyz`, `/metrics`,

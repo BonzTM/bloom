@@ -65,8 +65,8 @@ jobs:
       contents: read
       packages: write
     outputs:
-      candidate: ${{ steps.vars.outputs.candidate }}
-      digest: ${{ steps.build.outputs.digest }}
+      digest: ${{ steps.resolve.outputs.digest || steps.build.outputs.digest }}
+      reused: ${{ steps.resolve.outputs.exists }}
       version: ${{ steps.vars.outputs.version }}
     steps:
       - name: Check out Bloom
@@ -87,6 +87,7 @@ jobs:
           {
             echo "candidate=${IMAGE_NAME}:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             echo "created=$(date --utc --date="@${commit_epoch}" +%Y-%m-%dT%H:%M:%SZ)"
+            echo "immutable-tag=${version}"
             echo "version=${version}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -100,8 +101,47 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      - name: Resolve immutable image
+        id: resolve
+        shell: bash
+        env:
+          EXPECTED_TAG: ${{ steps.vars.outputs.immutable-tag }}
+          EXPECTED_VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+          error_file="$(mktemp)"
+          trap 'rm -f -- "${error_file}"' EXIT
+          if ! digest="$({
+            docker buildx imagetools inspect "${IMAGE_NAME}:${EXPECTED_TAG}" \
+              --format '{{json .Manifest}}' | jq --exit-status --raw-output .digest
+          } 2>"${error_file}")"; then
+            if grep -Eqi 'manifest unknown|not found' "${error_file}"; then
+              echo "exists=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            cat "${error_file}" >&2
+            exit 1
+          fi
+
+          image_json="$(docker buildx imagetools inspect "${IMAGE_NAME}:${EXPECTED_TAG}" \
+            --format '{{json .Image}}')"
+          revision="$(jq --exit-status --raw-output \
+            '.config.Labels["org.opencontainers.image.revision"]' <<<"${image_json}")"
+          version="$(jq --exit-status --raw-output \
+            '.config.Labels["org.opencontainers.image.version"]' <<<"${image_json}")"
+          if [[ "${revision}" != "${GITHUB_SHA}" || "${version}" != "${EXPECTED_VERSION}" ]]; then
+            echo "::error title=Immutable image metadata conflict::${IMAGE_NAME}:${EXPECTED_TAG} has revision ${revision} and version ${version}."
+            exit 1
+          fi
+          {
+            echo "digest=${digest}"
+            echo "exists=true"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice title=Immutable image reused::${IMAGE_NAME}:${EXPECTED_TAG} already exists at ${digest}; build and smoke test are skipped."
+
       - name: Build and push candidate
         id: build
+        if: steps.resolve.outputs.exists == 'false'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -118,6 +158,7 @@ jobs:
           sbom: true
 
   smoke:
+    if: needs.build.outputs.reused == 'false'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -195,6 +236,10 @@ jobs:
             "${version_file}" >/dev/null
 
   promote:
+    if: >-
+      ${{ always() && needs.build.result == 'success' &&
+          ((needs.build.outputs.reused == 'true' && needs.smoke.result == 'skipped') ||
+           (needs.build.outputs.reused == 'false' && needs.smoke.result == 'success')) }}
     needs: [validate, build, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -205,6 +250,7 @@ jobs:
       attestations: write
     outputs:
       digest: ${{ needs.build.outputs.digest }}
+      main-current: ${{ steps.promote.outputs.main-current }}
     steps:
       - name: Log in to ghcr.io
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -214,6 +260,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest candidate image provenance
+        if: needs.build.outputs.reused == 'false'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_NAME }}
@@ -223,7 +270,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Promote candidate digest
+      - name: Check out Bloom history
+        if: needs.validate.outputs.release-kind == 'main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Promote image digest
+        id: promote
         shell: bash
         env:
           DIGEST: ${{ needs.build.outputs.digest }}
@@ -293,11 +347,39 @@ jobs:
             tags+=("${alias}")
           }
 
+          add_main_alias() {
+            if existing_digest="$(inspect_digest main)"; then
+              existing_revision="$(docker buildx imagetools inspect "${IMAGE_NAME}:main" \
+                --format '{{json .Image}}' | jq --exit-status --raw-output \
+                '.config.Labels["org.opencontainers.image.revision"]')"
+            else
+              status=$?
+              if [[ "${status}" == 2 ]]; then
+                tags+=(main)
+                echo "main-current=true" >> "${GITHUB_OUTPUT}"
+                return 0
+              fi
+              return "${status}"
+            fi
+
+            if [[ ! "${existing_revision}" =~ ^[0-9a-f]{40}$ ]] || \
+              ! git cat-file -e "${existing_revision}^{commit}" 2>/dev/null || \
+              ! git merge-base --is-ancestor "${existing_revision}" "${GITHUB_SHA}"; then
+              echo "main-current=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice title=Main image alias unchanged::${IMAGE_NAME}:main remains at ${existing_digest}; revision ${existing_revision} is not a known ancestor of ${GITHUB_SHA}."
+              return 0
+            fi
+
+            tags+=(main)
+            echo "main-current=true" >> "${GITHUB_OUTPUT}"
+          }
+
           tags=()
           if [[ "${RELEASE_KIND}" == "main" ]]; then
             immutable_tag="main-${GITHUB_SHA}"
             check_immutable_tag "${immutable_tag}"
-            tags=(main "${immutable_tag}")
+            tags=("${immutable_tag}")
+            add_main_alias
           else
             check_immutable_tag "${GITHUB_REF_NAME}"
             tags=("${GITHUB_REF_NAME}")
@@ -323,7 +405,7 @@ jobs:
           done
 
   deploy-pr:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.promote.outputs.main-current == 'true'
     needs: [build, promote]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -433,14 +515,12 @@ jobs:
 
           Image digest: ${DIGEST}"
 
-          current_main_oid="$(git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
-          if [[ "${current_main_oid}" != "${BASE_OID}" ]]; then
-            echo "::error title=Homelab main moved::Rerun to recreate ${BRANCH} from current main."
-            exit 1
-          fi
-          git push \
+          git push --atomic \
+            --force-with-lease="refs/heads/main:${BASE_OID}" \
             --force-with-lease="refs/heads/${BRANCH}:${REMOTE_BRANCH_OID}" \
-            origin "HEAD:refs/heads/${BRANCH}"
+            origin \
+            "${BASE_OID}:refs/heads/main" \
+            "HEAD:refs/heads/${BRANCH}"
           echo "changed=true" >> "${GITHUB_OUTPUT}"
 
       - name: Open or update deployment pull request
