@@ -166,8 +166,11 @@ workflow reports and skips only those provenance steps. In both modes, fresh
 candidates are built and smoke-tested by digest, image labels and versions are
 checked, and an attached SPDX SBOM must be present. Private-mode reuse therefore
 rejects a legacy immutable image without an SBOM or with mismatched labels.
-Making the repository public enables signed provenance on the next run with no
-workflow change.
+Making the repository public turns signed provenance on for the next fresh
+build with no workflow change. An immutable tag that was published while the
+repository was private has no attestation, so a rerun of that same commit will
+refuse to reuse it once attestations are required; delete that package version
+once and rerun to rebuild it with provenance.
 
 A weekly cleanup inspects a rotating window of at most 1,000 package versions and
 deletes at most 100 versions older than seven days only when every tag on that

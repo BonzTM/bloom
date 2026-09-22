@@ -20,8 +20,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    permissions:
-      contents: read
+    permissions: {}
     outputs:
       attestations-available: ${{ steps.repository.outputs.attestations-available }}
       release-kind: ${{ steps.ref.outputs.release-kind }}
@@ -55,24 +54,25 @@ jobs:
           echo "::error title=Unsupported image ref::Select main or a tag such as v1.2.3 or v1.2.3-rc.1."
           exit 1
 
-      - name: Detect repository visibility
+      - name: Detect attestation availability
         id: repository
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Both triggers carry the repository object, so no API call is needed.
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           set -euo pipefail
-          private="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .private)"
-          if [[ "${private}" == "false" ]]; then
-            echo "attestations-available=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          if [[ "${private}" == "true" ]]; then
-            echo "attestations-available=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          echo "::error title=Invalid repository visibility::GitHub returned an unexpected private value: ${private}"
-          exit 1
+          # GitHub offers artifact attestations to public repositories, and to
+          # private ones only on GitHub Enterprise Cloud. This is a user-owned
+          # repository, so private means unavailable on the current plan.
+          case "${REPOSITORY_PRIVATE}" in
+            false) echo "attestations-available=true" >> "${GITHUB_OUTPUT}" ;;
+            true) echo "attestations-available=false" >> "${GITHUB_OUTPUT}" ;;
+            *)
+              echo "::error title=Unknown repository visibility::github.event.repository.private was '${REPOSITORY_PRIVATE}'"
+              exit 1
+              ;;
+          esac
 
   verification:
     needs: validate
@@ -169,7 +169,7 @@ jobs:
               exit 1
             fi
           else
-            echo "::notice title=Immutable image provenance verification skipped::Artifact attestations require a public repository."
+            echo "::notice title=Immutable image provenance verification skipped::Artifact attestations are unavailable for this repository on its current plan (private repositories need GitHub Enterprise Cloud)."
           fi
           if ! docker buildx imagetools inspect "${IMAGE_NAME}@${digest}" \
             --format '{{json .SBOM}}' | jq --exit-status '
@@ -326,7 +326,7 @@ jobs:
               needs.validate.outputs.attestations-available == 'false' }}
         shell: bash
         run: |
-          echo "::notice title=Candidate provenance attestation skipped::Artifact attestations require a public repository."
+          echo "::notice title=Candidate provenance attestation skipped::Artifact attestations are unavailable for this repository on its current plan (private repositories need GitHub Enterprise Cloud)."
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -481,7 +481,7 @@ jobs:
               --source-digest "${GITHUB_SHA}" \
               --signer-workflow BonzTM/bloom/.github/workflows/image.yml >/dev/null
           else
-            echo "::notice title=Promoted image provenance verification skipped::Artifact attestations require a public repository."
+            echo "::notice title=Promoted image provenance verification skipped::Artifact attestations are unavailable for this repository on its current plan (private repositories need GitHub Enterprise Cloud)."
           fi
           docker buildx imagetools inspect "${IMAGE_NAME}@${DIGEST}" \
             --format '{{json .SBOM}}' | jq --exit-status '
