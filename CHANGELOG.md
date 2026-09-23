@@ -27,6 +27,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- Media servers page in the administration area (`/admin/media-servers`,
+  guarded by `admin.settings`): register a Jellyfin server with its API key,
+  see the capabilities Bloom detected, and remove it.
 - Automatic first-administrator startup bootstrap with the `admin` username,
   the built-in `owner` role, and the optional `BLOOM_BOOTSTRAP_USERNAME`
   override. Existing accounts are never changed, and concurrent startup

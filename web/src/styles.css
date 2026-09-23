@@ -90,12 +90,14 @@ input[aria-invalid="true"] {
   margin-left: auto;
 }
 
-.roles-table {
+.roles-table,
+.media-servers-table {
   border-collapse: collapse;
   width: 100%;
 }
 
-.roles-table caption {
+.roles-table caption,
+.media-servers-table caption {
   caption-side: bottom;
   color: #4a5568;
   font-size: 0.875rem;
@@ -104,18 +106,22 @@ input[aria-invalid="true"] {
 }
 
 .roles-table th,
-.roles-table td {
+.roles-table td,
+.media-servers-table th,
+.media-servers-table td {
   border-bottom: 1px solid #ccd3df;
   padding: 0.5rem;
   text-align: left;
   vertical-align: top;
 }
 
-.roles-table th[scope="col"] {
+.roles-table th[scope="col"],
+.media-servers-table th[scope="col"] {
   border-bottom-width: 2px;
 }
 
-.permission-list {
+.permission-list,
+.capability-list {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
@@ -129,6 +135,28 @@ input[aria-invalid="true"] {
   border-radius: 0.25rem;
   font-size: 0.8125rem;
   padding: 0.125rem 0.375rem;
+}
+
+.checkbox-field label {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.media-servers-table time {
+  white-space: nowrap;
+}
+
+.transport-warning {
+  color: #8a4b00;
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0;
+}
+
+.confirm-remove {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .pager {
