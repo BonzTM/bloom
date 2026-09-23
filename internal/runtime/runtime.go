@@ -47,14 +47,15 @@ type Streams struct {
 // Dependencies are process facilities injected for deterministic startup and
 // retry tests. Production Run supplies their system implementations.
 type Dependencies struct {
-	Clock             core.Clock
-	OIDCRandom        func(time.Duration) (time.Duration, error)
-	OIDCWait          func(context.Context, time.Duration) error
-	ListenerReady     func(net.Addr)
-	newTracerProvider func(context.Context, config.TelemetryConfig, string, string) (tracerLifecycle, error)
-	openStore         func(context.Context, config.Config, *slog.Logger, *telemetry.PromMetrics) (*sql.DB, error)
-	listen            func(context.Context, string, string) (net.Listener, error)
-	newOIDCProvider   func(context.Context, config.OIDCConfig, oidcadapter.Dependencies) (oidcLifecycle, error)
+	Clock              core.Clock
+	OIDCRandom         func(time.Duration) (time.Duration, error)
+	OIDCWait           func(context.Context, time.Duration) error
+	ListenerReady      func(net.Addr)
+	newTracerProvider  func(context.Context, config.TelemetryConfig, string, string) (tracerLifecycle, error)
+	openStore          func(context.Context, config.Config, *slog.Logger, *telemetry.PromMetrics) (*sql.DB, error)
+	listen             func(context.Context, string, string) (net.Listener, error)
+	newOIDCProvider    func(context.Context, config.OIDCConfig, oidcadapter.Dependencies) (oidcLifecycle, error)
+	newPlaybackManager func(playbackManagerDependencies) (*playback.Manager, error)
 }
 
 type tracerLifecycle interface {
@@ -187,7 +188,7 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	playbackStore, playbackManager, err := playbackDependencies(
-		pool, cfg, mediaServers, metrics, logger, deps.Clock,
+		pool, cfg, mediaServers, metrics, logger, deps.Clock, deps.newPlaybackManager,
 	)
 	if err != nil {
 		return serviceWiring{}, err
@@ -260,6 +261,14 @@ func runtimeDependencies(supplied []Dependencies) Dependencies {
 			ctx context.Context, cfg config.OIDCConfig, adapterDeps oidcadapter.Dependencies,
 		) (oidcLifecycle, error) {
 			return oidcadapter.New(ctx, cfg, adapterDeps)
+		}
+	}
+	if deps.newPlaybackManager == nil {
+		deps.newPlaybackManager = func(input playbackManagerDependencies) (*playback.Manager, error) {
+			return playback.NewManager(
+				input.servers, input.store, input.config, input.factory, input.clock,
+				input.logger, input.metrics, playback.ManagerOptions{},
+			)
 		}
 	}
 	return deps
@@ -384,6 +393,7 @@ func playbackDependencies(
 	metrics *telemetry.PromMetrics,
 	logger *slog.Logger,
 	clock core.Clock,
+	newManager func(playbackManagerDependencies) (*playback.Manager, error),
 ) (core.PlaybackStore, *playback.Manager, error) {
 	store, err := db.NewPlaybackStore(pool, cfg.Database.Driver)
 	if err != nil {
@@ -399,14 +409,25 @@ func playbackDependencies(
 			return mediaServers.ListSessions(ctx, server.ID)
 		})
 	}
-	manager, err := playback.NewManager(
-		mediaServers, store, collectorConfig, factory, clock, logger, metrics, playback.ManagerOptions{},
-	)
+	manager, err := newManager(playbackManagerDependencies{
+		servers: mediaServers, store: store, config: collectorConfig, factory: factory,
+		clock: clock, logger: logger, metrics: metrics,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("build playback manager: %w", err)
 	}
 	mediaServers.SetPlaybackLifecycle(manager)
 	return store, manager, nil
+}
+
+type playbackManagerDependencies struct {
+	servers *mediaserver.Service
+	store   core.PlaybackStore
+	config  playback.Config
+	factory playback.SourceFactory
+	clock   core.Clock
+	logger  *slog.Logger
+	metrics playback.Observer
 }
 
 func mediaServerDependencies(

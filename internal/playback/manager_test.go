@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ type managerServerLister struct {
 	mu      sync.Mutex
 	servers []core.MediaServerConnection
 	err     error
+	called  chan struct{}
 }
 
 func (l *managerServerLister) List(
@@ -26,6 +29,9 @@ func (l *managerServerLister) List(
 ) ([]core.MediaServerConnection, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.called != nil {
+		l.called <- struct{}{}
+	}
 	return append([]core.MediaServerConnection(nil), l.servers...), l.err
 }
 
@@ -42,6 +48,16 @@ type managerBlockingSource struct {
 	entered chan struct{}
 	exited  chan struct{}
 	once    sync.Once
+}
+
+type managerObserver struct{ refreshFailures atomic.Int32 }
+
+func (*managerObserver) ObservePlaybackPoll(string, string, float64) {}
+func (*managerObserver) SetOpenWatches(string, string, int)          {}
+func (*managerObserver) IncWatchesClosed(string, string)             {}
+
+func (o *managerObserver) IncPlaybackRefreshFailure() {
+	o.refreshFailures.Add(1)
 }
 
 func (s *managerBlockingSource) ListSessions(ctx context.Context) ([]core.PlaybackSession, error) {
@@ -71,29 +87,61 @@ func TestManagerRefreshAddsAndRemovesCollectors(t *testing.T) {
 	assertManagerStops(t, manager)
 }
 
-func TestManagerRefreshFailureStopsRunLoop(t *testing.T) {
-	lister := &managerServerLister{}
+func TestManagerRetriesInitialListFailure(t *testing.T) {
+	wantErr := errors.New("database unavailable")
+	lister := &managerServerLister{err: wantErr}
 	refresh := make(chan time.Time, 1)
+	source := &managerBlockingSource{entered: make(chan struct{}, 1), exited: make(chan struct{})}
+	observer := &managerObserver{}
+	var logs strings.Builder
+	manager := newTestManagerWithTelemetry(t, lister, &memoryPlaybackStore{}, refresh,
+		func(core.MediaServer) Source { return source },
+		slog.New(slog.NewTextHandler(&logs, nil)), observer)
+
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("Start after initial list failure: %v", err)
+	}
+	lister.mu.Lock()
+	lister.err = nil
+	lister.servers = []core.MediaServerConnection{{Server: managerTestServer()}}
+	lister.mu.Unlock()
+	refresh <- time.Time{}
+	receiveSignal(t, source.entered)
+	if got := observer.refreshFailures.Load(); got != 1 {
+		t.Fatalf("refresh failure metrics = %d, want 1", got)
+	}
+	if got := strings.Count(logs.String(), "playback manager refresh failed"); got != 1 {
+		t.Fatalf("refresh failure logs = %d, want 1: %s", got, logs.String())
+	}
+	assertManagerStops(t, manager)
+	receiveSignal(t, source.exited)
+}
+
+func TestManagerRefreshFailureKeepsRunLoopLive(t *testing.T) {
+	lister := &managerServerLister{called: make(chan struct{}, 3)}
+	refresh := make(chan time.Time, 2)
+	source := &managerBlockingSource{entered: make(chan struct{}, 1), exited: make(chan struct{})}
 	manager := newTestManager(t, lister, &memoryPlaybackStore{}, refresh, func(core.MediaServer) Source {
-		return &sequenceSource{}
+		return source
 	})
 	if err := manager.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	receiveSignal(t, lister.called)
 	wantErr := errors.New("list failed")
 	lister.mu.Lock()
 	lister.err = wantErr
 	lister.mu.Unlock()
 	refresh <- time.Time{}
-	select {
-	case err := <-manager.Errors():
-		if !errors.Is(err, wantErr) {
-			t.Fatalf("manager error = %v, want %v", err, wantErr)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("manager did not report refresh failure")
-	}
+	receiveSignal(t, lister.called)
+	lister.mu.Lock()
+	lister.err = nil
+	lister.servers = []core.MediaServerConnection{{Server: managerTestServer()}}
+	lister.mu.Unlock()
+	refresh <- time.Time{}
+	receiveSignal(t, source.entered)
 	assertManagerStops(t, manager)
+	receiveSignal(t, source.exited)
 }
 
 func TestManagerRestoresLargeOpenSetBeforeCollectorStarts(t *testing.T) {
@@ -198,11 +246,26 @@ func newTestManager(
 	factory SourceFactory,
 ) *Manager {
 	t.Helper()
+	return newTestManagerWithTelemetry(
+		t, lister, store, refresh, factory, slog.New(slog.DiscardHandler), nil,
+	)
+}
+
+func newTestManagerWithTelemetry(
+	t *testing.T,
+	lister serverLister,
+	store core.PlaybackStore,
+	refresh <-chan time.Time,
+	factory SourceFactory,
+	logger *slog.Logger,
+	observer Observer,
+) *Manager {
+	t.Helper()
 	manager, err := NewManager(lister, store, Config{
 		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
 		MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
 	}, factory, testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)),
-		slog.New(slog.DiscardHandler), nil, ManagerOptions{
+		logger, observer, ManagerOptions{
 			Refresh: refresh,
 			Wait: func(ctx context.Context, _ time.Duration) error {
 				if err := ctx.Err(); err != nil {

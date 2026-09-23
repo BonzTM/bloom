@@ -34,7 +34,8 @@ func baseConfig(t *testing.T, addr string) config.Config {
 			WriteTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxBodyBytes: 1 << 20,
 		},
 		Database: config.DatabaseConfig{
-			Driver: config.DriverSQLite, DSN: "file:" + filepath.Join(t.TempDir(), "bloom.db") + "?_pragma=foreign_keys(1)",
+			Driver: config.DriverSQLite, DSN: "file:" + filepath.Join(t.TempDir(), "bloom.db") +
+				"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)",
 			MaxOpenConns: 2, MaxIdleConns: 2, ConnMaxLifetime: time.Minute, ConnMaxIdleTime: time.Minute,
 		},
 		Telemetry: config.TelemetryConfig{LogFormat: config.LogFormatJSON, TraceSampleRatio: 1},

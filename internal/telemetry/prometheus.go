@@ -24,27 +24,28 @@ import (
 // class): request IDs, user IDs, and raw paths are NEVER used as labels because
 // they would blow up the time-series cardinality.
 type PromMetrics struct {
-	registry               *prometheus.Registry
-	requests               *prometheus.CounterVec
-	requestSeconds         *prometheus.HistogramVec
-	loginAttempts          *prometheus.CounterVec
-	csrfRejections         prometheus.Counter
-	auditWriteFailures     prometheus.Counter
-	sessionCleanupFailures prometheus.Counter
-	authorizationDenials   *prometheus.CounterVec
-	mediaServerRequests    *prometheus.CounterVec
-	mediaServerSeconds     *prometheus.HistogramVec
-	mediaServerRetries     *prometheus.CounterVec
-	oidcDependencyEvents   *prometheus.CounterVec
-	oidcDependencySeconds  *prometheus.HistogramVec
-	inviteCreations        *prometheus.CounterVec
-	inviteAcceptances      *prometheus.CounterVec
-	playbackPolls          *prometheus.CounterVec
-	playbackPollSeconds    *prometheus.HistogramVec
-	playbackOpenWatches    *prometheus.GaugeVec
-	playbackWatchesClosed  *prometheus.CounterVec
-	playbackMu             sync.Mutex
-	playbackOpenByServer   map[string]int
+	registry                *prometheus.Registry
+	requests                *prometheus.CounterVec
+	requestSeconds          *prometheus.HistogramVec
+	loginAttempts           *prometheus.CounterVec
+	csrfRejections          prometheus.Counter
+	auditWriteFailures      prometheus.Counter
+	sessionCleanupFailures  prometheus.Counter
+	authorizationDenials    *prometheus.CounterVec
+	mediaServerRequests     *prometheus.CounterVec
+	mediaServerSeconds      *prometheus.HistogramVec
+	mediaServerRetries      *prometheus.CounterVec
+	oidcDependencyEvents    *prometheus.CounterVec
+	oidcDependencySeconds   *prometheus.HistogramVec
+	inviteCreations         *prometheus.CounterVec
+	inviteAcceptances       *prometheus.CounterVec
+	playbackPolls           *prometheus.CounterVec
+	playbackPollSeconds     *prometheus.HistogramVec
+	playbackOpenWatches     *prometheus.GaugeVec
+	playbackWatchesClosed   *prometheus.CounterVec
+	playbackRefreshFailures prometheus.Counter
+	playbackMu              sync.Mutex
+	playbackOpenByServer    map[string]int
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -59,6 +60,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	inviteCreations := newOutcomeCounter(namespace, "invite_creations_total", "Total invite creation attempts by finite outcome.")
 	inviteAcceptances := newOutcomeCounter(namespace, "invite_acceptances_total", "Total invite acceptance attempts by finite outcome.")
 	playbackCollectors := newPlaybackCollectors(namespace)
+	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
+		"Total failed playback manager refresh attempts.")
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -77,7 +80,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		inviteAcceptances:     inviteAcceptances,
 		playbackPolls:         playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
 		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
-		playbackOpenByServer: make(map[string]int),
+		playbackRefreshFailures: playbackRefreshFailures,
+		playbackOpenByServer:    make(map[string]int),
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -243,6 +247,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.playbackPollSeconds,
 		m.playbackOpenWatches,
 		m.playbackWatchesClosed,
+		m.playbackRefreshFailures,
 	)
 }
 
@@ -291,6 +296,9 @@ func (m *PromMetrics) IncWatchesClosed(kind, reason string) {
 	}
 	m.playbackWatchesClosed.WithLabelValues(kind, reason).Inc()
 }
+
+// IncPlaybackRefreshFailure records one failed media-server listing attempt.
+func (m *PromMetrics) IncPlaybackRefreshFailure() { m.playbackRefreshFailures.Inc() }
 
 func boundedMediaKind(kind string) string {
 	if kind == string(core.MediaServerKindJellyfin) {

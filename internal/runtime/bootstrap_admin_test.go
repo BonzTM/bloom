@@ -29,7 +29,8 @@ func (bootstrapTestClock) Now() time.Time {
 }
 
 func TestBootstrapAdminSQLite(t *testing.T) {
-	dsn := "file:" + t.TempDir() + "/bloom.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	dsn := "file:" + t.TempDir() +
+		"/bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 	pool := openBootstrapTestDatabase(t, config.DriverSQLite, dsn)
 	runBootstrapAdminEngineSuite(t, pool, config.DriverSQLite, dsn)
 }
