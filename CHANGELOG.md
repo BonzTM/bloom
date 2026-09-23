@@ -31,6 +31,11 @@ contracts) gets an entry here.
 
 ### Added
 
+- Administrators can prepare requests from the web UI: store or remove the
+  TMDB API key (its presence is shown, the key never is), manage request
+  profiles that name the download manager, quality profile, root folder, and
+  tags an approved request is sent to, and approve or decline pending requests
+  with an optional reason from a queue filtered by status.
 - Runtime restart coverage on SQLite and PostgreSQL proves that database-backed
   browser sessions survive process replacement and logout revocations remain
   effective.

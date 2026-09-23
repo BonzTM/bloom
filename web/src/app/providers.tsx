@@ -9,6 +9,8 @@ import type { MediaServersApi } from "../features/media-servers/api/media-server
 import { MediaServersApiContext } from "../features/media-servers/media-servers-context.js";
 import type { PlaybackApi } from "../features/playback/api/playback-api.js";
 import { PlaybackApiContext } from "../features/playback/playback-context.js";
+import type { RequestsApi } from "../features/requests/api/requests-api.js";
+import { RequestsApiContext } from "../features/requests/requests-context.js";
 import type { RolesApi } from "../features/roles/api/roles-api.js";
 import { RolesApiContext } from "../features/roles/roles-context.js";
 import type { SystemApi } from "../features/system/api/system-api.js";
@@ -21,6 +23,7 @@ type AppProvidersProps = Readonly<{
   mediaServersApi: MediaServersApi;
   invitesApi: InvitesApi;
   playbackApi: PlaybackApi;
+  requestsApi: RequestsApi;
   queryClient: QueryClient;
   router: RouterProviderProps["router"];
 }>;
@@ -32,6 +35,7 @@ export function AppProviders({
   mediaServersApi,
   invitesApi,
   playbackApi,
+  requestsApi,
   queryClient,
   router,
 }: AppProvidersProps): ReactNode {
@@ -43,7 +47,9 @@ export function AppProviders({
             <MediaServersApiContext value={mediaServersApi}>
               <InvitesApiContext value={invitesApi}>
                 <PlaybackApiContext value={playbackApi}>
-                  <RouterProvider router={router} />
+                  <RequestsApiContext value={requestsApi}>
+                    <RouterProvider router={router} />
+                  </RequestsApiContext>
                 </PlaybackApiContext>
               </InvitesApiContext>
             </MediaServersApiContext>

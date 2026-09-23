@@ -23,6 +23,14 @@ import type {
   HistoryWatch,
   Watch,
 } from "../features/playback/api/playback-schemas.js";
+import {
+  metadataKeyRequestSchema,
+  requestDecisionSchema,
+  requestProfileInputSchema,
+  requestStatusSchema,
+  type MediaRequest,
+  type RequestProfile,
+} from "../features/requests/api/requests-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -762,7 +770,364 @@ function playbackHistory(url: URL) {
   return pagedItems(url, playbackHistoryQuerySchema, items);
 }
 
+// Requests: profiles, the TMDB key's presence, and the requests themselves.
+// Decisions change the working copy only; the key is never kept, only the
+// fact that one was stored.
+const MAX_PROFILE_CURSOR_LENGTH = 100;
+const MAX_REQUEST_CURSOR_LENGTH = 140;
+export const REQUESTER_ALICE = "0b6c3d2e-1111-4a2b-9c3d-000000000002";
+export const REQUESTER_BOB = "0b6c3d2e-1111-4a2b-9c3d-000000000003";
+export const PROFILE_MOVIES = "9c1d2e3f-0000-4000-8000-000000000001";
+export const PROFILE_SERIES = "9c1d2e3f-0000-4000-8000-000000000002";
+export const INVALID_TMDB_KEY = "rejected-key";
+
+export const mockRequestProfiles: readonly RequestProfile[] = [
+  {
+    id: PROFILE_MOVIES,
+    name: "Movies HD",
+    kinds: ["movie"],
+    download_manager_kind: "radarr",
+    download_manager_instance: "radarr-main",
+    quality_profile: "HD-1080p",
+    root_folder: "/data/movies",
+    tags: ["bloom"],
+    created_at: "2026-09-15T10:00:00Z",
+    updated_at: "2026-09-15T10:00:00Z",
+  },
+  {
+    id: PROFILE_SERIES,
+    name: "Series",
+    kinds: ["series"],
+    download_manager_kind: "sonarr",
+    download_manager_instance: "sonarr-main",
+    quality_profile: "Any",
+    root_folder: "/data/tv",
+    tags: [],
+    created_at: "2026-09-16T10:00:00Z",
+    updated_at: "2026-09-16T10:00:00Z",
+  },
+];
+
+function mediaRequest(overrides: Partial<MediaRequest>): MediaRequest {
+  return {
+    id: "5e4d3c2b-0000-4000-8000-000000000000",
+    kind: "movie",
+    provider: "tmdb",
+    provider_id: "949",
+    title: "Heat",
+    year: 1995,
+    poster_path: "/heat.jpg",
+    requester_account_id: REQUESTER_ALICE,
+    profile_id: PROFILE_MOVIES,
+    status: "pending",
+    seasons: [],
+    decision_reason: "",
+    decided_by_account_id: "",
+    created_at: "2026-09-22T09:00:00Z",
+    updated_at: "2026-09-22T09:00:00Z",
+    ...overrides,
+  };
+}
+
+// Newest first, as the server orders them.
+export const mockRequests: readonly MediaRequest[] = [
+  mediaRequest({
+    id: "5e4d3c2b-0000-4000-8000-000000000001",
+    kind: "series",
+    provider_id: "1396",
+    title: "The Arrival",
+    year: 2021,
+    poster_path: "/arrival.jpg",
+    requester_account_id: REQUESTER_BOB,
+    profile_id: PROFILE_SERIES,
+    seasons: [
+      { number: 1, status: "pending" },
+      { number: 2, status: "pending" },
+    ],
+    created_at: "2026-09-23T08:00:00Z",
+    updated_at: "2026-09-23T08:00:00Z",
+  }),
+  mediaRequest({ id: "5e4d3c2b-0000-4000-8000-000000000002" }),
+  mediaRequest({
+    id: "5e4d3c2b-0000-4000-8000-000000000003",
+    provider_id: "1124",
+    title: "The Prestige",
+    year: 2006,
+    poster_path: "",
+    status: "declined",
+    decision_reason: "Already on the shelf.",
+    decided_by_account_id: mockAccount.id,
+    decided_at: "2026-09-21T12:00:00Z",
+    created_at: "2026-09-20T09:00:00Z",
+    updated_at: "2026-09-21T12:00:00Z",
+  }),
+  mediaRequest({
+    id: "5e4d3c2b-0000-4000-8000-000000000004",
+    provider_id: "27205",
+    title: "Inception",
+    year: 2010,
+    status: "available",
+    decided_by_account_id: mockAccount.id,
+    decided_at: "2026-09-19T12:00:00Z",
+    created_at: "2026-09-18T09:00:00Z",
+    updated_at: "2026-09-19T13:00:00Z",
+  }),
+];
+
+let requestProfiles: RequestProfile[] = [...mockRequestProfiles];
+let requests: MediaRequest[] = [...mockRequests];
+let tmdbKeyConfigured = false;
+let createdProfiles = 0;
+
+export function resetMockRequests(): void {
+  requestProfiles = [...mockRequestProfiles];
+  requests = [...mockRequests];
+  tmdbKeyConfigured = false;
+  createdProfiles = 0;
+}
+
+export function setMockTmdbKeyConfigured(configured: boolean): void {
+  tmdbKeyConfigured = configured;
+}
+
+const profilesQuerySchema = pageQuerySchema(MAX_PROFILE_CURSOR_LENGTH);
+const requestsQuerySchema = pageQuerySchema(MAX_REQUEST_CURSOR_LENGTH);
+
+function permissionDenial(permission: KnownPermission) {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes(permission)) {
+    return envelope(403, "forbidden", `missing permission ${permission}`);
+  }
+  return undefined;
+}
+
+function byName(a: RequestProfile, b: RequestProfile): number {
+  return a.name.localeCompare(b.name, "en");
+}
+
+async function saveProfile(request: Request, id: string | undefined) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = requestProfileInputSchema.safeParse(await request.json());
+  if (!input.success) {
+    return envelope(422, "validation_failed", "invalid profile");
+  }
+  const existing = requestProfiles.find((profile) => profile.id === id);
+  if (id !== undefined && existing === undefined) {
+    return envelope(404, "not_found", "profile not found");
+  }
+  const name = input.data.name.toLowerCase();
+  if (
+    requestProfiles.some(
+      (profile) => profile.id !== id && profile.name.toLowerCase() === name,
+    )
+  ) {
+    return envelope(409, "already_exists", "a profile uses that name");
+  }
+  createdProfiles += existing === undefined ? 1 : 0;
+  const ordinal = String(createdProfiles).padStart(2, "0");
+  const profile: RequestProfile = {
+    id: existing?.id ?? `9c1d2e3f-0000-4000-8000-0000000001${ordinal}`,
+    ...input.data,
+    created_at: existing?.created_at ?? "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  };
+  requestProfiles = [
+    ...requestProfiles.filter((candidate) => candidate.id !== profile.id),
+    profile,
+  ].sort(byName);
+  return HttpResponse.json(profile, {
+    status: existing === undefined ? 201 : 200,
+  });
+}
+
+function removeProfile(id: string | readonly string[] | undefined) {
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return envelope(422, "validation_failed", "invalid id");
+  }
+  if (!requestProfiles.some((profile) => profile.id === id)) {
+    return envelope(404, "not_found", "profile not found");
+  }
+  if (requests.some((request) => request.profile_id === id)) {
+    return envelope(409, "already_exists", "requests reference this profile");
+  }
+  requestProfiles = requestProfiles.filter((profile) => profile.id !== id);
+  return new HttpResponse(null, { status: 204 });
+}
+
+function listRequests(url: URL) {
+  const statuses = url.searchParams.getAll("status");
+  const requesters = url.searchParams.getAll("requester_id");
+  if (statuses.length > 1 || requesters.length > 1) {
+    return envelope(422, "validation_failed", "repeated filter");
+  }
+  const status = requestStatusSchema.safeParse(statuses[0]);
+  if (statuses[0] !== undefined && !status.success) {
+    return envelope(422, "validation_failed", "invalid status");
+  }
+  if (
+    requesters[0] !== undefined &&
+    !z.uuid().safeParse(requesters[0]).success
+  ) {
+    return envelope(422, "validation_failed", "invalid requester_id");
+  }
+  const items = requests.filter(
+    (request) =>
+      (statuses[0] === undefined || request.status === statuses[0]) &&
+      (requesters[0] === undefined ||
+        request.requester_account_id === requesters[0]),
+  );
+  return pagedItems(url, requestsQuerySchema, items);
+}
+
+async function decideRequest(
+  id: string | readonly string[] | undefined,
+  verb: "approve" | "decline",
+  request: Request,
+) {
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return envelope(422, "validation_failed", "invalid id");
+  }
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = requestDecisionSchema.safeParse(await request.json());
+  if (!input.success) {
+    return envelope(422, "validation_failed", "invalid decision");
+  }
+  const existing = requests.find((candidate) => candidate.id === id);
+  if (existing === undefined) {
+    return envelope(404, "not_found", "request not found");
+  }
+  if (existing.status !== "pending") {
+    return envelope(409, "already_exists", "request already decided");
+  }
+  const status = verb === "approve" ? "approved" : "declined";
+  const decided: MediaRequest = {
+    ...existing,
+    status,
+    seasons: existing.seasons.map((season) => ({ ...season, status })),
+    decision_reason: input.data.reason ?? "",
+    decided_by_account_id: mockAccount.id,
+    decided_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  };
+  requests = requests.map((candidate) =>
+    candidate.id === id ? decided : candidate,
+  );
+  return HttpResponse.json(decided);
+}
+
+async function storeTmdbKey(request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = metadataKeyRequestSchema.safeParse(await request.json());
+  if (!input.success || input.data.api_key === INVALID_TMDB_KEY) {
+    return envelope(422, "validation_failed", "invalid api key");
+  }
+  tmdbKeyConfigured = true;
+  return HttpResponse.json({ configured: true });
+}
+
+function removeTmdbKey() {
+  if (!tmdbKeyConfigured) {
+    return envelope(404, "not_found", "no key stored");
+  }
+  tmdbKeyConfigured = false;
+  return new HttpResponse(null, { status: 204 });
+}
+
+const requestHandlers = [
+  http.get(
+    "*/api/v1/request-profiles",
+    jsonApi(
+      ({ request }) =>
+        permissionDenial("admin.settings") ??
+        pagedItems(new URL(request.url), profilesQuerySchema, requestProfiles),
+    ),
+  ),
+  http.post(
+    "*/api/v1/request-profiles",
+    jsonApi(
+      async ({ request }) =>
+        permissionDenial("admin.settings") ??
+        (await saveProfile(request, undefined)),
+    ),
+  ),
+  http.put(
+    "*/api/v1/request-profiles/:id",
+    jsonApi(async ({ params, request }) => {
+      const denied = permissionDenial("admin.settings");
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (
+        typeof params.id !== "string" ||
+        !z.uuid().safeParse(params.id).success
+      ) {
+        return envelope(422, "validation_failed", "invalid id");
+      }
+      return saveProfile(request, params.id);
+    }),
+  ),
+  http.delete(
+    "*/api/v1/request-profiles/:id",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("admin.settings") ?? removeProfile(params.id),
+    ),
+  ),
+  http.get(
+    "*/api/v1/requests",
+    jsonApi(
+      ({ request }) =>
+        permissionDenial("requests.approve") ??
+        listRequests(new URL(request.url)),
+    ),
+  ),
+  http.post(
+    "*/api/v1/requests/:id/approve",
+    jsonApi(
+      async ({ params, request }) =>
+        permissionDenial("requests.approve") ??
+        (await decideRequest(params.id, "approve", request)),
+    ),
+  ),
+  http.post(
+    "*/api/v1/requests/:id/decline",
+    jsonApi(
+      async ({ params, request }) =>
+        permissionDenial("requests.approve") ??
+        (await decideRequest(params.id, "decline", request)),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/providers/tmdb/key",
+    jsonApi(
+      () =>
+        permissionDenial("admin.settings") ??
+        HttpResponse.json({ configured: tmdbKeyConfigured }),
+    ),
+  ),
+  http.put(
+    "*/api/v1/metadata/providers/tmdb/key",
+    jsonApi(
+      async ({ request }) =>
+        permissionDenial("admin.settings") ?? (await storeTmdbKey(request)),
+    ),
+  ),
+  http.delete(
+    "*/api/v1/metadata/providers/tmdb/key",
+    jsonApi(() => permissionDenial("admin.settings") ?? removeTmdbKey()),
+  ),
+];
+
 export const handlers = [
+  ...requestHandlers,
   http.get(
     "*/api/v1/playback/now",
     jsonApi(

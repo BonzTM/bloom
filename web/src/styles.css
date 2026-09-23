@@ -574,6 +574,61 @@ button:disabled {
   color: var(--text);
 }
 
+/* Text that only assistive technology reads: a button says "Approve" on
+   screen and "Approve Heat (1995)" to a screen reader. */
+.visually-hidden {
+  block-size: 1px;
+  clip-path: inset(50%);
+  inline-size: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.row-detail {
+  color: var(--text-muted);
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.checkbox-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.checkbox-group legend {
+  padding-inline: var(--space-1);
+}
+
+.decision-form {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 16rem;
+}
+
+.decision-form textarea {
+  border-color: var(--control-border);
+  resize: vertical;
+}
+
+.key-presence {
+  margin-block: var(--space-2);
+}
+
 .confirm-remove {
   display: inline-flex;
   flex-wrap: wrap;
