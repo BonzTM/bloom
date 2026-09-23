@@ -89,3 +89,57 @@ input[aria-invalid="true"] {
   gap: 0.5rem;
   margin-left: auto;
 }
+
+.roles-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.roles-table caption {
+  caption-side: bottom;
+  color: #4a5568;
+  font-size: 0.875rem;
+  padding-top: 0.5rem;
+  text-align: left;
+}
+
+.roles-table th,
+.roles-table td {
+  border-bottom: 1px solid #ccd3df;
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.roles-table th[scope="col"] {
+  border-bottom-width: 2px;
+}
+
+.permission-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.permission-list code {
+  background: #eef1f6;
+  border-radius: 0.25rem;
+  font-size: 0.8125rem;
+  padding: 0.125rem 0.375rem;
+}
+
+.pager {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+
+.stale-warning {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}

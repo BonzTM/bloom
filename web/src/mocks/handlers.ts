@@ -7,6 +7,7 @@ import {
   type KnownPermission,
   type Session,
 } from "../features/auth/api/auth-schemas.js";
+import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
 export const mockVersion: VersionInfo = {
@@ -30,6 +31,58 @@ export const mockSession: Session = {
   roles: ["admin"],
   permissions: [...allPermissions],
 };
+
+// Roles the mock server lists: the built-in ones plus enough custom roles
+// that the contract's default page of 50 is exercised by the real client
+// request. Cursors are the offset of the next page.
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
+const MAX_CURSOR_LENGTH = 86;
+const MAX_INT64 = 9_223_372_036_854_775_807n;
+const CUSTOM_ROLE_COUNT = 49;
+
+function customRole(index: number): Role {
+  const ordinal = String(index).padStart(2, "0");
+  return {
+    id: `8e1c2f7a-0000-4000-8000-0000000001${ordinal}`,
+    name: `custom-${ordinal}`,
+    description: `Custom role ${ordinal}.`,
+    built_in: false,
+    created_at: "2026-09-10T08:30:00Z",
+    permissions: ["requests.read.own"],
+  };
+}
+
+// Ordered by name, as the server orders them.
+export const mockRoles: readonly Role[] = [
+  {
+    id: "8e1c2f7a-0000-4000-8000-000000000001",
+    name: "admin",
+    description: "Full access to every part of Bloom.",
+    built_in: true,
+    created_at: "2026-09-01T12:00:00Z",
+    permissions: [...allPermissions],
+  },
+  ...Array.from({ length: CUSTOM_ROLE_COUNT }, (_, index) =>
+    customRole(index + 1),
+  ),
+  {
+    id: "8e1c2f7a-0000-4000-8000-000000000002",
+    name: "member",
+    description: "Request media and see their own statistics.",
+    built_in: true,
+    created_at: "2026-09-01T12:00:00Z",
+    permissions: ["requests.create", "requests.read.own", "stats.read.own"],
+  },
+  {
+    id: "8e1c2f7a-0000-4000-8000-000000000003",
+    name: "reviewer",
+    description: "Approve requests.",
+    built_in: false,
+    created_at: "2026-09-10T08:30:00Z",
+    permissions: ["requests.approve", "requests.read.own"],
+  },
+];
 
 // Credentials the mock backend accepts. Anything else is a 401, and the
 // username "locked" is always rate limited so that UI path is testable.
@@ -112,7 +165,76 @@ function sendsJson(request: Request): boolean {
   );
 }
 
+const rolesQuerySchema = z.object({
+  cursor: z
+    .string()
+    .min(1)
+    .max(MAX_CURSOR_LENGTH)
+    .regex(/^offset:\d{1,3}$/)
+    .optional(),
+  // Decimal digits only, as the server's integer parser reads them: no
+  // sign, exponent, radix prefix, fraction, or whitespace; leading zeros are
+  // fine and nothing beyond a signed 64-bit integer. Values above the
+  // maximum page are clamped.
+  page_size: z
+    .string()
+    .regex(/^[0-9]+$/)
+    .refine((digits) => /^[0-9]+$/.test(digits) && BigInt(digits) <= MAX_INT64)
+    .transform((digits) => Math.min(Number(digits), MAX_PAGE_SIZE))
+    .pipe(z.number().int().min(1))
+    .optional(),
+});
+
+// The parameters the server reads, each at most once as the server requires;
+// unknown parameters are ignored, as the server ignores them.
+function singleValues(
+  params: URLSearchParams,
+): Record<string, string> | undefined {
+  const values: Record<string, string> = {};
+  for (const name of ["cursor", "page_size"]) {
+    const all = params.getAll(name);
+    if (all.length > 1) {
+      return undefined;
+    }
+    if (all[0] !== undefined) {
+      values[name] = all[0];
+    }
+  }
+  return values;
+}
+
+function rolesPage(url: URL) {
+  const raw = singleValues(url.searchParams);
+  const query = rolesQuerySchema.safeParse(raw);
+  if (raw === undefined || !query.success) {
+    return envelope(422, "validation_failed", "invalid cursor or page_size");
+  }
+  const offset =
+    query.data.cursor === undefined
+      ? 0
+      : Number(query.data.cursor.slice("offset:".length));
+  const size = query.data.page_size ?? DEFAULT_PAGE_SIZE;
+  const items = mockRoles.slice(offset, offset + size);
+  const next = offset + size;
+  return HttpResponse.json({
+    items,
+    next_cursor: next < mockRoles.length ? `offset:${String(next)}` : "",
+  });
+}
+
 export const handlers = [
+  http.get(
+    "*/api/v1/roles",
+    jsonApi(({ request }) => {
+      if (!signedIn) {
+        return envelope(401, "unauthorized", "sign in required");
+      }
+      if (!granted.includes("admin.roles")) {
+        return envelope(403, "forbidden", "missing permission admin.roles");
+      }
+      return rolesPage(new URL(request.url));
+    }),
+  ),
   http.get(
     "*/api/v1/version",
     jsonApi(() => HttpResponse.json(mockVersion)),
