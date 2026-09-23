@@ -360,9 +360,32 @@ type openAPIResponse struct {
 
 func TestForbiddenOpenAPIDocumentsPermissionAndCSRFDenials(t *testing.T) {
 	description := loadOpenAPI(t).Components.Responses["Forbidden"].Description
-	for _, cause := range []string{"admin.settings", "csrf_rejected"} {
+	for _, cause := range []string{"required permission", "csrf_rejected"} {
 		if !strings.Contains(description, cause) {
 			t.Errorf("Forbidden description %q does not document %q", description, cause)
+		}
+	}
+	if strings.Contains(description, "admin.settings") {
+		t.Errorf("Forbidden description %q is endpoint-specific", description)
+	}
+}
+
+func TestSharedNotFoundDescriptionIsResourceNeutral(t *testing.T) {
+	description := loadOpenAPI(t).Components.Responses["NotFound"].Description
+	if strings.Contains(description, "media server") || !strings.Contains(description, "requested resource") {
+		t.Fatalf("NotFound description %q is not resource-neutral", description)
+	}
+}
+
+func TestInviteLibraryBoundsAreDocumented(t *testing.T) {
+	document := loadOpenAPI(t)
+	for _, schemaName := range []string{"Invite", "CreateInviteRequest"} {
+		libraryIDs := document.validator.Components.Schemas[schemaName].Value.Properties["library_ids"].Value
+		if libraryIDs.MaxItems == nil || *libraryIDs.MaxItems != core.MaxInviteLibraries {
+			t.Errorf("%s library_ids maxItems = %v, want %d", schemaName, libraryIDs.MaxItems, core.MaxInviteLibraries)
+		}
+		if got := fmt.Sprint(libraryIDs.Items.Value.Extensions["x-max-bytes"]); got != "128" {
+			t.Errorf("%s library_ids item x-max-bytes = %s, want 128", schemaName, got)
 		}
 	}
 }

@@ -14,7 +14,13 @@ version: "2"
 sql:
   - engine: sqlite
     schema: internal/db/migrations/sqlite
-    queries: internal/db/queries
+    queries:
+      - internal/db/queries/accounts.sql
+      - internal/db/queries/authorization.sql
+      - internal/db/queries/media_servers.sql
+      - internal/db/queries/oidc.sql
+      - internal/db/queries/invites.sql
+      - internal/db/queries/invites_sqlite.sql
     gen:
       go:
         package: sqlite
@@ -28,7 +34,13 @@ sql:
         emit_empty_slices: true
   - engine: postgresql
     schema: internal/db/migrations/postgres
-    queries: internal/db/queries
+    queries:
+      - internal/db/queries/accounts.sql
+      - internal/db/queries/authorization.sql
+      - internal/db/queries/media_servers.sql
+      - internal/db/queries/oidc.sql
+      - internal/db/queries/invites.sql
+      - internal/db/queries/invites_postgres.sql
     gen:
       go:
         package: postgres

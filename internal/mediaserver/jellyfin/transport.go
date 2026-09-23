@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -91,17 +92,21 @@ func dialAllowed(
 	return nil, fmt.Errorf("dial media server destination: %w", last)
 }
 
-func (c *Client) getAttempt(
+func (c *Client) requestAttempt(
 	ctx context.Context,
-	operation, path string,
+	operation, method, path string,
+	body []byte,
 	started time.Time,
 ) ([]byte, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, false, mediaError(operation, core.MediaServerMalformed, err)
 	}
 	req.Header.Set("Authorization", c.authorization)
 	req.Header.Set("Accept", "application/json")
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return c.classifyTransportError(ctx, operation, started, err)
@@ -154,6 +159,9 @@ func (c *Client) classifyResponse(
 	case status == http.StatusNotFound:
 		c.observe(operation, "not_found", started)
 		return nil, false, mediaError(operation, core.MediaServerNotFound, nil)
+	case operation == "create_user" && status == http.StatusBadRequest:
+		c.observe(operation, "username_rejected", started)
+		return nil, false, &core.MediaUserNameError{}
 	case retryableStatus(status):
 		c.observe(operation, "unavailable", started)
 		delay, valid := parseRetryAfter(resp.Header.Get("Retry-After"), c.now())

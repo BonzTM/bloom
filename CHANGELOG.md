@@ -30,6 +30,12 @@ contracts) gets an entry here.
 - Media servers page in the administration area (`/admin/media-servers`,
   guarded by `admin.settings`): register a Jellyfin server with its API key,
   see the capabilities Bloom detected, and remove it.
+- Invite storage on SQLite and PostgreSQL through migration `00010`, including
+  library selections and redemption records while retaining only code hashes.
+- Administrative invite create, list, get, and revoke routes guarded by
+  `users.invite`, plus public preview and acceptance routes with rate limits,
+  CSRF protection, audit events, metrics, and compensating Jellyfin user
+  deletion when library access cannot be applied.
 - Automatic first-administrator startup bootstrap with the `admin` username,
   the built-in `owner` role, and the optional `BLOOM_BOOTSTRAP_USERNAME`
   override. Existing accounts are never changed, and concurrent startup

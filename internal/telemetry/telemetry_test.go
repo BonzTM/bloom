@@ -100,6 +100,8 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	}
 	m.IncAuthorizationDenial(permission)
 	m.ObserveMediaServerRequest("jellyfin", "probe", "success", 0.02)
+	m.IncInviteCreation("success")
+	m.IncInviteAcceptance("accepted")
 	for _, outcome := range []string{"scheduled", "exhausted", "budget_exhausted"} {
 		m.ObserveMediaServerRetry("jellyfin", "probe", outcome)
 	}
@@ -127,6 +129,7 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_media_server_requests_total", "bloomtest_media_server_request_duration_seconds",
 		"bloomtest_media_server_retries_total",
 		"bloomtest_oidc_dependency_events_total", "bloomtest_oidc_dependency_duration_seconds",
+		"bloomtest_invite_creations_total", "bloomtest_invite_acceptances_total",
 	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)

@@ -53,6 +53,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		testOIDCIdentityStore(t, pool, driver, store, adminStore, authorizer)
 	})
 	runMediaServerEngineTests(t, pool, driver)
+	runInviteEngineTests(t, pool, driver, store)
 }
 
 func testOIDCFlowClaim(t *testing.T, pool *sql.DB, sessions scs.CtxStore, clock *testutil.FakeClock) {
@@ -138,6 +139,341 @@ func runAccountEngineTests(
 	})
 	t.Run("password hash update", func(t *testing.T) { testPasswordHashUpdate(t, store, localIdentities) })
 	t.Run("password hash length constraint", func(t *testing.T) { testPasswordHashLengthConstraint(t, store) })
+}
+
+func runInviteEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, accounts core.AccountStore) {
+	t.Helper()
+	ctx := context.Background()
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 15, 0, 0, 123456789, time.UTC))
+	account := core.Account{ID: mustID(t), Username: "inviter-" + mustID(t), CreatedAt: now}
+	if err := accounts.CreateAccount(ctx, account); err != nil {
+		t.Fatalf("create invite owner: %v", err)
+	}
+	server := mediaServerRecord(t, "Invite target", "https://invites.example.test", now)
+	_, mediaWriter, storeErr := db.NewMediaServerStores(pool, driver)
+	if storeErr != nil {
+		t.Fatalf("NewMediaServerStores: %v", storeErr)
+	}
+	if err := mediaWriter.CreateMediaServer(ctx, server); err != nil {
+		t.Fatalf("create invite media server: %v", err)
+	}
+	reader, store, storeErr := db.NewInviteStores(pool, driver)
+	if storeErr != nil {
+		t.Fatalf("NewInviteStores: %v", storeErr)
+	}
+	t.Run("round trip status and revocation", func(t *testing.T) {
+		testInviteRoundTrip(t, reader, store, account.ID, server.ID, now)
+	})
+	t.Run("concurrent last use", func(t *testing.T) {
+		testConcurrentInviteLastUse(t, reader, store, account.ID, server.ID, now)
+	})
+	t.Run("expiry is checked after lock", func(t *testing.T) {
+		testInviteExpiryAtLock(t, store, account.ID, server.ID, now)
+	})
+	t.Run("provisioning failure is durable", func(t *testing.T) {
+		testInviteProvisioningFailure(t, pool, reader, store, account.ID, server.ID, now)
+	})
+	t.Run("provisioning failure blocks a waiting acceptance", func(t *testing.T) {
+		testInviteProvisioningFailureBlocksWaiter(t, pool, reader, store, account.ID, server.ID, now)
+	})
+	t.Run("provisioning failure insert error rolls back", func(t *testing.T) {
+		testInviteProvisioningFailureInsertError(t, pool, reader, store, account.ID, server.ID, now)
+	})
+}
+
+func testInviteRoundTrip(
+	t *testing.T, reader core.InviteReader, store core.InviteStore, accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	code, hash, codeErr := core.NewInviteCode()
+	if codeErr != nil || code == "" {
+		t.Fatalf("NewInviteCode = %q, %v", code, codeErr)
+	}
+	expires, uses := now.Add(time.Hour), 2
+	invite := core.Invite{
+		ID: mustID(t), MediaServerID: serverID, CreatedBy: accountID, Label: "Friends",
+		ExpiresAt: &expires, MaxUses: &uses, LibraryIDs: []string{"11111111-1111-4111-8111-111111111111"},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateInvite(context.Background(), invite, hash); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	got, err := reader.GetInviteByCodeHash(context.Background(), hash)
+	if err != nil || !reflect.DeepEqual(got, invite) || got.Status(now) != core.InviteActive {
+		t.Fatalf("GetInviteByCodeHash = %+v, %v; want %+v", got, err, invite)
+	}
+	page, err := reader.ListInvites(context.Background(), nil, 1)
+	if err != nil || len(page) != 1 || page[0].ID != invite.ID {
+		t.Fatalf("ListInvites = %+v, %v", page, err)
+	}
+	revoked, err := store.RevokeInvite(context.Background(), invite.ID, now.Add(time.Minute))
+	if err != nil || revoked.Status(now.Add(time.Minute)) != core.InviteRevoked {
+		t.Fatalf("RevokeInvite = %+v, %v", revoked, err)
+	}
+}
+
+func testConcurrentInviteLastUse(
+	t *testing.T, reader core.InviteReader, store core.InviteStore, accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	_, hash, codeErr := core.NewInviteCode()
+	if codeErr != nil {
+		t.Fatal(codeErr)
+	}
+	uses := 1
+	invite := core.Invite{
+		ID: mustID(t), MediaServerID: serverID, CreatedBy: accountID, Label: "Single use",
+		MaxUses: &uses, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+	}
+	if err := store.CreateInvite(context.Background(), invite, hash); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	results := make(chan error, 2)
+	var callbacks atomic.Int32
+	redemptionID, mediaUserID := mustID(t), mustID(t)
+	redeem := func(_ context.Context, locked core.Invite) (core.InviteRedemption, error) {
+		if locked.ID == "" {
+			return core.InviteRedemption{}, core.ErrInvalidArgument
+		}
+		if callbacks.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return core.InviteRedemption{
+			ID: redemptionID, InviteID: locked.ID, MediaServerID: locked.MediaServerID,
+			MediaUserID: mediaUserID, Username: "invite-user", RedeemedAt: now.Add(2 * time.Second),
+		}, nil
+	}
+	clock := testutil.NewFakeClock(now.Add(2 * time.Second))
+	go func() { results <- store.RedeemInvite(context.Background(), hash, clock, redeem) }()
+	<-entered
+	go func() { results <- store.RedeemInvite(context.Background(), hash, clock, redeem) }()
+	close(release)
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) || (!errors.Is(first, core.ErrInviteUnavailable) && !errors.Is(second, core.ErrInviteUnavailable)) {
+		t.Fatalf("concurrent results = (%v, %v), want one success and one unavailable", first, second)
+	}
+	if callbacks.Load() != 1 {
+		t.Fatalf("redemption callbacks = %d, want 1", callbacks.Load())
+	}
+	got, err := reader.GetInvite(context.Background(), invite.ID)
+	if err != nil || got.UseCount != 1 || got.Status(now.Add(2*time.Second)) != core.InviteExhausted {
+		t.Fatalf("redeemed invite = %+v, %v", got, err)
+	}
+}
+
+func testInviteExpiryAtLock(
+	t *testing.T, store core.InviteStore, accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	_, hash, err := core.NewInviteCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := now.Add(2 * time.Minute)
+	invite := core.Invite{
+		ID: mustID(t), MediaServerID: serverID, CreatedBy: accountID, Label: "Expiry race",
+		ExpiresAt: &expires, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
+	}
+	if err := store.CreateInvite(t.Context(), invite, hash); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	clock := testutil.NewFakeClock(expires.Add(-time.Microsecond))
+	entered, release := make(chan struct{}), make(chan struct{})
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	secondStarted := make(chan struct{})
+	firstRedeem := redemptionCallback(t, now, entered, release)
+	secondRedeem := redemptionCallback(t, now, nil, nil)
+	go func() { firstDone <- store.RedeemInvite(t.Context(), hash, clock, firstRedeem) }()
+	<-entered
+	go func() {
+		close(secondStarted)
+		secondDone <- store.RedeemInvite(t.Context(), hash, clock, secondRedeem)
+	}()
+	<-secondStarted
+	clock.Set(expires)
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first redemption: %v", err)
+	}
+	if err := <-secondDone; !errors.Is(err, core.ErrInviteUnavailable) {
+		t.Fatalf("second redemption = %v, want unavailable", err)
+	}
+}
+
+func redemptionCallback(
+	t *testing.T, now time.Time, entered chan<- struct{}, release <-chan struct{},
+) core.InviteRedeemFunc {
+	t.Helper()
+	redemptionID, mediaUserID := mustID(t), mustID(t)
+	return func(_ context.Context, locked core.Invite) (core.InviteRedemption, error) {
+		if entered != nil {
+			close(entered)
+			<-release
+		}
+		return core.InviteRedemption{
+			ID: redemptionID, InviteID: locked.ID, MediaServerID: locked.MediaServerID,
+			MediaUserID: mediaUserID, Username: "expiry-user", RedeemedAt: now.Add(time.Minute),
+		}, nil
+	}
+}
+
+func testInviteProvisioningFailure(
+	t *testing.T, pool *sql.DB, reader core.InviteReader, store core.InviteStore,
+	accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	failure := core.InviteProvisioningFailure{
+		ID: mustID(t), InviteID: mustID(t), MediaServerID: serverID, MediaUserID: mustID(t),
+		Username: "cleanup-user", Reason: core.InviteProvisioningCleanupFailed,
+		CreatedAt: now.Add(3 * time.Second), UpdatedAt: now.Add(3 * time.Second),
+	}
+	_, hash, err := core.NewInviteCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invite := core.Invite{
+		ID: failure.InviteID, MediaServerID: serverID, CreatedBy: accountID, Label: "Cleanup",
+		CreatedAt: now.Add(3 * time.Second), UpdatedAt: now.Add(3 * time.Second),
+	}
+	if err := store.CreateInvite(t.Context(), invite, hash); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if err := store.RecordInviteProvisioningFailure(t.Context(), failure); err != nil {
+		t.Fatalf("RecordInviteProvisioningFailure: %v", err)
+	}
+	var gotID, gotUserID, gotUsername, gotReason string
+	query := "SELECT invite_id, media_user_id, username, reason FROM invite_provisioning_failures WHERE id = $1"
+	if err := pool.QueryRowContext(t.Context(), query, failure.ID).Scan(&gotID, &gotUserID, &gotUsername, &gotReason); err != nil {
+		t.Fatalf("select provisioning failure: %v", err)
+	}
+	if gotID != failure.InviteID || gotUserID != failure.MediaUserID || gotUsername != failure.Username || gotReason != string(failure.Reason) {
+		t.Fatalf("stored failure = (%q, %q, %q, %q), want %+v", gotID, gotUserID, gotUsername, gotReason, failure)
+	}
+	if _, err := reader.GetInviteByCodeHash(t.Context(), hash); !errors.Is(err, core.ErrInviteUnavailable) {
+		t.Fatalf("invite with pending cleanup lookup = %v, want unavailable", err)
+	}
+}
+
+func testInviteProvisioningFailureBlocksWaiter(
+	t *testing.T, pool *sql.DB, reader core.InviteReader, store core.InviteStore,
+	accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	invite, hash := createInviteFixture(t, store, accountID, serverID, "Failure race", now.Add(4*time.Second))
+	entered, release := make(chan struct{}), make(chan struct{})
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	secondStarted := make(chan struct{})
+	var callbacks atomic.Int32
+	cause := errors.New("provisioning failed")
+	failureID, mediaUserID := mustID(t), mustID(t)
+	redeem := func(_ context.Context, locked core.Invite) (core.InviteRedemption, error) {
+		if callbacks.Add(1) != 1 {
+			return core.InviteRedemption{InviteID: locked.ID}, errors.New("unexpected second provisioning callback")
+		}
+		close(entered)
+		<-release
+		failure := core.InviteProvisioningFailure{
+			ID: failureID, InviteID: locked.ID, MediaServerID: locked.MediaServerID,
+			MediaUserID: mediaUserID, Username: "cleanup-user", Reason: core.InviteProvisioningCleanupFailed,
+			CreatedAt: now.Add(5 * time.Second), UpdatedAt: now.Add(5 * time.Second),
+		}
+		return core.InviteRedemption{}, &core.InviteProvisioningError{Failure: failure, Err: cause}
+	}
+	clock := testutil.NewFakeClock(now.Add(5 * time.Second))
+	go func() { firstDone <- store.RedeemInvite(t.Context(), hash, clock, redeem) }()
+	<-entered
+	go func() {
+		close(secondStarted)
+		secondDone <- store.RedeemInvite(t.Context(), hash, clock, redeem)
+	}()
+	<-secondStarted
+	close(release)
+	if err := <-firstDone; !errors.Is(err, cause) {
+		t.Fatalf("first acceptance = %v, want provisioning failure", err)
+	}
+	if err := <-secondDone; !errors.Is(err, core.ErrInviteUnavailable) {
+		t.Fatalf("waiting acceptance = %v, want unavailable", err)
+	}
+	if callbacks.Load() != 1 {
+		t.Fatalf("provisioning callbacks = %d, want 1", callbacks.Load())
+	}
+	assertFailedInviteOutcome(t, pool, reader, invite.ID, 1)
+}
+
+func testInviteProvisioningFailureInsertError(
+	t *testing.T, pool *sql.DB, reader core.InviteReader, store core.InviteStore,
+	accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	seedInvite, _ := createInviteFixture(t, store, accountID, serverID, "Failure seed", now.Add(6*time.Second))
+	failure := provisioningFailureFixture(t, seedInvite, now.Add(7*time.Second))
+	if err := store.RecordInviteProvisioningFailure(t.Context(), failure); err != nil {
+		t.Fatalf("seed provisioning failure: %v", err)
+	}
+	target, hash := createInviteFixture(t, store, accountID, serverID, "Failure insert", now.Add(8*time.Second))
+	cause := errors.New("provisioning failed")
+	redeem := func(_ context.Context, locked core.Invite) (core.InviteRedemption, error) {
+		duplicate := provisioningFailureFixture(t, locked, now.Add(9*time.Second))
+		duplicate.ID = failure.ID
+		return core.InviteRedemption{}, &core.InviteProvisioningError{Failure: duplicate, Err: cause}
+	}
+	err := store.RedeemInvite(t.Context(), hash, testutil.NewFakeClock(now.Add(9*time.Second)), redeem)
+	if !errors.Is(err, core.ErrInviteProvisioningFailureRecord) || !errors.Is(err, cause) {
+		t.Fatalf("acceptance error = %v, want provisioning and record failures", err)
+	}
+	if _, err := reader.GetInviteByCodeHash(t.Context(), hash); err != nil {
+		t.Fatalf("target invite lookup after failed record insert: %v", err)
+	}
+	assertFailedInviteOutcome(t, pool, reader, target.ID, 0)
+}
+
+func createInviteFixture(
+	t *testing.T, store core.InviteStore, accountID, serverID, label string, now time.Time,
+) (core.Invite, [sha256.Size]byte) {
+	t.Helper()
+	_, hash, err := core.NewInviteCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invite := core.Invite{
+		ID: mustID(t), MediaServerID: serverID, CreatedBy: accountID, Label: label,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateInvite(t.Context(), invite, hash); err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	return invite, hash
+}
+
+func provisioningFailureFixture(t *testing.T, invite core.Invite, now time.Time) core.InviteProvisioningFailure {
+	t.Helper()
+	return core.InviteProvisioningFailure{
+		ID: mustID(t), InviteID: invite.ID, MediaServerID: invite.MediaServerID,
+		MediaUserID: mustID(t), Username: "cleanup-user", Reason: core.InviteProvisioningCleanupFailed,
+		CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+func assertFailedInviteOutcome(
+	t *testing.T, pool *sql.DB, reader core.InviteReader, inviteID string, wantFailures int32,
+) {
+	t.Helper()
+	invite, err := reader.GetInvite(t.Context(), inviteID)
+	if err != nil || invite.UseCount != 0 {
+		t.Fatalf("invite after provisioning failure = %+v, %v", invite, err)
+	}
+	var redemptions, failures int32
+	if err := pool.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM invite_redemptions WHERE invite_id = $1", inviteID).Scan(&redemptions); err != nil {
+		t.Fatalf("count invite redemptions: %v", err)
+	}
+	if err := pool.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM invite_provisioning_failures WHERE invite_id = $1", inviteID).Scan(&failures); err != nil {
+		t.Fatalf("count invite provisioning failures: %v", err)
+	}
+	if redemptions != 0 || failures != wantFailures {
+		t.Fatalf("redemptions=%d failures=%d, want 0, %d", redemptions, failures, wantFailures)
+	}
 }
 
 func runMediaServerEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -761,7 +1097,7 @@ ORDER BY tc.table_name, kcu.column_name`
 		t.Fatalf("list foreign keys: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
-	got := make([]string, 0, 3)
+	got := make([]string, 0, 11)
 	for rows.Next() {
 		var table, column, target, targetColumn, action string
 		if err := rows.Scan(&table, &column, &target, &targetColumn, &action); err != nil {
@@ -773,6 +1109,13 @@ ORDER BY tc.table_name, kcu.column_name`
 		"account_identities:account_id:accounts:id:CASCADE",
 		"account_roles:account_id:accounts:id:CASCADE",
 		"account_roles:role_id:roles:id:CASCADE",
+		"invite_libraries:invite_id:invites:id:CASCADE",
+		"invite_provisioning_failures:invite_id:invites:id:RESTRICT",
+		"invite_provisioning_failures:media_server_id:media_servers:id:RESTRICT",
+		"invite_redemptions:invite_id:invites:id:RESTRICT",
+		"invite_redemptions:media_server_id:media_servers:id:RESTRICT",
+		"invites:created_by_account_id:accounts:id:RESTRICT",
+		"invites:media_server_id:media_servers:id:RESTRICT",
 		"role_permissions:role_id:roles:id:CASCADE",
 	}
 	if err := rows.Err(); err != nil || !slices.Equal(got, want) {
@@ -830,7 +1173,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 9)
+	assertMigrationVersion(t, pool, 10)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -951,7 +1294,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 9)
+	assertMigrationVersion(t, pool, 10)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -80,6 +81,195 @@ func TestClientHappyPathAndEncodedAuthorization(t *testing.T) {
 	libraries, err := client.ListLibraries(context.Background())
 	if err != nil || len(libraries) != 1 || libraries[0].ID != "lib-1" {
 		t.Fatalf("ListLibraries = %+v, %v", libraries, err)
+	}
+}
+
+func TestClientUserProvisioningPreservesWholePolicy(t *testing.T) {
+	const userID = "44444444-4444-4444-8444-444444444444"
+	const libraryID = "55555555-5555-4555-8555-555555555555"
+	var createCalls, getCalls, policyCalls, deleteCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/New":
+			createCalls++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode create: %v", err)
+			}
+			if body["Name"] != "new-user" || body["Password"] != "Th1s-is-a-unique-password!" {
+				t.Errorf("create body = %#v", body)
+			}
+			_, _ = fmt.Fprintf(w, `{"Id":%q,"Name":"new-user"}`, userID)
+		case r.Method == http.MethodGet && r.URL.Path == "/Users/"+userID:
+			getCalls++
+			_, _ = fmt.Fprint(w, `{"Id":"`+userID+`","Name":"new-user","Policy":{"AuthenticationProviderId":"auth","PasswordResetProviderId":"reset","IsAdministrator":true,"EnableAllFolders":true,"EnabledFolders":[]}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/"+userID+"/Policy":
+			policyCalls++
+			var policy map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+				t.Errorf("decode policy: %v", err)
+			}
+			if policy["IsAdministrator"] != true || policy["EnableAllFolders"] != false {
+				t.Errorf("policy fields = %#v", policy)
+			}
+			folders, ok := policy["EnabledFolders"].([]any)
+			if !ok || len(folders) != 1 || folders[0] != libraryID {
+				t.Errorf("EnabledFolders = %#v", policy["EnabledFolders"])
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodDelete && r.URL.Path == "/Users/"+userID:
+			deleteCalls++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	user, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
+	if err != nil || user.ID != userID {
+		t.Fatalf("CreateUser = %+v, %v", user, err)
+	}
+	if err := client.SetLibraryAccess(context.Background(), user.ID, []string{libraryID}, false); err != nil {
+		t.Fatalf("SetLibraryAccess: %v", err)
+	}
+	if err := client.DeleteUser(context.Background(), user.ID); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if createCalls != 1 || getCalls != 1 || policyCalls != 1 || deleteCalls != 1 {
+		t.Fatalf("calls create=%d get=%d policy=%d delete=%d", createCalls, getCalls, policyCalls, deleteCalls)
+	}
+}
+
+func TestClientCreateUserClassifiesFailuresWithoutRetry(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		kind      core.MediaServerErrorKind
+		nameError bool
+	}{
+		{name: "taken or invalid name", status: http.StatusBadRequest, nameError: true},
+		{name: "API key revoked", status: http.StatusUnauthorized, kind: core.MediaServerUnauthorized},
+		{name: "server failure", status: http.StatusServiceUnavailable, kind: core.MediaServerUnavailable},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			postCalls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/Users" {
+					_, _ = fmt.Fprint(w, `[]`)
+					return
+				}
+				postCalls++
+				w.WriteHeader(testCase.status)
+			}))
+			defer server.Close()
+			client := newTestClient(t, server, nil)
+			_, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
+			if testCase.nameError {
+				nameErr, ok := errors.AsType[*core.MediaUserNameError](err)
+				if !ok || nameErr == nil {
+					t.Fatalf("error = %T %v, want MediaUserNameError", err, err)
+				}
+			} else {
+				assertMediaError(t, err, testCase.kind)
+			}
+			if postCalls != 1 {
+				t.Fatalf("POST /Users/New calls = %d, want 1", postCalls)
+			}
+		})
+	}
+}
+
+func TestClientCreateUserFindsAmbiguousMalformedSuccess(t *testing.T) {
+	const userID = "44444444-4444-4444-8444-444444444444"
+	var listCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/Users/New":
+			_, _ = fmt.Fprint(w, `{}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/Users":
+			listCalls++
+			_, _ = fmt.Fprint(w, `[{"Id":"`+userID+`","Name":"new-user"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	user, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
+	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) || user.ID != userID || listCalls != 1 {
+		t.Fatalf("CreateUser = %+v, %v; list calls = %d", user, err, listCalls)
+	}
+}
+
+func TestClientCreateUserFindsUserAfterResponseLoss(t *testing.T) {
+	const userID = "44444444-4444-4444-8444-444444444444"
+	created := false
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method == http.MethodPost && request.URL.Path == "/Users/New" {
+			created = true
+			return nil, io.ErrUnexpectedEOF
+		}
+		if request.Method == http.MethodGet && request.URL.Path == "/Users" && created {
+			return jsonResponse(http.StatusOK, `[{"Id":"`+userID+`","Name":"new-user"}]`), nil
+		}
+		return jsonResponse(http.StatusNotFound, ``), nil
+	})
+	client := newTransportClient(t, transport)
+	user, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
+	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) || user.ID != userID {
+		t.Fatalf("CreateUser = %+v, %v", user, err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestClientPolicyAndDeleteRetryIdempotentFailures(t *testing.T) {
+	const userID = "44444444-4444-4444-8444-444444444444"
+	var policyCalls, deleteCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_, _ = fmt.Fprint(w, `{"Id":"`+userID+`","Name":"new-user","Policy":{"AuthenticationProviderId":"auth","PasswordResetProviderId":"reset"}}`)
+		case http.MethodPost:
+			policyCalls++
+			if policyCalls == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodDelete:
+			deleteCalls++
+			if deleteCalls == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	if err := client.SetLibraryAccess(context.Background(), userID, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteUser(context.Background(), userID); err != nil {
+		t.Fatal(err)
+	}
+	if policyCalls != 2 || deleteCalls != 2 {
+		t.Fatalf("retry calls policy=%d delete=%d", policyCalls, deleteCalls)
 	}
 }
 

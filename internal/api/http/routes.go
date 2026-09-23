@@ -5,6 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/BonzTM/bloom/internal/core"
 )
 
@@ -45,6 +50,12 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleProbeMediaServer},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerLibraries},
 	{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMediaServer},
+	{method: http.MethodPost, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleCreateInvite},
+	{method: http.MethodGet, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleListInvites},
+	{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleGetInvite},
+	{method: http.MethodDelete, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleRevokeInvite},
+	{method: http.MethodGet, path: "/api/v1/invite/{code}", access: routePublic, handler: (*Server).handlePreviewInvite},
+	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, handler: (*Server).handleAcceptInvite},
 }
 
 func (r apiRoute) usesSessionAccount() bool {
@@ -94,6 +105,10 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/media-servers") && (s.mediaServerReader == nil || s.mediaServerManager == nil) {
+			continue
+		}
+		if strings.HasPrefix(route.path, "/api/v1/invite") &&
+			(s.inviteReader == nil || s.inviteManager == nil) {
 			continue
 		}
 		if _, exists := handlers[route.path]; !exists {
@@ -152,5 +167,30 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 	if strings.HasPrefix(route.path, "/api/v1/media-servers") {
 		handler = s.mediaServerOperationMiddleware(handler)
 	}
+	if strings.HasPrefix(route.path, "/api/v1/invite") {
+		handler = s.mediaServerOperationMiddleware(handler)
+	}
+	if isPublicInviteRoute(route.path) {
+		handler = sanitizedInviteTrace(route)(handler)
+	}
 	return handler, nil
+}
+
+func isPublicInviteRoute(pattern string) bool {
+	return pattern == "/api/v1/invite/{code}" || pattern == "/api/v1/invite/{code}/accept"
+}
+
+func sanitizedInviteTrace(route apiRoute) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+			ctx, span := otel.Tracer("github.com/BonzTM/bloom/internal/api/http").Start(
+				ctx, route.method+" "+route.path,
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(attribute.String("http.route", route.path)),
+			)
+			defer span.End()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

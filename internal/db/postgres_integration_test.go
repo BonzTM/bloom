@@ -55,6 +55,18 @@ func TestPostgresEngineSuite(t *testing.T) {
 	assertColumns(t, pool, postgresAccountRoleColumns, expectedAccountRoleColumns)
 	assertColumns(t, pool, postgresMediaServerColumns, expectedMediaServerColumns)
 	assertColumns(t, pool, postgresIdentityColumns, expectedIdentityColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return postgresTableColumns(ctx, pool, "invites")
+	}, expectedInviteColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return postgresTableColumns(ctx, pool, "invite_libraries")
+	}, expectedInviteLibraryColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return postgresTableColumns(ctx, pool, "invite_redemptions")
+	}, expectedInviteRedemptionColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return postgresTableColumns(ctx, pool, "invite_provisioning_failures")
+	}, expectedInviteProvisioningFailureColumns)
 }
 
 func postgresSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {

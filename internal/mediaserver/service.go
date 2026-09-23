@@ -226,6 +226,23 @@ func (s *Service) Libraries(ctx context.Context, id string) ([]core.Library, err
 	return libraries, nil
 }
 
+// AcquireUserProvisioner resolves and reserves one per-server adapter slot.
+// The caller must invoke the returned release function exactly once.
+func (s *Service) AcquireUserProvisioner(
+	ctx context.Context, id string,
+) (core.MediaUserProvisioner, func(), error) {
+	call, err := s.adapter(ctx, id, "provision_user")
+	if err != nil {
+		return nil, nil, err
+	}
+	provisioner, ok := call.entry.adapter.(core.MediaUserProvisioner)
+	if !ok {
+		call.release()
+		return nil, nil, fmt.Errorf("media server does not support user provisioning: %w", core.ErrInvalidArgument)
+	}
+	return provisioner, call.release, nil
+}
+
 func (s *Service) adapter(ctx context.Context, id, operation string) (*adapterCall, error) {
 	build := s.adapters.begin(id, operation)
 	callCtx, cancel := dependencyContext(ctx)

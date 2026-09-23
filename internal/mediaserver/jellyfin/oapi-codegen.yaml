@@ -7,3 +7,8 @@ output-options:
   include-operation-ids:
     - GetSystemInfo
     - GetVirtualFolders
+    - GetUsers
+    - CreateUserByName
+    - GetUserById
+    - UpdateUserPolicy
+    - DeleteUser

@@ -280,6 +280,8 @@ const (
 	auditResourceAuthOIDCCallback = "route:auth.oidc.callback"
 	auditResourceRoles            = "route:roles"
 	auditResourceMediaServers     = "route:media_servers"
+	auditResourceInvites          = "route:invites"
+	auditResourceInvitePublic     = "route:invite_public"
 )
 
 func routeResource(r *http.Request) string {
@@ -303,6 +305,10 @@ func routeResource(r *http.Request) string {
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
 		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
 		return auditResourceMediaServers
+	case "/api/v1/invites", "/api/v1/invites/{id}":
+		return auditResourceInvites
+	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
+		return auditResourceInvitePublic
 	default:
 		return auditResourceRouteUnmatched
 	}

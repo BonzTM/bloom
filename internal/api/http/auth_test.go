@@ -257,6 +257,7 @@ type authHarness struct {
 	sessionStore  *controllableSessionStore
 	authorization *authAuthorization
 	mediaServers  *fakeMediaServerService
+	invites       *fakeInviteService
 }
 
 type controllableSessionStore struct {
@@ -422,6 +423,7 @@ func newAuthHarnessConfigured(
 	}
 	authorization := newAuthAuthorization()
 	mediaServers := newFakeMediaServerService()
+	invites := newFakeInviteService(clock.Now())
 	srv := New(config.HTTPConfig{
 		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 8192,
 	}, Deps{
@@ -430,7 +432,9 @@ func newAuthHarnessConfigured(
 		Web: web, Identity: identity, Accounts: store,
 		Authorizer: authorization, Roles: authorization,
 		MediaServerReader: mediaServers, MediaServerManager: mediaServers,
-		Sessions: sessions, Audit: audit, Clock: clock, Auth: authCfg,
+		InviteReader:  invites,
+		InviteManager: invites,
+		Sessions:      sessions, Audit: audit, Clock: clock, Auth: authCfg,
 		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	return authHarness{
@@ -438,6 +442,7 @@ func newAuthHarnessConfigured(
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
 		authorization: authorization,
 		mediaServers:  mediaServers,
+		invites:       invites,
 	}
 }
 
