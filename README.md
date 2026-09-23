@@ -233,9 +233,9 @@ Use `GET /api/v1/invites` to review status and use counts. Use
 and its redemption history; Bloom does not offer invite deletion.
 
 The recipient opens `/invite/<code>` and chooses a Jellyfin username and
-password. Usernames must be 1 through 64 UTF-8 bytes, must not have leading or
-trailing whitespace or control characters, and otherwise follow Jellyfin's
-username character rule. Passwords must contain 15 through 1024 Unicode
+password. Usernames must not have leading or trailing whitespace or control
+characters and must follow Jellyfin's username character rule; Bloom adds its
+own bound of 1 through 64 UTF-8 bytes, which Jellyfin does not have. Passwords must contain 15 through 1024 Unicode
 characters, must not exceed 4096 UTF-8 bytes, and must not appear in Bloom's
 offline common-password denylist. Bloom sends the password to Jellyfin for user
 creation. It never stores, logs, or audits the password.
@@ -245,6 +245,10 @@ Jellyfin user. If that update fails, Bloom deletes the new user and returns an
 upstream failure. A used, expired, exhausted, revoked, or unknown code returns
 the same public not-found response. A username that Jellyfin rejects as taken
 or invalid returns a conflict response.
+
+The public invite routes are rate limited per client address and per code
+with the same `BLOOM_LOGIN_RATE_*` settings that bound sign-in attempts, so a
+code cannot be guessed by enumeration.
 
 ### Requests
 
@@ -331,9 +335,9 @@ this table.
 | `BLOOM_SESSION_COOKIE_SECURE` | bool | no | `true` | no | Set the `Secure` session-cookie flag. Disable only for plaintext local development. |
 | `BLOOM_SESSION_LIFETIME` | duration | no | `24h` | no | Absolute lifetime of a browser session. |
 | `BLOOM_SESSION_IDLE_TIMEOUT` | duration | no | `30m` | no | Invalidate a browser session after this period of inactivity. Must not exceed the lifetime. |
-| `BLOOM_LOGIN_RATE_REFILL_INTERVAL` | duration | no | `1m` | no | Per-IP and per-username login buckets regain one attempt per interval. |
-| `BLOOM_LOGIN_RATE_BURST` | int | no | `5` | no | Maximum immediately available login attempts in each IP or username bucket. |
-| `BLOOM_LOGIN_RATE_MAX_KEYS` | int | no | `10000` | no | Bound on combined IP and username rate-limit entries held in memory. Valid range: 2-100000. |
+| `BLOOM_LOGIN_RATE_REFILL_INTERVAL` | duration | no | `1m` | no | Per-IP and per-username login buckets, and the per-IP and per-code buckets on the public invite routes, regain one attempt per interval. |
+| `BLOOM_LOGIN_RATE_BURST` | int | no | `5` | no | Maximum immediately available attempts in each login bucket and each public invite bucket. |
+| `BLOOM_LOGIN_RATE_MAX_KEYS` | int | no | `10000` | no | Bound on rate-limit entries held in memory, for the login buckets and separately for the public invite buckets. Valid range: 2-100000. |
 | `BLOOM_LOGIN_MAX_CONCURRENT` | int | no | `4` | no | Maximum concurrent Argon2id password verifications. Excess attempts fail fast with `503`. Valid range: 1-64. |
 | `BLOOM_TRUSTED_PROXY_CIDRS` | comma-separated CIDRs | no | — | no | Trust `X-Forwarded-For` only when the direct peer is in this allowlist. Empty disables forwarded addresses. |
 | `BLOOM_OIDC_ENABLED` | bool | no | `false` | no | Enable one generic OpenID Connect provider. Discovery runs at startup and startup fails if it cannot complete. |
