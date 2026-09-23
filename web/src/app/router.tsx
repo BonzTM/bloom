@@ -23,6 +23,13 @@ const LazyRolesRoute = lazy(() => import("../routes/roles-route.js"));
 const LazyMediaServersRoute = lazy(
   () => import("../routes/media-servers-route.js"),
 );
+const LazyInvitesRoute = lazy(() => import("../routes/invites-route.js"));
+const LazyInviteAcceptRoute = lazy(
+  () => import("../routes/invite-accept-route.js"),
+);
+const LazyInviteAcceptedRoute = lazy(
+  () => import("../routes/invite-accepted-route.js"),
+);
 
 type LazyPageProps = Readonly<{ loading: string; children: ReactNode }>;
 
@@ -58,6 +65,22 @@ const routes: RouteObject[] = [
         ),
       },
       {
+        path: "invite/accepted",
+        element: (
+          <LazyPage loading="Loading…">
+            <LazyInviteAcceptedRoute />
+          </LazyPage>
+        ),
+      },
+      {
+        path: "invite/:code",
+        element: (
+          <LazyPage loading="Loading your invite…">
+            <LazyInviteAcceptRoute />
+          </LazyPage>
+        ),
+      },
+      {
         path: "admin",
         element: (
           <RequirePermission anyOf={ADMIN_PERMISSIONS}>
@@ -89,6 +112,16 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.adminSettings]}>
                 <LazyPage loading="Loading media servers…">
                   <LazyMediaServersRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "invites",
+            element: (
+              <RequirePermission anyOf={[permissions.usersInvite]}>
+                <LazyPage loading="Loading invites…">
+                  <LazyInvitesRoute />
                 </LazyPage>
               </RequirePermission>
             ),

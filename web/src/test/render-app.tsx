@@ -6,6 +6,7 @@ import type { InitialEntry } from "react-router-dom";
 import { AppProviders } from "../app/providers.js";
 import { createTestRouter } from "../app/router.js";
 import { AuthApi } from "../features/auth/api/auth-api.js";
+import { InvitesApi } from "../features/invites/api/invites-api.js";
 import { MediaServersApi } from "../features/media-servers/api/media-servers-api.js";
 import { RolesApi } from "../features/roles/api/roles-api.js";
 import { SystemApi } from "../features/system/api/system-api.js";
@@ -32,6 +33,7 @@ export function renderApp(initialEntry: InitialEntry = "/"): AppRender {
   const authApi = new AuthApi(client);
   const rolesApi = new RolesApi(client);
   const mediaServersApi = new MediaServersApi(client);
+  const invitesApi = new InvitesApi(client);
   const router = createTestRouter([initialEntry]);
   const result = render(
     <StrictMode>
@@ -40,6 +42,7 @@ export function renderApp(initialEntry: InitialEntry = "/"): AppRender {
         authApi={authApi}
         rolesApi={rolesApi}
         mediaServersApi={mediaServersApi}
+        invitesApi={invitesApi}
         queryClient={queryClient}
         router={router}
       />

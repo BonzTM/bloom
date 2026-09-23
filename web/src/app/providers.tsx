@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { RouterProvider, type RouterProviderProps } from "react-router-dom";
 import type { AuthApi } from "../features/auth/api/auth-api.js";
 import { AuthApiContext } from "../features/auth/auth-context.js";
+import type { InvitesApi } from "../features/invites/api/invites-api.js";
+import { InvitesApiContext } from "../features/invites/invites-context.js";
 import type { MediaServersApi } from "../features/media-servers/api/media-servers-api.js";
 import { MediaServersApiContext } from "../features/media-servers/media-servers-context.js";
 import type { RolesApi } from "../features/roles/api/roles-api.js";
@@ -15,6 +17,7 @@ type AppProvidersProps = Readonly<{
   authApi: AuthApi;
   rolesApi: RolesApi;
   mediaServersApi: MediaServersApi;
+  invitesApi: InvitesApi;
   queryClient: QueryClient;
   router: RouterProviderProps["router"];
 }>;
@@ -24,6 +27,7 @@ export function AppProviders({
   authApi,
   rolesApi,
   mediaServersApi,
+  invitesApi,
   queryClient,
   router,
 }: AppProvidersProps): ReactNode {
@@ -33,7 +37,9 @@ export function AppProviders({
         <AuthApiContext value={authApi}>
           <RolesApiContext value={rolesApi}>
             <MediaServersApiContext value={mediaServersApi}>
-              <RouterProvider router={router} />
+              <InvitesApiContext value={invitesApi}>
+                <RouterProvider router={router} />
+              </InvitesApiContext>
             </MediaServersApiContext>
           </RolesApiContext>
         </AuthApiContext>

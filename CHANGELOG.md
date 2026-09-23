@@ -27,6 +27,11 @@ contracts) gets an entry here.
 
 ### Added
 
+- Invites in the web UI: `/admin/invites` (guarded by `users.invite`) creates
+  an invite for a registered media server with an expiry and a use limit,
+  shows the link once, lists invites with their status, and revokes them; the
+  public `/invite/<code>` page lets the invited person choose a username and
+  password and creates their account on the media server.
 - Media servers page in the administration area (`/admin/media-servers`,
   guarded by `admin.settings`): register a Jellyfin server with its API key,
   see the capabilities Bloom detected, and remove it.

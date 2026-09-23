@@ -12,6 +12,13 @@ import {
   type MediaServer,
   type RegisterMediaServerRequest,
 } from "../features/media-servers/api/media-servers-schemas.js";
+import {
+  acceptInviteRequestSchema,
+  createInviteRequestSchema,
+  INVITE_CODE_PATTERN,
+  type Invite,
+  type CreateInviteRequest,
+} from "../features/invites/api/invites-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -155,6 +162,7 @@ export const errorCodeSchema = z.enum([
   "method_not_allowed",
   "forbidden",
   "media_server_failure",
+  "username_unavailable",
 ]);
 
 export type ErrorCode = z.output<typeof errorCodeSchema>;
@@ -393,7 +401,284 @@ function removeMediaServer(id: string | readonly string[] | undefined) {
   return new HttpResponse(null, { status: 204 });
 }
 
+// Invites the mock server starts with, newest first as the server orders
+// them. Codes are plaintext here only so tests can follow a link; the real
+// server keeps digests.
+const MAX_INVITE_CURSOR_LENGTH = 128;
+const INVITE_RETRY_AFTER_SECONDS = 30;
+export const VALID_INVITE_CODE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+export const REVOKED_INVITE_CODE = "ABCDEFGHIJKLMNOPQRSTUVWXY2";
+export const RATE_LIMITED_INVITE_CODE = "ABCDEFGHIJKLMNOPQRSTUVWXY3";
+export const TAKEN_INVITE_USERNAME = "taken";
+export const mockInviteRules = {
+  username_rule:
+    "1 to 64 characters: letters, digits, spaces, and - _ . ' @ + are allowed.",
+  password_rule:
+    "15 to 1024 characters. Common passwords and passwords used before are refused.",
+} as const;
+
+export const mockInvites: readonly Invite[] = [
+  {
+    id: "6a1b2c3d-0000-4000-8000-000000000001",
+    media_server_id: "3d7f1a2b-0000-4000-8000-000000000001",
+    label: "Family",
+    expires_at: "2026-12-31T00:00:00Z",
+    max_uses: 5,
+    use_count: 1,
+    library_ids: [],
+    status: "active",
+    created_at: "2026-09-20T09:00:00Z",
+  },
+  {
+    id: "6a1b2c3d-0000-4000-8000-000000000002",
+    media_server_id: "3d7f1a2b-0000-4000-8000-000000000002",
+    label: "Old link",
+    use_count: 2,
+    library_ids: [],
+    status: "revoked",
+    created_at: "2026-09-01T09:00:00Z",
+  },
+];
+
+let invites: Invite[] = [...mockInvites];
+let inviteIdsByCode = new Map<string, string>();
+let createdInvites = 0;
+
+export function resetMockInvites(): void {
+  invites = [...mockInvites];
+  inviteIdsByCode = new Map([
+    [VALID_INVITE_CODE, "6a1b2c3d-0000-4000-8000-000000000001"],
+    [REVOKED_INVITE_CODE, "6a1b2c3d-0000-4000-8000-000000000002"],
+  ]);
+  createdInvites = 0;
+}
+resetMockInvites();
+
+const invitesQuerySchema = pageQuerySchema(MAX_INVITE_CURSOR_LENGTH);
+
+function inviteDenial() {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("users.invite")) {
+    return envelope(403, "forbidden", "missing permission users.invite");
+  }
+  return undefined;
+}
+
+function newestFirst(items: readonly Invite[]): Invite[] {
+  return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+function mediaServerById(id: string): MediaServer | undefined {
+  return mediaServers.find((server) => server.id === id);
+}
+
+// The nth created invite gets a fixed, valid code so tests can follow it.
+function nextInviteCode(): string {
+  return `ABCDEFGHIJKLMNOPQRSTUVWXA${String.fromCharCode(65 + createdInvites)}`;
+}
+
+function createMockInvite(input: CreateInviteRequest): Invite {
+  createdInvites += 1;
+  const ordinal = String(createdInvites).padStart(2, "0");
+  const invite: Invite = {
+    id: `6a1b2c3d-0000-4000-8000-0000000001${ordinal}`,
+    media_server_id: input.media_server_id,
+    label: input.label,
+    use_count: 0,
+    library_ids: input.library_ids ?? [],
+    status: "active",
+    created_at: `2026-09-24T12:${ordinal}:00Z`,
+  };
+  if (input.expires_at !== undefined) {
+    invite.expires_at = input.expires_at;
+  }
+  if (input.max_uses !== undefined) {
+    invite.max_uses = input.max_uses;
+  }
+  invites = [invite, ...invites];
+  return invite;
+}
+
+function upstreamFailure(server: MediaServer) {
+  const host = new URL(server.base_url).hostname;
+  if (host === UNREACHABLE_MEDIA_SERVER_HOST) {
+    return envelope(502, "media_server_failure", "media server failed", {
+      "Retry-After": "5",
+    });
+  }
+  if (host === BUSY_MEDIA_SERVER_HOST) {
+    return envelope(503, "unavailable", "media server busy", {
+      "Retry-After": "2",
+    });
+  }
+  return undefined;
+}
+
+async function createInvite(request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = createInviteRequestSchema.safeParse(await request.json());
+  if (!input.success) {
+    return envelope(422, "validation_failed", "invalid invite");
+  }
+  const server = mediaServerById(input.data.media_server_id);
+  if (server === undefined) {
+    return envelope(404, "not_found", "media server not found");
+  }
+  const failure = upstreamFailure(server);
+  if (failure !== undefined) {
+    return failure;
+  }
+  const code = nextInviteCode();
+  const invite = createMockInvite(input.data);
+  inviteIdsByCode.set(code, invite.id);
+  return HttpResponse.json(
+    { invite, code, accept_path: `/invite/${code}` },
+    { status: 201 },
+  );
+}
+
+function inviteById(id: string | readonly string[] | undefined) {
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return { response: envelope(422, "validation_failed", "invalid id") };
+  }
+  const invite = invites.find((candidate) => candidate.id === id);
+  if (invite === undefined) {
+    return { response: envelope(404, "not_found", "invite not found") };
+  }
+  return { invite };
+}
+
+function revokeInvite(id: string | readonly string[] | undefined) {
+  const found = inviteById(id);
+  if (found.response !== undefined) {
+    return found.response;
+  }
+  invites = invites.map((invite) =>
+    invite.id === found.invite.id ? { ...invite, status: "revoked" } : invite,
+  );
+  return new HttpResponse(null, { status: 204 });
+}
+
+// The public answer for a code: the active invite it names, or one opaque
+// 404 for a code that is malformed, unknown, expired, used up, or revoked.
+function activeInviteForCode(code: string | readonly string[] | undefined) {
+  if (typeof code !== "string" || !INVITE_CODE_PATTERN.test(code)) {
+    return { response: envelope(404, "not_found", "invite not available") };
+  }
+  if (code === RATE_LIMITED_INVITE_CODE) {
+    return {
+      response: envelope(429, "rate_limited", "too many attempts", {
+        "Retry-After": String(INVITE_RETRY_AFTER_SECONDS),
+      }),
+    };
+  }
+  const id = inviteIdsByCode.get(code);
+  const invite = invites.find((candidate) => candidate.id === id);
+  const server =
+    invite === undefined ? undefined : mediaServerById(invite.media_server_id);
+  if (invite?.status !== "active" || server === undefined) {
+    return { response: envelope(404, "not_found", "invite not available") };
+  }
+  return { invite, server };
+}
+
+function previewInvite(code: string | readonly string[] | undefined) {
+  const found = activeInviteForCode(code);
+  if (found.response !== undefined) {
+    return found.response;
+  }
+  return HttpResponse.json({
+    media_server_name: found.server.name,
+    ...mockInviteRules,
+  });
+}
+
+async function acceptInvite(
+  code: string | readonly string[] | undefined,
+  request: Request,
+) {
+  const found = activeInviteForCode(code);
+  if (found.response !== undefined) {
+    return found.response;
+  }
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = acceptInviteRequestSchema.safeParse(await request.json());
+  if (!input.success) {
+    return envelope(422, "validation_failed", "invalid account details");
+  }
+  if (input.data.username.toLowerCase() === TAKEN_INVITE_USERNAME) {
+    return envelope(409, "username_unavailable", "username taken");
+  }
+  const failure = upstreamFailure(found.server);
+  if (failure !== undefined) {
+    return failure;
+  }
+  const useCount = found.invite.use_count + 1;
+  const exhausted =
+    found.invite.max_uses !== undefined && useCount >= found.invite.max_uses;
+  invites = invites.map((invite) =>
+    invite.id === found.invite.id
+      ? {
+          ...invite,
+          use_count: useCount,
+          status: exhausted ? "exhausted" : "active",
+        }
+      : invite,
+  );
+  return HttpResponse.json(
+    { media_server_name: found.server.name, username: input.data.username },
+    { status: 201 },
+  );
+}
+
 export const handlers = [
+  http.get(
+    "*/api/v1/invites",
+    jsonApi(
+      ({ request }) =>
+        inviteDenial() ??
+        pagedItems(
+          new URL(request.url),
+          invitesQuerySchema,
+          newestFirst(invites),
+        ),
+    ),
+  ),
+  http.post(
+    "*/api/v1/invites",
+    jsonApi(
+      async ({ request }) => inviteDenial() ?? (await createInvite(request)),
+    ),
+  ),
+  http.get(
+    "*/api/v1/invites/:id",
+    jsonApi(({ params }) => {
+      const denied = inviteDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const found = inviteById(params.id);
+      return found.response ?? HttpResponse.json(found.invite);
+    }),
+  ),
+  http.delete(
+    "*/api/v1/invites/:id",
+    jsonApi(({ params }) => inviteDenial() ?? revokeInvite(params.id)),
+  ),
+  http.get(
+    "*/api/v1/invite/:code",
+    jsonApi(({ params }) => previewInvite(params.code)),
+  ),
+  http.post(
+    "*/api/v1/invite/:code/accept",
+    jsonApi(({ params, request }) => acceptInvite(params.code, request)),
+  ),
   http.get(
     "*/api/v1/media-servers",
     jsonApi(
