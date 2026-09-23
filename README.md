@@ -115,6 +115,26 @@ page size is 50 roles and the enforced maximum is 100. A missing session gets
 `401 unauthorized`; a signed-in account without the required permission gets
 `403 forbidden`. This slice does not expose role-editing endpoints.
 
+When OIDC is enabled, `GET /api/v1/auth/providers` advertises the configured
+display name, `POST /api/v1/auth/oidc/start` with an
+`application/x-www-form-urlencoded` body and optional `return_to` field begins
+discovery-backed authorization-code sign-in with PKCE, and the callback is
+`GET /api/v1/auth/oidc/callback`. State, nonce, verifier, and return path live
+only in Bloom's server-side session and expire after ten minutes. A linked
+identity is keyed by its verified issuer and subject. An unknown identity is
+provisioned only when `BLOOM_OIDC_DEFAULT_ROLE` is explicitly non-empty; the
+secure default does not provision accounts. Claim-mapped roles are recorded as
+OIDC grants and reconciled on each sign-in. Manual grants remain independent,
+including a manual grant of the same role. Effective authorization is their
+union. Bloom does not retain provider access or refresh tokens.
+
+Failed browser callbacks redirect to the configured public URL at
+`/login?error=<code>`. The closed code set is `unknown_identity`,
+`provisioning_disabled`, `state_invalid`, `token_invalid`,
+`provider_unavailable`, `disabled`, and `internal_error`. Provider error text is
+never copied into the redirect. Callers whose `Accept` header does not include
+`text/html` receive the documented JSON error envelope instead.
+
 ### Running against PostgreSQL
 
 ```bash
@@ -195,6 +215,7 @@ this table.
 | `BLOOM_HTTP_WRITE_TIMEOUT` | duration | no | `15s` | no | Bound on writing a response. |
 | `BLOOM_HTTP_IDLE_TIMEOUT` | duration | no | `60s` | no | Idle keep-alive connection lifetime. |
 | `BLOOM_HTTP_MAX_BODY_BYTES` | int | no | `1048576` | no | Cap on non-streaming request bodies. |
+| `BLOOM_PUBLIC_URL` | HTTP(S) origin | no | `http://localhost:8080` | no | Externally visible Bloom origin used for callback-error redirects and OIDC redirect validation. |
 | `BLOOM_DB_DRIVER` | `sqlite` \| `postgres` | no | `sqlite` | no | Database engine. Anything else fails startup. |
 | `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. For compatibility, startup supplies `_pragma=foreign_keys(1)` when a configured SQLite DSN omits a foreign-key pragma; an explicit disable still fails startup. |
 | `BLOOM_DB_MAX_OPEN_CONNS` | int | no | `25` | no | Pool cap on open connections. |
@@ -213,12 +234,27 @@ this table.
 | `BLOOM_LOGIN_RATE_MAX_KEYS` | int | no | `10000` | no | Bound on combined IP and username rate-limit entries held in memory. Valid range: 2-100000. |
 | `BLOOM_LOGIN_MAX_CONCURRENT` | int | no | `4` | no | Maximum concurrent Argon2id password verifications. Excess attempts fail fast with `503`. Valid range: 1-64. |
 | `BLOOM_TRUSTED_PROXY_CIDRS` | comma-separated CIDRs | no | — | no | Trust `X-Forwarded-For` only when the direct peer is in this allowlist. Empty disables forwarded addresses. |
+| `BLOOM_OIDC_ENABLED` | bool | no | `false` | no | Enable one generic OpenID Connect provider. Discovery runs at startup and startup fails if it cannot complete. |
+| `BLOOM_OIDC_DISPLAY_NAME` | string | OIDC: yes | `OpenID Connect` | no | Sign-in method label returned by `GET /api/v1/auth/providers`. |
+| `BLOOM_OIDC_ISSUER_URL` | URL | OIDC: yes | — | no | OIDC issuer, limited to 2,048 bytes. HTTPS is required except loopback HTTP with the development flag. |
+| `BLOOM_OIDC_CLIENT_ID` | string | OIDC: yes | — | no | OAuth client identifier. |
+| `BLOOM_OIDC_CLIENT_SECRET` | string | OIDC: yes | — | **yes** | Environment-only OAuth client secret. It is wrapped in `config.Secret`, never rendered or logged, and never accepted as a flag. Rotate it with a rolling restart. |
+| `BLOOM_OIDC_REDIRECT_URL` | URL | OIDC: yes | — | no | Exact callback URL: `BLOOM_PUBLIC_URL` plus `/api/v1/auth/oidc/callback`, with no query or fragment. HTTPS is required except loopback HTTP in explicit development mode. |
+| `BLOOM_OIDC_SCOPES` | space-separated strings | no | `openid profile email` | no | Requested scopes. `openid` is required; at most 16 values are accepted. |
+| `BLOOM_OIDC_USERNAME_CLAIM` | string | no | `preferred_username` | no | Verified ID-token claim used to derive the canonical Bloom username. |
+| `BLOOM_OIDC_ROLE_CLAIM` | string | no | — | no | Optional verified claim containing one role value or an array of role values. |
+| `BLOOM_OIDC_ROLE_MAP` | comma-separated mappings | no | — | no | Claim-value-to-Bloom-role mappings such as `bloom-admins=owner,bloom-users=member`. Requires a role claim. |
+| `BLOOM_OIDC_DEFAULT_ROLE` | role name | no | — | no | Explicit opt-in to JIT provisioning. The role is assigned when no mapped role applies; empty keeps unknown identities denied. |
+| `BLOOM_OIDC_ALLOW_INSECURE_ISSUER` | bool | no | `false` | no | Development-only opt-in for an HTTP issuer and callback on `localhost` or a loopback IP. |
+| `BLOOM_OIDC_DISCOVERY_TIMEOUT` | duration | no | `5s` | no | Per-attempt and total client bound for startup discovery. Valid range: `100ms`-`30s`. |
+| `BLOOM_OIDC_TOKEN_EXCHANGE_TIMEOUT` | duration | no | `5s` | no | Authorization-code exchange bound. Valid range: `100ms`-`30s`; token POSTs are not retried. |
+| `BLOOM_OIDC_JWKS_FETCH_TIMEOUT` | duration | no | `5s` | no | JWKS fetch bound. Valid range: `100ms`-`30s`; cached-key misses perform at most one bounded refetch. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
 | `BLOOM_LOG_FORMAT` | `json` \| `text` | no | `json` | no | Log record format. |
 | `BLOOM_OTLP_ENDPOINT` | string | no | — | no | OTLP/HTTP trace collector `host:port`. Empty disables span export. |
 | `BLOOM_OTLP_INSECURE` | bool | no | `false` | no | Send spans over plaintext HTTP. |
 | `BLOOM_TRACE_SAMPLE_RATIO` | float | no | `1.0` | no | Head-based sampling ratio in `[0,1]`. |
-| `BLOOM_SHUTDOWN_GRACE` | duration | no | `15s` | no | Drain budget on `SIGTERM`; keep it under the platform's termination grace. |
+| `BLOOM_SHUTDOWN_GRACE` | duration | no | `15s` | no | Total ordered shutdown budget on `SIGTERM`; keep it under the platform's termination grace. Bloom drains HTTP first, then closes the OIDC provider and media-server idle connections before the database and telemetry tracer. Unused time carries forward within the same absolute deadline. Size the grace to more than twice the longest admitted request so the drain reservation can finish it. |
 
 The `-migrate` flag (no env key) applies the embedded goose migrations for the
 configured engine and exits; it is how a deployment's migration Job invokes the
@@ -231,6 +267,13 @@ account data. Migration `00006_roles` adds roles, role permissions, and account
 role assignments on both engines and seeds the built-in `owner` and `member`
 roles. Existing accounts are deliberately left without roles; the migration
 logs a notice instead of guessing their authority.
+
+Migration `00008_oidc_identities` adds issuer-and-subject-keyed OIDC identity
+links on both engines. Migration `00009_account_role_sources` adds `manual` and
+`oidc` provenance so OIDC reconciliation cannot remove a manual grant. Apply
+both before the new binary receives traffic. Their down migrations restore the
+prior schema. Rolling back `00009` collapses duplicate manual/OIDC grants to one
+effective assignment, so preserve a backup if the provenance must be restored.
 
 ### Upgrading existing accounts to roles
 

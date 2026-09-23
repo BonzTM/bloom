@@ -48,7 +48,7 @@ func (s *Server) sessionAccountMiddleware(next http.Handler) http.Handler {
 			if actor == "" {
 				actor = "anonymous"
 			}
-			s.emitAuthAudit(r, actor, "", "auth.session", routeResource(r), telemetry.AuditFailure, reason, clientIP(r, s.trustedProxyCIDRs))
+			s.emitAuthAudit(r, actor, "auth.session", routeResource(r), telemetry.AuditFailure, reason, clientIP(r, s.trustedProxyCIDRs))
 		}
 		if err != nil {
 			writeError(w, r, s.logger, err)

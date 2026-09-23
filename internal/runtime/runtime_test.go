@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/runtime"
+	"github.com/BonzTM/bloom/internal/testutil"
 )
 
 const testSecret = "0123456789abcdef0123456789abcdef"
@@ -65,19 +68,6 @@ func TestRunWarnsOnceWhenTrustedProxyModeIsEnabled(t *testing.T) {
 	}
 }
 
-// freeAddr reserves and releases a loopback port so the server under test can
-// bind a known address.
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	return addr
-}
-
 func TestRunMigrateModeAppliesSchemaAndExits(t *testing.T) {
 	cfg := baseConfig(t, ":0")
 	cfg.Migrate = true
@@ -120,17 +110,18 @@ func TestRunRejectsEncodedExplicitlyDisabledForeignKeys(t *testing.T) {
 }
 
 func TestRunServesProbesAndStopsOnCancel(t *testing.T) {
-	addr := freeAddr(t)
-	cfg := baseConfig(t, addr)
+	cfg := baseConfig(t, "127.0.0.1:0")
 	cfg.Database.MigrateOnStartup = true
 	var log strings.Builder
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runtime.Run(ctx, cfg, runtime.Streams{Log: &log, Audit: io.Discard}) }()
+	ready := make(chan net.Addr, 1)
+	deps := runtime.Dependencies{ListenerReady: func(addr net.Addr) { ready <- addr }}
+	go func() { done <- runtime.Run(ctx, cfg, runtime.Streams{Log: &log, Audit: io.Discard}, deps) }()
 
-	client := &http.Client{Timeout: 2 * time.Second}
-	waitForListener(t, client, "http://"+addr+"/livez", done)
+	addr := listenerAddress(t, ready, done)
+	client := &http.Client{}
 
 	assertStatus(t, client, "http://"+addr+"/livez", http.StatusOK)
 	assertStatus(t, client, "http://"+addr+"/readyz", http.StatusOK)
@@ -150,13 +141,8 @@ func TestRunServesProbesAndStopsOnCancel(t *testing.T) {
 	}
 
 	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run returned error on cancel: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not stop within 10s of cancellation")
+	if err := <-done; err != nil {
+		t.Fatalf("Run returned error on cancel: %v", err)
 	}
 	if !strings.Contains(log.String(), `"msg":"stopped"`) {
 		t.Errorf("log lacks stopped record: %s", log.String())
@@ -177,29 +163,112 @@ func TestRunFailsFastOnUnreachableDatabase(t *testing.T) {
 	}
 }
 
-// waitForListener polls url until it answers, failing fast if Run exits first
-// (its error is far more useful than a listener timeout).
-func waitForListener(t *testing.T, client *http.Client, url string, done <-chan error) {
-	t.Helper()
-	const attempts = 250 // 250 * 20ms = 5s upper bound
-	for range attempts {
-		select {
-		case err := <-done:
-			t.Fatalf("Run exited before the listener came up: %v", err)
-		default:
-		}
-		resp, err := client.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			return
-		}
-		var netErr net.Error
-		if !errors.As(err, &netErr) && !strings.Contains(err.Error(), "connection refused") {
-			t.Fatalf("unexpected error waiting for listener: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
+func TestRunDisabledOIDCPerformsNoDiscovery(t *testing.T) {
+	var requests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
+	t.Cleanup(provider.Close)
+	cfg := baseConfig(t, "127.0.0.1:0")
+	cfg.Database.MigrateOnStartup = true
+	cfg.PublicURL = "https://bloom.example"
+	cfg.OIDC = config.OIDCConfig{Enabled: false, IssuerURL: provider.URL}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan net.Addr, 1)
+	deps := runtime.Dependencies{ListenerReady: func(addr net.Addr) { ready <- addr }}
+	go func() { done <- runtime.Run(ctx, cfg, runtime.Streams{Log: io.Discard, Audit: io.Discard}, deps) }()
+	_ = listenerAddress(t, ready, done)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	t.Fatal("listener did not come up within 5s")
+	if requests.Load() != 0 {
+		t.Fatalf("disabled OIDC discovery requests = %d, want 0", requests.Load())
+	}
+}
+
+func TestRunEnabledOIDCFailsStartupWhenDiscoveryUnavailable(t *testing.T) {
+	var requests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(provider.Close)
+	cfg := baseConfig(t, ":0")
+	cfg.Database.MigrateOnStartup = true
+	cfg.PublicURL = "https://bloom.example"
+	cfg.OIDC = config.OIDCConfig{
+		Enabled: true, DisplayName: "SSO", IssuerURL: provider.URL,
+		ClientID: "bloom", ClientSecret: config.NewSecret([]byte("secret")),
+		RedirectURL: "https://bloom.example/api/v1/auth/oidc/callback",
+		Scopes:      []string{"openid"}, UsernameClaim: "preferred_username",
+		AllowInsecureIssuer: true, DiscoveryTimeout: 200 * time.Millisecond,
+		TokenExchangeTimeout: time.Second, JWKSFetchTimeout: time.Second,
+	}
+	clock := testutil.NewFakeClock(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
+	var waits int
+	err := runtime.Run(context.Background(), cfg, runtime.Streams{Log: io.Discard, Audit: io.Discard}, runtime.Dependencies{
+		Clock:      clock,
+		OIDCRandom: func(time.Duration) (time.Duration, error) { return 0, nil },
+		OIDCWait:   func(context.Context, time.Duration) error { waits++; return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "initialize OIDC provider") {
+		t.Fatalf("Run error = %v, want OIDC startup failure", err)
+	}
+	if requests.Load() != 3 || waits != 2 {
+		t.Fatalf("discovery attempts = %d waits = %d, want 3 and 2", requests.Load(), waits)
+	}
+}
+
+func TestRunFailsStartupWhenConfiguredOIDCRoleIsMissing(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*config.OIDCConfig)
+	}{
+		{name: "default role", mutate: func(cfg *config.OIDCConfig) { cfg.DefaultRole = "missing-default" }},
+		{name: "role map target", mutate: func(cfg *config.OIDCConfig) {
+			cfg.RoleClaim = "groups"
+			cfg.RoleMap = map[string]string{"operators": "missing-mapped"}
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			var discoveryRequests atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				discoveryRequests.Add(1)
+			}))
+			t.Cleanup(provider.Close)
+			cfg := baseConfig(t, "127.0.0.1:0")
+			cfg.Database.MigrateOnStartup = true
+			cfg.PublicURL = "https://bloom.example"
+			cfg.OIDC = config.OIDCConfig{
+				Enabled: true, DisplayName: "SSO", IssuerURL: provider.URL,
+				ClientID: "bloom", ClientSecret: config.NewSecret([]byte("secret")),
+				RedirectURL: "https://bloom.example/api/v1/auth/oidc/callback",
+				Scopes:      []string{"openid"}, UsernameClaim: "preferred_username",
+				AllowInsecureIssuer: true, DiscoveryTimeout: time.Second,
+				TokenExchangeTimeout: time.Second, JWKSFetchTimeout: time.Second,
+			}
+			testCase.mutate(&cfg.OIDC)
+			err := runtime.Run(context.Background(), cfg, runtime.Streams{Log: io.Discard, Audit: io.Discard})
+			if err == nil || !strings.Contains(err.Error(), "configured OIDC role") {
+				t.Fatalf("Run error = %v, want configured role startup failure", err)
+			}
+			if discoveryRequests.Load() != 0 {
+				t.Fatalf("discovery requests = %d, want fail-fast before discovery", discoveryRequests.Load())
+			}
+		})
+	}
+}
+
+func listenerAddress(t *testing.T, ready <-chan net.Addr, done <-chan error) string {
+	t.Helper()
+	select {
+	case addr := <-ready:
+		return addr.String()
+	case err := <-done:
+		t.Fatalf("Run exited before the listener came up: %v", err)
+		return ""
+	}
 }
 
 func assertStatus(t *testing.T, client *http.Client, url string, want int) {

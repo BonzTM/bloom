@@ -9,7 +9,7 @@ WHERE ar.account_id = sqlc.arg(account_id)
 ORDER BY rp.permission;
 
 -- name: GetAuthorizationSnapshot :many
-SELECT r.name AS role_name, rp.permission
+SELECT DISTINCT r.name AS role_name, rp.permission
 FROM account_roles ar
 JOIN roles r ON r.id = ar.role_id
 LEFT JOIN role_permissions rp ON rp.role_id = r.id
@@ -36,6 +36,6 @@ FROM roles
 WHERE name = sqlc.arg(role_name);
 
 -- name: AssignRoleIDToAccount :execrows
-INSERT INTO account_roles (account_id, role_id)
-VALUES (sqlc.arg(account_id), sqlc.arg(role_id))
+INSERT INTO account_roles (account_id, role_id, source)
+VALUES (sqlc.arg(account_id), sqlc.arg(role_id), 'manual')
 ON CONFLICT DO NOTHING;

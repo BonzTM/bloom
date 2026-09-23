@@ -32,41 +32,99 @@ import (
 // under the integration build tag against a live server.
 func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
-	ctx := context.Background()
+	prepareEngineSuite(t, pool, driver)
+	store, localIdentities, err := db.NewAccountStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewAccountStores: %v", err)
+	}
+	authorizer, roles, adminStore := newAuthorizationTestStores(t, pool, driver)
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC))
+	sessionStore, err := db.NewSessionStore(pool, driver, &sessionCleanupMetrics{}, slog.New(slog.DiscardHandler), clock)
+	if err != nil {
+		t.Fatalf("NewSessionStore: %v", err)
+	}
+	runAccountEngineTests(t, pool, driver, store, localIdentities, sessionStore, clock)
+	t.Run("OIDC flow claim is atomic", func(t *testing.T) {
+		testOIDCFlowClaim(t, pool, sessionStore, clock)
+	})
+	t.Run("configured role lookup", func(t *testing.T) { testConfiguredRoleLookup(t, roles) })
+	runAuthorizationEngineTests(t, pool, driver, store, adminStore, authorizer, roles)
+	t.Run("OIDC identity provisioning and role sync", func(t *testing.T) {
+		testOIDCIdentityStore(t, pool, driver, store, adminStore, authorizer)
+	})
+	runMediaServerEngineTests(t, pool, driver)
+}
+
+func testOIDCFlowClaim(t *testing.T, pool *sql.DB, sessions scs.CtxStore, clock *testutil.FakeClock) {
+	t.Helper()
+	flows, err := db.NewOIDCFlowStore(pool)
+	if err != nil {
+		t.Fatalf("NewOIDCFlowStore: %v", err)
+	}
+	const token = "single-use-flow"
+	if err := sessions.CommitCtx(t.Context(), storedSessionToken(token), []byte("flow"), clock.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("seed OIDC flow: %v", err)
+	}
+	ready := make(chan struct{}, 2)
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			ready <- struct{}{}
+			<-start
+			claimed, claimErr := flows.ClaimOIDCFlow(t.Context(), token)
+			if claimErr != nil {
+				t.Errorf("ClaimOIDCFlow: %v", claimErr)
+			}
+			results <- claimed
+		}()
+	}
+	<-ready
+	<-ready
+	close(start)
+	claims := 0
+	for range 2 {
+		if <-results {
+			claims++
+		}
+	}
+	if claims != 1 {
+		t.Fatalf("successful flow claims = %d, want 1", claims)
+	}
+}
+
+func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
 	t.Run("username migration", func(t *testing.T) {
 		testUsernameMigration(t, pool, driver)
 	})
 	t.Run("role migration preserves existing role-less accounts", func(t *testing.T) {
 		testRoleMigrationNotice(t, pool, driver)
 	})
+	t.Run("role source migration preserves manual provenance", func(t *testing.T) {
+		testRoleSourceMigrationRoundTrip(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
-	if err := db.Migrate(ctx, pool, driver); err != nil {
+	if err := db.Migrate(context.Background(), pool, driver); err != nil {
 		t.Fatalf("Migrate (first up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
-	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+	if err := db.MigrateDownAll(context.Background(), pool, driver); err != nil {
 		t.Fatalf("MigrateDownAll: %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 0)
-	if err := db.Migrate(ctx, pool, driver); err != nil {
+	if err := db.Migrate(context.Background(), pool, driver); err != nil {
 		t.Fatalf("Migrate (second up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
+}
 
-	store, localIdentities, err := db.NewAccountStores(pool, driver)
-	if err != nil {
-		t.Fatalf("NewAccountStores: %v", err)
-	}
-	authorizer, roles, adminStore := newAuthorizationTestStores(t, pool, driver)
-	cleanupMetrics := &sessionCleanupMetrics{}
-	clock := testutil.NewFakeClock(time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC))
-	logger := slog.New(slog.DiscardHandler)
-	sessionStore, err := db.NewSessionStore(pool, driver, cleanupMetrics, logger, clock)
-	if err != nil {
-		t.Fatalf("NewSessionStore: %v", err)
-	}
-
+func runAccountEngineTests(
+	t *testing.T, pool *sql.DB, driver config.Driver, store core.AccountStore,
+	localIdentities core.LocalIdentityStore, sessionStore scs.CtxStore, clock *testutil.FakeClock,
+) {
+	t.Helper()
 	t.Run("create and get round-trip", func(t *testing.T) { testCreateGet(t, store) })
 	t.Run("duplicate id", func(t *testing.T) { testDuplicateID(t, store) })
 	t.Run("duplicate username", func(t *testing.T) { testDuplicateUsername(t, store) })
@@ -80,8 +138,6 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	})
 	t.Run("password hash update", func(t *testing.T) { testPasswordHashUpdate(t, store, localIdentities) })
 	t.Run("password hash length constraint", func(t *testing.T) { testPasswordHashLengthConstraint(t, store) })
-	runAuthorizationEngineTests(t, pool, driver, store, adminStore, authorizer, roles)
-	runMediaServerEngineTests(t, pool, driver)
 }
 
 func runMediaServerEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -149,6 +205,163 @@ func mediaServerNames(servers []core.MediaServer) []string {
 		names = append(names, server.Name)
 	}
 	return names
+}
+
+func testOIDCIdentityStore(
+	t *testing.T,
+	pool *sql.DB,
+	driver config.Driver,
+	accounts core.AccountStore,
+	admins core.AdminAccountStore,
+	authorizer core.Authorizer,
+) {
+	t.Helper()
+	fixture := prepareOIDCIdentityFixture(t, pool, driver, accounts)
+	assertAccountPermissions(t, authorizer, fixture.created.Account.ID, ownerPermissions())
+	assigned, err := admins.GrantRole(context.Background(), fixture.created.Account.ID, "owner")
+	if err != nil || !assigned {
+		t.Fatalf("overlapping manual owner role = %v, %v; want a distinct manual grant", assigned, err)
+	}
+	fixture.signIn.MappedRoles = nil
+	fixture.signIn.Now = fixture.now.Add(time.Minute)
+	existing, err := fixture.store.SignInOIDC(context.Background(), fixture.signIn)
+	if err != nil || existing.Provisioned || existing.Account.ID != fixture.created.Account.ID {
+		t.Fatalf("existing sign-in = %+v, %v", existing, err)
+	}
+	if len(existing.AddedRoles) != 0 || !slices.Equal(existing.RemovedRoles, []string{"owner"}) {
+		t.Fatalf("reconciliation role delta = added %v removed %v", existing.AddedRoles, existing.RemovedRoles)
+	}
+	assertAccountPermissions(t, authorizer, fixture.created.Account.ID, ownerPermissions())
+	assertOIDCIdentityRow(t, pool, fixture.created.Account.ID, fixture.signIn.Issuer, fixture.signIn.Subject, "Alice Example", "[]")
+	testOIDCOtherIssuer(t, fixture.store, fixture.signIn, fixture.created.Account.ID, fixture.now)
+}
+
+type oidcIdentityFixture struct {
+	store   core.OIDCAccountStore
+	signIn  core.OIDCSignIn
+	created core.OIDCSignInResult
+	now     time.Time
+}
+
+func prepareOIDCIdentityFixture(
+	t *testing.T, pool *sql.DB, driver config.Driver, accounts core.AccountStore,
+) oidcIdentityFixture {
+	t.Helper()
+	oidcStore, err := db.NewOIDCAccountStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewOIDCAccountStore: %v", err)
+	}
+	now := authorizationFixtureTime()
+	assertOIDCProvisioningDisabled(t, oidcStore, now)
+	createOIDCUsernameCollision(t, accounts, now)
+	signIn := core.OIDCSignIn{
+		Provider: "oidc", Issuer: "https://id.example", Subject: "subject-alice", UsernameClaim: "Alice Example",
+		MappedRoles: []string{"owner"}, DefaultRole: "member", AutoProvision: true,
+		Now: now,
+	}
+	testOIDCMissingRoleErrors(t, oidcStore, signIn)
+	created, err := oidcStore.SignInOIDC(context.Background(), signIn)
+	if err != nil || !created.Provisioned || created.Account.Username == "alice-example" {
+		t.Fatalf("provision = %+v, %v", created, err)
+	}
+	if !slices.Equal(created.AddedRoles, []string{"owner"}) || len(created.RemovedRoles) != 0 {
+		t.Fatalf("provision role delta = added %v removed %v", created.AddedRoles, created.RemovedRoles)
+	}
+	wantUsername, usernameErr := core.OIDCUsername(signIn.UsernameClaim, signIn.Issuer+"\x00"+signIn.Subject, 1)
+	if usernameErr != nil || created.Account.Username != wantUsername {
+		t.Fatalf("collision username = %q, %v; want %q", created.Account.Username, usernameErr, wantUsername)
+	}
+	return oidcIdentityFixture{store: oidcStore, signIn: signIn, created: created, now: now}
+}
+
+func assertOIDCProvisioningDisabled(t *testing.T, store core.OIDCAccountStore, now time.Time) {
+	t.Helper()
+	rejected := core.OIDCSignIn{
+		Provider: "oidc", Issuer: "https://id.example", Subject: "rejected", UsernameClaim: "rejected-user", Now: now,
+	}
+	if _, err := store.SignInOIDC(context.Background(), rejected); !errors.Is(err, core.ErrOIDCProvisioningDisabled) {
+		t.Fatalf("disabled provisioning = %v, want ErrOIDCProvisioningDisabled", err)
+	}
+}
+
+func createOIDCUsernameCollision(t *testing.T, accounts core.AccountStore, now time.Time) {
+	t.Helper()
+	collision := core.Account{ID: mustID(t), Username: "alice-example", CreatedAt: now}
+	if err := accounts.CreateAccount(context.Background(), collision); err != nil {
+		t.Fatalf("create username collision: %v", err)
+	}
+}
+
+func testConfiguredRoleLookup(t *testing.T, roles core.RoleReader) {
+	t.Helper()
+	for _, testCase := range []struct {
+		name string
+		want bool
+	}{
+		{name: "owner", want: true},
+		{name: "member", want: true},
+		{name: "missing-role", want: false},
+	} {
+		got, err := roles.RoleExists(context.Background(), testCase.name)
+		if err != nil || got != testCase.want {
+			t.Fatalf("RoleExists(%q) = %v, %v; want %v", testCase.name, got, err, testCase.want)
+		}
+	}
+}
+
+func testOIDCMissingRoleErrors(t *testing.T, store core.OIDCAccountStore, base core.OIDCSignIn) {
+	t.Helper()
+	tests := []struct {
+		name   string
+		mutate func(*core.OIDCSignIn)
+	}{
+		{name: "default", mutate: func(signIn *core.OIDCSignIn) {
+			signIn.Subject = "missing-default-role"
+			signIn.MappedRoles = nil
+			signIn.DefaultRole = "missing-role"
+		}},
+		{name: "mapped", mutate: func(signIn *core.OIDCSignIn) {
+			signIn.Subject = "missing-mapped-role"
+			signIn.MappedRoles = []string{"missing-role"}
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run("missing "+testCase.name+" role", func(t *testing.T) {
+			signIn := base
+			testCase.mutate(&signIn)
+			_, err := store.SignInOIDC(context.Background(), signIn)
+			if err == nil || errors.Is(err, core.ErrNotFound) {
+				t.Fatalf("SignInOIDC error = %v, want opaque internal error", err)
+			}
+		})
+	}
+}
+
+func testOIDCOtherIssuer(
+	t *testing.T, oidcStore core.OIDCAccountStore, signIn core.OIDCSignIn, firstAccountID string, now time.Time,
+) {
+	t.Helper()
+	otherIssuer := signIn
+	otherIssuer.Issuer = "https://other-id.example"
+	otherIssuer.MappedRoles = []string{"member"}
+	otherIssuer.Now = now.Add(2 * time.Minute)
+	other, otherErr := oidcStore.SignInOIDC(context.Background(), otherIssuer)
+	if otherErr != nil || !other.Provisioned || other.Account.ID == firstAccountID {
+		t.Fatalf("same subject under another issuer = %+v, %v; want distinct provisioned account", other, otherErr)
+	}
+}
+
+func assertOIDCIdentityRow(t *testing.T, pool *sql.DB, accountID, issuer, subject, usernameClaim, mappedRoles string) {
+	t.Helper()
+	var gotAccount, gotSubject, gotUsernameClaim, gotRoles string
+	err := pool.QueryRowContext(context.Background(),
+		"SELECT account_id, subject, username_claim, mapped_roles FROM account_identities WHERE issuer = $1 AND subject = $2",
+		issuer, subject,
+	).Scan(&gotAccount, &gotSubject, &gotUsernameClaim, &gotRoles)
+	if err != nil || gotAccount != accountID || gotSubject != subject ||
+		gotUsernameClaim != usernameClaim || gotRoles != mappedRoles {
+		t.Fatalf("OIDC identity row = %q %q %q %q, %v", gotAccount, gotSubject, gotUsernameClaim, gotRoles, err)
+	}
 }
 
 func runAuthorizationEngineTests(
@@ -233,6 +446,51 @@ func testRoleMigrationNotice(t *testing.T, pool *sql.DB, driver config.Driver) {
 	}
 	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
 		t.Fatalf("clean role migration fixture: %v", err)
+	}
+}
+
+func testRoleSourceMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare role source migration: %v", err)
+	}
+	accountID := mustID(t)
+	username := "role-source-" + mustID(t)
+	createdAt := migrationCreatedAt(driver)
+	if _, err := pool.ExecContext(ctx,
+		"INSERT INTO accounts (id, username, username_key, created_at) VALUES ($1, $2, $2, $3)",
+		accountID, username, createdAt,
+	); err != nil {
+		t.Fatalf("create role source fixture account: %v", err)
+	}
+	var roleID string
+	if err := pool.QueryRowContext(ctx, "SELECT id FROM roles WHERE name = 'owner'").Scan(&roleID); err != nil {
+		t.Fatalf("select owner role: %v", err)
+	}
+	for _, source := range []string{"manual", "oidc"} {
+		if _, err := pool.ExecContext(ctx,
+			"INSERT INTO account_roles (account_id, role_id, source) VALUES ($1, $2, $3)",
+			accountID, roleID, source,
+		); err != nil {
+			t.Fatalf("insert %s role source: %v", source, err)
+		}
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 8); err != nil {
+		t.Fatalf("roll back role source migration: %v", err)
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM account_roles WHERE account_id = $1", accountID, 1)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("re-apply role source migration: %v", err)
+	}
+	var source string
+	if err := pool.QueryRowContext(ctx,
+		"SELECT source FROM account_roles WHERE account_id = $1 AND role_id = $2", accountID, roleID,
+	).Scan(&source); err != nil || source != "manual" {
+		t.Fatalf("restored role source = %q, %v; want manual", source, err)
+	}
+	if _, err := pool.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", accountID); err != nil {
+		t.Fatalf("delete role source fixture: %v", err)
 	}
 }
 
@@ -512,6 +770,7 @@ ORDER BY tc.table_name, kcu.column_name`
 		got = append(got, strings.Join([]string{table, column, target, targetColumn, action}, ":"))
 	}
 	want := []string{
+		"account_identities:account_id:accounts:id:CASCADE",
 		"account_roles:account_id:accounts:id:CASCADE",
 		"account_roles:role_id:roles:id:CASCADE",
 		"role_permissions:role_id:roles:id:CASCADE",
@@ -571,7 +830,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 7)
+	assertMigrationVersion(t, pool, 9)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -692,7 +951,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 7)
+	assertMigrationVersion(t, pool, 9)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}
@@ -995,17 +1254,20 @@ func loadSessionContext(t *testing.T, manager *scs.SessionManager, token string)
 
 func assertStoredSession(t *testing.T, pool *sql.DB, token string, want bool) {
 	t.Helper()
-	hash := sha256.Sum256([]byte(token))
-	storedToken := base64.RawURLEncoding.EncodeToString(hash[:])
 	var count int
 	if err := pool.QueryRowContext(context.Background(),
-		"SELECT COUNT(*) FROM sessions WHERE token = $1", storedToken,
+		"SELECT COUNT(*) FROM sessions WHERE token = $1", storedSessionToken(token),
 	).Scan(&count); err != nil {
 		t.Fatalf("query hashed token: %v", err)
 	}
 	if got := count == 1; got != want {
 		t.Fatalf("hashed token stored = %v, want %v", got, want)
 	}
+}
+
+func storedSessionToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
 func assertSessionUnusable(t *testing.T, manager *scs.SessionManager, token string) {

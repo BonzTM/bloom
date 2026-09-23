@@ -207,6 +207,206 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/providers:
+    get:
+      tags: [auth]
+      operationId: getAuthProviders
+      summary: List enabled browser sign-in methods.
+      responses:
+        "200":
+          description: Local sign-in is always present; OIDC is present when enabled.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlPublic" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthProvidersResponse"
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedGet"
+  /api/v1/auth/oidc/start:
+    post:
+      tags: [auth]
+      operationId: startOIDC
+      summary: Start an OpenID Connect authorization-code flow with PKCE.
+      requestBody:
+        required: false
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                return_to:
+                  type: string
+                  maxLength: 2048
+                  description: Optional same-origin application path used after sign-in.
+      responses:
+        "303":
+          description: Redirect to the configured provider. Flow secrets are stored only in the server-side session.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Location: { $ref: "#/components/headers/Location" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+        "500":
+          $ref: "#/components/responses/AuthInternalError"
+        "400":
+          description: The form body is malformed. The `code` is `invalid_argument`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: The supplied session cookie is malformed.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403":
+          description: Cross-origin protection rejected the request.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: OIDC is disabled, so the route is not mounted.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "415":
+          description: Content-Type is not `application/x-www-form-urlencoded`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: Per-client start rate limit exceeded. `Retry-After` is bounded whole seconds.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: The form contains an unknown field, repeated `return_to`, or a `return_to` longer than 2,048 characters. The `code` is `validation_failed`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedPost"
+  /api/v1/auth/oidc/callback:
+    get:
+      tags: [auth]
+      operationId: completeOIDC
+      summary: Validate the OpenID Connect callback and establish a browser session.
+      description: |
+        A successful callback redirects to the validated return path. A failed
+        browser callback whose `Accept` header includes `text/html` redirects
+        to the configured public URL at `/login?error=<code>`. `code` is one of
+        `unknown_identity`, `provisioning_disabled`, `state_invalid`,
+        `token_invalid`, `provider_unavailable`, `disabled`, or
+        `internal_error`. Provider error text is never included. Callers that
+        do not accept HTML receive the JSON outcomes below.
+      parameters:
+        - in: query
+          name: state
+          required: true
+          description: Must occur exactly once and contain at most 512 ASCII characters.
+          schema: { type: string, minLength: 1, maxLength: 512, pattern: '^[\x00-\x7F]*$' }
+        - in: query
+          name: code
+          required: false
+          description: When present, must occur exactly once and contain at most 4096 ASCII characters.
+          schema: { type: string, maxLength: 4096, pattern: '^[\x00-\x7F]*$' }
+        - in: query
+          name: error
+          required: false
+          description: When present, must occur exactly once and contain at most 256 ASCII characters.
+          schema: { type: string, maxLength: 256, pattern: '^[\x00-\x7F]*$' }
+      responses:
+        "303":
+          description: Signed in and redirected to the validated return path, or a failed browser sign-in redirected with an `OIDCCallbackErrorCode` query value.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Location: { $ref: "#/components/headers/Location" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+        "401":
+          description: State, nonce, token, or verified claim validation failed (`oidc_rejected`); the account is disabled (`invalid_credentials`); or the session cookie is malformed (`unauthorized`).
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403":
+          description: The identity is unknown or automatic provisioning is disabled. The `code` is `forbidden`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: Callback rate limit exceeded.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          $ref: "#/components/responses/AuthInternalError"
+        "503":
+          description: Provider work capacity is exhausted or the provider is transiently unavailable. The body is opaque and `Retry-After` is bounded whole seconds.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: OIDC is disabled, so the route is not mounted.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedGet"
   /api/v1/auth/logout:
     post:
       tags: [auth]
@@ -529,6 +729,11 @@ components:
       schema:
         type: integer
         minimum: 1
+    Location:
+      description: Redirect destination.
+      schema:
+        type: string
+        format: uri-reference
   responses:
     MediaServerCreated:
       description: The connection was proved and stored with its credential encrypted.
@@ -881,6 +1086,29 @@ components:
           minLength: 1
           maxLength: 1024
           description: Length is measured in Unicode code points.
+    AuthProvider:
+      type: object
+      required: [id, display_name]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          enum: [local, oidc]
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+    AuthProvidersResponse:
+      type: object
+      required: [providers]
+      additionalProperties: false
+      properties:
+        providers:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/AuthProvider"
     AccountSummary:
       type: object
       required: [id, username]
@@ -1032,6 +1260,18 @@ components:
         - method_not_allowed
         - forbidden
         - media_server_failure
+        - oidc_rejected
+    OIDCCallbackErrorCode:
+      type: string
+      description: Closed browser-facing OIDC callback failure code set.
+      enum:
+        - unknown_identity
+        - provisioning_disabled
+        - state_invalid
+        - token_invalid
+        - provider_unavailable
+        - disabled
+        - internal_error
     FieldError:
       type: object
       required: [field, code, message]

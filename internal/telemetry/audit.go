@@ -37,9 +37,14 @@ import (
 // explicit rather than a free-form string.
 type AuditResult string
 
+// AuditProvider is the finite authentication-provider identifier set.
+type AuditProvider string
+
 const (
 	// AuditActionRoleAssign is the stable action for every account role assignment.
 	AuditActionRoleAssign = "role.assign"
+	// AuditActionRoleRemove is the stable action for every account role removal.
+	AuditActionRoleRemove = "role.remove"
 	// AuditSuccess marks an allowed, completed action.
 	AuditSuccess AuditResult = "success"
 	// AuditFailure marks an authentication failure: the caller could not be
@@ -48,6 +53,10 @@ const (
 	// AuditDenied marks an authorization denial: the caller is known but lacks the
 	// required permission or ownership for the action.
 	AuditDenied AuditResult = "denied"
+	// AuditProviderOIDC identifies the generic OpenID Connect adapter.
+	AuditProviderOIDC AuditProvider = "oidc"
+	// AuditProviderLocal identifies Bloom's username and password adapter.
+	AuditProviderLocal AuditProvider = "local"
 )
 
 // AuditEvent is one audit record. Every field is non-sensitive identity or
@@ -83,6 +92,9 @@ type AuditEvent struct {
 	Reason string
 	// Source is the validated client address or service identity such as "cli".
 	Source string
+	// Provider is the finite authentication provider identifier. Empty for
+	// events outside an authentication-provider flow.
+	Provider AuditProvider
 	// RequestID is the correlation id tying the audit record to the access log and
 	// trace for the same request.
 	RequestID string
@@ -151,6 +163,7 @@ func (a *AuditLogger) Emit(ctx context.Context, e AuditEvent) error {
 		slog.String("result", string(e.Result)),
 		slog.String("reason", e.Reason),
 		slog.String("source", e.Source),
+		slog.String("provider", string(e.Provider)),
 		slog.String("request_id", e.RequestID),
 	)
 	if err := a.logger.Handler().Handle(ctx, record); err != nil {

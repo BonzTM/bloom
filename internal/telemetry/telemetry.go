@@ -64,10 +64,10 @@ func (r *Readiness) Ready() bool { return r.ready.Load() }
 type Metrics interface {
 	// IncRequest records one handled HTTP request by route pattern and status.
 	IncRequest(routePattern, statusClass string)
-	// IncLoginAttempt records one local-login attempt by its finite outcome:
+	// IncLoginAttempt records one login attempt by provider and finite outcome:
 	// success, unknown_user, bad_password, disabled, rate_limited, overloaded,
 	// or internal_error.
-	IncLoginAttempt(outcome string)
+	IncLoginAttempt(provider, outcome string)
 	// IncCSRFRejection records one cross-origin write rejection.
 	IncCSRFRejection()
 }
@@ -91,7 +91,7 @@ type NopMetrics struct{}
 func (NopMetrics) IncRequest(string, string) {}
 
 // IncLoginAttempt does nothing.
-func (NopMetrics) IncLoginAttempt(string) {}
+func (NopMetrics) IncLoginAttempt(string, string) {}
 
 // IncCSRFRejection does nothing.
 func (NopMetrics) IncCSRFRejection() {}

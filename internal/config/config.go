@@ -14,9 +14,14 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BonzTM/bloom/internal/core"
 )
@@ -54,6 +59,11 @@ type Config struct {
 	Auth AuthConfig
 	// Bootstrap holds the optional automatic first-administrator credentials.
 	Bootstrap BootstrapConfig
+	// PublicURL is the externally visible Bloom origin used to validate OAuth
+	// redirects. It contains no path, query, or fragment.
+	PublicURL string
+	// OIDC configures the optional generic OpenID Connect sign-in provider.
+	OIDC OIDCConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -63,8 +73,8 @@ type Config struct {
 	// It is set by the -migrate flag only (no env key): it is an invocation mode,
 	// not ambient configuration.
 	Migrate bool
-	// ShutdownGrace bounds ordered shutdown. It must exceed worst-case in-flight
-	// work and stay under the platform termination grace.
+	// ShutdownGrace bounds ordered shutdown. HTTP drain receives half, so this
+	// must exceed twice the longest request and stay under platform grace.
 	ShutdownGrace time.Duration
 }
 
@@ -74,6 +84,25 @@ type BootstrapConfig struct {
 	Username string
 	// Password enables startup bootstrap when it is non-empty. It never renders.
 	Password Secret
+}
+
+// OIDCConfig configures one generic OpenID Connect provider.
+type OIDCConfig struct {
+	Enabled              bool
+	DisplayName          string
+	IssuerURL            string
+	ClientID             string
+	ClientSecret         Secret
+	RedirectURL          string
+	Scopes               []string
+	UsernameClaim        string
+	RoleClaim            string
+	RoleMap              map[string]string
+	DefaultRole          string
+	AllowInsecureIssuer  bool
+	DiscoveryTimeout     time.Duration
+	TokenExchangeTimeout time.Duration
+	JWKSFetchTimeout     time.Duration
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -189,13 +218,20 @@ const (
 	defaultLoginMaxConcurrent      = 4
 	maxLoginMaxConcurrent          = 64
 	defaultBootstrapUsername       = "admin"
+	defaultPublicURL               = "http://localhost:8080"
+	defaultOIDCDisplayName         = "OpenID Connect"
+	defaultOIDCScopes              = "openid profile email"
+	defaultOIDCUsernameClaim       = "preferred_username"
+	defaultOIDCDefaultRole         = ""
+	defaultOIDCTimeout             = 5 * time.Second
+	minOIDCTimeout                 = 100 * time.Millisecond
+	maxOIDCTimeout                 = 30 * time.Second
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
-// and validates the result. Precedence is flags > environment > defaults: each
-// flag's default is seeded from the environment (or the hard-coded default), so
-// an explicit flag wins, an unset flag falls back to the env value, and an
-// unset env falls back to the default.
+// and validates the result. Precedence is flags > environment > defaults for
+// non-secret settings. Secrets load from the environment only so they never
+// enter process arguments or flag output.
 //
 // args are the process arguments excluding the program name (os.Args[1:]).
 // Passing them in keeps Load testable without mutating global flag state.
@@ -227,9 +263,9 @@ func Load(args []string) (Config, error) {
 // rawFlags holds the parsed flag pointers between bindFlags and build. It exists
 // so Load stays short and each step is testable in isolation.
 type rawFlags struct {
-	addr, dsn, driver, logLevel, logFormat, otlpEndpoint, secretKey *string
+	addr, dsn, driver, logLevel, logFormat, otlpEndpoint, publicURL *string
 	bootstrapUsername                                               *string
-	bootstrapPassword                                               string
+	secretKey, bootstrapPassword                                    string
 	readHeaderTimeout, readTimeout, writeTimeout, idleTimeout       *time.Duration
 	connMaxLifetime, connMaxIdleTime, shutdownGrace                 *time.Duration
 	maxBodyBytes                                                    *int64
@@ -237,6 +273,7 @@ type rawFlags struct {
 	migrateOnStartup, otlpInsecure, migrateMode                     *bool
 	traceSampleRatio                                                *float64
 	auth                                                            authRawFlags
+	oidc                                                            oidcRawFlags
 }
 
 type authRawFlags struct {
@@ -246,6 +283,15 @@ type authRawFlags struct {
 	loginRateRefillInterval             *time.Duration
 	loginRateBurst, loginRateMaxKeys    *int
 	loginMaxConcurrent                  *int
+}
+
+type oidcRawFlags struct {
+	enabled, allowInsecureIssuer                        *bool
+	displayName, issuerURL, clientID                    *string
+	clientSecret                                        string
+	redirectURL, scopes, usernameClaim, roleClaim       *string
+	roleMap, defaultRole                                *string
+	discoveryTimeout, tokenExchangeTimeout, jwksTimeout *time.Duration
 }
 
 // bindFlags declares every flag with its env-seeded default.
@@ -266,10 +312,11 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		connMaxIdleTime:  fs.Duration("db-conn-max-idle-time", env.duration("BLOOM_DB_CONN_MAX_IDLE_TIME", defaultConnMaxIdleTime), "max DB connection idle time"),
 		migrateOnStartup: fs.Bool("db-migrate-on-startup", env.bool("BLOOM_DB_MIGRATE_ON_STARTUP", false), "apply embedded goose migrations on startup"),
 
-		secretKey: fs.String("secret-key", env.string("BLOOM_SECRET_KEY", ""), "master secret for at-rest encryption (required, >= 32 bytes; prefer the env var)"),
+		secretKey: env.string("BLOOM_SECRET_KEY", ""),
 		bootstrapUsername: fs.String("bootstrap-username",
 			env.string("BLOOM_BOOTSTRAP_USERNAME", defaultBootstrapUsername), "username for automatic first-administrator bootstrap"),
 		bootstrapPassword: env.string("BLOOM_BOOTSTRAP_PASSWORD", ""),
+		publicURL:         fs.String("public-url", env.string("BLOOM_PUBLIC_URL", defaultPublicURL), "externally visible Bloom origin"),
 
 		logLevel:         fs.String("log-level", env.string("BLOOM_LOG_LEVEL", "info"), "log level (debug|info|warn|error)"),
 		logFormat:        fs.String("log-format", env.string("BLOOM_LOG_FORMAT", string(LogFormatJSON)), "log format (json|text)"),
@@ -277,11 +324,32 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		otlpInsecure:     fs.Bool("otlp-insecure", env.bool("BLOOM_OTLP_INSECURE", false), "send spans over plaintext HTTP instead of TLS"),
 		traceSampleRatio: fs.Float64("trace-sample-ratio", env.float64("BLOOM_TRACE_SAMPLE_RATIO", defaultTraceSampleRatio), "head-based trace sampling ratio in [0,1]"),
 		auth:             bindAuthFlags(fs, env),
+		oidc:             bindOIDCFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
+	}
+}
+
+func bindOIDCFlags(fs *flag.FlagSet, env *envReader) oidcRawFlags {
+	return oidcRawFlags{
+		enabled:              fs.Bool("oidc-enabled", env.bool("BLOOM_OIDC_ENABLED", false), "enable OpenID Connect sign-in"),
+		displayName:          fs.String("oidc-display-name", env.string("BLOOM_OIDC_DISPLAY_NAME", defaultOIDCDisplayName), "OIDC provider display name"),
+		issuerURL:            fs.String("oidc-issuer-url", env.string("BLOOM_OIDC_ISSUER_URL", ""), "OIDC issuer URL"),
+		clientID:             fs.String("oidc-client-id", env.string("BLOOM_OIDC_CLIENT_ID", ""), "OIDC client id"),
+		clientSecret:         env.string("BLOOM_OIDC_CLIENT_SECRET", ""),
+		redirectURL:          fs.String("oidc-redirect-url", env.string("BLOOM_OIDC_REDIRECT_URL", ""), "OIDC callback URL"),
+		scopes:               fs.String("oidc-scopes", env.string("BLOOM_OIDC_SCOPES", defaultOIDCScopes), "space-separated OIDC scopes"),
+		usernameClaim:        fs.String("oidc-username-claim", env.string("BLOOM_OIDC_USERNAME_CLAIM", defaultOIDCUsernameClaim), "OIDC username claim"),
+		roleClaim:            fs.String("oidc-role-claim", env.string("BLOOM_OIDC_ROLE_CLAIM", ""), "optional OIDC role claim"),
+		roleMap:              fs.String("oidc-role-map", env.string("BLOOM_OIDC_ROLE_MAP", ""), "claim-value to Bloom-role mappings"),
+		defaultRole:          fs.String("oidc-default-role", env.string("BLOOM_OIDC_DEFAULT_ROLE", defaultOIDCDefaultRole), "role assigned to newly provisioned accounts"),
+		allowInsecureIssuer:  fs.Bool("oidc-allow-insecure-issuer", env.bool("BLOOM_OIDC_ALLOW_INSECURE_ISSUER", false), "allow HTTP issuer on loopback for development"),
+		discoveryTimeout:     fs.Duration("oidc-discovery-timeout", env.duration("BLOOM_OIDC_DISCOVERY_TIMEOUT", defaultOIDCTimeout), "OIDC discovery timeout"),
+		tokenExchangeTimeout: fs.Duration("oidc-token-exchange-timeout", env.duration("BLOOM_OIDC_TOKEN_EXCHANGE_TIMEOUT", defaultOIDCTimeout), "OIDC token exchange timeout"),
+		jwksTimeout:          fs.Duration("oidc-jwks-fetch-timeout", env.duration("BLOOM_OIDC_JWKS_FETCH_TIMEOUT", defaultOIDCTimeout), "OIDC JWKS fetch timeout"),
 	}
 }
 
@@ -313,38 +381,45 @@ func (r rawFlags) build() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	roleMap, err := parseOIDCRoleMap(*r.oidc.roleMap)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
-		HTTP:          r.buildHTTP(),
-		Database:      r.buildDatabase(),
-		Telemetry:     r.buildTelemetry(level),
-		Auth:          r.auth.build(trustedProxyCIDRs),
+		HTTP:          r.httpConfig(),
+		Database:      r.databaseConfig(),
+		Telemetry:     r.telemetryConfig(level),
+		Auth:          r.authConfig(trustedProxyCIDRs),
 		Bootstrap:     bootstrap,
-		SecretKey:     NewSecret([]byte(*r.secretKey)),
+		PublicURL:     *r.publicURL,
+		OIDC:          r.oidcConfig(roleMap),
+		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
 	}, nil
 }
 
-func (r rawFlags) buildHTTP() HTTPConfig {
+func (r rawFlags) httpConfig() HTTPConfig {
 	return HTTPConfig{
-		Addr: *r.addr, ReadHeaderTimeout: *r.readHeaderTimeout, ReadTimeout: *r.readTimeout,
-		WriteTimeout: *r.writeTimeout, IdleTimeout: *r.idleTimeout, MaxBodyBytes: *r.maxBodyBytes,
+		Addr: *r.addr, ReadHeaderTimeout: *r.readHeaderTimeout,
+		ReadTimeout: *r.readTimeout, WriteTimeout: *r.writeTimeout,
+		IdleTimeout: *r.idleTimeout, MaxBodyBytes: *r.maxBodyBytes,
 	}
 }
 
-func (r rawFlags) buildDatabase() DatabaseConfig {
+func (r rawFlags) databaseConfig() DatabaseConfig {
 	driver, dsn := Driver(*r.driver), *r.dsn
 	if driver == DriverSQLite && dsn == "" {
 		dsn = DefaultSQLiteDSN
 	}
 	return DatabaseConfig{
-		Driver: driver, DSN: dsn, MaxOpenConns: *r.maxOpenConns, MaxIdleConns: *r.maxIdleConns,
-		ConnMaxLifetime: *r.connMaxLifetime, ConnMaxIdleTime: *r.connMaxIdleTime,
-		MigrateOnStartup: *r.migrateOnStartup,
+		Driver: driver, DSN: dsn, MaxOpenConns: *r.maxOpenConns,
+		MaxIdleConns: *r.maxIdleConns, ConnMaxLifetime: *r.connMaxLifetime,
+		ConnMaxIdleTime: *r.connMaxIdleTime, MigrateOnStartup: *r.migrateOnStartup,
 	}
 }
 
-func (r rawFlags) buildTelemetry(level slog.Level) TelemetryConfig {
+func (r rawFlags) telemetryConfig(level slog.Level) TelemetryConfig {
 	return TelemetryConfig{
 		LogLevel: level, LogFormat: LogFormat(*r.logFormat), OTLPEndpoint: *r.otlpEndpoint,
 		OTLPInsecure: *r.otlpInsecure, TraceSampleRatio: *r.traceSampleRatio,
@@ -359,14 +434,54 @@ func (r rawFlags) buildBootstrap() (BootstrapConfig, error) {
 	return BootstrapConfig{Username: username, Password: NewSecret([]byte(r.bootstrapPassword))}, nil
 }
 
-func (r authRawFlags) build(trustedProxyCIDRs []netip.Prefix) AuthConfig {
+func (r rawFlags) authConfig(prefixes []netip.Prefix) AuthConfig {
 	return AuthConfig{
-		SessionCookieSecure: *r.sessionCookieSecure,
-		SessionLifetime:     *r.sessionLifetime, SessionIdleTimeout: *r.sessionIdleTimeout,
-		LoginRateRefillInterval: *r.loginRateRefillInterval, LoginRateBurst: *r.loginRateBurst,
-		LoginRateMaxKeys: *r.loginRateMaxKeys, LoginMaxConcurrent: *r.loginMaxConcurrent,
-		TrustedProxyCIDRs: trustedProxyCIDRs,
+		SessionCookieSecure: *r.auth.sessionCookieSecure,
+		SessionLifetime:     *r.auth.sessionLifetime, SessionIdleTimeout: *r.auth.sessionIdleTimeout,
+		LoginRateRefillInterval: *r.auth.loginRateRefillInterval,
+		LoginRateBurst:          *r.auth.loginRateBurst, LoginRateMaxKeys: *r.auth.loginRateMaxKeys,
+		LoginMaxConcurrent: *r.auth.loginMaxConcurrent, TrustedProxyCIDRs: prefixes,
 	}
+}
+
+func (r rawFlags) oidcConfig(roleMap map[string]string) OIDCConfig {
+	return OIDCConfig{
+		Enabled: *r.oidc.enabled, DisplayName: *r.oidc.displayName,
+		IssuerURL: *r.oidc.issuerURL, ClientID: *r.oidc.clientID,
+		ClientSecret: NewSecret([]byte(r.oidc.clientSecret)), RedirectURL: *r.oidc.redirectURL,
+		Scopes: strings.Fields(*r.oidc.scopes), UsernameClaim: *r.oidc.usernameClaim,
+		RoleClaim: *r.oidc.roleClaim, RoleMap: roleMap, DefaultRole: *r.oidc.defaultRole,
+		AllowInsecureIssuer: *r.oidc.allowInsecureIssuer, DiscoveryTimeout: *r.oidc.discoveryTimeout,
+		TokenExchangeTimeout: *r.oidc.tokenExchangeTimeout, JWKSFetchTimeout: *r.oidc.jwksTimeout,
+	}
+}
+
+func parseOIDCRoleMap(raw string) (map[string]string, error) {
+	result := make(map[string]string)
+	if strings.TrimSpace(raw) == "" {
+		return result, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 64 {
+		return nil, errors.New("config: BLOOM_OIDC_ROLE_MAP must contain at most 64 mappings")
+	}
+	for _, part := range parts {
+		claim, role, ok := strings.Cut(part, "=")
+		claim, role = strings.TrimSpace(claim), strings.TrimSpace(role)
+		if !ok || claim == "" || !coreRoleName(role) {
+			return nil, fmt.Errorf("config: BLOOM_OIDC_ROLE_MAP contains invalid mapping %q", part)
+		}
+		if _, exists := result[claim]; exists {
+			return nil, fmt.Errorf("config: BLOOM_OIDC_ROLE_MAP repeats claim value %q", claim)
+		}
+		result[claim] = role
+	}
+	return result, nil
+}
+
+func coreRoleName(role string) bool {
+	return role != "" && len(role) <= 64 && utf8.ValidString(role) && role == strings.TrimSpace(role) &&
+		strings.IndexFunc(role, unicode.IsControl) == -1
 }
 
 func parseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
@@ -407,6 +522,15 @@ func (c Config) Validate() error {
 	if err := c.Bootstrap.validate(); err != nil {
 		return err
 	}
+	if c.PublicURL != "" || c.OIDC.Enabled {
+		publicURL, err := validatePublicURL(c.PublicURL)
+		if err != nil {
+			return err
+		}
+		if err := c.OIDC.validate(publicURL); err != nil {
+			return err
+		}
+	}
 	if c.SecretKey.Len() < MinSecretKeyBytes {
 		return fmt.Errorf("config: BLOOM_SECRET_KEY must be set and at least %d bytes long (got %d)", MinSecretKeyBytes, c.SecretKey.Len())
 	}
@@ -421,6 +545,91 @@ func (b BootstrapConfig) validate() error {
 		return fmt.Errorf("config: BLOOM_BOOTSTRAP_USERNAME: %w", err)
 	}
 	return nil
+}
+
+func validatePublicURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil ||
+		parsed.Opaque != "" || parsed.Path != "" || parsed.RawPath != "" || parsed.ForceQuery ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawFragment != "" ||
+		(parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return nil, fmt.Errorf("config: BLOOM_PUBLIC_URL must be an absolute HTTP(S) origin, got %q", raw)
+	}
+	return parsed, nil
+}
+
+func (o OIDCConfig) validate(publicURL *url.URL) error {
+	if !o.Enabled {
+		return nil
+	}
+	if o.DisplayName == "" || len(o.DisplayName) > 80 {
+		return errors.New("config: BLOOM_OIDC_DISPLAY_NAME must contain 1-80 bytes")
+	}
+	if len(o.IssuerURL) > core.MaxOIDCIssuerBytes {
+		return fmt.Errorf("config: BLOOM_OIDC_ISSUER_URL must not exceed %d bytes", core.MaxOIDCIssuerBytes)
+	}
+	issuer, err := url.Parse(o.IssuerURL)
+	if err != nil || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return errors.New("config: BLOOM_OIDC_ISSUER_URL must be an absolute issuer URL")
+	}
+	if issuer.Scheme != "https" && (!o.AllowInsecureIssuer || issuer.Scheme != "http" || !loopbackHost(issuer.Hostname())) {
+		return errors.New("config: BLOOM_OIDC_ISSUER_URL must use HTTPS; HTTP is allowed only on loopback with BLOOM_OIDC_ALLOW_INSECURE_ISSUER=true")
+	}
+	if o.ClientID == "" {
+		return errors.New("config: BLOOM_OIDC_CLIENT_ID must not be empty")
+	}
+	if o.ClientSecret.Len() == 0 {
+		return errors.New("config: BLOOM_OIDC_CLIENT_SECRET must not be empty")
+	}
+	redirect, err := url.Parse(o.RedirectURL)
+	expectedRedirect := *publicURL
+	expectedRedirect.Path = "/api/v1/auth/oidc/callback"
+	if err != nil || redirect.User != nil || redirect.Opaque != "" || redirect.RawPath != "" || redirect.ForceQuery ||
+		redirect.RawQuery != "" || redirect.Fragment != "" || redirect.RawFragment != "" ||
+		o.RedirectURL != expectedRedirect.String() {
+		return errors.New("config: BLOOM_OIDC_REDIRECT_URL must be the configured public origin plus /api/v1/auth/oidc/callback without query or fragment")
+	}
+	if redirect.Scheme != "https" && (!o.AllowInsecureIssuer || redirect.Scheme != "http" || !loopbackHost(redirect.Hostname())) {
+		return errors.New("config: BLOOM_OIDC_REDIRECT_URL must use HTTPS; HTTP is allowed only on loopback with BLOOM_OIDC_ALLOW_INSECURE_ISSUER=true")
+	}
+	if len(o.Scopes) == 0 || len(o.Scopes) > 16 || !slices.Contains(o.Scopes, "openid") {
+		return errors.New("config: BLOOM_OIDC_SCOPES must contain openid and at most 16 scopes")
+	}
+	if o.UsernameClaim == "" || len(o.UsernameClaim) > 128 {
+		return errors.New("config: BLOOM_OIDC_USERNAME_CLAIM must contain 1-128 bytes")
+	}
+	if len(o.RoleMap) > 0 && o.RoleClaim == "" {
+		return errors.New("config: BLOOM_OIDC_ROLE_MAP requires BLOOM_OIDC_ROLE_CLAIM")
+	}
+	if o.DefaultRole != "" && !coreRoleName(o.DefaultRole) {
+		return errors.New("config: BLOOM_OIDC_DEFAULT_ROLE is not a valid role name")
+	}
+	return o.validateTimeouts()
+}
+
+func (o OIDCConfig) validateTimeouts() error {
+	values := []struct {
+		key   string
+		value time.Duration
+	}{
+		{"BLOOM_OIDC_DISCOVERY_TIMEOUT", o.DiscoveryTimeout},
+		{"BLOOM_OIDC_TOKEN_EXCHANGE_TIMEOUT", o.TokenExchangeTimeout},
+		{"BLOOM_OIDC_JWKS_FETCH_TIMEOUT", o.JWKSFetchTimeout},
+	}
+	for _, value := range values {
+		if value.value < minOIDCTimeout || value.value > maxOIDCTimeout {
+			return fmt.Errorf("config: %s must be in [%s,%s], got %s", value.key, minOIDCTimeout, maxOIDCTimeout, value.value)
+		}
+	}
+	return nil
+}
+
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (a AuthConfig) validate() error {

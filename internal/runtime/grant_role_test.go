@@ -51,8 +51,9 @@ func assertGrantRoleAudit(t *testing.T, output, accountID, reason string) {
 	}
 	want := map[string]any{
 		"level": "INFO", "msg": "audit", "log_type": "audit", "actor": "cli", "subject_id": "",
-		"action": telemetry.AuditActionRoleAssign, "resource": "account:" + accountID, "permission": "", "role": "owner", "kind": "",
-		"allow_insecure": false, "result": "success", "reason": reason, "source": "cli", "request_id": "",
+		"action": telemetry.AuditActionRoleAssign, "resource": "account:" + accountID, "permission": "", "role": "owner", "kind": "", "provider": "",
+		"allow_insecure": false,
+		"result":         "success", "reason": reason, "source": "cli", "request_id": "",
 	}
 	if len(got) != len(want)+1 {
 		t.Fatalf("grant-role audit fields = %v, want %v plus time", got, want)

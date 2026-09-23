@@ -2,11 +2,15 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/BonzTM/bloom/internal/core"
 )
 
 // testSecret is a 32-byte key that satisfies the minimum length.
@@ -17,6 +21,60 @@ func setRequired(t *testing.T) {
 	t.Setenv("BLOOM_SECRET_KEY", testSecret)
 }
 
+func parseFlagOutput(args []string) (string, error) {
+	var output strings.Builder
+	fs := flag.NewFlagSet("bloom", flag.ContinueOnError)
+	fs.SetOutput(&output)
+	env := newEnvReader()
+	_ = bindFlags(fs, env)
+	if err := env.err(); err != nil {
+		return output.String(), err
+	}
+	err := fs.Parse(args)
+	return output.String(), err
+}
+
+func TestSecretFlagOutputNeverRevealsEnvironmentValues(t *testing.T) {
+	const oidcSecret = "configured-oidc-client-secret"
+	t.Setenv("BLOOM_SECRET_KEY", testSecret)
+	t.Setenv("BLOOM_OIDC_CLIENT_SECRET", oidcSecret)
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "usage", args: []string{"-h"}},
+		{name: "parse error", args: []string{"-http-read-timeout=invalid"}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			output, err := parseFlagOutput(testCase.args)
+			if err == nil {
+				t.Fatal("flag parsing succeeded, want error")
+			}
+			if testCase.name == "usage" && !errors.Is(err, flag.ErrHelp) {
+				t.Fatalf("usage error = %v, want flag.ErrHelp", err)
+			}
+			for _, secret := range []string{testSecret, oidcSecret} {
+				if strings.Contains(output, secret) {
+					t.Fatalf("%s output revealed a configured secret", testCase.name)
+				}
+			}
+		})
+	}
+}
+
+func TestSecretFlagsAreNotAccepted(t *testing.T) {
+	t.Setenv("BLOOM_SECRET_KEY", testSecret)
+	t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "configured-oidc-client-secret")
+	for _, name := range []string{"secret-key", "oidc-client-secret"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseFlagOutput([]string{"-" + name, strings.Repeat("x", MinSecretKeyBytes)}); err == nil {
+				t.Fatalf("-%s was accepted", name)
+			}
+		})
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	setRequired(t)
 	t.Setenv("BLOOM_HTTP_ADDR", ":9090")
@@ -25,12 +83,30 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: unexpected error: %v", err)
 	}
+	assertHTTPDefaults(t, cfg)
+	assertDatabaseDefaults(t, cfg)
+	assertAuthDefaults(t, cfg)
+	assertOIDCDefaults(t, cfg)
+	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
+		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
+	}
+	if cfg.ShutdownGrace != defaultShutdownGrace {
+		t.Errorf("ShutdownGrace = %s, want %s", cfg.ShutdownGrace, defaultShutdownGrace)
+	}
+}
+
+func assertHTTPDefaults(t *testing.T, cfg Config) {
+	t.Helper()
 	if cfg.HTTP.Addr != ":9090" {
 		t.Errorf("Addr = %q, want :9090 (env precedence)", cfg.HTTP.Addr)
 	}
 	if cfg.HTTP.MaxBodyBytes != defaultMaxBodyBytes {
 		t.Errorf("MaxBodyBytes = %d, want default %d", cfg.HTTP.MaxBodyBytes, defaultMaxBodyBytes)
 	}
+}
+
+func assertDatabaseDefaults(t *testing.T, cfg Config) {
+	t.Helper()
 	if cfg.Database.Driver != DriverSQLite {
 		t.Errorf("Driver = %q, want sqlite", cfg.Database.Driver)
 	}
@@ -43,6 +119,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Telemetry.LogFormat != LogFormatJSON {
 		t.Errorf("LogFormat = %q, want json", cfg.Telemetry.LogFormat)
 	}
+}
+
+func assertAuthDefaults(t *testing.T, cfg Config) {
+	t.Helper()
 	if !cfg.Auth.SessionCookieSecure {
 		t.Error("SessionCookieSecure = false, want secure-by-default")
 	}
@@ -61,11 +141,152 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.Auth.TrustedProxyCIDRs) != 0 {
 		t.Errorf("TrustedProxyCIDRs default = %v, want disabled", cfg.Auth.TrustedProxyCIDRs)
 	}
-	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
-		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
+}
+
+func assertOIDCDefaults(t *testing.T, cfg Config) {
+	t.Helper()
+	if cfg.PublicURL != "http://localhost:8080" {
+		t.Errorf("PublicURL = %q, want local default", cfg.PublicURL)
 	}
-	if cfg.ShutdownGrace != defaultShutdownGrace {
-		t.Errorf("ShutdownGrace = %s, want %s", cfg.ShutdownGrace, defaultShutdownGrace)
+	if cfg.OIDC.Enabled {
+		t.Error("OIDC.Enabled = true, want disabled")
+	}
+	if got := strings.Join(cfg.OIDC.Scopes, " "); got != "openid profile email" {
+		t.Errorf("OIDC scopes = %q, want defaults", got)
+	}
+	if cfg.OIDC.UsernameClaim != "preferred_username" || cfg.OIDC.DefaultRole != "" {
+		t.Errorf("OIDC claim defaults = username %q role %q", cfg.OIDC.UsernameClaim, cfg.OIDC.DefaultRole)
+	}
+}
+
+func TestLoadOIDCConfiguration(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_PUBLIC_URL", "https://bloom.example")
+	t.Setenv("BLOOM_OIDC_ENABLED", "true")
+	t.Setenv("BLOOM_OIDC_ISSUER_URL", "https://id.example/application/o/bloom/")
+	t.Setenv("BLOOM_OIDC_CLIENT_ID", "bloom")
+	t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "client-secret")
+	t.Setenv("BLOOM_OIDC_REDIRECT_URL", "https://bloom.example/api/v1/auth/oidc/callback")
+	t.Setenv("BLOOM_OIDC_ROLE_CLAIM", "groups")
+	t.Setenv("BLOOM_OIDC_ROLE_MAP", "bloom-admins=owner,bloom-users=member")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OIDC.ClientSecret.String() != "[redacted]" || cfg.OIDC.ClientSecret.Len() != len("client-secret") {
+		t.Fatal("OIDC client secret was not retained as a redacted Secret")
+	}
+	if rendered := fmt.Sprintf("%+v", cfg); strings.Contains(rendered, "client-secret") {
+		t.Fatalf("rendered configuration leaks the OIDC client secret: %s", rendered)
+	}
+	if cfg.OIDC.RoleMap["bloom-admins"] != "owner" || cfg.OIDC.RoleMap["bloom-users"] != "member" {
+		t.Fatalf("OIDC role map = %v", cfg.OIDC.RoleMap)
+	}
+}
+
+func TestOIDCValidation(t *testing.T) {
+	base := func(t *testing.T) {
+		t.Helper()
+		setRequired(t)
+		t.Setenv("BLOOM_OIDC_ENABLED", "true")
+		t.Setenv("BLOOM_PUBLIC_URL", "https://bloom.example")
+		t.Setenv("BLOOM_OIDC_ISSUER_URL", "https://id.example")
+		t.Setenv("BLOOM_OIDC_CLIENT_ID", "bloom")
+		t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "client-secret")
+		t.Setenv("BLOOM_OIDC_REDIRECT_URL", "https://bloom.example/api/v1/auth/oidc/callback")
+	}
+	tests := []struct {
+		name, key, value string
+	}{
+		{name: "issuer requires https", key: "BLOOM_OIDC_ISSUER_URL", value: "http://id.example"},
+		{name: "redirect same origin", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://other.example/callback"},
+		{name: "redirect exact path", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/callback"},
+		{name: "redirect encoded path", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/%61pi/v1/auth/oidc/callback"},
+		{name: "redirect encoded slash", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/api%2fv1/auth/oidc/callback"},
+		{name: "redirect no query", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/api/v1/auth/oidc/callback?next=/"},
+		{name: "redirect no empty query", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/api/v1/auth/oidc/callback?"},
+		{name: "redirect no fragment", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/api/v1/auth/oidc/callback#next"},
+		{name: "redirect no empty fragment", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/api/v1/auth/oidc/callback#"},
+		{name: "redirect https", key: "BLOOM_OIDC_REDIRECT_URL", value: "http://bloom.example/api/v1/auth/oidc/callback"},
+		{name: "openid scope required", key: "BLOOM_OIDC_SCOPES", value: "profile email"},
+		{name: "role claim required for map", key: "BLOOM_OIDC_ROLE_MAP", value: "admins=owner"},
+		{name: "role map rejects controls", key: "BLOOM_OIDC_ROLE_MAP", value: "admins=own\x7fer"},
+		{name: "bounded timeout", key: "BLOOM_OIDC_DISCOVERY_TIMEOUT", value: "31s"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			base(t)
+			t.Setenv(testCase.key, testCase.value)
+			_, err := Load(nil)
+			if err == nil || !strings.Contains(err.Error(), testCase.key) {
+				t.Fatalf("Load error = %v, want key %s", err, testCase.key)
+			}
+		})
+	}
+}
+
+func TestOIDCIssuerLengthBound(t *testing.T) {
+	base := func(t *testing.T) {
+		t.Helper()
+		setRequired(t)
+		t.Setenv("BLOOM_OIDC_ENABLED", "true")
+		t.Setenv("BLOOM_PUBLIC_URL", "https://bloom.example")
+		t.Setenv("BLOOM_OIDC_CLIENT_ID", "bloom")
+		t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "client-secret")
+		t.Setenv("BLOOM_OIDC_REDIRECT_URL", "https://bloom.example/api/v1/auth/oidc/callback")
+	}
+	prefix := "https://id.example/"
+	for _, testCase := range []struct {
+		name   string
+		length int
+		valid  bool
+	}{
+		{name: "maximum", length: core.MaxOIDCIssuerBytes, valid: true},
+		{name: "over maximum", length: core.MaxOIDCIssuerBytes + 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			base(t)
+			t.Setenv("BLOOM_OIDC_ISSUER_URL", prefix+strings.Repeat("a", testCase.length-len(prefix)))
+			_, err := Load(nil)
+			if (err == nil) != testCase.valid {
+				t.Fatalf("Load issuer length %d error = %v, want valid %v", testCase.length, err, testCase.valid)
+			}
+		})
+	}
+}
+
+func TestOIDCLoopbackHTTPRequiresDevelopmentFlag(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_OIDC_ENABLED", "true")
+	t.Setenv("BLOOM_PUBLIC_URL", "http://localhost:8080")
+	t.Setenv("BLOOM_OIDC_ISSUER_URL", "http://127.0.0.1:9090")
+	t.Setenv("BLOOM_OIDC_CLIENT_ID", "bloom")
+	t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "client-secret")
+	t.Setenv("BLOOM_OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oidc/callback")
+	if _, err := Load(nil); err == nil {
+		t.Fatal("Load accepted loopback HTTP issuer without development flag")
+	}
+	t.Setenv("BLOOM_OIDC_ALLOW_INSECURE_ISSUER", "true")
+	if _, err := Load(nil); err != nil {
+		t.Fatalf("Load rejected explicitly enabled loopback issuer: %v", err)
+	}
+}
+
+func TestOIDCLoopbackRedirectHTTPRequiresDevelopmentFlag(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_OIDC_ENABLED", "true")
+	t.Setenv("BLOOM_PUBLIC_URL", "http://localhost:8080")
+	t.Setenv("BLOOM_OIDC_ISSUER_URL", "https://id.example")
+	t.Setenv("BLOOM_OIDC_CLIENT_ID", "bloom")
+	t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "client-secret")
+	t.Setenv("BLOOM_OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oidc/callback")
+	if _, err := Load(nil); err == nil {
+		t.Fatal("Load accepted loopback HTTP redirect without development flag")
+	}
+	t.Setenv("BLOOM_OIDC_ALLOW_INSECURE_ISSUER", "true")
+	if _, err := Load(nil); err != nil {
+		t.Fatalf("Load rejected explicitly enabled loopback redirect: %v", err)
 	}
 }
 

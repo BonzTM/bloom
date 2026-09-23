@@ -16,6 +16,9 @@ contracts) gets an entry here.
 
 ### Changed
 
+- `BLOOM_SECRET_KEY` is read from the environment only and the `-secret-key`
+  flag is removed, so usage output and process arguments can never carry a
+  secret. `BLOOM_OIDC_CLIENT_SECRET` follows the same rule.
 - `create-admin` is now the recovery path for administrator access. Normal
   first-run setup starts Bloom with `BLOOM_BOOTSTRAP_PASSWORD`, signs in, and
   then removes the variable from the service environment.
@@ -37,6 +40,22 @@ contracts) gets an entry here.
 - Pinned Jellyfin 12.1.0 OpenAPI input and scoped `oapi-codegen` output for the
   system-information and virtual-folder operations, with `make generate` and a
   stale-generation verification gate.
+- Generic OIDC sign-in with provider discovery, authorization-code exchange,
+  PKCE, verified issuer/subject identities, role-claim mapping, bounded
+  dependency retries and telemetry, `GET /api/v1/auth/providers`,
+  `POST /api/v1/auth/oidc/start`, and `GET /api/v1/auth/oidc/callback`.
+- `BLOOM_PUBLIC_URL` and OIDC settings `BLOOM_OIDC_ENABLED`,
+  `BLOOM_OIDC_DISPLAY_NAME`, `BLOOM_OIDC_ISSUER_URL`, `BLOOM_OIDC_CLIENT_ID`,
+  `BLOOM_OIDC_CLIENT_SECRET`, `BLOOM_OIDC_REDIRECT_URL`, `BLOOM_OIDC_SCOPES`,
+  `BLOOM_OIDC_USERNAME_CLAIM`, `BLOOM_OIDC_ROLE_CLAIM`,
+  `BLOOM_OIDC_ROLE_MAP`, `BLOOM_OIDC_DEFAULT_ROLE`,
+  `BLOOM_OIDC_ALLOW_INSECURE_ISSUER`, `BLOOM_OIDC_DISCOVERY_TIMEOUT`,
+  `BLOOM_OIDC_TOKEN_EXCHANGE_TIMEOUT`, and `BLOOM_OIDC_JWKS_FETCH_TIMEOUT`.
+- Migration `00008_oidc_identities` adds issuer-and-subject-keyed OIDC links.
+  Migration `00009_account_role_sources` records `manual` or `oidc` role-grant
+  provenance. Apply both before rollout. Their down migrations restore the
+  prior schema; rolling back `00009` preserves the effective assignment but
+  collapses overlapping source provenance.
 - Main-branch and tagged-release image publishing with candidate-first smoke
   tests, source- and signer-bound attestation plus SBOM verification for
   immutable-image reuse, required CI and PostgreSQL gates, pre-promotion

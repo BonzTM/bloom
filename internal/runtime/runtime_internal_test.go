@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,15 +11,15 @@ import (
 	"time"
 
 	"github.com/BonzTM/bloom/internal/config"
-	"github.com/BonzTM/bloom/internal/telemetry"
+	"github.com/BonzTM/bloom/internal/core"
 )
 
-type recordingTracer struct {
+type boundedTracer struct {
 	called      bool
 	hasDeadline bool
 }
 
-func (t *recordingTracer) Shutdown(ctx context.Context) error {
+func (t *boundedTracer) Shutdown(ctx context.Context) error {
 	t.called = true
 	_, t.hasDeadline = ctx.Deadline()
 	return nil
@@ -41,19 +40,6 @@ type orderedFailingTracer struct {
 	err   error
 }
 
-type orderedShutdownServer struct{ order *[]string }
-
-func (s orderedShutdownServer) SetReady(ready bool) {
-	if !ready {
-		*s.order = append(*s.order, "unready")
-	}
-}
-
-func (s orderedShutdownServer) Shutdown(context.Context) error {
-	*s.order = append(*s.order, "shutdown http")
-	return nil
-}
-
 type orderedMediaCloser struct{ order *[]string }
 
 func (c orderedMediaCloser) CloseIdleConnections() {
@@ -62,14 +48,19 @@ func (c orderedMediaCloser) CloseIdleConnections() {
 
 func TestShutdownClosesMediaBeforeDatabaseAndTracer(t *testing.T) {
 	order := make([]string, 0, 5)
-	err := shutdown(
-		orderedShutdownServer{order: &order},
-		orderedMediaCloser{order: &order},
-		orderedFailingCloser{order: &order},
-		orderedFailingTracer{order: &order},
-		slog.New(slog.DiscardHandler),
-		time.Second,
-	)
+	media := orderedMediaCloser{order: &order}
+	phases := shutdownPhases{
+		setReady:       func(bool) { order = append(order, "unready") },
+		drainHTTP:      func(context.Context) error { order = append(order, "shutdown http"); return nil },
+		forceCloseHTTP: func(context.Context) error { return nil },
+		waitHandlers:   func(context.Context) error { return nil },
+		closeProvider:  func(context.Context) error { return nil },
+		closeMedia:     func(context.Context) error { media.CloseIdleConnections(); return nil },
+		closeDatabase:  func(context.Context) error { return orderedFailingCloser{order: &order}.Close() },
+		flushTelemetry: orderedFailingTracer{order: &order}.Shutdown,
+	}
+	plan := newShutdownPlan(time.Now(), time.Second)
+	err := executeShutdown(t.Context(), plan, phases)
 	if err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
@@ -84,25 +75,62 @@ func (t orderedFailingTracer) Shutdown(context.Context) error {
 	return t.err
 }
 
-func TestCleanupStartupFailureReturnsOrderedCleanupErrors(t *testing.T) {
+type orderedFailingProvider struct {
+	order *[]string
+	err   error
+}
+
+func (orderedFailingProvider) AuthorizationURL(string, string, string) string { return "" }
+
+func (orderedFailingProvider) Exchange(context.Context, string, string, string) (core.OIDCClaims, error) {
+	return core.OIDCClaims{}, errors.New("not used")
+}
+
+func (p orderedFailingProvider) Close(context.Context) error {
+	*p.order = append(*p.order, "close provider")
+	return p.err
+}
+
+func TestStartupOwnershipCleanupReturnsOrderedErrors(t *testing.T) {
 	startupErr := errors.New("startup failed")
+	providerErr := errors.New("close provider")
 	closeErr := errors.New("close database")
 	traceErr := errors.New("shutdown tracer")
-	order := make([]string, 0, 2)
-	err := cleanupStartupFailure(startupErr,
-		nil,
-		orderedFailingCloser{order: &order, err: closeErr},
-		orderedFailingTracer{order: &order, err: traceErr},
-		time.Second)
-	if !errors.Is(err, startupErr) || !errors.Is(err, closeErr) || !errors.Is(err, traceErr) {
-		t.Fatalf("cleanup error = %v; want startup, close, and tracer errors", err)
+	order := make([]string, 0, 4)
+	ownership := startupOwnership{
+		tracer:   orderedFailingTracer{order: &order, err: traceErr},
+		pool:     orderedFailingCloser{order: &order, err: closeErr},
+		provider: orderedFailingProvider{order: &order, err: providerErr},
+		media:    orderedMediaCloser{order: &order},
+		grace:    time.Second,
 	}
-	if len(order) != 2 || order[0] != "close database" || order[1] != "shutdown tracer" {
-		t.Fatalf("cleanup order = %v; want database then tracer", order)
+	err := startupErr
+	ownership.cleanup(&err)
+	if !errors.Is(err, startupErr) || !errors.Is(err, providerErr) || !errors.Is(err, closeErr) || !errors.Is(err, traceErr) {
+		t.Fatalf("cleanup error = %v; want startup, provider, close, and tracer errors", err)
+	}
+	want := []string{"close provider", "close media", "close database", "shutdown tracer"}
+	if !slices.Equal(order, want) {
+		t.Fatalf("cleanup order = %v; want %v", order, want)
 	}
 }
 
-func TestRunInitializedShutsDownTracerAfterStoreFailure(t *testing.T) {
+func TestStartupOwnershipCleanupSkipsTransferredResources(t *testing.T) {
+	order := make([]string, 0, 2)
+	ownership := startupOwnership{
+		tracer:      orderedFailingTracer{order: &order},
+		pool:        orderedFailingCloser{order: &order},
+		grace:       time.Second,
+		transferred: true,
+	}
+	var err error
+	ownership.cleanup(&err)
+	if err != nil || len(order) != 0 {
+		t.Fatalf("cleanup after transfer = err %v order %v; want no cleanup", err, order)
+	}
+}
+
+func TestRunShutsDownTracerAfterStoreFailure(t *testing.T) {
 	cfg := config.Config{
 		Database: config.DatabaseConfig{
 			Driver:       config.DriverPostgres,
@@ -110,13 +138,18 @@ func TestRunInitializedShutsDownTracerAfterStoreFailure(t *testing.T) {
 			MaxOpenConns: 1, MaxIdleConns: 1,
 			ConnMaxLifetime: time.Minute, ConnMaxIdleTime: time.Minute,
 		},
+		Bootstrap:     config.BootstrapConfig{Username: "admin"},
 		ShutdownGrace: 50 * time.Millisecond,
 	}
-	tracer := &recordingTracer{}
-	err := runInitialized(t.Context(), cfg, Streams{Audit: io.Discard}, slog.New(slog.DiscardHandler),
-		telemetry.NewPromMetrics("bootstrap-startup-test"), tracer)
+	tracer := &boundedTracer{}
+	deps := Dependencies{
+		newTracerProvider: func(context.Context, config.TelemetryConfig, string, string) (tracerLifecycle, error) {
+			return tracer, nil
+		},
+	}
+	err := Run(t.Context(), cfg, Streams{Log: io.Discard, Audit: io.Discard}, deps)
 	if err == nil {
-		t.Fatal("runInitialized succeeded with unreachable database")
+		t.Fatal("Run succeeded with unreachable database")
 	}
 	if !tracer.called || !tracer.hasDeadline {
 		t.Fatalf("tracer shutdown = called %t, bounded %t", tracer.called, tracer.hasDeadline)
@@ -126,7 +159,7 @@ func TestRunInitializedShutsDownTracerAfterStoreFailure(t *testing.T) {
 	}
 }
 
-func TestRunInitializedShutsDownTracerAfterMediaServerFailure(t *testing.T) {
+func TestRunShutsDownTracerAfterMediaServerFailure(t *testing.T) {
 	cfg := config.Config{
 		Database: config.DatabaseConfig{
 			Driver:       config.DriverSQLite,
@@ -141,11 +174,15 @@ func TestRunInitializedShutsDownTracerAfterMediaServerFailure(t *testing.T) {
 		Bootstrap:     config.BootstrapConfig{Username: "admin"},
 		ShutdownGrace: 50 * time.Millisecond,
 	}
-	tracer := &recordingTracer{}
-	err := runInitialized(t.Context(), cfg, Streams{Audit: io.Discard}, slog.New(slog.DiscardHandler),
-		telemetry.NewPromMetrics("media-startup-test"), tracer)
+	tracer := &boundedTracer{}
+	deps := Dependencies{
+		newTracerProvider: func(context.Context, config.TelemetryConfig, string, string) (tracerLifecycle, error) {
+			return tracer, nil
+		},
+	}
+	err := Run(t.Context(), cfg, Streams{Log: io.Discard, Audit: io.Discard}, deps)
 	if err == nil || !strings.Contains(err.Error(), "build credential cipher") {
-		t.Fatalf("runInitialized error = %v, want credential cipher failure from an empty secret key", err)
+		t.Fatalf("Run error = %v, want credential cipher failure from an empty secret key", err)
 	}
 	if !tracer.called || !tracer.hasDeadline {
 		t.Fatalf("tracer shutdown = called %t, bounded %t", tracer.called, tracer.hasDeadline)

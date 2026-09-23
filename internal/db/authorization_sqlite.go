@@ -70,6 +70,20 @@ func (s *sqliteAuthorization) ListRoles(ctx context.Context, afterName string, p
 	return roles, nil
 }
 
+func (s *sqliteAuthorization) RoleExists(ctx context.Context, name string) (bool, error) {
+	if !core.ValidRoleName(name) {
+		return false, fmt.Errorf("find role: %w", core.ErrInvalidArgument)
+	}
+	_, err := s.q.GetRoleIDByName(ctx, name)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("find role %q: %w", name, err)
+}
+
 func sqliteRole(value any) (core.Role, error) {
 	created, ok := value.(string)
 	if !ok {

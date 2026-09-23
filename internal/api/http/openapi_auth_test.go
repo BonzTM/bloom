@@ -32,9 +32,10 @@ const (
 	mediaServerSchema       = "#/components/schemas/MediaServer"
 	probeMediaServerSchema  = "#/components/schemas/ProbeMediaServerResponse"
 	librariesSchema         = "#/components/schemas/LibrariesResponse"
+	providersSchema         = "#/components/schemas/AuthProvidersResponse"
 )
 
-var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
+var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Location", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
 
 type authContractCase struct {
 	name, path, method, schema string
@@ -470,7 +471,7 @@ func assertResponseSchema(
 		}
 	case currentSchema, permissionsSchema, rolesSchema, errorSchema,
 		createMediaServerSchema, mediaServersSchema, mediaServerSchema,
-		probeMediaServerSchema, librariesSchema:
+		probeMediaServerSchema, librariesSchema, providersSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)

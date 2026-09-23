@@ -217,6 +217,17 @@ func (a *authAuthorization) resetCalls() {
 	a.listRolesCalls = 0
 }
 
+func (a *authAuthorization) RoleExists(_ context.Context, name string) (bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, role := range a.roles {
+		if role.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (a *recordingAudit) Emit(_ context.Context, event telemetry.AuditEvent) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -252,9 +263,13 @@ type controllableSessionStore struct {
 	mu                            sync.Mutex
 	base                          scs.Store
 	findErr, commitErr, deleteErr error
+	claimErr                      error
 	deleteAfterErr                error
+	beforeClaim                   func(context.Context) error
 	deleted                       []string
 	beforeCommit                  func(context.Context) error
+	findReady                     chan<- struct{}
+	findRelease                   <-chan struct{}
 }
 
 func (s *controllableSessionStore) Find(token string) ([]byte, bool, error) {
@@ -274,11 +289,19 @@ func (s *controllableSessionStore) FindCtx(ctx context.Context, token string) ([
 		return nil, false, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.findErr != nil {
-		return nil, false, s.findErr
+		err := s.findErr
+		s.mu.Unlock()
+		return nil, false, err
 	}
-	return s.base.Find(token)
+	data, found, err := s.base.Find(token)
+	ready, release := s.findReady, s.findRelease
+	s.mu.Unlock()
+	if ready != nil {
+		ready <- struct{}{}
+		<-release
+	}
+	return data, found, err
 }
 
 func (s *controllableSessionStore) CommitCtx(ctx context.Context, token string, data []byte, expiry time.Time) error {
@@ -317,6 +340,34 @@ func (s *controllableSessionStore) DeleteCtx(ctx context.Context, token string) 
 		return err
 	}
 	return s.deleteAfterErr
+}
+
+func (s *controllableSessionStore) ClaimOIDCFlow(ctx context.Context, token string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	beforeClaim := s.beforeClaim
+	s.mu.Unlock()
+	if beforeClaim != nil {
+		if err := beforeClaim(ctx); err != nil {
+			return false, err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claimErr != nil {
+		return false, s.claimErr
+	}
+	storedToken := hashedSessionToken(token)
+	_, found, err := s.base.Find(storedToken)
+	if err != nil || !found {
+		return false, err
+	}
+	if err := s.base.Delete(storedToken); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func newAuthHarness(t *testing.T, mutate func(*config.AuthConfig)) authHarness {
@@ -490,7 +541,7 @@ func TestLoginSuccessCookieAuditAndMetric(t *testing.T) {
 		t.Errorf("cookie flags = %+v", cookie)
 	}
 	event := h.audit.last(t)
-	if event.Actor != "11111111-1111-4111-8111-111111111111" || event.Resource != "account:11111111-1111-4111-8111-111111111111" || event.Reason != "authenticated" || event.Source != "192.0.2.10" || event.RequestID != "request-1" {
+	if event.Actor != "11111111-1111-4111-8111-111111111111" || event.Resource != "account:11111111-1111-4111-8111-111111111111" || event.Reason != "authenticated" || event.Source != "192.0.2.10" || event.RequestID != "request-1" || event.Provider != telemetry.AuditProviderLocal {
 		t.Errorf("audit event = %+v", event)
 	}
 	if strings.Contains(rec.Body.String(), "secret-password") {
@@ -718,7 +769,8 @@ func TestLoginCredentialFailuresAreOpaque(t *testing.T) {
 				t.Errorf("body = %q, want identical %q", rec.Body.String(), wantBody)
 			}
 			event := h.audit.last(t)
-			if event.Reason != tt.reason || event.Actor != "anonymous" || event.SubjectID == "" || event.Resource != auditResourceAuthLogin {
+			if event.Reason != tt.reason || event.Actor != "anonymous" || event.SubjectID == "" ||
+				event.Resource != auditResourceAuthLogin || event.Provider != telemetry.AuditProviderLocal {
 				t.Errorf("audit event = %+v", event)
 			}
 			if event.SubjectID == tt.username || strings.Contains(event.SubjectID, tt.username) {
@@ -791,7 +843,7 @@ func TestLoginRateLimitAndRetryAfter(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "60" {
 		t.Fatalf("limited login = %d Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
 	}
-	if event := h.audit.last(t); event.Reason != "rate_limited" || event.Actor != "anonymous" || event.SubjectID == "" || event.Resource != auditResourceAuthLogin {
+	if event := h.audit.last(t); event.Reason != "rate_limited" || event.Actor != "anonymous" || event.SubjectID == "" || event.Resource != auditResourceAuthLogin || event.Provider != telemetry.AuditProviderLocal {
 		t.Errorf("audit event = %+v", event)
 	}
 	if got := h.metrics.loginOutcome(); got != "rate_limited" {
@@ -1115,6 +1167,7 @@ func TestCrossOriginProtectionMapsExactKnownRoutes(t *testing.T) {
 		{path: "/api/v1/auth/login", resource: auditResourceAuthLogin},
 		{path: "/api/v1/auth/logout", resource: auditResourceAuthLogout},
 		{path: "/api/v1/auth/me", resource: auditResourceAuthMe},
+		{path: "/api/v1/auth/oidc/start", resource: auditResourceAuthOIDCStart},
 		{path: "/api/v1/media-servers", resource: auditResourceMediaServers},
 		{path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", resource: auditResourceMediaServers},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", resource: auditResourceMediaServers},
@@ -1226,4 +1279,13 @@ func (m *countingMetrics) resetLoginOutcomes() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.logins = nil
+}
+
+func (m *countingMetrics) loginProvider() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.loginProviders) == 0 {
+		return ""
+	}
+	return m.loginProviders[len(m.loginProviders)-1]
 }

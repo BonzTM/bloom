@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -67,6 +68,20 @@ func (s *postgresAuthorization) ListRoles(ctx context.Context, afterName string,
 		}
 	}
 	return roles, nil
+}
+
+func (s *postgresAuthorization) RoleExists(ctx context.Context, name string) (bool, error) {
+	if !core.ValidRoleName(name) {
+		return false, fmt.Errorf("find role: %w", core.ErrInvalidArgument)
+	}
+	_, err := s.q.GetRoleIDByName(ctx, name)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("find role %q: %w", name, err)
 }
 
 func postgresRole(value any) (core.Role, error) {

@@ -101,6 +101,25 @@ func (l *loginLimiter) allow(ipKey, usernameKey string) (bool, time.Duration) {
 	return true, 0
 }
 
+func (l *loginLimiter) allowOne(key string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.clock.Now()
+	bucket := l.buckets[key]
+	if allowed, retry := l.existingBucketsAllow(now, bucket); !allowed {
+		return false, retry
+	}
+	if bucket == nil {
+		if allowed, retry := l.ensureCapacity(now, 1, key); !allowed {
+			return false, retry
+		}
+		bucket = l.newBucket(now, key)
+	}
+	bucket.tokens--
+	l.markUsed(now, bucket)
+	return true, 0
+}
+
 func (l *loginLimiter) existingBucketsAllow(now time.Time, buckets ...*tokenBucket) (bool, time.Duration) {
 	var retry time.Duration
 	for _, bucket := range buckets {

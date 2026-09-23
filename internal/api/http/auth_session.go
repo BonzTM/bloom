@@ -39,10 +39,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.sessions.Destroy(r.Context()); err != nil {
-		s.emitAuthAudit(r, account.ID, "", "auth.logout", accountResource(account.ID), telemetry.AuditFailure, "internal_error", clientIP(r, s.trustedProxyCIDRs))
+		s.emitAuthAudit(r, account.ID, "auth.logout", accountResource(account.ID), telemetry.AuditFailure, "internal_error", clientIP(r, s.trustedProxyCIDRs))
 		writeError(w, r, s.logger, err)
 		return
 	}
-	s.emitAuthAudit(r, account.ID, "", "auth.logout", accountResource(account.ID), telemetry.AuditSuccess, "logged_out", clientIP(r, s.trustedProxyCIDRs))
+	s.emitAuthAudit(r, account.ID, "auth.logout", accountResource(account.ID), telemetry.AuditSuccess, "logged_out", clientIP(r, s.trustedProxyCIDRs))
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -77,6 +77,7 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteRolePermissionColumns, expectedRolePermissionColumns)
 	assertColumns(t, pool, sqliteAccountRoleColumns, expectedAccountRoleColumns)
 	assertColumns(t, pool, sqliteMediaServerColumns, expectedMediaServerColumns)
+	assertColumns(t, pool, sqliteIdentityColumns, expectedIdentityColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
@@ -86,8 +87,9 @@ var (
 	expectedSessionColumns        = []string{"data", "expiry", "token"}
 	expectedRoleColumns           = []string{"built_in", "created_at", "description", "id", "name"}
 	expectedRolePermissionColumns = []string{"permission", "role_id"}
-	expectedAccountRoleColumns    = []string{"account_id", "role_id"}
+	expectedAccountRoleColumns    = []string{"account_id", "role_id", "source"}
 	expectedMediaServerColumns    = []string{"allow_insecure", "base_url", "created_at", "credential_ciphertext", "id", "kind", "name", "name_key", "updated_at"}
+	expectedIdentityColumns       = []string{"account_id", "created_at", "issuer", "last_login_at", "mapped_roles", "provider", "subject", "username_claim"}
 )
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
@@ -210,6 +212,10 @@ func sqliteAccountRoleColumns(ctx context.Context, pool *sql.DB) ([]string, erro
 
 func sqliteMediaServerColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return sqliteTableColumns(ctx, pool, "media_servers")
+}
+
+func sqliteIdentityColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "account_identities")
 }
 
 func sqliteTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {

@@ -25,12 +25,16 @@ type apiRoute struct {
 	sessions     bool
 	authRequired bool
 	snapshot     bool
+	oidc         bool
 	handler      apiHandler
 }
 
 var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/version", access: routePublic, handler: (*Server).handleVersion},
 	{method: http.MethodGet, path: "/api/v1/auth/permissions", access: routePublic, handler: (*Server).handlePermissions},
+	{method: http.MethodGet, path: "/api/v1/auth/providers", access: routePublic, handler: (*Server).handleAuthProviders},
+	{method: http.MethodPost, path: "/api/v1/auth/oidc/start", access: routePublic, sessions: true, authRequired: true, oidc: true, handler: (*Server).handleOIDCStart},
+	{method: http.MethodGet, path: "/api/v1/auth/oidc/callback", access: routePublic, sessions: true, authRequired: true, oidc: true, handler: (*Server).handleOIDCCallback},
 	{method: http.MethodPost, path: "/api/v1/auth/login", access: routePublic, sessions: true, authRequired: true, handler: (*Server).handleLogin},
 	{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true, handler: (*Server).handleLogout},
 	{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true, handler: (*Server).handleMe},
@@ -84,6 +88,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			return err
 		}
 		if route.authRequired && s.loginLimiter == nil {
+			continue
+		}
+		if route.oidc && (s.oidcProvider == nil || s.oidcAccounts == nil || s.oidcFlows == nil || !s.oidcConfig.Enabled) {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/media-servers") && (s.mediaServerReader == nil || s.mediaServerManager == nil) {
