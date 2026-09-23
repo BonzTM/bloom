@@ -83,3 +83,21 @@ export const loginRequestSchema = z.strictObject({
   username: z.string().min(1).max(USERNAME_MAX_LENGTH),
   password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
 });
+
+// Wire contract for `GET /api/v1/auth/providers`: which sign-in methods the
+// server offers. Local is always present; a single sign-on provider appears
+// when the operator has enabled one.
+export const signInProviderSchema = z.object({
+  id: z.enum(["local", "oidc"]),
+  display_name: z.string().min(1).max(80),
+});
+
+export type SignInProvider = z.output<typeof signInProviderSchema>;
+
+export const authProvidersResponseSchema = z.object({
+  providers: z.array(signInProviderSchema).min(1).max(2),
+});
+
+export type AuthProvidersResponse = z.output<
+  typeof authProvidersResponseSchema
+>;

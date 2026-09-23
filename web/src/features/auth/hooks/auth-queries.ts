@@ -6,7 +6,19 @@ import { useAuthApi } from "../auth-context.js";
 
 export const authKeys = {
   session: () => ["auth", "session"] as const,
+  providers: () => ["auth", "providers"] as const,
 };
+
+// Which sign-in methods the server offers. Operator configuration, so it is
+// fetched once per page load.
+export function useSignInProviders() {
+  const api = useAuthApi();
+  return useQuery({
+    queryKey: authKeys.providers(),
+    queryFn: ({ signal }) => api.providers(signal),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
 
 // The current session, or null when the visitor is signed out. A 401 from
 // `/me` is the normal signed-out answer, not an error to surface. Every

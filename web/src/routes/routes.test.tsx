@@ -3,10 +3,13 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import {
+  jsonApi,
+  localProvider,
   mockAccount,
   mockSession,
+  oidcProvider,
+  setMockProviders,
   signInMockSession,
-  jsonApi,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
 import type { Session } from "../features/auth/api/auth-schemas.js";
@@ -304,4 +307,112 @@ it("lets the person correct a rejected password and sign in with Enter", async (
     await screen.findByRole("heading", { name: "Bloom", level: 1 }),
   ).toBeVisible();
   expect(screen.getByText("Signed in as admin")).toBeVisible();
+});
+
+it("offers single sign-on when the server enables it, returning to the page that asked", async () => {
+  setMockProviders([localProvider, oidcProvider]);
+  renderApp({ pathname: "/login", state: { from: "/about" } });
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  const button = await screen.findByRole("button", {
+    name: "Continue with Homelab SSO",
+  });
+  const form = button.closest("form");
+  expect(form).toHaveAttribute("method", "post");
+  expect(form).toHaveAttribute(
+    "action",
+    "http://localhost/api/v1/auth/oidc/start",
+  );
+  expect(form?.querySelector('input[name="return_to"]')).toHaveValue("/about");
+  expect(screen.getByLabelText("Username")).toBeVisible();
+});
+
+it("shows only the password form when single sign-on is not enabled", async () => {
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+  await screen.findByLabelText("Username");
+
+  expect(
+    screen.queryByRole("button", { name: /Continue with/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps password sign-in available when the provider list cannot load", async () => {
+  server.use(
+    http.get(
+      "*/api/v1/auth/providers",
+      jsonApi(() => new HttpResponse("upstream down", { status: 502 })),
+    ),
+  );
+  renderApp("/login");
+
+  expect(await screen.findByLabelText("Username")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: /Continue with/ }),
+  ).not.toBeInTheDocument();
+});
+
+it("explains a failed single sign-on attempt sent back by the server", async () => {
+  renderApp("/login?error=unknown_identity");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "not linked to a Bloom account",
+  );
+  expect(screen.getByLabelText("Username")).toBeVisible();
+});
+
+it.each([
+  ["an external URL", { from: "https://evil.example/" }, "/"],
+  ["a protocol-relative URL", { from: "//evil.example/" }, "/"],
+  [
+    "a query and fragment",
+    { from: "/stats?range=7d#top" },
+    "/stats?range=7d#top",
+  ],
+])(
+  "posts a validated return path to the single sign-on start for %s",
+  async (_label, state, expected) => {
+    setMockProviders([localProvider, oidcProvider]);
+    renderApp({ pathname: "/login", state });
+
+    const button = await screen.findByRole("button", {
+      name: "Continue with Homelab SSO",
+    });
+    const form = button.closest("form");
+    expect(form).toHaveAttribute(
+      "action",
+      "http://localhost/api/v1/auth/oidc/start",
+    );
+    expect(form?.querySelector('input[name="return_to"]')).toHaveValue(
+      expected,
+    );
+  },
+);
+
+it.each([
+  ["an unknown code", "error=something_else"],
+  ["a hostile value", "error=%3Cscript%3Ealert(1)%3C%2Fscript%3E"],
+  ["an oversized value", `error=${"a".repeat(65)}`],
+])(
+  "shows one generic alert and never the raw value for %s",
+  async (_label, query) => {
+    renderApp(`/login?${query}`);
+    await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent(
+      "Single sign-on failed. Please try again.",
+    );
+    expect(document.body.textContent).not.toContain("something_else");
+    expect(document.body.textContent).not.toContain("<script>");
+  },
+);
+
+it("shows no single sign-on alert without an error code", async () => {
+  renderApp("/login");
+  await screen.findByRole("heading", { name: "Sign in", level: 1 });
+
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
