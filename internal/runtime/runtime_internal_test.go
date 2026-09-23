@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +41,44 @@ type orderedFailingTracer struct {
 	err   error
 }
 
+type orderedShutdownServer struct{ order *[]string }
+
+func (s orderedShutdownServer) SetReady(ready bool) {
+	if !ready {
+		*s.order = append(*s.order, "unready")
+	}
+}
+
+func (s orderedShutdownServer) Shutdown(context.Context) error {
+	*s.order = append(*s.order, "shutdown http")
+	return nil
+}
+
+type orderedMediaCloser struct{ order *[]string }
+
+func (c orderedMediaCloser) CloseIdleConnections() {
+	*c.order = append(*c.order, "close media")
+}
+
+func TestShutdownClosesMediaBeforeDatabaseAndTracer(t *testing.T) {
+	order := make([]string, 0, 5)
+	err := shutdown(
+		orderedShutdownServer{order: &order},
+		orderedMediaCloser{order: &order},
+		orderedFailingCloser{order: &order},
+		orderedFailingTracer{order: &order},
+		slog.New(slog.DiscardHandler),
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	want := []string{"unready", "shutdown http", "close media", "close database", "shutdown tracer"}
+	if !slices.Equal(order, want) {
+		t.Fatalf("shutdown order = %v, want %v", order, want)
+	}
+}
+
 func (t orderedFailingTracer) Shutdown(context.Context) error {
 	*t.order = append(*t.order, "shutdown tracer")
 	return t.err
@@ -49,6 +90,7 @@ func TestCleanupStartupFailureReturnsOrderedCleanupErrors(t *testing.T) {
 	traceErr := errors.New("shutdown tracer")
 	order := make([]string, 0, 2)
 	err := cleanupStartupFailure(startupErr,
+		nil,
 		orderedFailingCloser{order: &order, err: closeErr},
 		orderedFailingTracer{order: &order, err: traceErr},
 		time.Second)
@@ -81,5 +123,31 @@ func TestRunInitializedShutsDownTracerAfterStoreFailure(t *testing.T) {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("startup error was replaced by cleanup error: %v", err)
+	}
+}
+
+func TestRunInitializedShutsDownTracerAfterMediaServerFailure(t *testing.T) {
+	cfg := config.Config{
+		Database: config.DatabaseConfig{
+			Driver:       config.DriverSQLite,
+			DSN:          "file:" + filepath.Join(t.TempDir(), "media.db") + "?_pragma=foreign_keys(1)",
+			MaxOpenConns: 1, MaxIdleConns: 1,
+			ConnMaxLifetime: time.Minute, ConnMaxIdleTime: time.Minute,
+			MigrateOnStartup: true,
+		},
+		Auth: config.AuthConfig{
+			SessionLifetime: time.Hour, SessionIdleTimeout: time.Minute,
+		},
+		Bootstrap:     config.BootstrapConfig{Username: "admin"},
+		ShutdownGrace: 50 * time.Millisecond,
+	}
+	tracer := &recordingTracer{}
+	err := runInitialized(t.Context(), cfg, Streams{Audit: io.Discard}, slog.New(slog.DiscardHandler),
+		telemetry.NewPromMetrics("media-startup-test"), tracer)
+	if err == nil || !strings.Contains(err.Error(), "build credential cipher") {
+		t.Fatalf("runInitialized error = %v, want credential cipher failure from an empty secret key", err)
+	}
+	if !tracer.called || !tracer.hasDeadline {
+		t.Fatalf("tracer shutdown = called %t, bounded %t", tracer.called, tracer.hasDeadline)
 	}
 }

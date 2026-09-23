@@ -23,10 +23,15 @@ import (
 )
 
 const (
-	currentSchema     = "#/components/schemas/CurrentAccountResponse"
-	permissionsSchema = "#/components/schemas/PermissionCatalogResponse"
-	rolesSchema       = "#/components/schemas/RolesResponse"
-	errorSchema       = "#/components/schemas/ErrorResponse"
+	currentSchema           = "#/components/schemas/CurrentAccountResponse"
+	permissionsSchema       = "#/components/schemas/PermissionCatalogResponse"
+	rolesSchema             = "#/components/schemas/RolesResponse"
+	errorSchema             = "#/components/schemas/ErrorResponse"
+	createMediaServerSchema = "#/components/schemas/CreateMediaServerResponse"
+	mediaServersSchema      = "#/components/schemas/MediaServersResponse"
+	mediaServerSchema       = "#/components/schemas/MediaServer"
+	probeMediaServerSchema  = "#/components/schemas/ProbeMediaServerResponse"
+	librariesSchema         = "#/components/schemas/LibrariesResponse"
 )
 
 var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
@@ -346,9 +351,19 @@ type openAPIOperation struct {
 }
 
 type openAPIResponse struct {
-	Ref     string                      `yaml:"$ref"`
-	Headers map[string]map[string]any   `yaml:"headers"`
-	Content map[string]openAPIMediaType `yaml:"content"`
+	Description string                      `yaml:"description"`
+	Ref         string                      `yaml:"$ref"`
+	Headers     map[string]map[string]any   `yaml:"headers"`
+	Content     map[string]openAPIMediaType `yaml:"content"`
+}
+
+func TestForbiddenOpenAPIDocumentsPermissionAndCSRFDenials(t *testing.T) {
+	description := loadOpenAPI(t).Components.Responses["Forbidden"].Description
+	for _, cause := range []string{"admin.settings", "csrf_rejected"} {
+		if !strings.Contains(description, cause) {
+			t.Errorf("Forbidden description %q does not document %q", description, cause)
+		}
+	}
 }
 
 type openAPIMediaType struct {
@@ -453,7 +468,9 @@ func assertResponseSchema(
 		if recorder.Body.Len() != 0 {
 			t.Errorf("response body = %q, want empty", recorder.Body.String())
 		}
-	case currentSchema, permissionsSchema, rolesSchema, errorSchema:
+	case currentSchema, permissionsSchema, rolesSchema, errorSchema,
+		createMediaServerSchema, mediaServersSchema, mediaServerSchema,
+		probeMediaServerSchema, librariesSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)

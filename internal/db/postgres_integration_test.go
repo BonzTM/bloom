@@ -53,6 +53,7 @@ func TestPostgresEngineSuite(t *testing.T) {
 	assertColumns(t, pool, postgresRoleColumns, expectedRoleColumns)
 	assertColumns(t, pool, postgresRolePermissionColumns, expectedRolePermissionColumns)
 	assertColumns(t, pool, postgresAccountRoleColumns, expectedAccountRoleColumns)
+	assertColumns(t, pool, postgresMediaServerColumns, expectedMediaServerColumns)
 }
 
 func postgresSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
@@ -75,6 +76,10 @@ func postgresRolePermissionColumns(ctx context.Context, pool *sql.DB) ([]string,
 
 func postgresAccountRoleColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return postgresTableColumns(ctx, pool, "account_roles")
+}
+
+func postgresMediaServerColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "media_servers")
 }
 
 func postgresTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {

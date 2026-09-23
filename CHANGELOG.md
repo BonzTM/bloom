@@ -31,6 +31,12 @@ contracts) gets an entry here.
 - Administration area in the web UI: an `Admin` entry for accounts holding an
   admin permission, and a roles page that lists every role with its kind and
   permissions, paged through the roles API.
+- Jellyfin media-server registration, encrypted API-key storage, connection
+  probes, capability reporting, library listing, `admin.settings` route guards,
+  audit events, outbound metrics, and SQLite/PostgreSQL migration `00007`.
+- Pinned Jellyfin 12.1.0 OpenAPI input and scoped `oapi-codegen` output for the
+  system-information and virtual-folder operations, with `make generate` and a
+  stale-generation verification gate.
 - Main-branch and tagged-release image publishing with candidate-first smoke
   tests, source- and signer-bound attestation plus SBOM verification for
   immutable-image reuse, required CI and PostgreSQL gates, pre-promotion
@@ -85,6 +91,12 @@ contracts) gets an entry here.
 - SQLite database startup now supplies the foreign-key pragma when the
   configured DSN omits it. Explicitly disabled foreign keys still fail
   startup, and shipped container DSNs now declare the enabled pragma.
+- Media-server credentials are bound to registration metadata and carry a
+  derived key id. HTTPS is the default, plaintext HTTP requires a persisted and
+  audited override, unsafe special-purpose destinations are denied at validation
+  and dial time, environment proxies are bypassed, retries are transient-only,
+  and every media-server handler and dependency call has a bounded budget.
+
 - Image publishing skips the artifact attestation steps, with a notice, when
   attestations are unavailable for the repository's plan, and keeps every other
   proof step; a public repository gets signed provenance automatically.

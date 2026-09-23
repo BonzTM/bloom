@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -23,6 +24,18 @@ import (
 type Pinger interface {
 	// PingContext reports whether the dependency can serve traffic.
 	PingContext(ctx context.Context) error
+}
+
+type mediaServerReader interface {
+	List(ctx context.Context, afterNameKey string, pageSize int) ([]core.MediaServerConnection, error)
+	Get(ctx context.Context, id string) (core.MediaServerConnection, error)
+	Libraries(ctx context.Context, id string) ([]core.Library, error)
+}
+
+type mediaServerManager interface {
+	Register(ctx context.Context, kind core.MediaServerKind, name, baseURL, credential string, allowInsecure bool) (core.MediaServerConnection, error)
+	Probe(ctx context.Context, id string) (core.ServerInfo, error)
+	Delete(ctx context.Context, id string) (core.MediaServer, error)
 }
 
 // Server owns the HTTP listener, mux, and middleware wiring. It holds the
@@ -47,9 +60,12 @@ type Server struct {
 	loginLimiter          *loginLimiter
 	passwordVerifications chan struct{}
 	authOperationTimeout  time.Duration
+	mediaOperationTimeout time.Duration
 	trustedProxyCIDRs     []netip.Prefix
 	authorizer            core.Authorizer
 	roles                 core.RoleReader
+	mediaServerReader     mediaServerReader
+	mediaServerManager    mediaServerManager
 }
 
 // Deps bundles the dependencies the server wires on top of config. Grouping
@@ -76,6 +92,10 @@ type Deps struct {
 	Authorizer core.Authorizer
 	// Roles reads account role names and the administrative role list.
 	Roles core.RoleReader
+	// MediaServerReader supplies registered-server reads.
+	MediaServerReader mediaServerReader
+	// MediaServerManager supplies registered-server changes and probes.
+	MediaServerManager mediaServerManager
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -101,21 +121,24 @@ type metricsExposer interface {
 // the server to unready before draining.
 func New(cfg config.HTTPConfig, deps Deps) *Server {
 	s := &Server{
-		logger:               deps.Logger,
-		metrics:              deps.Metrics,
-		readiness:            deps.Readiness,
-		pinger:               deps.Pinger,
-		web:                  deps.Web,
-		maxBodyBytes:         cfg.MaxBodyBytes,
-		identity:             deps.Identity,
-		accounts:             deps.Accounts,
-		sessions:             deps.Sessions,
-		audit:                deps.Audit,
-		auditFailureMetrics:  telemetry.NopMetrics{},
-		authorizationMetrics: telemetry.NopMetrics{},
-		trustedProxyCIDRs:    deps.Auth.TrustedProxyCIDRs,
-		authorizer:           deps.Authorizer,
-		roles:                deps.Roles,
+		logger:                deps.Logger,
+		metrics:               deps.Metrics,
+		readiness:             deps.Readiness,
+		pinger:                deps.Pinger,
+		web:                   deps.Web,
+		maxBodyBytes:          cfg.MaxBodyBytes,
+		identity:              deps.Identity,
+		accounts:              deps.Accounts,
+		sessions:              deps.Sessions,
+		audit:                 deps.Audit,
+		auditFailureMetrics:   telemetry.NopMetrics{},
+		authorizationMetrics:  telemetry.NopMetrics{},
+		trustedProxyCIDRs:     deps.Auth.TrustedProxyCIDRs,
+		authorizer:            deps.Authorizer,
+		roles:                 deps.Roles,
+		mediaServerReader:     deps.MediaServerReader,
+		mediaServerManager:    deps.MediaServerManager,
+		mediaOperationTimeout: derivedAuthOperationTimeout(cfg.WriteTimeout),
 	}
 	if s.audit == nil {
 		s.audit = telemetry.NopAuditLogger()
@@ -229,17 +252,6 @@ func (s *Server) routes() http.Handler {
 	return h
 }
 
-func (s *Server) authRoute(method string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != method {
-			w.Header().Set("Allow", method)
-			writeError(w, r, s.logger, errMethodNotAllowed)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (s *Server) sessionHandler(handler http.Handler, accountRequired bool) http.Handler {
 	if accountRequired {
 		handler = s.sessionAccountMiddleware(handler)
@@ -257,7 +269,7 @@ func (s *Server) handleCSRFRejected(w http.ResponseWriter, r *http.Request) {
 }
 
 func csrfAuditResource(path string) string {
-	switch path {
+	switch inventoryPattern(path) {
 	case "/api/v1/auth/login":
 		return auditResourceAuthLogin
 	case "/api/v1/auth/logout":
@@ -268,9 +280,34 @@ func csrfAuditResource(path string) string {
 		return auditResourceAuthPermissions
 	case "/api/v1/roles":
 		return auditResourceRoles
+	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
+		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
+		return auditResourceMediaServers
 	default:
 		return auditResourceRouteUnmatched
 	}
+}
+
+func inventoryPattern(path string) string {
+	for _, route := range apiRouteInventory {
+		if routePathMatches(route.path, path) {
+			return route.path
+		}
+	}
+	return ""
+}
+
+func routePathMatches(pattern, path string) bool {
+	const parameter = "{id}"
+	prefix, suffix, found := strings.Cut(pattern, parameter)
+	if !found {
+		return path == pattern
+	}
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	value := path[len(prefix) : len(path)-len(suffix)]
+	return value != "" && !strings.Contains(value, "/")
 }
 
 // ListenAndServe starts serving and blocks until the server is shut down. It

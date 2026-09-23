@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
@@ -65,6 +68,10 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 		t.Fatalf("NewCatalogPermission: %v", err)
 	}
 	m.IncAuthorizationDenial(permission)
+	m.ObserveMediaServerRequest("jellyfin", "probe", "success", 0.02)
+	for _, outcome := range []string{"scheduled", "exhausted", "budget_exhausted"} {
+		m.ObserveMediaServerRetry("jellyfin", "probe", outcome)
+	}
 
 	families, err := m.Registry().Gather()
 	if err != nil {
@@ -80,6 +87,8 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 		"bloomtest_audit_write_failures_total",
 		"bloomtest_session_cleanup_failures_total", "go_goroutines",
 		"bloomtest_authorization_denials_total",
+		"bloomtest_media_server_requests_total", "bloomtest_media_server_request_duration_seconds",
+		"bloomtest_media_server_retries_total",
 	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)
@@ -96,9 +105,44 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 			t.Errorf("authorization denial metric = %+v", metrics)
 		}
 	}
+	assertRetryMetricOutcomes(t, m.Registry())
 	if m.Handler() == nil {
 		t.Error("Handler() = nil")
 	}
+}
+
+func assertRetryMetricOutcomes(t *testing.T, gatherer prometheus.Gatherer) {
+	t.Helper()
+	families, err := gatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather retry metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "bloomtest_media_server_retries_total" {
+			continue
+		}
+		outcomes := make([]string, 0, len(family.GetMetric()))
+		for _, metric := range family.GetMetric() {
+			labels := make(map[string]string, len(metric.GetLabel()))
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+				if label.GetName() == "outcome" {
+					outcomes = append(outcomes, label.GetValue())
+				}
+			}
+			if labels["kind"] != "jellyfin" || labels["operation"] != "probe" ||
+				metric.GetCounter().GetValue() != 1 {
+				t.Errorf("retry metric = %+v", metric)
+			}
+		}
+		slices.Sort(outcomes)
+		want := []string{"budget_exhausted", "exhausted", "scheduled"}
+		if !slices.Equal(outcomes, want) {
+			t.Fatalf("retry metric outcomes = %v, want %v", outcomes, want)
+		}
+		return
+	}
+	t.Fatal("retry metric family not gathered")
 }
 
 type fixedClock struct{ t time.Time }
@@ -128,14 +172,14 @@ func TestAuditLoggerSchema(t *testing.T) {
 		"log_type": "audit", "actor": "acct-1", "action": "auth.login", "resource": "account:acct-1",
 		"result": "success", "request_id": "req-1", "time": "2026-09-22T11:00:00Z",
 		"reason": "authenticated", "source": "192.0.2.1", "subject_id": "username:opaque",
-		"permission": "admin.roles", "role": "owner",
+		"permission": "admin.roles", "role": "owner", "kind": "",
 	} {
 		if rec[k] != want {
 			t.Errorf("%s = %v, want %q", k, rec[k], want)
 		}
 	}
-	if len(rec) != 14 {
-		t.Fatalf("audit field count = %d, want 14: %v", len(rec), rec)
+	if len(rec) != 16 {
+		t.Fatalf("audit field count = %d, want 16: %v", len(rec), rec)
 	}
 }
 

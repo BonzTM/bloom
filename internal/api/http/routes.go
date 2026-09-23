@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/BonzTM/bloom/internal/core"
 )
@@ -34,6 +35,12 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true, handler: (*Server).handleLogout},
 	{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true, handler: (*Server).handleMe},
 	{method: http.MethodGet, path: "/api/v1/roles", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true, handler: (*Server).handleRoles},
+	{method: http.MethodPost, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateMediaServer},
+	{method: http.MethodGet, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListMediaServers},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetMediaServer},
+	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleProbeMediaServer},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerLibraries},
+	{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMediaServer},
 }
 
 func (r apiRoute) usesSessionAccount() bool {
@@ -69,6 +76,8 @@ func (r apiRoute) validate() (core.CatalogPermission, error) {
 }
 
 func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
+	handlers := make(map[string][]methodHandler)
+	paths := make([]string, 0, len(apiRouteInventory))
 	for _, route := range apiRouteInventory {
 		handler, err := s.routeHandler(route)
 		if err != nil {
@@ -77,9 +86,38 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		if route.authRequired && s.loginLimiter == nil {
 			continue
 		}
-		mux.Handle(route.path, s.authRoute(route.method, handler))
+		if strings.HasPrefix(route.path, "/api/v1/media-servers") && (s.mediaServerReader == nil || s.mediaServerManager == nil) {
+			continue
+		}
+		if _, exists := handlers[route.path]; !exists {
+			paths = append(paths, route.path)
+		}
+		handlers[route.path] = append(handlers[route.path], methodHandler{method: route.method, handler: handler})
+	}
+	for _, path := range paths {
+		mux.Handle(path, s.dispatchMethods(handlers[path]))
 	}
 	return nil
+}
+
+type methodHandler struct {
+	method  string
+	handler http.Handler
+}
+
+func (s *Server) dispatchMethods(handlers []methodHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allowed := make([]string, 0, len(handlers))
+		for _, candidate := range handlers {
+			allowed = append(allowed, candidate.method)
+			if r.Method == candidate.method {
+				candidate.handler.ServeHTTP(w, r)
+				return
+			}
+		}
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+		writeError(w, r, s.logger, errMethodNotAllowed)
+	})
 }
 
 func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
@@ -103,6 +141,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		handler = s.sessionHandler(handler, true)
 	} else if route.sessions {
 		handler = s.sessionHandler(handler, false)
+	}
+	if strings.HasPrefix(route.path, "/api/v1/media-servers") {
+		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	return handler, nil
 }

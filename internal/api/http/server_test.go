@@ -166,6 +166,12 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true},
 		{method: http.MethodGet, path: "/api/v1/roles", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 	}
 	if len(apiRouteInventory) != len(want) {
 		t.Fatalf("route inventory length = %d, want %d", len(apiRouteInventory), len(want))

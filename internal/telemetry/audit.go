@@ -73,6 +73,10 @@ type AuditEvent struct {
 	// Role is the assigned role name. It is empty for events that are not role
 	// assignments.
 	Role string
+	// Kind is the finite integration kind for integration configuration events.
+	Kind string
+	// AllowInsecure records an explicit plaintext-transport exception.
+	AllowInsecure bool
 	// Result is the outcome: success, failure, or denied.
 	Result AuditResult
 	// Reason is a finite audit-safe outcome detail such as "bad_password".
@@ -142,6 +146,8 @@ func (a *AuditLogger) Emit(ctx context.Context, e AuditEvent) error {
 		slog.String("resource", e.Resource),
 		slog.String("permission", e.Permission),
 		slog.String("role", e.Role),
+		slog.String("kind", e.Kind),
+		slog.Bool("allow_insecure", e.AllowInsecure),
 		slog.String("result", string(e.Result)),
 		slog.String("reason", e.Reason),
 		slog.String("source", e.Source),

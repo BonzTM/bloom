@@ -123,6 +123,62 @@ export BLOOM_DB_DSN='postgres://bloom:bloom@localhost:5432/bloom?sslmode=disable
 go run ./cmd/bloom -migrate && go run ./cmd/bloom
 ```
 
+### Adding a media server
+
+Sign in as an account with `admin.settings`, then register each Jellyfin server
+through `POST /api/v1/media-servers`. Bloom requires an HTTPS base URL, probes
+`GET /System/Info` before saving anything, and encrypts the API key
+with a key derived from `BLOOM_SECRET_KEY`. The API key is write-only. Bloom
+never returns it from the API or includes it in application or audit logs.
+
+Plaintext HTTP exposes the unrestricted Jellyfin administrator credential to
+the network. Use it only for a trusted local deployment that cannot enable TLS,
+and set `"allow_insecure": true` on that registration. Bloom stores and returns
+that exception, emits a warning, and records it in the create audit event.
+
+Private destination ranges are allowed for self-hosted servers. Bloom rejects
+loopback, link-local, multicast, unspecified, and cloud-metadata destinations.
+It resolves and checks the address again when each connection is dialed to
+prevent DNS rebinding into a rejected range. Credentialed Jellyfin requests do
+not honor environment proxy settings; deploy a TLS endpoint directly reachable
+from Bloom rather than relying on `HTTP_PROXY` or `HTTPS_PROXY`.
+
+The following example keeps both passwords out of command-line arguments:
+
+```bash
+read -rsp 'Bloom password: ' BLOOM_LOGIN_PASSWORD; echo
+curl -sS -c bloom.cookies -H 'Content-Type: application/json' \
+  --data-binary @- http://localhost:8080/api/v1/auth/login <<EOF
+{"username":"owner","password":"${BLOOM_LOGIN_PASSWORD}"}
+EOF
+unset BLOOM_LOGIN_PASSWORD
+
+read -rsp 'Jellyfin API key: ' JELLYFIN_API_KEY; echo
+curl -sS -b bloom.cookies -H 'Content-Type: application/json' \
+  --data-binary @- http://localhost:8080/api/v1/media-servers <<EOF
+{"kind":"jellyfin","name":"Home","base_url":"https://jellyfin.example.com","api_key":"${JELLYFIN_API_KEY}"}
+EOF
+unset JELLYFIN_API_KEY
+```
+
+Use `GET /api/v1/media-servers` to list registrations. Use
+`POST /api/v1/media-servers/{id}/probe` to recheck a connection and
+`GET /api/v1/media-servers/{id}/libraries` to list its libraries. Deleting a
+registration removes its encrypted credential.
+
+### Back up the master secret
+
+Back up `BLOOM_SECRET_KEY` with the database and keep it stable across restarts,
+replicas, restores, and upgrades. The value derives both the credential key and
+the installation-specific Jellyfin device identifier. Bloom stores a derived
+key identifier in each encrypted envelope, so starting with a different value
+reports a wrong-key failure instead of treating every credential as corrupt.
+
+If the key is lost or changed, restore the original key. If it cannot be
+restored, delete and re-register every media server with its API key. A
+supported credential re-encryption command is planned but is not included in
+this release. Do not attempt rotation by changing the environment value alone.
+
 ## Configuration
 
 All configuration is loaded once in `internal/config` from environment variables
@@ -146,7 +202,7 @@ this table.
 | `BLOOM_DB_CONN_MAX_LIFETIME` | duration | no | `30m` | no | Bound on connection age. |
 | `BLOOM_DB_CONN_MAX_IDLE_TIME` | duration | no | `5m` | no | Reap idle connections after this long. |
 | `BLOOM_DB_MIGRATE_ON_STARTUP` | bool | no | `false` | no | Apply embedded migrations before serving. Single-writer convenience; production uses `-migrate`. |
-| `BLOOM_SECRET_KEY` | string | **yes** | — | **yes** | Master secret (at least 32 bytes) that derives the at-rest encryption key for stored credentials ([ADR 0006](decisions/0006-auth-and-authorization-model.md)). Never logged. |
+| `BLOOM_SECRET_KEY` | string | **yes** | — | **yes** | Stable master secret (at least 32 bytes) that derives stored-credential keys and the Jellyfin device id ([ADR 0006](decisions/0006-auth-and-authorization-model.md)). Back it up with the database. Never log or rotate it by replacement; see “Back up the master secret.” |
 | `BLOOM_BOOTSTRAP_USERNAME` | string | no | `admin` | no | Username for automatic first-administrator bootstrap. Uses the normal username policy. |
 | `BLOOM_BOOTSTRAP_PASSWORD` | string | startup: optional; create-admin: conditional | — | **yes** | Enables automatic first-administrator bootstrap when set. The recovery command reads it non-interactively; when unset, that command requires a terminal prompt. Remove it after the first account exists. |
 | `BLOOM_SESSION_COOKIE_SECURE` | bool | no | `true` | no | Set the `Secure` session-cookie flag. Disable only for plaintext local development. |

@@ -32,6 +32,7 @@ const (
 	codeUnsupportedMediaType = "unsupported_media_type"
 	codeMethodNotAllowed     = "method_not_allowed"
 	codeForbidden            = "forbidden"
+	codeMediaServerFailure   = "media_server_failure"
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -40,6 +41,10 @@ const (
 // calling writeError, which calls this.
 func errorClass(err error) (status int, code string) {
 	switch {
+	case isMediaServerErrorKind(err, core.MediaServerSaturated):
+		return http.StatusServiceUnavailable, codeUnavailable
+	case isMediaServerError(err):
+		return http.StatusBadGateway, codeMediaServerFailure
 	case errors.Is(err, core.ErrNotFound):
 		return http.StatusNotFound, codeNotFound
 	case errors.Is(err, core.ErrAlreadyExists):
@@ -65,6 +70,16 @@ func errorClass(err error) (status int, code string) {
 	default:
 		return http.StatusInternalServerError, codeInternal
 	}
+}
+
+func isMediaServerError(err error) bool {
+	var mediaErr *core.MediaServerError
+	return errors.As(err, &mediaErr)
+}
+
+func isMediaServerErrorKind(err error, kind core.MediaServerErrorKind) bool {
+	var mediaErr *core.MediaServerError
+	return errors.As(err, &mediaErr) && mediaErr.Kind == kind
 }
 
 // errNotReady is the transport-local sentinel behind a 503 from /readyz: the

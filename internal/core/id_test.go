@@ -26,6 +26,17 @@ func TestNewIDFormat(t *testing.T) {
 	}
 }
 
+func TestValidID(t *testing.T) {
+	if !ValidID("33333333-3333-4333-8333-333333333333") {
+		t.Fatal("ValidID rejected a canonical UUID")
+	}
+	for _, value := range []string{"", "not-a-uuid", "33333333-3333-4333-7333-333333333333"} {
+		if ValidID(value) {
+			t.Errorf("ValidID(%q) = true", value)
+		}
+	}
+}
+
 func TestFormatUUID(t *testing.T) {
 	var b [16]byte
 	for i := range b {

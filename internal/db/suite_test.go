@@ -81,6 +81,74 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("password hash update", func(t *testing.T) { testPasswordHashUpdate(t, store, localIdentities) })
 	t.Run("password hash length constraint", func(t *testing.T) { testPasswordHashLengthConstraint(t, store) })
 	runAuthorizationEngineTests(t, pool, driver, store, adminStore, authorizer, roles)
+	runMediaServerEngineTests(t, pool, driver)
+}
+
+func runMediaServerEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	reader, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewMediaServerStores: %v", err)
+	}
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 12, 0, 0, 123456789, time.FixedZone("west", -4*60*60)))
+	first := core.MediaServerRecord{MediaServer: core.MediaServer{
+		ID: mustID(t), Kind: core.MediaServerKindJellyfin, Name: "Alpha", BaseURL: "https://alpha.example.test",
+		CreatedAt: now, UpdatedAt: now,
+	}, CredentialCiphertext: []byte{1, 2, 3}}
+	second := core.MediaServerRecord{MediaServer: core.MediaServer{
+		ID: mustID(t), Kind: core.MediaServerKindJellyfin, Name: "Beta", BaseURL: "http://beta.example.test:8096/jellyfin",
+		AllowInsecure: true, CreatedAt: now, UpdatedAt: now,
+	}, CredentialCiphertext: []byte{4, 5, 6}}
+	accented := mediaServerRecord(t, "\u00c9clair", "https://accented.example.test", now)
+	lowercase := mediaServerRecord(t, "zebra", "https://lowercase.example.test", now)
+	for _, record := range []core.MediaServerRecord{accented, lowercase, second, first} {
+		if createErr := writer.CreateMediaServer(context.Background(), record); createErr != nil {
+			t.Fatalf("CreateMediaServer(%s): %v", record.Name, createErr)
+		}
+	}
+	got, err := reader.GetMediaServer(context.Background(), first.ID)
+	if err != nil || !reflect.DeepEqual(got, first) {
+		t.Fatalf("GetMediaServer = %+v, %v; want %+v", got, err, first)
+	}
+	page, err := reader.ListMediaServers(context.Background(), "", 1)
+	if err != nil || len(page) != 1 || page[0].Name != "Alpha" {
+		t.Fatalf("ListMediaServers first page = %+v, %v", page, err)
+	}
+	page, err = reader.ListMediaServers(context.Background(), core.MediaServerNameKey("Alpha"), 4)
+	if err != nil || !reflect.DeepEqual(mediaServerNames(page), []string{"Beta", "zebra", "\u00c9clair"}) {
+		t.Fatalf("ListMediaServers after Alpha = %+v, %v", page, err)
+	}
+	duplicate := second
+	duplicate.ID = mustID(t)
+	if err := writer.CreateMediaServer(context.Background(), duplicate); !errors.Is(err, core.ErrAlreadyExists) {
+		t.Fatalf("duplicate name = %v, want ErrAlreadyExists", err)
+	}
+	canonicalDuplicate := mediaServerRecord(t, "E\u0301CLAIR", "https://duplicate.example.test", now)
+	if err := writer.CreateMediaServer(context.Background(), canonicalDuplicate); !errors.Is(err, core.ErrAlreadyExists) {
+		t.Fatalf("canonical-equivalent name = %v, want ErrAlreadyExists", err)
+	}
+	if err := writer.DeleteMediaServer(context.Background(), first.ID); err != nil {
+		t.Fatalf("DeleteMediaServer: %v", err)
+	}
+	if _, err := reader.GetMediaServer(context.Background(), first.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetMediaServer after delete = %v, want ErrNotFound", err)
+	}
+}
+
+func mediaServerRecord(t *testing.T, name, baseURL string, now time.Time) core.MediaServerRecord {
+	t.Helper()
+	return core.MediaServerRecord{MediaServer: core.MediaServer{
+		ID: mustID(t), Kind: core.MediaServerKindJellyfin, Name: name, BaseURL: baseURL,
+		CreatedAt: now, UpdatedAt: now,
+	}, CredentialCiphertext: []byte(name)}
+}
+
+func mediaServerNames(servers []core.MediaServer) []string {
+	names := make([]string, 0, len(servers))
+	for _, server := range servers {
+		names = append(names, server.Name)
+	}
+	return names
 }
 
 func runAuthorizationEngineTests(
@@ -503,7 +571,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 6)
+	assertMigrationVersion(t, pool, 7)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -624,7 +692,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 6)
+	assertMigrationVersion(t, pool, 7)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}
