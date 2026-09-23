@@ -27,9 +27,27 @@ export default function AdminRoute(): ReactNode {
               <p>Create links that let people join a media server.</p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.requestsApprove]}>
+            <li className="card">
+              <h2>
+                <Link to="/admin/requests">Requests</Link>
+              </h2>
+              <p>Approve or decline what people asked for.</p>
+            </li>
+          </PermissionGate>
+          <PermissionGate anyOf={[permissions.adminSettings]}>
+            <li className="card">
+              <h2>
+                <Link to="/admin/request-profiles">Request settings</Link>
+              </h2>
+              <p>Set the TMDB key and where approved requests go.</p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.statsReadAll]}>
-            <li>
-              <Link to="/admin/playback">Playback</Link>
+            <li className="card">
+              <h2>
+                <Link to="/admin/playback">Playback</Link>
+              </h2>
               <p>See what is playing now and what finished recently.</p>
             </li>
           </PermissionGate>

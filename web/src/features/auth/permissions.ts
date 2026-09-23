@@ -8,6 +8,9 @@ export const permissions = {
   adminRoles: "admin.roles",
   usersInvite: "users.invite",
   statsReadAll: "stats.read.all",
+  requestsApprove: "requests.approve",
+  requestsCreate: "requests.create",
+  requestsReadOwn: "requests.read.own",
 } as const satisfies Record<string, KnownPermission>;
 
 export const ADMIN_PERMISSIONS: readonly KnownPermission[] = [
@@ -15,6 +18,7 @@ export const ADMIN_PERMISSIONS: readonly KnownPermission[] = [
   permissions.adminRoles,
   permissions.usersInvite,
   permissions.statsReadAll,
+  permissions.requestsApprove,
 ];
 
 export function hasPermission(

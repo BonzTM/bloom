@@ -5,7 +5,7 @@ const MAX_RESPONSE_BYTES = 1_000_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 type RequestOptions = Readonly<{
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;

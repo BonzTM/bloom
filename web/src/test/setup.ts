@@ -4,6 +4,7 @@ import { cleanup } from "@testing-library/react";
 import {
   resetMockInvites,
   resetMockMediaServers,
+  resetMockRequests,
   resetMockSession,
 } from "../mocks/handlers.js";
 import { server } from "./server.js";
@@ -18,6 +19,7 @@ afterEach(() => {
   resetMockSession();
   resetMockMediaServers();
   resetMockInvites();
+  resetMockRequests();
 });
 
 afterAll(() => {
