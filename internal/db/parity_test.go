@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,20 +71,26 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	runEngineSuite(t, pool, config.DriverSQLite)
 	assertColumns(t, pool, sqliteColumns, expectedAccountColumns)
 	assertColumns(t, pool, sqliteSessionColumns, expectedSessionColumns)
+	assertColumns(t, pool, sqliteRoleColumns, expectedRoleColumns)
+	assertColumns(t, pool, sqliteRolePermissionColumns, expectedRolePermissionColumns)
+	assertColumns(t, pool, sqliteAccountRoleColumns, expectedAccountRoleColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
 // engines to expose for the accounts table.
 var (
-	expectedAccountColumns = []string{"created_at", "disabled", "id", "password_hash", "username", "username_key"}
-	expectedSessionColumns = []string{"data", "expiry", "token"}
+	expectedAccountColumns        = []string{"created_at", "disabled", "id", "password_hash", "username", "username_key"}
+	expectedSessionColumns        = []string{"data", "expiry", "token"}
+	expectedRoleColumns           = []string{"built_in", "created_at", "description", "id", "name"}
+	expectedRolePermissionColumns = []string{"permission", "role_id"}
+	expectedAccountRoleColumns    = []string{"account_id", "role_id"}
 )
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
 	t.Helper()
 	pool, err := db.Open(context.Background(), config.DatabaseConfig{
 		Driver:          config.DriverSQLite,
-		DSN:             "file::memory:",
+		DSN:             "file::memory:?_pragma=foreign_keys(1)",
 		MaxOpenConns:    1,
 		MaxIdleConns:    1,
 		ConnMaxLifetime: time.Hour,
@@ -94,6 +101,50 @@ func openSQLiteMemory(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = pool.Close() })
 	return pool
+}
+
+func TestOpenSQLiteRejectsDisabledForeignKeys(t *testing.T) {
+	_, err := db.Open(context.Background(), config.DatabaseConfig{
+		Driver:          config.DriverSQLite,
+		DSN:             "file::memory:",
+		MaxOpenConns:    1,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: time.Hour,
+		ConnMaxIdleTime: time.Hour,
+	})
+	if err == nil || !strings.Contains(err.Error(), "_pragma=foreign_keys(1)") {
+		t.Fatalf("Open without SQLite foreign keys = %v, want actionable error", err)
+	}
+}
+
+func TestSQLiteForeignKeysEnabledOnEveryConnection(t *testing.T) {
+	pool, err := db.Open(context.Background(), config.DatabaseConfig{
+		Driver:       config.DriverSQLite,
+		DSN:          "file:foreign-key-pool?mode=memory&cache=shared&_pragma=foreign_keys(1)",
+		MaxOpenConns: 4, MaxIdleConns: 4,
+		ConnMaxLifetime: time.Hour, ConnMaxIdleTime: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	connections := make([]*sql.Conn, 0, 4)
+	t.Cleanup(func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	})
+	for index := range 4 {
+		conn, err := pool.Conn(context.Background())
+		if err != nil {
+			t.Fatalf("connection %d: %v", index, err)
+		}
+		connections = append(connections, conn)
+		var enabled int
+		if err := conn.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&enabled); err != nil || enabled != 1 {
+			t.Fatalf("connection %d foreign_keys = %d, %v; want 1", index, enabled, err)
+		}
+	}
 }
 
 // sqliteColumns lists the accounts columns via PRAGMA table_info.
@@ -108,6 +159,27 @@ func sqliteColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 
 func sqliteSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	rows, err := pool.QueryContext(ctx, "SELECT name FROM pragma_table_info('sessions') ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanStrings(rows)
+}
+
+func sqliteRoleColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "roles")
+}
+
+func sqliteRolePermissionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "role_permissions")
+}
+
+func sqliteAccountRoleColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "account_roles")
+}
+
+func sqliteTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {
+	rows, err := pool.QueryContext(ctx, "SELECT name FROM pragma_table_info($1) ORDER BY name", table)
 	if err != nil {
 		return nil, err
 	}

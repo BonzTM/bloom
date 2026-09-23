@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -41,11 +42,14 @@ type Server struct {
 	sessions              *scs.SessionManager
 	audit                 auditEmitter
 	auditFailureMetrics   telemetry.AuditFailureMetrics
+	authorizationMetrics  telemetry.AuthorizationMetrics
 	usernameAuditKey      [32]byte
 	loginLimiter          *loginLimiter
 	passwordVerifications chan struct{}
 	authOperationTimeout  time.Duration
 	trustedProxyCIDRs     []netip.Prefix
+	authorizer            core.Authorizer
+	roles                 core.RoleReader
 }
 
 // Deps bundles the dependencies the server wires on top of config. Grouping
@@ -68,6 +72,10 @@ type Deps struct {
 	Identity core.IdentityProvider
 	// Accounts reloads the session account on every protected request.
 	Accounts core.AccountStore
+	// Authorizer computes effective permissions from current database state.
+	Authorizer core.Authorizer
+	// Roles reads account role names and the administrative role list.
+	Roles core.RoleReader
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -93,18 +101,21 @@ type metricsExposer interface {
 // the server to unready before draining.
 func New(cfg config.HTTPConfig, deps Deps) *Server {
 	s := &Server{
-		logger:              deps.Logger,
-		metrics:             deps.Metrics,
-		readiness:           deps.Readiness,
-		pinger:              deps.Pinger,
-		web:                 deps.Web,
-		maxBodyBytes:        cfg.MaxBodyBytes,
-		identity:            deps.Identity,
-		accounts:            deps.Accounts,
-		sessions:            deps.Sessions,
-		audit:               deps.Audit,
-		auditFailureMetrics: telemetry.NopMetrics{},
-		trustedProxyCIDRs:   deps.Auth.TrustedProxyCIDRs,
+		logger:               deps.Logger,
+		metrics:              deps.Metrics,
+		readiness:            deps.Readiness,
+		pinger:               deps.Pinger,
+		web:                  deps.Web,
+		maxBodyBytes:         cfg.MaxBodyBytes,
+		identity:             deps.Identity,
+		accounts:             deps.Accounts,
+		sessions:             deps.Sessions,
+		audit:                deps.Audit,
+		auditFailureMetrics:  telemetry.NopMetrics{},
+		authorizationMetrics: telemetry.NopMetrics{},
+		trustedProxyCIDRs:    deps.Auth.TrustedProxyCIDRs,
+		authorizer:           deps.Authorizer,
+		roles:                deps.Roles,
 	}
 	if s.audit == nil {
 		s.audit = telemetry.NopAuditLogger()
@@ -120,6 +131,9 @@ func New(cfg config.HTTPConfig, deps Deps) *Server {
 	}
 	if metrics, ok := deps.Metrics.(telemetry.AuditFailureMetrics); ok {
 		s.auditFailureMetrics = metrics
+	}
+	if metrics, ok := deps.Metrics.(telemetry.AuthorizationMetrics); ok {
+		s.authorizationMetrics = metrics
 	}
 	if exposer, ok := deps.Metrics.(metricsExposer); ok {
 		s.metricsHandler = exposer.Handler()
@@ -140,6 +154,8 @@ func New(cfg config.HTTPConfig, deps Deps) *Server {
 func authDependenciesPresent(deps Deps) bool {
 	return deps.Identity != nil &&
 		deps.Accounts != nil &&
+		deps.Authorizer != nil &&
+		deps.Roles != nil &&
 		deps.Sessions != nil &&
 		deps.Clock != nil &&
 		len(deps.AuditCorrelationKey) > 0
@@ -169,11 +185,8 @@ func derivedAuthOperationTimeout(writeTimeout time.Duration) time.Duration {
 // route-scoped session/account middleware -> handler.
 func (s *Server) routes() http.Handler {
 	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("GET /api/v1/version", s.handleVersion)
-	if s.loginLimiter != nil {
-		apiMux.Handle("/api/v1/auth/login", s.authRoute(http.MethodPost, s.sessionHandler(http.HandlerFunc(s.handleLogin), false)))
-		apiMux.Handle("/api/v1/auth/logout", s.authRoute(http.MethodPost, s.sessionHandler(http.HandlerFunc(s.handleLogout), true)))
-		apiMux.Handle("/api/v1/auth/me", s.authRoute(http.MethodGet, s.sessionHandler(http.HandlerFunc(s.handleMe), true)))
+	if err := s.registerAPIRoutes(apiMux); err != nil {
+		panic(fmt.Sprintf("register API routes: %v", err))
 	}
 	// An unknown /api/* route gets the JSON 404 envelope, never HTML. Every
 	// other path belongs to the SPA (ADR 0002) when one is wired, and to the
@@ -251,6 +264,10 @@ func csrfAuditResource(path string) string {
 		return auditResourceAuthLogout
 	case "/api/v1/auth/me":
 		return auditResourceAuthMe
+	case "/api/v1/auth/permissions":
+		return auditResourceAuthPermissions
+	case "/api/v1/roles":
+		return auditResourceRoles
 	default:
 		return auditResourceRouteUnmatched
 	}

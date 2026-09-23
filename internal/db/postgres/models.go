@@ -18,9 +18,27 @@ type Account struct {
 	UsernameKey  string
 }
 
+type AccountRole struct {
+	AccountID string
+	RoleID    string
+}
+
 type AccountUsernameMigrationBackup struct {
 	AccountID        string
 	OriginalUsername string
+}
+
+type Role struct {
+	ID          string
+	Name        string
+	Description string
+	BuiltIn     bool
+	CreatedAt   time.Time
+}
+
+type RolePermission struct {
+	RoleID     string
+	Permission string
 }
 
 type Session struct {

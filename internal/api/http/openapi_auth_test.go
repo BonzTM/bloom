@@ -23,8 +23,11 @@ import (
 )
 
 const (
-	authSchema  = "#/components/schemas/AuthResponse"
-	errorSchema = "#/components/schemas/ErrorResponse"
+	authSchema        = "#/components/schemas/AuthResponse"
+	currentSchema     = "#/components/schemas/CurrentAccountResponse"
+	permissionsSchema = "#/components/schemas/PermissionCatalogResponse"
+	rolesSchema       = "#/components/schemas/RolesResponse"
+	errorSchema       = "#/components/schemas/ErrorResponse"
 )
 
 var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
@@ -75,11 +78,21 @@ func authContractCases() []authContractCase {
 		{name: "logout 500", path: "/api/v1/auth/logout", method: "post", status: 500, schema: errorSchema, headers: session, run: logoutInternalError},
 		{name: "logout 500 delete", path: "/api/v1/auth/logout", method: "post", status: 500, schema: errorSchema, headers: sessionCookie, run: logoutDeleteError},
 		{name: "logout 405", path: "/api/v1/auth/logout", method: "post", status: 405, schema: errorSchema, headers: []string{"Allow", "Cache-Control", "X-Request-ID"}, run: logoutMethodRejected},
-		{name: "me 200", path: "/api/v1/auth/me", method: "get", status: 200, schema: authSchema, headers: sessionCookie, run: meSuccess},
+		{name: "me 200", path: "/api/v1/auth/me", method: "get", status: 200, schema: currentSchema, headers: sessionCookie, run: meSuccess},
 		{name: "me 401 missing", path: "/api/v1/auth/me", method: "get", status: 401, schema: errorSchema, headers: session, run: meMissing},
 		{name: "me 401 invalid", path: "/api/v1/auth/me", method: "get", status: 401, schema: errorSchema, headers: sessionCookie, run: meInvalid},
 		{name: "me 500", path: "/api/v1/auth/me", method: "get", status: 500, schema: errorSchema, headers: sessionCookie, run: meInternalError},
 		{name: "me 405", path: "/api/v1/auth/me", method: "get", status: 405, schema: errorSchema, headers: []string{"Allow", "Cache-Control", "X-Request-ID"}, run: meMethodRejected},
+		{name: "permissions 200", path: "/api/v1/auth/permissions", method: "get", status: 200, schema: permissionsSchema, headers: []string{"Cache-Control", "X-Request-ID"}, run: permissionsSuccess},
+		{name: "permissions 405", path: "/api/v1/auth/permissions", method: "get", status: 405, schema: errorSchema, headers: []string{"Allow", "Cache-Control", "X-Request-ID"}, run: permissionsMethodRejected},
+		{name: "roles 200", path: "/api/v1/roles", method: "get", status: 200, schema: rolesSchema, headers: sessionCookie, run: rolesSuccess},
+		{name: "roles 401 missing", path: "/api/v1/roles", method: "get", status: 401, schema: errorSchema, headers: session, run: rolesMissing},
+		{name: "roles 401 invalid", path: "/api/v1/roles", method: "get", status: 401, schema: errorSchema, headers: sessionCookie, run: rolesInvalid},
+		{name: "roles 401 revoked", path: "/api/v1/roles", method: "get", status: 401, schema: errorSchema, headers: sessionCookie, run: rolesRevoked},
+		{name: "roles 403", path: "/api/v1/roles", method: "get", status: 403, schema: errorSchema, headers: sessionCookie, run: rolesForbidden},
+		{name: "roles 422", path: "/api/v1/roles", method: "get", status: 422, schema: errorSchema, headers: sessionCookie, run: rolesInvalidCursor},
+		{name: "roles 500", path: "/api/v1/roles", method: "get", status: 500, schema: errorSchema, headers: sessionCookie, run: rolesInternalError},
+		{name: "roles 405", path: "/api/v1/roles", method: "get", status: 405, schema: errorSchema, headers: []string{"Allow", "Cache-Control", "X-Request-ID"}, run: rolesMethodRejected},
 	}
 }
 
@@ -96,6 +109,16 @@ func logoutMethodRejected(t *testing.T, h authHarness) *httptest.ResponseRecorde
 func meMethodRejected(t *testing.T, h authHarness) *httptest.ResponseRecorder {
 	t.Helper()
 	return assertMethodRejected(t, h, http.MethodPost, "/api/v1/auth/me", http.MethodGet)
+}
+
+func permissionsMethodRejected(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	return assertMethodRejected(t, h, http.MethodPost, "/api/v1/auth/permissions", http.MethodGet)
+}
+
+func rolesMethodRejected(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	return assertMethodRejected(t, h, http.MethodPost, "/api/v1/roles", http.MethodGet)
 }
 
 func assertMethodRejected(t *testing.T, h authHarness, method, path, allow string) *httptest.ResponseRecorder {
@@ -243,8 +266,64 @@ func meInvalid(t *testing.T, h authHarness) *httptest.ResponseRecorder {
 func meInternalError(t *testing.T, h authHarness) *httptest.ResponseRecorder {
 	t.Helper()
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
-	h.store.fail(errors.New("database unavailable"))
+	h.authorization.mu.Lock()
+	h.authorization.snapshotErr = errors.New("database unavailable")
+	h.authorization.mu.Unlock()
 	return h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
+}
+
+func permissionsSuccess(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	return h.request(t, http.MethodGet, "/api/v1/auth/permissions", "", nil)
+}
+
+func rolesSuccess(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	return h.request(t, http.MethodGet, "/api/v1/roles", "", cookie)
+}
+
+func rolesMissing(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	return h.request(t, http.MethodGet, "/api/v1/roles", "", nil)
+}
+
+func rolesInvalid(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	return h.request(t, http.MethodGet, "/api/v1/roles", "", &http.Cookie{Name: sessionCookieName, Value: "invalid"})
+}
+
+func rolesRevoked(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	if err := h.sessions.Store.Delete(hashedSessionToken(cookie.Value)); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+	return h.request(t, http.MethodGet, "/api/v1/roles", "", cookie)
+}
+
+func rolesInvalidCursor(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	return h.request(t, http.MethodGet, "/api/v1/roles?cursor=***", "", cookie)
+}
+
+func rolesForbidden(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.authorization.mu.Lock()
+	h.authorization.permissions["11111111-1111-4111-8111-111111111111"] = nil
+	h.authorization.mu.Unlock()
+	return h.request(t, http.MethodGet, "/api/v1/roles", "", cookie)
+}
+
+func rolesInternalError(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.authorization.mu.Lock()
+	h.authorization.listRolesErr = errors.New("database unavailable")
+	h.authorization.mu.Unlock()
+	return h.request(t, http.MethodGet, "/api/v1/roles", "", cookie)
 }
 
 func crossOriginRequest(h authHarness, method, path, body string) *httptest.ResponseRecorder {
@@ -277,6 +356,50 @@ type openAPIMediaType struct {
 	Schema struct {
 		Ref string `yaml:"$ref"`
 	} `yaml:"schema"`
+}
+
+type roleBoundsDocument struct {
+	Paths map[string]map[string]struct {
+		Parameters []struct {
+			Name   string `yaml:"name"`
+			Schema struct {
+				MinLength int `yaml:"minLength"`
+				MaxLength int `yaml:"maxLength"`
+			} `yaml:"schema"`
+		} `yaml:"parameters"`
+	} `yaml:"paths"`
+	Components struct {
+		Schemas map[string]struct {
+			Properties map[string]struct {
+				MaxLength int `yaml:"maxLength"`
+			} `yaml:"properties"`
+		} `yaml:"schemas"`
+	} `yaml:"components"`
+}
+
+func TestRoleCursorOpenAPIBoundsMatchParser(t *testing.T) {
+	data, err := os.ReadFile("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read OpenAPI: %v", err)
+	}
+	var document roleBoundsDocument
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatalf("parse OpenAPI: %v", err)
+	}
+	parameters := document.Paths["/api/v1/roles"]["get"].Parameters
+	for _, parameter := range parameters {
+		if parameter.Name == "cursor" {
+			if parameter.Schema.MinLength != 1 || parameter.Schema.MaxLength != maxRoleCursorBytes {
+				t.Fatalf("cursor bounds = %d..%d, want 1..%d",
+					parameter.Schema.MinLength, parameter.Schema.MaxLength, maxRoleCursorBytes)
+			}
+			if got := document.Components.Schemas["RolesResponse"].Properties["next_cursor"].MaxLength; got != maxRoleCursorBytes {
+				t.Fatalf("next_cursor maxLength = %d, want %d", got, maxRoleCursorBytes)
+			}
+			return
+		}
+	}
+	t.Fatal("cursor parameter is missing")
 }
 
 func loadOpenAPI(t *testing.T) openAPIDocument {
@@ -331,9 +454,7 @@ func assertResponseSchema(
 		if recorder.Body.Len() != 0 {
 			t.Errorf("response body = %q, want empty", recorder.Body.String())
 		}
-	case authSchema:
-		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
-	case errorSchema:
+	case authSchema, currentSchema, permissionsSchema, rolesSchema, errorSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)

@@ -50,11 +50,36 @@ func TestPostgresEngineSuite(t *testing.T) {
 	runEngineSuite(t, pool, config.DriverPostgres)
 	assertColumns(t, pool, postgresColumns, expectedAccountColumns)
 	assertColumns(t, pool, postgresSessionColumns, expectedSessionColumns)
+	assertColumns(t, pool, postgresRoleColumns, expectedRoleColumns)
+	assertColumns(t, pool, postgresRolePermissionColumns, expectedRolePermissionColumns)
+	assertColumns(t, pool, postgresAccountRoleColumns, expectedAccountRoleColumns)
 }
 
 func postgresSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	rows, err := pool.QueryContext(ctx,
 		"SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'sessions' ORDER BY column_name")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanStrings(rows)
+}
+
+func postgresRoleColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "roles")
+}
+
+func postgresRolePermissionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "role_permissions")
+}
+
+func postgresAccountRoleColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "account_roles")
+}
+
+func postgresTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {
+	rows, err := pool.QueryContext(ctx,
+		"SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY column_name", table)
 	if err != nil {
 		return nil, err
 	}

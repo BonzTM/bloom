@@ -10,6 +10,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -69,5 +70,27 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (*sql.DB, error) {
 		_ = pool.Close()
 		return nil, fmt.Errorf("ping %s database: %w", cfg.Driver, err)
 	}
+	if cfg.Driver == config.DriverSQLite {
+		if err := verifySQLiteForeignKeys(pingCtx, pool); err != nil {
+			_ = pool.Close()
+			return nil, err
+		}
+	}
 	return pool, nil
+}
+
+func verifySQLiteForeignKeys(ctx context.Context, pool *sql.DB) error {
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("verify SQLite foreign keys: acquire connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	var enabled int
+	if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enabled); err != nil {
+		return fmt.Errorf("verify SQLite foreign keys: %w", err)
+	}
+	if enabled != 1 {
+		return errors.New("verify SQLite foreign keys: disabled; add _pragma=foreign_keys(1) to BLOOM_DB_DSN")
+	}
+	return nil
 }

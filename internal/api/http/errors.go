@@ -31,6 +31,7 @@ const (
 	codeCSRFRejected         = "csrf_rejected"
 	codeUnsupportedMediaType = "unsupported_media_type"
 	codeMethodNotAllowed     = "method_not_allowed"
+	codeForbidden            = "forbidden"
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -49,6 +50,8 @@ func errorClass(err error) (status int, code string) {
 		return http.StatusUnauthorized, codeLoginRejected
 	case errors.Is(err, errAuthenticationRequired):
 		return http.StatusUnauthorized, codeUnauthorized
+	case errors.Is(err, core.ErrForbidden):
+		return http.StatusForbidden, codeForbidden
 	case errors.Is(err, errRateLimited):
 		return http.StatusTooManyRequests, codeRateLimited
 	case errors.Is(err, errAuthenticationBusy):

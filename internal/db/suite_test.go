@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -34,6 +36,9 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("username migration", func(t *testing.T) {
 		testUsernameMigration(t, pool, driver)
 	})
+	t.Run("role migration preserves existing role-less accounts", func(t *testing.T) {
+		testRoleMigrationNotice(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(ctx, pool, driver); err != nil {
@@ -53,6 +58,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	if err != nil {
 		t.Fatalf("NewAccountStores: %v", err)
 	}
+	authorizer, roles, adminStore := newAuthorizationTestStores(t, pool, driver)
 	cleanupMetrics := &sessionCleanupMetrics{}
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC))
 	logger := slog.New(slog.DiscardHandler)
@@ -74,6 +80,377 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	})
 	t.Run("password hash update", func(t *testing.T) { testPasswordHashUpdate(t, store, localIdentities) })
 	t.Run("password hash length constraint", func(t *testing.T) { testPasswordHashLengthConstraint(t, store) })
+	runAuthorizationEngineTests(t, pool, driver, store, adminStore, authorizer, roles)
+}
+
+func runAuthorizationEngineTests(
+	t *testing.T,
+	pool *sql.DB,
+	driver config.Driver,
+	store core.AccountStore,
+	adminStore core.AdminAccountStore,
+	authorizer core.Authorizer,
+	roles core.RoleReader,
+) {
+	t.Helper()
+	t.Run("built-in role authorization", func(t *testing.T) {
+		testBuiltInRoleAuthorization(t, store, adminStore, authorizer, roles)
+	})
+	t.Run("role foreign keys and cascades", func(t *testing.T) {
+		testRoleForeignKeysAndCascades(t, pool, driver, store)
+	})
+	t.Run("foreign key schema contract", func(t *testing.T) { testForeignKeySchema(t, pool, driver) })
+}
+
+func newAuthorizationTestStores(
+	t *testing.T,
+	pool *sql.DB,
+	driver config.Driver,
+) (core.Authorizer, core.RoleReader, core.AdminAccountStore) {
+	t.Helper()
+	authorizer, roles, err := db.NewAuthorizationStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewAuthorizationStores: %v", err)
+	}
+	adminStore, err := db.NewAdminAccountStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewAdminAccountStore: %v", err)
+	}
+	return authorizer, roles, adminStore
+}
+
+func testRoleMigrationNotice(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare role migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 5); err != nil {
+		t.Fatalf("roll back role migration: %v", err)
+	}
+	store, _, err := db.NewAccountStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewAccountStores: %v", err)
+	}
+	account := core.Account{ID: mustID(t), Username: "legacy-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	if err := store.CreateAccount(ctx, account); err != nil {
+		t.Fatalf("create legacy role-less account: %v", err)
+	}
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	if err := db.MigrateWithLogger(ctx, pool, driver, logger); err != nil {
+		t.Fatalf("apply role migration: %v", err)
+	}
+	if !strings.Contains(logs.String(), "existing accounts were left without roles") {
+		t.Fatalf("migration notice = %q", logs.String())
+	}
+	var assignments int
+	if err := pool.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_roles WHERE account_id = $1", account.ID).Scan(&assignments); err != nil {
+		t.Fatalf("count legacy role assignments: %v", err)
+	}
+	if assignments != 0 {
+		t.Fatalf("legacy account received %d guessed roles", assignments)
+	}
+	logs.Reset()
+	if err := db.MigrateWithLogger(ctx, pool, driver, logger); err != nil {
+		t.Fatalf("idempotent role migration: %v", err)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("already-applied migration logged notice: %q", logs.String())
+	}
+	assertSeedCount(t, pool, "roles", 2)
+	assertSeedCount(t, pool, "role_permissions", 13)
+	if _, err := pool.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", account.ID); err != nil {
+		t.Fatalf("delete legacy role-less account: %v", err)
+	}
+	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean role migration fixture: %v", err)
+	}
+}
+
+func assertSeedCount(t *testing.T, pool *sql.DB, table string, want int) {
+	t.Helper()
+	query := map[string]string{
+		"roles":            "SELECT COUNT(*) FROM roles",
+		"role_permissions": "SELECT COUNT(*) FROM role_permissions",
+	}[table]
+	var got int
+	if err := pool.QueryRowContext(context.Background(), query).Scan(&got); err != nil || got != want {
+		t.Fatalf("%s seed count = %d, %v; want %d", table, got, err, want)
+	}
+}
+
+func testBuiltInRoleAuthorization(
+	t *testing.T,
+	accounts core.AccountStore,
+	admins core.AdminAccountStore,
+	authorizer core.Authorizer,
+	roles core.RoleReader,
+) {
+	t.Helper()
+	ctx := context.Background()
+	owner := core.Account{ID: mustID(t), Username: "owner-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	member := core.Account{ID: mustID(t), Username: "member-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	roleless := core.Account{ID: mustID(t), Username: "roleless-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	if err := admins.CreateAccountWithRole(ctx, owner, "owner"); err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	if err := admins.CreateAccountWithRole(ctx, member, "member"); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if err := accounts.CreateAccount(ctx, roleless); err != nil {
+		t.Fatalf("create role-less account: %v", err)
+	}
+	failed := core.Account{ID: mustID(t), Username: "failed-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	if err := admins.CreateAccountWithRole(ctx, failed, "missing-role"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("create with missing role = %v, want ErrNotFound", err)
+	}
+	if _, err := accounts.GetAccount(ctx, failed.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("failed role assignment persisted account: %v", err)
+	}
+	wantOwner := ownerPermissions()
+	assertBuiltInPermissions(t, authorizer, owner.ID, member.ID, roleless.ID, wantOwner)
+	assertSeededRoles(t, roles, wantOwner)
+	assertRolePagination(t, roles)
+	assertRoleGrant(t, admins, roleless.ID)
+}
+
+func ownerPermissions() []core.Permission {
+	wantOwner := make([]core.Permission, 0, len(core.PermissionCatalog()))
+	for _, definition := range core.PermissionCatalog() {
+		wantOwner = append(wantOwner, definition.ID)
+	}
+	slices.Sort(wantOwner)
+	return wantOwner
+}
+
+func authorizationFixtureTime() time.Time {
+	return time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+}
+
+func assertBuiltInPermissions(
+	t *testing.T,
+	authorizer core.Authorizer,
+	ownerID, memberID, rolelessID string,
+	wantOwner []core.Permission,
+) {
+	t.Helper()
+	assertAccountPermissions(t, authorizer, ownerID, wantOwner)
+	assertAccountPermissions(t, authorizer, memberID, []core.Permission{
+		core.PermissionRequestsCreate, core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
+	})
+	assertAccountPermissions(t, authorizer, rolelessID, nil)
+	assertAuthorizationSnapshot(t, authorizer, ownerID, []string{"owner"}, wantOwner)
+	assertAuthorizationSnapshot(t, authorizer, memberID, []string{"member"}, []core.Permission{
+		core.PermissionRequestsCreate, core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
+	})
+	assertAuthorizationSnapshot(t, authorizer, rolelessID, nil, nil)
+}
+
+func assertAuthorizationSnapshot(
+	t *testing.T,
+	authorizer core.Authorizer,
+	accountID string,
+	wantRoles []string,
+	wantPermissions []core.Permission,
+) {
+	t.Helper()
+	got, err := authorizer.Snapshot(context.Background(), accountID)
+	if err != nil {
+		t.Fatalf("Snapshot(%q): %v", accountID, err)
+	}
+	if len(wantRoles) == 0 {
+		wantRoles = []string{}
+	}
+	if len(wantPermissions) == 0 {
+		wantPermissions = []core.Permission{}
+	}
+	if !slices.Equal(got.RoleNames, wantRoles) || !slices.Equal(got.Permissions, wantPermissions) {
+		t.Fatalf("Snapshot(%q) = %+v, want roles %v permissions %v",
+			accountID, got, wantRoles, wantPermissions)
+	}
+}
+
+func assertSeededRoles(t *testing.T, roles core.RoleReader, wantOwner []core.Permission) {
+	t.Helper()
+	listed, err := roles.ListRoles(context.Background(), "", 10)
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	wantRoles := []core.Role{
+		{
+			ID: "00000000-0000-4000-8000-000000000002", Name: "member",
+			Description: "Access to owned data and creating requests.", BuiltIn: true,
+			CreatedAt: time.Unix(0, 0).UTC(),
+			Permissions: []core.Permission{
+				core.PermissionRequestsCreate, core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
+			},
+		},
+		{
+			ID: "00000000-0000-4000-8000-000000000001", Name: "owner",
+			Description: "Full access to every Bloom permission.", BuiltIn: true,
+			CreatedAt: time.Unix(0, 0).UTC(), Permissions: wantOwner,
+		},
+	}
+	if !reflect.DeepEqual(listed, wantRoles) {
+		t.Fatalf("roles = %+v, want %+v", listed, wantRoles)
+	}
+}
+
+func assertRolePagination(t *testing.T, roles core.RoleReader) {
+	t.Helper()
+	firstPage, err := roles.ListRoles(context.Background(), "", 1)
+	if err != nil || len(firstPage) != 1 || firstPage[0].Name != "member" {
+		t.Fatalf("first role page = %+v, %v", firstPage, err)
+	}
+	secondPage, err := roles.ListRoles(context.Background(), firstPage[0].Name, 1)
+	if err != nil || len(secondPage) != 1 || secondPage[0].Name != "owner" {
+		t.Fatalf("second role page = %+v, %v", secondPage, err)
+	}
+}
+
+func assertRoleGrant(t *testing.T, admins core.AdminAccountStore, rolelessID string) {
+	t.Helper()
+	assigned, err := admins.GrantRole(context.Background(), rolelessID, "member")
+	if err != nil || !assigned {
+		t.Fatalf("GrantRole(first) = %v, %v; want assigned", assigned, err)
+	}
+	assigned, err = admins.GrantRole(context.Background(), rolelessID, "member")
+	if err != nil || assigned {
+		t.Fatalf("GrantRole(idempotent) = %v, %v; want already held", assigned, err)
+	}
+	if _, err := admins.GrantRole(context.Background(), mustID(t), "member"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GrantRole(unknown account) = %v, want ErrNotFound", err)
+	}
+	if _, err := admins.GrantRole(context.Background(), rolelessID, "missing-role"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GrantRole(unknown role) = %v, want ErrNotFound", err)
+	}
+}
+
+func assertAccountPermissions(t *testing.T, authorizer core.Authorizer, accountID string, want []core.Permission) {
+	t.Helper()
+	got, err := authorizer.Permissions(context.Background(), accountID)
+	if err != nil {
+		t.Fatalf("Permissions(%q): %v", accountID, err)
+	}
+	if len(want) == 0 {
+		want = []core.Permission{}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Permissions(%q) = %v, want %v", accountID, got, want)
+	}
+}
+
+func testRoleForeignKeysAndCascades(
+	t *testing.T,
+	pool *sql.DB,
+	driver config.Driver,
+	accounts core.AccountStore,
+) {
+	t.Helper()
+	ctx := context.Background()
+	account := core.Account{ID: mustID(t), Username: "fk-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	if err := accounts.CreateAccount(ctx, account); err != nil {
+		t.Fatalf("create foreign-key account: %v", err)
+	}
+	ownerRoleID := "00000000-0000-4000-8000-000000000001"
+	assertConstraintFailure(t, pool,
+		"INSERT INTO account_roles (account_id, role_id) VALUES ($1, $2)", mustID(t), ownerRoleID)
+	assertConstraintFailure(t, pool,
+		"INSERT INTO account_roles (account_id, role_id) VALUES ($1, $2)", account.ID, mustID(t))
+	assertConstraintFailure(t, pool,
+		"INSERT INTO role_permissions (role_id, permission) VALUES ($1, $2)", mustID(t), "users.read")
+
+	if _, err := pool.ExecContext(ctx,
+		"INSERT INTO account_roles (account_id, role_id) VALUES ($1, $2)", account.ID, ownerRoleID); err != nil {
+		t.Fatalf("assign role for account cascade: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", account.ID); err != nil {
+		t.Fatalf("delete account for cascade: %v", err)
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM account_roles WHERE account_id = $1", account.ID, 0)
+
+	testRoleDeleteCascade(t, pool, driver, accounts)
+}
+
+func testRoleDeleteCascade(t *testing.T, pool *sql.DB, driver config.Driver, accounts core.AccountStore) {
+	t.Helper()
+	ctx := context.Background()
+	roleID := mustID(t)
+	account := core.Account{ID: mustID(t), Username: "cascade-" + mustID(t), CreatedAt: authorizationFixtureTime()}
+	if err := accounts.CreateAccount(ctx, account); err != nil {
+		t.Fatalf("create role-cascade account: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx,
+		"INSERT INTO roles (id, name, description, built_in, created_at) VALUES ($1, $2, $3, $4, $5)",
+		roleID, "cascade-"+roleID, "cascade fixture", false, migrationCreatedAt(driver)); err != nil {
+		t.Fatalf("create role cascade fixture: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx,
+		"INSERT INTO role_permissions (role_id, permission) VALUES ($1, $2)", roleID, "users.read"); err != nil {
+		t.Fatalf("create permission cascade fixture: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx,
+		"INSERT INTO account_roles (account_id, role_id) VALUES ($1, $2)", account.ID, roleID); err != nil {
+		t.Fatalf("create assignment cascade fixture: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx, "DELETE FROM roles WHERE id = $1", roleID); err != nil {
+		t.Fatalf("delete role for cascade: %v", err)
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM role_permissions WHERE role_id = $1", roleID, 0)
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM account_roles WHERE role_id = $1", roleID, 0)
+}
+
+func assertConstraintFailure(t *testing.T, pool *sql.DB, query string, args ...any) {
+	t.Helper()
+	if _, err := pool.ExecContext(context.Background(), query, args...); err == nil {
+		t.Fatalf("constraint query succeeded: %s", query)
+	}
+}
+
+func assertRowCount(t *testing.T, pool *sql.DB, query string, arg any, want int) {
+	t.Helper()
+	var got int
+	if err := pool.QueryRowContext(context.Background(), query, arg).Scan(&got); err != nil || got != want {
+		t.Fatalf("row count = %d, %v; want %d", got, err, want)
+	}
+}
+
+func testForeignKeySchema(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	query := `SELECT m.name, fk."from", fk."table", fk."to", fk.on_delete
+FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) fk
+WHERE m.type = 'table' ORDER BY m.name, fk."from"`
+	if driver == config.DriverPostgres {
+		query = `SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name, rc.delete_rule
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.constraint_schema = kcu.constraint_schema
+JOIN information_schema.referential_constraints rc ON tc.constraint_name = rc.constraint_name AND tc.constraint_schema = rc.constraint_schema
+JOIN information_schema.constraint_column_usage ccu ON rc.unique_constraint_name = ccu.constraint_name AND rc.unique_constraint_schema = ccu.constraint_schema
+WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema()
+ORDER BY tc.table_name, kcu.column_name`
+	}
+	rows, err := pool.QueryContext(context.Background(), query)
+	if err != nil {
+		t.Fatalf("list foreign keys: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	got := make([]string, 0, 3)
+	for rows.Next() {
+		var table, column, target, targetColumn, action string
+		if err := rows.Scan(&table, &column, &target, &targetColumn, &action); err != nil {
+			t.Fatalf("scan foreign key: %v", err)
+		}
+		got = append(got, strings.Join([]string{table, column, target, targetColumn, action}, ":"))
+	}
+	want := []string{
+		"account_roles:account_id:accounts:id:CASCADE",
+		"account_roles:role_id:roles:id:CASCADE",
+		"role_permissions:role_id:roles:id:CASCADE",
+	}
+	if err := rows.Err(); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("foreign keys = %v, %v; want %v (accounts and sessions define none)", got, err, want)
+	}
 }
 
 func testUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -126,7 +503,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 5)
+	assertMigrationVersion(t, pool, 6)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -247,7 +624,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 5)
+	assertMigrationVersion(t, pool, 6)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

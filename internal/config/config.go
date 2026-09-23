@@ -145,9 +145,9 @@ type TelemetryConfig struct {
 }
 
 // DefaultSQLiteDSN is the out-of-the-box SQLite DSN: a WAL-mode database file in
-// the working directory with a 5 second busy timeout so concurrent readers and
-// the single writer do not fail on transient locks (ADR 0004).
-const DefaultSQLiteDSN = "file:bloom.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+// the working directory with foreign-key enforcement on every connection, WAL
+// mode, and a 5 second busy timeout (ADR 0004).
+const DefaultSQLiteDSN = "file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 
 // MinSecretKeyBytes is the minimum accepted BLOOM_SECRET_KEY length. 32 bytes is
 // the smallest input that yields a full-strength 256-bit derived key.

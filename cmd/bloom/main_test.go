@@ -16,6 +16,7 @@ func TestRunCommandDoesNotReadBootstrapPasswordForNonAdminPaths(t *testing.T) {
 	}{
 		{name: "serve"},
 		{name: "migrate", args: []string{"-migrate"}},
+		{name: "grant role", args: []string{"grant-role", "--username", "owner", "--role", "owner"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

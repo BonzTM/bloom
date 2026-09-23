@@ -198,10 +198,12 @@ func (s *Server) emitFailedLoginAudit(r *http.Request, username, reason, ip stri
 }
 
 const (
-	auditResourceRouteUnmatched = "route:unmatched"
-	auditResourceAuthLogin      = "route:auth.login"
-	auditResourceAuthLogout     = "route:auth.logout"
-	auditResourceAuthMe         = "route:auth.me"
+	auditResourceRouteUnmatched  = "route:unmatched"
+	auditResourceAuthLogin       = "route:auth.login"
+	auditResourceAuthLogout      = "route:auth.logout"
+	auditResourceAuthMe          = "route:auth.me"
+	auditResourceAuthPermissions = "route:auth.permissions"
+	auditResourceRoles           = "route:roles"
 )
 
 func routeResource(r *http.Request) string {
@@ -212,6 +214,10 @@ func routeResource(r *http.Request) string {
 		return auditResourceAuthLogout
 	case "/api/v1/auth/me":
 		return auditResourceAuthMe
+	case "/api/v1/auth/permissions":
+		return auditResourceAuthPermissions
+	case "/api/v1/roles":
+		return auditResourceRoles
 	default:
 		return auditResourceRouteUnmatched
 	}

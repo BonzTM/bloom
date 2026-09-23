@@ -75,14 +75,14 @@ func Run(ctx context.Context, cfg config.Config, streams Streams) error {
 		return err
 	}
 	clock := systemClock{}
-	accounts, localIdentities, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
+	accounts, localIdentities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
 	if err != nil {
 		_ = pool.Close()
 		return err
 	}
 	srv, err := assembleHTTPServer(
 		cfg, streams.Audit, logger, metrics, pool,
-		accounts, localIdentities, sessions, clock,
+		accounts, localIdentities, authorizer, roles, sessions, clock,
 	)
 	if err != nil {
 		_ = pool.Close()
@@ -100,6 +100,8 @@ func assembleHTTPServer(
 	pool *sql.DB,
 	accounts core.AccountStore,
 	localIdentities core.LocalIdentityStore,
+	authorizer core.Authorizer,
+	roles core.RoleReader,
 	sessions *scs.SessionManager,
 	clock core.Clock,
 ) (*httpapi.Server, error) {
@@ -116,6 +118,8 @@ func assembleHTTPServer(
 		Web:                 web.Handler(dist, logger),
 		Identity:            core.NewLocalIdentityProvider(localIdentities),
 		Accounts:            accounts,
+		Authorizer:          authorizer,
+		Roles:               roles,
 		Sessions:            sessions,
 		Audit:               audit,
 		AuditCorrelationKey: cfg.SecretKey.Bytes(),
@@ -130,16 +134,20 @@ func authDependencies(
 	metrics db.SessionCleanupMetrics,
 	logger *slog.Logger,
 	clock core.Clock,
-) (core.AccountStore, core.LocalIdentityStore, *scs.SessionManager, error) {
+) (core.AccountStore, core.LocalIdentityStore, core.Authorizer, core.RoleReader, *scs.SessionManager, error) {
 	accounts, localIdentities, err := db.NewAccountStores(pool, cfg.Database.Driver)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("build account stores: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("build account stores: %w", err)
+	}
+	authorizer, roles, err := db.NewAuthorizationStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("build authorization stores: %w", err)
 	}
 	sessionStore, err := db.NewSessionStore(pool, cfg.Database.Driver, metrics, logger, clock)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("build session store: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("build session store: %w", err)
 	}
-	return accounts, localIdentities, configureSessions(cfg.Auth, sessionStore), nil
+	return accounts, localIdentities, authorizer, roles, configureSessions(cfg.Auth, sessionStore), nil
 }
 
 func warnTrustedProxyMode(logger *slog.Logger, cfg config.AuthConfig) {
@@ -173,7 +181,7 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metr
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	if cfg.Database.MigrateOnStartup {
-		if merr := db.Migrate(ctx, pool, cfg.Database.Driver); merr != nil {
+		if merr := db.MigrateWithLogger(ctx, pool, cfg.Database.Driver, logger); merr != nil {
 			_ = pool.Close()
 			return nil, fmt.Errorf("migrate: %w", merr)
 		}
@@ -222,7 +230,7 @@ func Migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	if merr := db.Migrate(ctx, pool, cfg.Database.Driver); merr != nil {
+	if merr := db.MigrateWithLogger(ctx, pool, cfg.Database.Driver, logger); merr != nil {
 		_ = pool.Close()
 		return fmt.Errorf("migrate: %w", merr)
 	}

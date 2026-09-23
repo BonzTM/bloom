@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	"github.com/BonzTM/bloom/internal/config"
+	"github.com/BonzTM/bloom/internal/core"
 )
 
 // NewLogger builds the single structured logger for the process. JSON for
@@ -77,6 +78,12 @@ type AuditFailureMetrics interface {
 	IncAuditWriteFailure()
 }
 
+// AuthorizationMetrics records permission denials. Permission labels come
+// only from core's finite catalog.
+type AuthorizationMetrics interface {
+	IncAuthorizationDenial(permission core.CatalogPermission)
+}
+
 // NopMetrics is the default no-op metrics implementation.
 type NopMetrics struct{}
 
@@ -91,6 +98,9 @@ func (NopMetrics) IncCSRFRejection() {}
 
 // IncAuditWriteFailure does nothing.
 func (NopMetrics) IncAuditWriteFailure() {}
+
+// IncAuthorizationDenial does nothing.
+func (NopMetrics) IncAuthorizationDenial(core.CatalogPermission) {}
 
 // IncSessionCleanupFailure does nothing.
 func (NopMetrics) IncSessionCleanupFailure() {}

@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -12,7 +13,18 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, s.logger, errAuthenticationRequired)
 		return
 	}
-	writeJSON(w, r, s.logger, http.StatusOK, authResponse{Account: accountDTO(account)})
+	snapshot, ok := authorizationSnapshotFrom(r.Context())
+	if !ok {
+		writeError(w, r, s.logger, errAuthenticationRequired)
+		return
+	}
+	roles := slices.Clone(snapshot.RoleNames)
+	permissions := slices.Clone(snapshot.Permissions)
+	slices.Sort(roles)
+	slices.Sort(permissions)
+	writeJSON(w, r, s.logger, http.StatusOK, currentAccountResponse{
+		Account: accountDTO(account), Roles: roles, Permissions: permissions,
+	})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

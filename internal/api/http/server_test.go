@@ -14,6 +14,7 @@ import (
 
 	"github.com/BonzTM/bloom/internal/buildinfo"
 	"github.com/BonzTM/bloom/internal/config"
+	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -44,6 +45,7 @@ type countingMetrics struct {
 	logins        []string
 	csrf          int
 	auditFailures int
+	authzDenials  int
 }
 
 func (m *countingMetrics) IncLoginAttempt(outcome string) {
@@ -68,6 +70,18 @@ func (m *countingMetrics) IncAuditWriteFailure() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.auditFailures++
+}
+
+func (m *countingMetrics) IncAuthorizationDenial(core.CatalogPermission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.authzDenials++
+}
+
+func (m *countingMetrics) authorizationDenialCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.authzDenials
 }
 
 func (m *countingMetrics) count() int {
@@ -141,6 +155,53 @@ func TestVersionContract(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
 		}
+	}
+}
+
+func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
+	want := []apiRoute{
+		{method: http.MethodGet, path: "/api/v1/version", access: routePublic},
+		{method: http.MethodGet, path: "/api/v1/auth/permissions", access: routePublic},
+		{method: http.MethodPost, path: "/api/v1/auth/login", access: routePublic, sessions: true, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true},
+		{method: http.MethodGet, path: "/api/v1/roles", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
+	}
+	if len(apiRouteInventory) != len(want) {
+		t.Fatalf("route inventory length = %d, want %d", len(apiRouteInventory), len(want))
+	}
+	for index, expected := range want {
+		got := apiRouteInventory[index]
+		if got.method != expected.method || got.path != expected.path || got.access != expected.access ||
+			got.permission != expected.permission || got.sessions != expected.sessions ||
+			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot {
+			t.Errorf("route %d = %+v, want %+v", index, got, expected)
+		}
+		if got.access != routePublic && !got.usesSessionAccount() {
+			t.Errorf("non-public route lacks session account middleware: %+v", got)
+		}
+	}
+}
+
+func TestPermissionRouteRejectsUnpublishedCatalogValue(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := apiRoute{
+		method: http.MethodGet, path: "/api/v1/invented", access: routePermission,
+		permission: "invented.permission", handler: (*Server).handleVersion,
+	}
+	if _, err := h.server.routeHandler(route); err == nil {
+		t.Fatal("permission route accepted an unpublished permission")
+	}
+}
+
+func TestSessionRouteRequiresAuthDependencies(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := apiRoute{
+		method: http.MethodPost, path: "/api/v1/session-public", access: routePublic,
+		sessions: true, handler: (*Server).handleLogin,
+	}
+	if _, err := h.server.routeHandler(route); err == nil {
+		t.Fatal("session route without auth dependencies was accepted")
 	}
 }
 
