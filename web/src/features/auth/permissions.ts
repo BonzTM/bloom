@@ -21,6 +21,12 @@ export const ADMIN_PERMISSIONS: readonly KnownPermission[] = [
   permissions.requestsApprove,
 ];
 
+// Permissions that open the requests area to a signed-in account.
+export const REQUESTS_PERMISSIONS: readonly KnownPermission[] = [
+  permissions.requestsCreate,
+  permissions.requestsReadOwn,
+];
+
 export function hasPermission(
   granted: readonly Permission[],
   required: KnownPermission,

@@ -1,5 +1,17 @@
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
+  createMediaRequestSchema,
+  metadataSearchResponseSchema,
+  metadataSeriesSchema,
+  metadataTitleSchema,
+  providerIdSchema,
+  searchQuerySchema,
+  type CreateMediaRequest,
+  type MetadataSeries,
+  type MetadataTitle,
+} from "./metadata-schemas.js";
+import {
+  mediaKindSchema,
   mediaRequestSchema,
   mediaRequestsPageSchema,
   metadataKeyPresenceSchema,
@@ -12,6 +24,7 @@ import {
   requestProfilesPageSchema,
   requestsCursorSchema,
   requestStatusSchema,
+  type MediaKind,
   type MediaRequest,
   type MediaRequestsPage,
   type MetadataKeyPresence,
@@ -23,6 +36,7 @@ import {
   type RequestStatus,
 } from "./requests-schemas.js";
 
+const METADATA_PATH = "api/v1/metadata";
 const PROFILES_PATH = "api/v1/request-profiles";
 const REQUESTS_PATH = "api/v1/requests";
 const KEY_PATH = "api/v1/metadata/providers/tmdb/key";
@@ -76,7 +90,50 @@ export class RequestsApi {
     });
   }
 
+  // ---- metadata (requests.create)
+
+  search(
+    query: string,
+    kind: MediaKind | undefined,
+    signal: AbortSignal,
+  ): Promise<readonly MetadataTitle[]> {
+    const params = new URLSearchParams({ q: searchQuerySchema.parse(query) });
+    if (kind !== undefined) {
+      params.set("kind", mediaKindSchema.parse(kind));
+    }
+    return this.#client
+      .requestJson(
+        `${METADATA_PATH}/search?${params.toString()}`,
+        metadataSearchResponseSchema,
+        { signal },
+      )
+      .then((response) => response.items);
+  }
+
+  movie(providerId: string, signal: AbortSignal): Promise<MetadataTitle> {
+    return this.#client.requestJson(
+      `${METADATA_PATH}/movies/${providerIdSchema.parse(providerId)}`,
+      metadataTitleSchema,
+      { signal },
+    );
+  }
+
+  series(providerId: string, signal: AbortSignal): Promise<MetadataSeries> {
+    return this.#client.requestJson(
+      `${METADATA_PATH}/series/${providerIdSchema.parse(providerId)}`,
+      metadataSeriesSchema,
+      { signal },
+    );
+  }
+
   // ---- requests
+
+  create(input: CreateMediaRequest): Promise<MediaRequest> {
+    return this.#client.requestJson(REQUESTS_PATH, mediaRequestSchema, {
+      method: "POST",
+      body: createMediaRequestSchema.parse(input),
+    });
+  }
 
   listRequests(
     filter: RequestsFilter,

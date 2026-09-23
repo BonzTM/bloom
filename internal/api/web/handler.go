@@ -20,11 +20,12 @@ const assetPrefix = "/assets/"
 // SPA default on purpose: scripts and styles are same-origin files, connect is
 // same-origin (the JSON API), and images allow data: for inline placeholders.
 // Loosen one directive at a time, with the reason next to it, when a feature
-// needs it (poster images from a metadata provider will need img-src https:).
+// needs it. Images also allow TMDB's image host, which serves the posters on
+// the requests pages; no other third-party origin is allowed anywhere.
 const documentCSP = "default-src 'self'; " +
 	"script-src 'self'; " +
 	"style-src 'self'; " +
-	"img-src 'self' data:; " +
+	"img-src 'self' data: https://image.tmdb.org; " +
 	"font-src 'self'; " +
 	"connect-src 'self'; " +
 	"object-src 'none'; " +

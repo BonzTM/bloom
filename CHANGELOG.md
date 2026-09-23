@@ -31,6 +31,11 @@ contracts) gets an entry here.
 
 ### Added
 
+- Anyone allowed to request media can search The Movie Database from the web
+  UI, browse results as a poster grid, open a movie or series, pick seasons
+  and a request profile, and follow their own requests. Posters load from
+  TMDB's image host, the one third-party origin the page's content security
+  policy allows for images.
 - Administrators can prepare requests from the web UI: store or remove the
   TMDB API key (its presence is shown, the key never is), manage request
   profiles that name the download manager, quality profile, root folder, and

@@ -33,6 +33,8 @@ const areas: readonly Area[] = [
     heading: "Requests",
     summary:
       "Discover movies and series, request them with quotas and approval rules, and follow availability.",
+    to: "/requests",
+    action: "Open requests",
   },
 ];
 
