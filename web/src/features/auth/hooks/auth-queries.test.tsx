@@ -8,6 +8,7 @@ import {
   envelope,
   mockAccount,
   mockCredentials,
+  mockSession,
   resetMockSession,
   signInMockSession,
   jsonApi,
@@ -79,7 +80,7 @@ function signIn(
 it("keeps the signed-in account when a session check started earlier answers late", async () => {
   const { queryClient, wrapper } = createHarness();
   const slow = heldResponse("get", "*/api/v1/auth/me", () =>
-    envelope(401, "unauthenticated", "sign in required"),
+    envelope(401, "unauthorized", "sign in required"),
   );
   const { result } = renderHook(useAuth, { wrapper });
   await slow.started;
@@ -88,13 +89,13 @@ it("keeps the signed-in account when a session check started earlier answers lat
   await act(async () => {
     await signIn(result.current.login, mockCredentials);
   });
-  expect(queryClient.getQueryData(authKeys.session())).toEqual(mockAccount);
+  expect(queryClient.getQueryData(authKeys.session())).toEqual(mockSession);
 
   slow.release();
   await waitFor(() => {
     expect(result.current.session.isFetching).toBe(false);
   });
-  expect(result.current.session.data).toEqual(mockAccount);
+  expect(result.current.session.data).toEqual(mockSession);
 });
 
 it("stays signed out when a session check started before sign-out answers late", async () => {
@@ -102,11 +103,11 @@ it("stays signed out when a session check started before sign-out answers late",
   signInMockSession();
   const { result } = renderHook(useAuth, { wrapper });
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.data).toEqual(mockSession);
   });
 
   const slow = heldResponse("get", "*/api/v1/auth/me", () =>
-    Response.json({ account: mockAccount }),
+    Response.json(mockSession),
   );
   const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
   await slow.started;
@@ -144,7 +145,7 @@ it("re-checks the session when sign-in fails after the server may have acted", a
   });
 
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.data).toEqual(mockSession);
   });
 });
 
@@ -162,7 +163,7 @@ it("re-checks the session when sign-out fails after the server may have acted", 
   );
   const { result } = renderHook(useAuth, { wrapper });
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.data).toEqual(mockSession);
   });
 
   await act(async () => {
@@ -188,7 +189,7 @@ it("re-checks the session when the tab regains focus", async () => {
   });
 
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.data).toEqual(mockSession);
   });
 });
 
@@ -199,10 +200,10 @@ it("ignores a session check that starts during sign-in and answers after it", as
     expect(result.current.session.data).toBeNull();
   });
   const login = heldResponse("post", "*/api/v1/auth/login", () =>
-    Response.json({ account: mockAccount }),
+    Response.json(mockSession),
   );
   const me = heldResponse("get", "*/api/v1/auth/me", () =>
-    envelope(401, "unauthenticated", "sign in required"),
+    envelope(401, "unauthorized", "sign in required"),
   );
 
   const signingIn = act(() => signIn(result.current.login, mockCredentials));
@@ -211,14 +212,14 @@ it("ignores a session check that starts during sign-in and answers after it", as
   await me.started;
   login.release();
   await signingIn;
-  expect(queryClient.getQueryData(authKeys.session())).toEqual(mockAccount);
+  expect(queryClient.getQueryData(authKeys.session())).toEqual(mockSession);
 
   me.release();
   await refetch;
   await waitFor(() => {
     expect(result.current.session.isFetching).toBe(false);
   });
-  expect(result.current.session.data).toEqual(mockAccount);
+  expect(result.current.session.data).toEqual(mockSession);
 });
 
 it("ignores a session check that starts during sign-out and answers after it", async () => {
@@ -226,7 +227,7 @@ it("ignores a session check that starts during sign-out and answers after it", a
   signInMockSession();
   const { result } = renderHook(useAuth, { wrapper });
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.data).toEqual(mockSession);
   });
   const logout = heldResponse(
     "post",
@@ -234,7 +235,7 @@ it("ignores a session check that starts during sign-out and answers after it", a
     () => new Response(null, { status: 204 }),
   );
   const me = heldResponse("get", "*/api/v1/auth/me", () =>
-    Response.json({ account: mockAccount }),
+    Response.json(mockSession),
   );
 
   const signOut = act(() => result.current.logout.mutateAsync());
@@ -260,7 +261,7 @@ it("never stores the credentials in the mutation cache", async () => {
     expect(result.current.session.data).toBeNull();
   });
   const login = heldResponse("post", "*/api/v1/auth/login", () =>
-    Response.json({ account: mockAccount }),
+    Response.json(mockSession),
   );
 
   const signingIn = act(() => signIn(result.current.login, mockCredentials));
@@ -283,7 +284,7 @@ it("drops a second sign-in while the first is in flight", async () => {
   let requests = 0;
   const login = heldResponse("post", "*/api/v1/auth/login", () => {
     requests += 1;
-    return Response.json({ account: mockAccount });
+    return Response.json(mockSession);
   });
 
   let first: Promise<void> = Promise.resolve();
@@ -308,6 +309,140 @@ it("drops a second sign-in while the first is in flight", async () => {
   expect(requests).toBe(1);
   expect(secondSettled).toBe(false);
   await waitFor(() => {
-    expect(result.current.session.data).toEqual(mockAccount);
+    expect(result.current.session.data).toEqual(mockSession);
   });
+});
+
+// Data fetched for one principal must never survive into another's session.
+function scopedQuery(queryClient: QueryClient, key: string, scoped: boolean) {
+  queryClient.setQueryData([key], "cached");
+  const query = queryClient.getQueryCache().find({ queryKey: [key] });
+  if (query === undefined) {
+    throw new Error("query not cached");
+  }
+  query.setOptions({
+    queryKey: [key],
+    meta: scoped ? { sessionScoped: true } : {},
+  });
+}
+
+function cachedKeys(queryClient: QueryClient): string[] {
+  return queryClient
+    .getQueryCache()
+    .getAll()
+    .map((query) => String(query.queryKey[0]))
+    .sort();
+}
+
+it("drops session-scoped data when a re-check finds the person signed out", async () => {
+  const { queryClient, wrapper } = createHarness();
+  signInMockSession();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockSession);
+  });
+  scopedQuery(queryClient, "roles", true);
+  scopedQuery(queryClient, "version", false);
+
+  resetMockSession();
+  await queryClient.refetchQueries({ queryKey: authKeys.session() });
+
+  await waitFor(() => {
+    expect(result.current.session.data).toBeNull();
+  });
+  expect(cachedKeys(queryClient)).toEqual(["auth", "version"]);
+});
+
+it("drops session-scoped data when a re-check finds a different account", async () => {
+  const { queryClient, wrapper } = createHarness();
+  signInMockSession();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockSession);
+  });
+  scopedQuery(queryClient, "roles", true);
+  const other = {
+    ...mockSession,
+    account: { ...mockAccount, id: "0b6c3d2e-1111-4a2b-9c3d-000000000002" },
+  };
+  server.use(
+    http.get(
+      "*/api/v1/auth/me",
+      jsonApi(() => Response.json(other)),
+    ),
+  );
+
+  await queryClient.refetchQueries({ queryKey: authKeys.session() });
+
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(other);
+  });
+  expect(cachedKeys(queryClient)).toEqual(["auth"]);
+});
+
+it("keeps session-scoped data when a re-check confirms the same account", async () => {
+  const { queryClient, wrapper } = createHarness();
+  signInMockSession();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockSession);
+  });
+  scopedQuery(queryClient, "roles", true);
+
+  await queryClient.refetchQueries({ queryKey: authKeys.session() });
+
+  expect(cachedKeys(queryClient)).toEqual(["auth", "roles"]);
+});
+
+it("keeps session-scoped data when a re-check is cancelled", async () => {
+  const { queryClient, wrapper } = createHarness();
+  signInMockSession();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockSession);
+  });
+  scopedQuery(queryClient, "roles", true);
+  const held = heldResponse("get", "*/api/v1/auth/me", () =>
+    envelope(401, "unauthorized", "sign in required"),
+  );
+
+  const refetch = queryClient.refetchQueries({ queryKey: authKeys.session() });
+  await held.started;
+  await queryClient.cancelQueries({ queryKey: authKeys.session() });
+  held.release();
+  await refetch;
+
+  expect(result.current.session.data).toEqual(mockSession);
+  expect(cachedKeys(queryClient)).toEqual(["auth", "roles"]);
+});
+
+it("removes session-scoped data before the new principal is written", async () => {
+  const { queryClient, wrapper } = createHarness();
+  signInMockSession();
+  const { result } = renderHook(useAuth, { wrapper });
+  await waitFor(() => {
+    expect(result.current.session.data).toEqual(mockSession);
+  });
+  scopedQuery(queryClient, "roles", true);
+  let scopedAtWrite: number | undefined;
+  const sessionQuery = queryClient
+    .getQueryCache()
+    .find({ queryKey: authKeys.session() });
+  const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+    if (
+      event.type === "updated" &&
+      event.action.type === "success" &&
+      event.query === sessionQuery
+    ) {
+      scopedAtWrite = queryClient.getQueryCache().findAll({
+        predicate: (query) => query.meta?.sessionScoped === true,
+      }).length;
+    }
+  });
+
+  resetMockSession();
+  await queryClient.refetchQueries({ queryKey: authKeys.session() });
+  unsubscribe();
+
+  expect(scopedAtWrite).toBe(0);
 });

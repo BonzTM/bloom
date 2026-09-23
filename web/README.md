@@ -9,6 +9,7 @@ The Bloom user interface: a React 19 and Vite single-page application that the G
 - A single typed fetch boundary with URL ownership, JSON headers, a ten-second timeout, caller cancellation, one-megabyte response bounds, safe HTTP error mapping, and Zod-parsed responses.
 - Two feature modules: `system` consumes `GET /api/v1/version` and renders the server version badge; `auth` signs in and out against `/api/v1/auth` and shows the current session in the navigation.
 - Jest 30's Babel transform with jsdom, React Testing Library, user-event, and MSW. Tests use accessible roles and names and reject every unhandled request.
+- Response compatibility policy: wire schemas strip fields the UI does not know, so a server that adds a field can ship before the UI that reads it. Missing or malformed required fields still fail the request. The contract declares no extra fields today, and the mock server answers only codes from its `ErrorCode` enum.
 
 ## Requirements
 
@@ -30,18 +31,18 @@ Vite proxies `/api`, `/livez`, and `/readyz` to `http://localhost:8080`. To work
 
 ## Package Map
 
-| Path                              | Responsibility                                                                             |
-| --------------------------------- | ------------------------------------------------------------------------------------------ |
-| `src/app/`                        | router, providers, QueryClient defaults, Suspense, and error-boundary composition          |
-| `src/routes/`                     | home, lazy about, lazy sign-in, and not-found navigation boundaries and page titles        |
-| `src/features/auth/`              | sign-in and sign-out: wire schemas, API slice, session query, login form, session controls |
-| `src/features/system/api/`        | `/api/v1/version` Zod wire schema and API slice                                            |
-| `src/features/system/hooks/`      | query keys and the version query                                                           |
-| `src/features/system/components/` | the version badge                                                                          |
-| `src/components/`                 | shared presentation-only status UI                                                         |
-| `src/lib/api/`                    | bounded fetch, abort propagation, response parsing, and typed errors                       |
-| `src/mocks/`                      | shared browser/test MSW handlers                                                           |
-| `src/test/`                       | jsdom polyfills, MSW lifecycle, and application render composition                         |
+| Path                              | Responsibility                                                                                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app/`                        | router, providers, QueryClient defaults, Suspense, and error-boundary composition                                                                                                       |
+| `src/routes/`                     | home, lazy about, lazy sign-in, and not-found navigation boundaries and page titles                                                                                                     |
+| `src/features/auth/`              | sign-in and sign-out: wire schemas mirrored from OpenAPI, API slice, the session query with its roles and permissions and principal-scoped cache clearing, login form, session controls |
+| `src/features/system/api/`        | `/api/v1/version` Zod wire schema and API slice                                                                                                                                         |
+| `src/features/system/hooks/`      | query keys and the version query                                                                                                                                                        |
+| `src/features/system/components/` | the version badge                                                                                                                                                                       |
+| `src/components/`                 | shared presentation-only status UI                                                                                                                                                      |
+| `src/lib/api/`                    | bounded fetch, abort propagation, response parsing, and typed errors                                                                                                                    |
+| `src/mocks/`                      | shared browser/test MSW handlers                                                                                                                                                        |
+| `src/test/`                       | jsdom polyfills, MSW lifecycle, and application render composition                                                                                                                      |
 
 ## Verification
 
@@ -53,7 +54,7 @@ npm run verify
 make verify
 ```
 
-Tests cover the home page and its version badge, navigation to the lazy about route, cold deep links, the not-found route, page-title updates, focus after navigation, sign-in success, rejected credentials, rate limiting, malformed responses, and validation bounds, the return destination after sign-in including hostile values, session and sign-out races against late responses, sign-out failure, version endpoint failure and contract rejection, Zod response rejection, non-JSON and oversized responses, caller abort, client timeout, backend error-envelope mapping with Retry-After, and MSW's rejection of unhandled requests.
+Tests cover the home page and its version badge, navigation to the lazy about route, cold deep links, the not-found route, page-title updates, focus after navigation, sign-in success, rejected credentials, rate limiting, malformed responses, and validation bounds, the return destination after sign-in including hostile values, session and sign-out races against late responses, sign-out failure, cache clearing on every principal change, the production retry policy, the once-only redirect hook under Strict Mode, version endpoint failure and contract rejection, Zod response rejection, non-JSON and oversized responses, caller abort, client timeout, backend error-envelope mapping with Retry-After, and MSW's rejection of unhandled requests.
 
 ## Build And Delivery
 

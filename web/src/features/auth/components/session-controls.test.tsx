@@ -6,6 +6,7 @@ import {
   envelope,
   signInMockSession,
   jsonApi,
+  mockSession,
 } from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
 import { createGate } from "../../../test/gate.js";
@@ -23,7 +24,7 @@ it("offers a retry when the session cannot be checked", async () => {
       jsonApi(() =>
         failing
           ? new HttpResponse("upstream down", { status: 502 })
-          : envelope(401, "unauthenticated", "sign in required"),
+          : envelope(401, "unauthorized", "sign in required"),
       ),
     ),
   );
@@ -50,7 +51,7 @@ it("announces the retry and withdraws the button while it runs", async () => {
           return new HttpResponse("upstream down", { status: 502 });
         }
         await gate.wait;
-        return envelope(401, "unauthenticated", "sign in required");
+        return envelope(401, "unauthorized", "sign in required");
       }),
     ),
   );
@@ -96,7 +97,7 @@ it("forgets the account when the server says there was no session", async () => 
   server.use(
     http.post(
       "*/api/v1/auth/logout",
-      jsonApi(() => envelope(401, "unauthenticated", "sign in required")),
+      jsonApi(() => envelope(401, "unauthorized", "sign in required")),
     ),
   );
   renderApp();
@@ -140,7 +141,7 @@ it("keeps showing the last known account when a refresh fails", async () => {
       jsonApi(() =>
         failing
           ? new HttpResponse("upstream down", { status: 502 })
-          : HttpResponse.json({ account: { id: "1", username: "admin" } }),
+          : HttpResponse.json(mockSession),
       ),
     ),
   );
@@ -168,7 +169,7 @@ it("warns when a refresh fails while signed out and keeps the sign-in link", asy
       jsonApi(() =>
         failing
           ? new HttpResponse("upstream down", { status: 502 })
-          : envelope(401, "unauthenticated", "sign in required"),
+          : envelope(401, "unauthorized", "sign in required"),
       ),
     ),
   );
@@ -192,14 +193,10 @@ it("warns when a refresh fails while signed out and keeps the sign-in link", asy
 });
 
 it.each([
-  [
-    "signed in",
-    () => HttpResponse.json({ account: { id: "1", username: "admin" } }),
-    "Signed in as admin",
-  ],
+  ["signed in", () => HttpResponse.json(mockSession), "Signed in as admin"],
   [
     "signed out",
-    () => envelope(401, "unauthenticated", "sign in required"),
+    () => envelope(401, "unauthorized", "sign in required"),
     "Sign in",
   ],
 ])(

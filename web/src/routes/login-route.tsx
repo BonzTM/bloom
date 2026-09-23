@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { AsyncStatus } from "../components/async-status.js";
 import { LoginForm } from "../features/auth/components/login-form.js";
 import { useLogin, useSession } from "../features/auth/hooks/auth-queries.js";
 import { safeDestination } from "./safe-destination.js";
+import { useRedirectOnce } from "./use-redirect-once.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
 
 export default function LoginRoute(): ReactNode {
@@ -18,7 +19,7 @@ export default function LoginRoute(): ReactNode {
   // never cut short by a stale cached account.
   const signedIn =
     session.data !== undefined && session.data !== null && !isPending;
-  useRedirectOnce(signedIn, destination);
+  useRedirectOnce(signedIn, destination, { replace: true });
 
   if (session.data === undefined && !session.isError) {
     return <AsyncStatus>Checking sign-in…</AsyncStatus>;
@@ -39,18 +40,4 @@ export default function LoginRoute(): ReactNode {
       />
     </>
   );
-}
-
-// Navigates exactly once when `when` becomes true. Strict Mode runs effects
-// twice in development; the ref makes the second run a no-op.
-function useRedirectOnce(when: boolean, to: string): void {
-  const navigate = useNavigate();
-  const done = useRef(false);
-  useEffect(() => {
-    if (!when || done.current) {
-      return;
-    }
-    done.current = true;
-    void navigate(to, { replace: true });
-  }, [when, to, navigate]);
 }

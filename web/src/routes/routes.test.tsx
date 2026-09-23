@@ -2,8 +2,14 @@ import { expect, it } from "@jest/globals";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { mockAccount, signInMockSession, jsonApi } from "../mocks/handlers.js";
+import {
+  mockAccount,
+  mockSession,
+  signInMockSession,
+  jsonApi,
+} from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import type { Session } from "../features/auth/api/auth-schemas.js";
 import { authKeys } from "../features/auth/hooks/auth-queries.js";
 import { createGate } from "../test/gate.js";
 import { server } from "../test/server.js";
@@ -243,7 +249,7 @@ it("does not redirect while a sign-in is still pending, then redirects exactly o
       jsonApi(async () => {
         await gate.wait;
         signInMockSession();
-        return HttpResponse.json({ account: mockAccount });
+        return HttpResponse.json(mockSession);
       }),
     ),
   );
@@ -266,7 +272,7 @@ it("does not redirect while a sign-in is still pending, then redirects exactly o
   await screen.findByRole("button", { name: "Signing in…" });
 
   // A stale cached account must not eject the person mid sign-in.
-  queryClient.setQueryData(authKeys.session(), mockAccount);
+  queryClient.setQueryData<Session | null>(authKeys.session(), mockSession);
   expect(
     screen.getByRole("heading", { name: "Sign in", level: 1 }),
   ).toBeVisible();
