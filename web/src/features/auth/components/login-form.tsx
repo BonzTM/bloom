@@ -77,7 +77,7 @@ export function LoginForm({
         error={errors.password}
         inputRef={refs.password}
       />
-      <button type="submit" disabled={pending}>
+      <button type="submit" className="btn-primary" disabled={pending}>
         {pending ? "Signing in…" : "Sign in"}
       </button>
       <p role="status">{pending ? "Signing in, please wait." : ""}</p>

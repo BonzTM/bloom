@@ -41,22 +41,29 @@ export function RolesTable({
 
 function Table({ roles }: Readonly<{ roles: readonly Role[] }>): ReactNode {
   return (
-    <table className="roles-table">
-      <caption>Roles, ordered by name</caption>
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Description</th>
-          <th scope="col">Kind</th>
-          <th scope="col">Permissions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {roles.map((role) => (
-          <RoleRow key={role.id} role={role} />
-        ))}
-      </tbody>
-    </table>
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label="Roles table"
+      tabIndex={0}
+    >
+      <table className="roles-table">
+        <caption>Roles, ordered by name</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Description</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Permissions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {roles.map((role) => (
+            <RoleRow key={role.id} role={role} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

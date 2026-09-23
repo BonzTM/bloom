@@ -53,13 +53,13 @@ function MediaServersPage({
   return (
     <>
       <h1>Media servers</h1>
-      <p>
+      <p className="page-intro">
         Bloom manages users, statistics, and requests for the servers registered
         here. Registration checks the address and API key against the server
         before anything is saved.
       </p>
       <RegisterSection register={register} />
-      <section aria-labelledby="registered-servers-heading">
+      <section aria-labelledby="registered-servers-heading" className="card">
         <h2 id="registered-servers-heading">Registered servers</h2>
         {denial === "unauthenticated" ? (
           <SignInNotConfirmed onRetry={servers.refetch} />
@@ -89,7 +89,7 @@ function RegisterSection({
   // Remounting the form after a success clears the API key from the screen.
   const [formKey, setFormKey] = useState(0);
   return (
-    <section aria-labelledby="register-server-heading">
+    <section aria-labelledby="register-server-heading" className="card">
       <h2 id="register-server-heading">Register a server</h2>
       <RegisterMediaServerForm
         key={formKey}

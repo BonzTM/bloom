@@ -67,29 +67,36 @@ type TableProps = Readonly<{
 
 function Table({ servers, removing, onRemove }: TableProps): ReactNode {
   return (
-    <table className="media-servers-table">
-      <caption>Media servers, ordered by name</caption>
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Kind</th>
-          <th scope="col">Address</th>
-          <th scope="col">Capabilities</th>
-          <th scope="col">Added</th>
-          <th scope="col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {servers.map((server) => (
-          <ServerRow
-            key={server.id}
-            server={server}
-            removing={removing === server.id}
-            onRemove={onRemove}
-          />
-        ))}
-      </tbody>
-    </table>
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label="Media servers table"
+      tabIndex={0}
+    >
+      <table className="media-servers-table">
+        <caption>Media servers, ordered by name</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Address</th>
+            <th scope="col">Capabilities</th>
+            <th scope="col">Added</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {servers.map((server) => (
+            <ServerRow
+              key={server.id}
+              server={server}
+              removing={removing === server.id}
+              onRemove={onRemove}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -107,7 +114,9 @@ function ServerRow({ server, removing, onRemove }: ServerRowProps): ReactNode {
       <td>
         <code>{server.base_url}</code>
         {server.allow_insecure ? (
-          <p className="transport-warning">Plaintext HTTP allowed</p>
+          <p className="transport-warning">
+            <span className="badge badge-warning">Plaintext HTTP allowed</span>
+          </p>
         ) : null}
       </td>
       <td>
@@ -213,6 +222,7 @@ function RemoveControls({
       <button
         ref={confirmRef}
         type="button"
+        className="btn-danger"
         onClick={() => {
           setConfirming(false);
           onRemove(id);
@@ -222,6 +232,7 @@ function RemoveControls({
       </button>
       <button
         type="button"
+        className="btn-ghost"
         onClick={() => {
           returnFocus.current = true;
           setConfirming(false);
