@@ -52,6 +52,61 @@ func TestCreateRequestAutoApprovalEmitsCreateAndApproveAudits(t *testing.T) {
 	}
 }
 
+func TestFailedQuotaDeletionIsAudited(t *testing.T) {
+	cases := []struct {
+		name, path, action, resource string
+		handle                       func(*Server, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "role", path: "/api/v1/roles/" + testRequestAccountID + "/request-quota",
+			action: "request_quota.role.delete", resource: "role:" + testRequestAccountID,
+			handle: (*Server).handleDeleteRoleRequestQuota,
+		},
+		{
+			name: "account", path: "/api/v1/accounts/" + testRequestAccountID + "/request-quota",
+			action: "request_quota.account.delete", resource: "account:" + testRequestAccountID,
+			handle: (*Server).handleDeleteAccountRequestQuota,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			audit := &recordingAudit{}
+			store := &requestHandlerStore{quotaErr: core.ErrNotFound}
+			server := newRequestHandlerServer(newQuotaHandlerService(t, store), audit)
+			request := requestWithAccount(t, http.MethodDelete, tc.path, "", core.PermissionAdminSettings)
+			request.SetPathValue("id", testRequestAccountID)
+			recorder := httptest.NewRecorder()
+			tc.handle(server, recorder, request)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			events := audit.snapshot()
+			if len(events) != 1 {
+				t.Fatalf("audit event count = %d, want 1", len(events))
+			}
+			event := events[0]
+			if event.Action != tc.action || event.Resource != tc.resource || event.Result != telemetry.AuditFailure ||
+				event.Actor != testRequestAccountID || event.RequestID != "request-1" {
+				t.Fatalf("audit event = %+v", event)
+			}
+		})
+	}
+}
+
+func newQuotaHandlerService(t *testing.T, store *requestHandlerStore) *requestapp.Service {
+	t.Helper()
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	service, err := requestapp.NewService(requestapp.Dependencies{
+		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
+		Metadata: &staticRequestMetadata{movie: validRequestMovie()}, Clock: clock,
+	})
+	if err != nil {
+		t.Fatalf("new request service: %v", err)
+	}
+	return service
+}
+
 func TestMalformedTMDBTitleReturnsOpaqueProviderFailure(t *testing.T) {
 	client := malformedTMDBClient(t)
 	t.Run("detail route", func(t *testing.T) {
@@ -162,6 +217,8 @@ func validRequestMovie() core.MetadataTitle {
 type requestHandlerStore struct {
 	profile core.RequestProfile
 	created core.MediaRequest
+	// quotaErr is what every quota delete answers with; nil means success.
+	quotaErr error
 }
 
 func (s *requestHandlerStore) GetRequestProfile(context.Context, string) (core.RequestProfile, error) {
@@ -216,10 +273,14 @@ func (*requestHandlerStore) SetRoleRequestQuota(context.Context, core.RoleReques
 	return nil
 }
 
-func (*requestHandlerStore) DeleteRoleRequestQuota(context.Context, string) error { return nil }
+func (s *requestHandlerStore) DeleteRoleRequestQuota(context.Context, string) error {
+	return s.quotaErr
+}
 
 func (*requestHandlerStore) SetAccountRequestQuota(context.Context, core.AccountRequestQuota) error {
 	return nil
 }
 
-func (*requestHandlerStore) DeleteAccountRequestQuota(context.Context, string) error { return nil }
+func (s *requestHandlerStore) DeleteAccountRequestQuota(context.Context, string) error {
+	return s.quotaErr
+}

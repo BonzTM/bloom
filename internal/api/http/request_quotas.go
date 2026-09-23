@@ -61,6 +61,7 @@ func (s *Server) handleDeleteRoleRequestQuota(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := s.requestService.DeleteRoleQuota(r.Context(), id); err != nil {
+		s.emitSettingsAudit(r, "request_quota.role.delete", "role:"+id, telemetry.AuditFailure)
 		writeError(w, r, s.logger, err)
 		return
 	}
@@ -106,6 +107,7 @@ func (s *Server) handleDeleteAccountRequestQuota(w http.ResponseWriter, r *http.
 		return
 	}
 	if err := s.requestService.DeleteAccountQuota(r.Context(), id); err != nil {
+		s.emitSettingsAudit(r, "request_quota.account.delete", "account:"+id, telemetry.AuditFailure)
 		writeError(w, r, s.logger, err)
 		return
 	}
