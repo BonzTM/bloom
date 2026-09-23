@@ -218,6 +218,8 @@ func hasInvalidLibraryID(ids []string) bool {
 // non-spacing marks, decimal digits, and connector punctuation. Jellyfin also
 // rejects "." and ".." explicitly. Source:
 // https://github.com/jellyfin/jellyfin/blob/master/Jellyfin.Server.Implementations/Users/UserManager.cs#L885-L891
+// The byte bound is Bloom's own: Jellyfin's rule has no length limit, but a
+// bound keeps request bodies, audit records, and rate-limit keys small.
 func ValidateJellyfinUsername(name string) error {
 	if name == "" || name == "." || name == ".." || len(name) > MaxJellyfinUsernameBytes ||
 		!utf8.ValidString(name) || name != strings.TrimSpace(name) {

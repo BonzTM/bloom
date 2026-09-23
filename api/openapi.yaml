@@ -1363,7 +1363,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     Conflict:
-      description: A media server already uses the requested unique name, or the requested change otherwise conflicts with existing resource state.
+      description: The requested unique name is already in use, or the requested change otherwise conflicts with existing resource state.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -1811,7 +1811,7 @@ components:
           type: string
           minLength: 1
           x-max-bytes: 64
-          description: Jellyfin-compatible username with no surrounding whitespace or control characters; `.` and `..` are invalid.
+          description: Jellyfin-compatible username with no surrounding whitespace or control characters; `.` and `..` are invalid. The 1 to 64 byte bound is Bloom's own, not Jellyfin's.
         password:
           type: string
           format: password
