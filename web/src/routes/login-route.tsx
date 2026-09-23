@@ -1,0 +1,56 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { AsyncStatus } from "../components/async-status.js";
+import { LoginForm } from "../features/auth/components/login-form.js";
+import { useLogin, useSession } from "../features/auth/hooks/auth-queries.js";
+import { safeDestination } from "./safe-destination.js";
+import { pageTitle, usePageTitle } from "./use-page-title.js";
+
+export default function LoginRoute(): ReactNode {
+  usePageTitle(pageTitle("Sign in"));
+  const session = useSession();
+  const { login, isPending, reset } = useLogin();
+  const location = useLocation();
+  const [serverError, setServerError] = useState<unknown>(null);
+  const destination = safeDestination(location.state, window.location.origin);
+  // The session cache is the single owner of the redirect: a successful login
+  // writes the account there and this effect follows. A pending sign-in is
+  // never cut short by a stale cached account.
+  const signedIn =
+    session.data !== undefined && session.data !== null && !isPending;
+  useRedirectOnce(signedIn, destination);
+
+  if (session.data === undefined && !session.isError) {
+    return <AsyncStatus>Checking sign-in…</AsyncStatus>;
+  }
+  if (signedIn) {
+    return <AsyncStatus>Signed in, taking you back…</AsyncStatus>;
+  }
+  return (
+    <>
+      <h1>Sign in</h1>
+      <LoginForm
+        pending={isPending}
+        serverError={serverError}
+        onSubmit={(input) => {
+          setServerError(null);
+          login(input, { onError: setServerError, onSettled: reset });
+        }}
+      />
+    </>
+  );
+}
+
+// Navigates exactly once when `when` becomes true. Strict Mode runs effects
+// twice in development; the ref makes the second run a no-op.
+function useRedirectOnce(when: boolean, to: string): void {
+  const navigate = useNavigate();
+  const done = useRef(false);
+  useEffect(() => {
+    if (!when || done.current) {
+      return;
+    }
+    done.current = true;
+    void navigate(to, { replace: true });
+  }, [when, to, navigate]);
+}

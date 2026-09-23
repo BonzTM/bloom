@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import {
   isRouteErrorResponse,
   Link,
@@ -6,9 +6,13 @@ import {
   Outlet,
   useRouteError,
 } from "react-router-dom";
+import { SessionControls } from "../features/auth/components/session-controls.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
+import { useRouteFocus } from "./use-route-focus.js";
 
 export function AppLayout(): ReactNode {
+  const main = useRef<HTMLElement>(null);
+  useRouteFocus(main);
   return (
     <>
       <header>
@@ -22,10 +26,13 @@ export function AppLayout(): ReactNode {
             <li>
               <NavLink to="/about">About</NavLink>
             </li>
+            <li className="session-controls">
+              <SessionControls />
+            </li>
           </ul>
         </nav>
       </header>
-      <main>
+      <main ref={main} tabIndex={-1}>
         <RouteErrorBoundary>
           <Outlet />
         </RouteErrorBoundary>

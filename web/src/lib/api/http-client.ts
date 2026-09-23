@@ -66,6 +66,8 @@ export class ApiClient {
       const requestInit: RequestInit = {
         method: options.method ?? "GET",
         headers: buildHeaders(options),
+        // The session cookie only ever travels to our own origin (ADR 0002).
+        credentials: "same-origin",
         signal,
       };
       if (options.body !== undefined) {
@@ -141,8 +143,16 @@ async function readHttpError(response: Response): Promise<ApiError> {
   const text = await readBoundedBody(response);
   try {
     const body: unknown = JSON.parse(text);
-    return mapHttpError(response.status, body);
+    return mapHttpError(
+      response.status,
+      body,
+      response.headers.get("retry-after"),
+    );
   } catch {
-    return mapHttpError(response.status, undefined);
+    return mapHttpError(
+      response.status,
+      undefined,
+      response.headers.get("retry-after"),
+    );
   }
 }

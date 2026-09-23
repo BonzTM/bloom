@@ -49,3 +49,43 @@ a {
   outline: 3px solid #2855d9;
   outline-offset: 2px;
 }
+
+form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+form div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+input {
+  border: 1px solid #8a94a6;
+  border-radius: 0.375rem;
+  font: inherit;
+  padding: 0.5rem;
+}
+
+input[aria-invalid="true"] {
+  border-color: #b3261e;
+}
+
+.field-error {
+  color: #b3261e;
+  font-size: 0.875rem;
+  margin: 0;
+  min-height: 1.25rem;
+}
+
+.field-error:empty {
+  display: none;
+}
+
+.session-controls {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
