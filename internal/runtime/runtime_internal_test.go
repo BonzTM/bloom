@@ -162,8 +162,9 @@ func TestRunShutsDownTracerAfterStoreFailure(t *testing.T) {
 func TestRunShutsDownTracerAfterMediaServerFailure(t *testing.T) {
 	cfg := config.Config{
 		Database: config.DatabaseConfig{
-			Driver:       config.DriverSQLite,
-			DSN:          "file:" + filepath.Join(t.TempDir(), "media.db") + "?_pragma=foreign_keys(1)",
+			Driver: config.DriverSQLite,
+			DSN: "file:" + filepath.Join(t.TempDir(), "media.db") +
+				"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)",
 			MaxOpenConns: 1, MaxIdleConns: 1,
 			ConnMaxLifetime: time.Minute, ConnMaxIdleTime: time.Minute,
 			MigrateOnStartup: true,

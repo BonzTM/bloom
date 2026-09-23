@@ -487,8 +487,9 @@ func cleanupTestConfig(t *testing.T) config.Config {
 			WriteTimeout: time.Second, IdleTimeout: time.Second, MaxBodyBytes: 1 << 20,
 		},
 		Database: config.DatabaseConfig{
-			Driver:       config.DriverSQLite,
-			DSN:          "file:" + filepath.Join(t.TempDir(), "cleanup.db") + "?_pragma=foreign_keys(1)",
+			Driver: config.DriverSQLite,
+			DSN: "file:" + filepath.Join(t.TempDir(), "cleanup.db") +
+				"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)",
 			MaxOpenConns: 2, MaxIdleConns: 2, ConnMaxLifetime: time.Minute, ConnMaxIdleTime: time.Minute,
 			MigrateOnStartup: true,
 		},

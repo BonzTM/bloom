@@ -141,6 +141,8 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Playback startup now remains available when the initial media-server listing
+  fails, reports the failure once, and retries during the bounded refresh loop.
 - SQLite database startup now supplies the foreign-key pragma when the
   configured DSN omits it. Explicitly disabled foreign keys still fail
   startup, and shipped container DSNs now declare the enabled pragma.

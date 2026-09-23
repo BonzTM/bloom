@@ -19,7 +19,8 @@ func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func prepareAdminDatabase(t *testing.T) string {
 	t.Helper()
-	dsn := "file:" + filepath.Join(t.TempDir(), "bloom.db") + "?_pragma=foreign_keys(1)"
+	dsn := "file:" + filepath.Join(t.TempDir(), "bloom.db") +
+		"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)

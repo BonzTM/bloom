@@ -21,6 +21,10 @@ type serverLister interface {
 	List(ctx context.Context, afterNameKey string, pageSize int) ([]core.MediaServerConnection, error)
 }
 
+type refreshObserver interface {
+	IncPlaybackRefreshFailure()
+}
+
 // SourceFactory constructs a polling source for one registered server.
 type SourceFactory func(core.MediaServer) Source
 
@@ -46,6 +50,7 @@ type Manager struct {
 	clock          core.Clock
 	logger         *slog.Logger
 	metrics        Observer
+	refreshMetrics refreshObserver
 	refreshTrigger <-chan time.Time
 	wait           func(context.Context, time.Duration) error
 	randomInt64    func(int64) int64
@@ -75,13 +80,17 @@ func NewManager(
 	if servers == nil || store == nil || factory == nil || clock == nil || logger == nil || !validConfig(config) {
 		return nil, fmt.Errorf("playback manager: %w", core.ErrInvalidArgument)
 	}
-	return &Manager{
+	manager := &Manager{
 		servers: servers, store: store, config: config, factory: factory,
 		clock: clock, logger: logger, metrics: metrics, refreshTrigger: options.Refresh,
 		wait: options.Wait, randomInt64: options.RandomInt64, newID: options.NewID,
 		collectors: make(map[string]managedCollector), deleting: make(map[string]bool),
 		errors: make(chan error, 1),
-	}, nil
+	}
+	if refreshMetrics, ok := metrics.(refreshObserver); ok {
+		manager.refreshMetrics = refreshMetrics
+	}
+	return manager, nil
 }
 
 // Start loads registered servers after HTTP readiness and starts their collectors.
@@ -96,11 +105,8 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.done = make(chan struct{})
 	m.started = true
 	m.mu.Unlock()
-	if err := m.refresh(ctx, runCtx); err != nil {
-		cancel()
-		m.stopAll()
-		m.markStopped()
-		return fmt.Errorf("start playback collectors: %w", err)
+	if err := m.refresh(ctx, runCtx); err != nil && ctx.Err() == nil {
+		m.reportRefreshFailure(ctx, err)
 	}
 	go m.run(runCtx)
 	return nil
@@ -153,10 +159,8 @@ func (m *Manager) runRefreshLoop(ctx context.Context, refresh <-chan time.Time) 
 				m.operationMu.Unlock()
 				return
 			}
-			if err := m.refresh(ctx, ctx); err != nil {
-				m.fail(fmt.Errorf("refresh playback collectors: %w", err))
-				m.stopAll()
-				return
+			if err := m.refresh(ctx, ctx); err != nil && ctx.Err() == nil {
+				m.reportRefreshFailure(ctx, err)
 			}
 		}
 	}
@@ -166,15 +170,15 @@ func (m *Manager) refresh(queryCtx, runCtx context.Context) error {
 	m.operationMu.Lock()
 	defer m.operationMu.Unlock()
 	servers, err := m.listServers(queryCtx)
-	if err != nil {
-		return err
-	}
 	present := make(map[string]bool, len(servers))
 	for _, server := range servers {
 		present[server.ID] = true
-		if err := m.startCollector(runCtx, server); err != nil {
-			return err
+		if startErr := m.startCollector(runCtx, server); startErr != nil {
+			return errors.Join(err, startErr)
 		}
+	}
+	if err != nil {
+		return err
 	}
 	m.stopDeleted(present)
 	return nil
@@ -186,7 +190,7 @@ func (m *Manager) listServers(ctx context.Context) ([]core.MediaServer, error) {
 	for range maxServerListPages {
 		connections, err := m.servers.List(ctx, after, serverListPageSize)
 		if err != nil {
-			return nil, fmt.Errorf("list media servers: %w", err)
+			return servers, fmt.Errorf("list media servers: %w", err)
 		}
 		for _, connection := range connections {
 			servers = append(servers, connection.Server)
@@ -196,7 +200,14 @@ func (m *Manager) listServers(ctx context.Context) ([]core.MediaServer, error) {
 		}
 		after = core.MediaServerNameKey(connections[len(connections)-1].Server.Name)
 	}
-	return nil, errors.New("registered media server count exceeds collector limit")
+	return servers, errors.New("registered media server count exceeds collector limit")
+}
+
+func (m *Manager) reportRefreshFailure(ctx context.Context, err error) {
+	if m.refreshMetrics != nil {
+		m.refreshMetrics.IncPlaybackRefreshFailure()
+	}
+	m.logger.WarnContext(ctx, "playback manager refresh failed", "error", err)
 }
 
 func (m *Manager) startCollector(runCtx context.Context, server core.MediaServer) error {
