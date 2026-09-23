@@ -13,7 +13,8 @@ import { pageTitle, usePageTitle } from "./use-page-title.js";
 export default function RolesRoute(): ReactNode {
   usePageTitle(pageTitle("Roles"));
   const session = useSession();
-  const roles = useRoles(session.data?.account.id);
+  const accountId = session.data?.account.id;
+  const roles = useRoles(accountId);
   const denial = accessDenial(roles.error);
   // The server says the session is gone although the cache says signed in.
   // Re-checking the session lets the route guard send the person to sign in;
@@ -25,13 +26,15 @@ export default function RolesRoute(): ReactNode {
   return (
     <>
       <h1>Roles</h1>
-      <p>
-        A role is a named set of permissions. Built-in roles ship with Bloom.
+      <p className="page-intro">
+        A role is a named set of permissions. Built-in roles ship with Bloom. A
+        role can carry a request quota: how many movies and seasons its members
+        may request in a rolling period.
       </p>
       {denial === "unauthenticated" ? (
         <SignInNotConfirmed onRetry={roles.refetch} />
       ) : (
-        <RolesTable query={roles} />
+        <RolesTable query={roles} accountId={accountId ?? ""} />
       )}
     </>
   );

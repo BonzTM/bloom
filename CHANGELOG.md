@@ -31,6 +31,8 @@ contracts) gets an entry here.
 
 ### Added
 
+- The Roles page shows and edits each role's request quota: how many movies
+  and seasons its members may request in a rolling period, or no limit.
 - Anyone allowed to request media can search The Movie Database from the web
   UI, browse results as a poster grid, open a movie or series, pick seasons
   and a request profile, and follow their own requests. Posters load from

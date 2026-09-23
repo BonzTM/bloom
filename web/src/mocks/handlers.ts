@@ -37,6 +37,10 @@ import {
   type MediaRequest,
   type RequestProfile,
 } from "../features/requests/api/requests-schemas.js";
+import {
+  requestQuotaInputSchema,
+  type RequestQuota,
+} from "../features/roles/api/quota-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -291,6 +295,91 @@ function pagedItems(
 function rolesPage(url: URL) {
   return pagedItems(url, rolesQuerySchema, mockRoles);
 }
+
+// Role request quotas: custom-01 starts with one, nothing else does.
+export const QUOTA_ROLE_ID = "8e1c2f7a-0000-4000-8000-000000000101";
+const mockRoleQuotas: readonly RequestQuota[] = [
+  {
+    scope_id: QUOTA_ROLE_ID,
+    movie_limit: 2,
+    movie_period_days: 30,
+    season_limit: 4,
+    season_period_days: 30,
+  },
+];
+let roleQuotas = new Map(
+  mockRoleQuotas.map((quota) => [quota.scope_id, quota]),
+);
+
+export function resetMockRoleQuotas(): void {
+  roleQuotas = new Map(mockRoleQuotas.map((quota) => [quota.scope_id, quota]));
+}
+
+function roleQuotaDenial(id: string | readonly string[] | undefined) {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("admin.roles")) {
+    return envelope(403, "forbidden", "missing permission admin.roles");
+  }
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return envelope(404, "not_found", "role not found");
+  }
+  if (!mockRoles.some((role) => role.id === id)) {
+    return envelope(404, "not_found", "role not found");
+  }
+  return undefined;
+}
+
+async function setRoleQuota(id: string, request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = requestQuotaInputSchema.safeParse(await request.json());
+  if (!input.success) {
+    return envelope(422, "validation_failed", "invalid quota");
+  }
+  const quota: RequestQuota = { scope_id: id, ...input.data };
+  roleQuotas.set(id, quota);
+  return HttpResponse.json(quota);
+}
+
+const roleQuotaHandlers = [
+  http.get(
+    "*/api/v1/roles/:id/request-quota",
+    jsonApi(({ params }) => {
+      const denied = roleQuotaDenial(params.id);
+      if (denied !== undefined) {
+        return denied;
+      }
+      const quota = roleQuotas.get(String(params.id));
+      return quota === undefined
+        ? envelope(404, "not_found", "no quota")
+        : HttpResponse.json(quota);
+    }),
+  ),
+  http.put(
+    "*/api/v1/roles/:id/request-quota",
+    jsonApi(
+      async ({ params, request }) =>
+        roleQuotaDenial(params.id) ??
+        (await setRoleQuota(String(params.id), request)),
+    ),
+  ),
+  http.delete(
+    "*/api/v1/roles/:id/request-quota",
+    jsonApi(({ params }) => {
+      const denied = roleQuotaDenial(params.id);
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (!roleQuotas.delete(String(params.id))) {
+        return envelope(404, "not_found", "no quota");
+      }
+      return new HttpResponse(null, { status: 204 });
+    }),
+  ),
+];
 
 // Media servers the mock server starts with, ordered by name as the server
 // orders them. Registration and removal change the working copy only.
@@ -1372,6 +1461,7 @@ const requestHandlers = [
 
 export const handlers = [
   ...requestHandlers,
+  ...roleQuotaHandlers,
   http.get(
     "*/api/v1/playback/now",
     jsonApi(
