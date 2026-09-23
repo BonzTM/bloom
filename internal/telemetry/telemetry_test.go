@@ -6,7 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,6 +109,10 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	}
 	m.ObserveOIDCDependency("discovery", "request_success", 0.02)
 	m.ObserveOIDCDependency("jwks", "retry", 0)
+	m.ObservePlaybackPoll("jellyfin", "success", 0.03)
+	m.SetOpenWatches("jellyfin", "server-1", 2)
+	m.SetOpenWatches("jellyfin", "server-2", 3)
+	m.IncWatchesClosed("jellyfin", "timeout")
 	return m
 }
 
@@ -130,11 +136,60 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_media_server_retries_total",
 		"bloomtest_oidc_dependency_events_total", "bloomtest_oidc_dependency_duration_seconds",
 		"bloomtest_invite_creations_total", "bloomtest_invite_acceptances_total",
+		"bloomtest_playback_polls_total", "bloomtest_playback_poll_duration_seconds",
+		"bloomtest_playback_open_watches", "bloomtest_playback_watches_closed_total",
 	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)
 		}
 	}
+}
+
+func TestPromMetricsAggregatesPlaybackGaugeByKind(t *testing.T) {
+	metrics := NewPromMetrics("playbacktest")
+	metrics.SetOpenWatches("jellyfin", "server-1", 2)
+	metrics.SetOpenWatches("jellyfin", "server-2", 3)
+	assertGaugeValue(t, metrics.Registry(), "playbacktest_playback_open_watches", 5)
+	metrics.SetOpenWatches("jellyfin", "server-1", 0)
+	assertGaugeValue(t, metrics.Registry(), "playbacktest_playback_open_watches", 3)
+}
+
+func TestPromMetricsPublishesConcurrentPlaybackGaugeInUpdateOrder(t *testing.T) {
+	metrics := NewPromMetrics("playbackconcurrent")
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	const servers = 128
+	workers.Add(servers)
+	for index := range servers {
+		go func() {
+			defer workers.Done()
+			<-start
+			metrics.SetOpenWatches("jellyfin", strconv.Itoa(index), 1)
+			metrics.SetOpenWatches("jellyfin", strconv.Itoa(index), 2)
+		}()
+	}
+	close(start)
+	workers.Wait()
+	assertGaugeValue(t, metrics.Registry(), "playbackconcurrent_playback_open_watches", 2*servers)
+	metrics.IncWatchesClosed("jellyfin", "overflow")
+}
+
+func assertGaugeValue(t *testing.T, gatherer prometheus.Gatherer, name string, want float64) {
+	t.Helper()
+	families, err := gatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() == name {
+			got := family.GetMetric()[0].GetGauge().GetValue()
+			if got != want {
+				t.Fatalf("%s = %f, want %f", name, got, want)
+			}
+			return
+		}
+	}
+	t.Fatal("playback gauge was not gathered")
 }
 
 func assertPromMetricLabels(t *testing.T, metrics *PromMetrics) {

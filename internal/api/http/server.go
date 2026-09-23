@@ -53,6 +53,10 @@ type inviteManager interface {
 	Accept(ctx context.Context, code, username, password string) (inviteapp.Accepted, error)
 }
 
+type playbackReader interface {
+	ListWatches(ctx context.Context, query core.PlaybackQuery) ([]core.PlaybackWatch, error)
+}
+
 // Server owns the HTTP listener, mux, and middleware wiring. It holds the
 // dependencies the handlers need and the readiness flag the shutdown sequence
 // flips. It never stores a request context.
@@ -88,6 +92,7 @@ type Server struct {
 	inviteLimiter         *loginLimiter
 	inviteAcceptances     chan struct{}
 	inviteMetrics         telemetry.InviteMetrics
+	playbackReader        playbackReader
 	clock                 core.Clock
 	oidcProvider          core.OIDCProvider
 	oidcAccounts          core.OIDCAccountStore
@@ -128,6 +133,8 @@ type Deps struct {
 	InviteReader inviteReader
 	// InviteManager supplies invite creation, revocation, and acceptance.
 	InviteManager inviteManager
+	// PlaybackReader supplies now-playing and history reads.
+	PlaybackReader playbackReader
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -251,6 +258,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		inviteReader:          deps.InviteReader,
 		inviteManager:         deps.InviteManager,
 		inviteMetrics:         telemetry.NopMetrics{},
+		playbackReader:        deps.PlaybackReader,
 		mediaOperationTimeout: derivedAuthOperationTimeout(cfg.WriteTimeout),
 		clock:                 deps.Clock,
 		oidcProvider:          deps.OIDC,

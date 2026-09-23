@@ -51,6 +51,34 @@ type recordingMediaCloser struct {
 	order  *shutdownOrder
 }
 
+type recordingPlaybackManager struct {
+	starts   atomic.Int32
+	stops    atomic.Int32
+	startErr error
+	errors   chan error
+	order    *shutdownOrder
+}
+
+func (m *recordingPlaybackManager) Start(context.Context) error {
+	m.starts.Add(1)
+	return m.startErr
+}
+
+func (m *recordingPlaybackManager) Errors() <-chan error {
+	if m.errors == nil {
+		m.errors = make(chan error)
+	}
+	return m.errors
+}
+
+func (m *recordingPlaybackManager) Stop(context.Context) error {
+	m.stops.Add(1)
+	if m.order != nil {
+		m.order.add("playback")
+	}
+	return nil
+}
+
 func (c *recordingMediaCloser) CloseIdleConnections() {
 	c.closes.Add(1)
 	if c.order != nil {
@@ -208,11 +236,12 @@ func TestRuntimeShutdownWaitsForAdmittedHandlerBeforeClosingDependencies(t *test
 		t.Fatalf("open shutdown test database: %v", err)
 	}
 	provider := &recordingOIDCProvider{order: order}
+	playbackManager := &recordingPlaybackManager{order: order}
 	media := &recordingMediaCloser{order: order}
 	tracer := &recordingTracer{order: order}
 	fixture := startBlockingServer(t, pool)
 	<-fixture.handlerStarted
-	phases := runtimeShutdownPhases(fixture.server, provider, media, pool, tracer)
+	phases := runtimeShutdownPhases(fixture.server, provider, playbackManager, media, pool, tracer)
 	forced := make(chan struct{})
 	drainFailure := errors.New("forced drain failure")
 	realDrain, realForceClose := phases.drainHTTP, phases.forceCloseHTTP
@@ -249,9 +278,47 @@ func TestRuntimeShutdownWaitsForAdmittedHandlerBeforeClosingDependencies(t *test
 	if serveErr := <-fixture.serveDone; !errors.Is(serveErr, http.ErrServerClosed) {
 		t.Fatalf("Serve error = %v, want http.ErrServerClosed", serveErr)
 	}
-	want := []string{"provider", "media", "database", "tracer"}
+	want := []string{"playback", "provider", "media", "database", "tracer"}
 	if got := order.snapshot(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("dependency close order = %v, want %v", got, want)
+	}
+}
+
+func TestServePropagatesPlaybackStartupFailure(t *testing.T) {
+	order := &shutdownOrder{}
+	databaseClosed := &atomic.Bool{}
+	pool := sql.OpenDB(shutdownDBConnector{order: order, closed: databaseClosed})
+	if err := pool.PingContext(t.Context()); err != nil {
+		t.Fatalf("open shutdown test database: %v", err)
+	}
+	manager := &recordingPlaybackManager{
+		startErr: errors.New("restore failed"), errors: make(chan error), order: order,
+	}
+	media := &recordingMediaCloser{order: order}
+	tracer := &recordingTracer{order: order}
+	srv := httpapi.New(config.HTTPConfig{
+		Addr: "127.0.0.1:0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second,
+		MaxBodyBytes: 1 << 20,
+	}, httpapi.Deps{
+		Logger: slog.New(slog.DiscardHandler), Metrics: telemetry.NopMetrics{},
+		Readiness: telemetry.NewReadiness(true), Pinger: pool,
+	})
+	serving, err := serve(
+		t.Context(), srv, nil, manager, media, pool, tracer,
+		slog.New(slog.DiscardHandler), time.Second, nil,
+		func(ctx context.Context, network, address string) (net.Listener, error) {
+			return (&net.ListenConfig{}).Listen(ctx, network, address)
+		},
+	)
+	if !serving || err == nil || !strings.Contains(err.Error(), "start playback manager") {
+		t.Fatalf("serve = %t, %v; want playback startup failure", serving, err)
+	}
+	if manager.starts.Load() != 1 || manager.stops.Load() != 1 {
+		t.Fatalf("playback lifecycle starts=%d stops=%d, want 1 each", manager.starts.Load(), manager.stops.Load())
+	}
+	want := []string{"playback", "media", "database", "tracer"}
+	if got := order.snapshot(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("startup failure shutdown order = %v, want %v", got, want)
 	}
 }
 
@@ -430,6 +497,10 @@ func cleanupTestConfig(t *testing.T) config.Config {
 			SessionCookieSecure: true, SessionLifetime: time.Hour,
 			SessionIdleTimeout: 15 * time.Minute, LoginRateRefillInterval: time.Minute,
 			LoginRateBurst: 5, LoginRateMaxKeys: 100, LoginMaxConcurrent: 4,
+		},
+		Playback: config.PlaybackConfig{
+			PollActive: 5 * time.Second, PollIdle: 30 * time.Second,
+			MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
 		},
 		SecretKey: config.NewSecret([]byte("0123456789abcdef0123456789abcdef")), ShutdownGrace: time.Second,
 	}

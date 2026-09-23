@@ -82,6 +82,9 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteInviteLibraryColumns, expectedInviteLibraryColumns)
 	assertColumns(t, pool, sqliteInviteRedemptionColumns, expectedInviteRedemptionColumns)
 	assertColumns(t, pool, sqliteInviteProvisioningFailureColumns, expectedInviteProvisioningFailureColumns)
+	assertColumns(t, pool, sqliteWatchColumns, expectedWatchColumns)
+	assertColumns(t, pool, sqliteWatchSegmentColumns, expectedWatchSegmentColumns)
+	assertColumns(t, pool, sqliteWatchPositionColumns, expectedWatchPositionColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
@@ -98,6 +101,9 @@ var (
 	expectedInviteLibraryColumns             = []string{"invite_id", "library_id"}
 	expectedInviteRedemptionColumns          = []string{"id", "invite_id", "media_server_id", "media_user_id", "redeemed_at", "username"}
 	expectedInviteProvisioningFailureColumns = []string{"created_at", "id", "invite_id", "media_server_id", "media_user_id", "reason", "updated_at", "username"}
+	expectedWatchColumns                     = []string{"active_seconds", "client", "created_at", "device_id", "device_name", "ended_at", "episode_number", "id", "item_id", "item_name", "item_type", "last_position_ms", "last_seen_at", "media_server_id", "media_user_id", "play_method", "season_number", "series_name", "server_session_id", "source", "started_at", "state", "updated_at", "username"}
+	expectedWatchSegmentColumns              = []string{"ended_at", "source", "started_at", "watch_id"}
+	expectedWatchPositionColumns             = []string{"observed_at", "paused", "play_method", "position_ms", "source", "watch_id"}
 )
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
@@ -240,6 +246,18 @@ func sqliteMediaServerColumns(ctx context.Context, pool *sql.DB) ([]string, erro
 
 func sqliteIdentityColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return sqliteTableColumns(ctx, pool, "account_identities")
+}
+
+func sqliteWatchColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "watches")
+}
+
+func sqliteWatchSegmentColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "watch_segments")
+}
+
+func sqliteWatchPositionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "watch_positions")
 }
 
 func sqliteTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {

@@ -35,6 +35,19 @@ contracts) gets an entry here.
   shows the link once, lists invites with their status, and revokes them; the
   public `/invite/<code>` page lets the invited person choose a username and
   password and creates their account on the media server.
+- Adaptive per-server Jellyfin playback collection from `GET /Sessions`, with
+  persisted pause/resume segments, bounded position samples, missed-poll stop
+  detection, restart recovery, and bounded failure backoff.
+- SQLite/PostgreSQL migration `00011_playback_collection` for watches, watch
+  segments, and watch positions, with source attribution on every row. Deleting
+  a media server stops its collector before cascading its playback data.
+- Administrator playback APIs `GET /api/v1/playback/now` and cursor-paged
+  `GET /api/v1/playback/history`, guarded by `stats.read.all` and returning the
+  watch source.
+- Playback settings `BLOOM_PLAYBACK_POLL_ACTIVE`,
+  `BLOOM_PLAYBACK_POLL_IDLE`, `BLOOM_PLAYBACK_MISSED_POLLS`, and
+  `BLOOM_PLAYBACK_RESUME_WINDOW`, plus poll, latency, open-watch, and closure
+  metrics.
 - Media servers page in the administration area (`/admin/media-servers`,
   guarded by `admin.settings`): register a Jellyfin server with its API key,
   see the capabilities Bloom detected, and remove it.

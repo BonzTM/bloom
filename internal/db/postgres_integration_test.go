@@ -67,6 +67,9 @@ func TestPostgresEngineSuite(t *testing.T) {
 	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
 		return postgresTableColumns(ctx, pool, "invite_provisioning_failures")
 	}, expectedInviteProvisioningFailureColumns)
+	assertColumns(t, pool, postgresWatchColumns, expectedWatchColumns)
+	assertColumns(t, pool, postgresWatchSegmentColumns, expectedWatchSegmentColumns)
+	assertColumns(t, pool, postgresWatchPositionColumns, expectedWatchPositionColumns)
 }
 
 func postgresSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
@@ -97,6 +100,18 @@ func postgresMediaServerColumns(ctx context.Context, pool *sql.DB) ([]string, er
 
 func postgresIdentityColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return postgresTableColumns(ctx, pool, "account_identities")
+}
+
+func postgresWatchColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "watches")
+}
+
+func postgresWatchSegmentColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "watch_segments")
+}
+
+func postgresWatchPositionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "watch_positions")
 }
 
 func postgresTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {

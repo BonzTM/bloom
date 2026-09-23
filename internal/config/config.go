@@ -64,6 +64,8 @@ type Config struct {
 	PublicURL string
 	// OIDC configures the optional generic OpenID Connect sign-in provider.
 	OIDC OIDCConfig
+	// Playback configures adaptive media-server session polling.
+	Playback PlaybackConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -103,6 +105,15 @@ type OIDCConfig struct {
 	DiscoveryTimeout     time.Duration
 	TokenExchangeTimeout time.Duration
 	JWKSFetchTimeout     time.Duration
+}
+
+// PlaybackConfig configures playback collection lifecycle bounds.
+type PlaybackConfig struct {
+	PollActive   time.Duration
+	PollIdle     time.Duration
+	MissedPolls  int
+	ResumeWindow time.Duration
+	StoreTimeout time.Duration
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -226,6 +237,20 @@ const (
 	defaultOIDCTimeout             = 5 * time.Second
 	minOIDCTimeout                 = 100 * time.Millisecond
 	maxOIDCTimeout                 = 30 * time.Second
+	defaultPlaybackPollActive      = 5 * time.Second
+	defaultPlaybackPollIdle        = 30 * time.Second
+	defaultPlaybackMissedPolls     = 3
+	defaultPlaybackResumeWindow    = 5 * time.Minute
+	defaultPlaybackStoreTimeout    = 5 * time.Second
+	minPlaybackPollActive          = time.Second
+	maxPlaybackPollActive          = time.Minute
+	minPlaybackPollIdle            = 5 * time.Second
+	maxPlaybackPollIdle            = 10 * time.Minute
+	maxPlaybackMissedPolls         = 100
+	minPlaybackResumeWindow        = time.Second
+	maxPlaybackResumeWindow        = 24 * time.Hour
+	minPlaybackStoreTimeout        = 100 * time.Millisecond
+	maxPlaybackStoreTimeout        = 30 * time.Second
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -274,6 +299,7 @@ type rawFlags struct {
 	traceSampleRatio                                                *float64
 	auth                                                            authRawFlags
 	oidc                                                            oidcRawFlags
+	playback                                                        playbackRawFlags
 }
 
 type authRawFlags struct {
@@ -292,6 +318,12 @@ type oidcRawFlags struct {
 	redirectURL, scopes, usernameClaim, roleClaim       *string
 	roleMap, defaultRole                                *string
 	discoveryTimeout, tokenExchangeTimeout, jwksTimeout *time.Duration
+}
+
+type playbackRawFlags struct {
+	pollActive, pollIdle, resumeWindow *time.Duration
+	storeTimeout                       *time.Duration
+	missedPolls                        *int
 }
 
 // bindFlags declares every flag with its env-seeded default.
@@ -325,11 +357,27 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		traceSampleRatio: fs.Float64("trace-sample-ratio", env.float64("BLOOM_TRACE_SAMPLE_RATIO", defaultTraceSampleRatio), "head-based trace sampling ratio in [0,1]"),
 		auth:             bindAuthFlags(fs, env),
 		oidc:             bindOIDCFlags(fs, env),
+		playback:         bindPlaybackFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
+	}
+}
+
+func bindPlaybackFlags(fs *flag.FlagSet, env *envReader) playbackRawFlags {
+	return playbackRawFlags{
+		pollActive: fs.Duration("playback-poll-active", env.duration(
+			"BLOOM_PLAYBACK_POLL_ACTIVE", defaultPlaybackPollActive), "active playback poll interval"),
+		pollIdle: fs.Duration("playback-poll-idle", env.duration(
+			"BLOOM_PLAYBACK_POLL_IDLE", defaultPlaybackPollIdle), "idle playback poll interval"),
+		missedPolls: fs.Int("playback-missed-polls", env.int(
+			"BLOOM_PLAYBACK_MISSED_POLLS", defaultPlaybackMissedPolls), "polls missed before a watch stops"),
+		resumeWindow: fs.Duration("playback-resume-window", env.duration(
+			"BLOOM_PLAYBACK_RESUME_WINDOW", defaultPlaybackResumeWindow), "window for reopening a stopped watch"),
+		storeTimeout: fs.Duration("playback-store-timeout", env.duration(
+			"BLOOM_PLAYBACK_STORE_TIMEOUT", defaultPlaybackStoreTimeout), "playback store operation timeout"),
 	}
 }
 
@@ -393,10 +441,19 @@ func (r rawFlags) build() (Config, error) {
 		Bootstrap:     bootstrap,
 		PublicURL:     *r.publicURL,
 		OIDC:          r.oidcConfig(roleMap),
+		Playback:      r.playbackConfig(),
 		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
 	}, nil
+}
+
+func (r rawFlags) playbackConfig() PlaybackConfig {
+	return PlaybackConfig{
+		PollActive: *r.playback.pollActive, PollIdle: *r.playback.pollIdle,
+		MissedPolls: *r.playback.missedPolls, ResumeWindow: *r.playback.resumeWindow,
+		StoreTimeout: *r.playback.storeTimeout,
+	}
 }
 
 func (r rawFlags) httpConfig() HTTPConfig {
@@ -519,6 +576,9 @@ func (c Config) Validate() error {
 	if err := c.Auth.validate(); err != nil {
 		return err
 	}
+	if err := c.Playback.validate(); err != nil {
+		return err
+	}
 	if err := c.Bootstrap.validate(); err != nil {
 		return err
 	}
@@ -536,6 +596,30 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownGrace <= 0 {
 		return fmt.Errorf("config: BLOOM_SHUTDOWN_GRACE must be positive, got %s", c.ShutdownGrace)
+	}
+	return nil
+}
+
+func (p PlaybackConfig) validate() error {
+	if p.PollActive < minPlaybackPollActive || p.PollActive > maxPlaybackPollActive {
+		return fmt.Errorf("config: BLOOM_PLAYBACK_POLL_ACTIVE must be in [%s,%s], got %s",
+			minPlaybackPollActive, maxPlaybackPollActive, p.PollActive)
+	}
+	if p.PollIdle < minPlaybackPollIdle || p.PollIdle > maxPlaybackPollIdle {
+		return fmt.Errorf("config: BLOOM_PLAYBACK_POLL_IDLE must be in [%s,%s], got %s",
+			minPlaybackPollIdle, maxPlaybackPollIdle, p.PollIdle)
+	}
+	if p.MissedPolls < 1 || p.MissedPolls > maxPlaybackMissedPolls {
+		return fmt.Errorf("config: BLOOM_PLAYBACK_MISSED_POLLS must be in [1,%d], got %d",
+			maxPlaybackMissedPolls, p.MissedPolls)
+	}
+	if p.ResumeWindow < minPlaybackResumeWindow || p.ResumeWindow > maxPlaybackResumeWindow {
+		return fmt.Errorf("config: BLOOM_PLAYBACK_RESUME_WINDOW must be in [%s,%s], got %s",
+			minPlaybackResumeWindow, maxPlaybackResumeWindow, p.ResumeWindow)
+	}
+	if p.StoreTimeout < minPlaybackStoreTimeout || p.StoreTimeout > maxPlaybackStoreTimeout {
+		return fmt.Errorf("config: BLOOM_PLAYBACK_STORE_TIMEOUT must be in [%s,%s], got %s",
+			minPlaybackStoreTimeout, maxPlaybackStoreTimeout, p.StoreTimeout)
 	}
 	return nil
 }

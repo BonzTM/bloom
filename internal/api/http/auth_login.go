@@ -282,6 +282,7 @@ const (
 	auditResourceMediaServers     = "route:media_servers"
 	auditResourceInvites          = "route:invites"
 	auditResourceInvitePublic     = "route:invite_public"
+	auditResourcePlayback         = "route:playback"
 )
 
 func routeResource(r *http.Request) string {
@@ -309,6 +310,8 @@ func routeResource(r *http.Request) string {
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
 		return auditResourceInvitePublic
+	case "/api/v1/playback/now", "/api/v1/playback/history":
+		return auditResourcePlayback
 	default:
 		return auditResourceRouteUnmatched
 	}

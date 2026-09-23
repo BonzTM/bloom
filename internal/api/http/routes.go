@@ -56,6 +56,8 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodDelete, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleRevokeInvite},
 	{method: http.MethodGet, path: "/api/v1/invite/{code}", access: routePublic, handler: (*Server).handlePreviewInvite},
 	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, handler: (*Server).handleAcceptInvite},
+	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
+	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
 }
 
 func (r apiRoute) usesSessionAccount() bool {
@@ -109,6 +111,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		}
 		if strings.HasPrefix(route.path, "/api/v1/invite") &&
 			(s.inviteReader == nil || s.inviteManager == nil) {
+			continue
+		}
+		if strings.HasPrefix(route.path, "/api/v1/playback") && s.playbackReader == nil {
 			continue
 		}
 		if _, exists := handlers[route.path]; !exists {
@@ -172,6 +177,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 	}
 	if isPublicInviteRoute(route.path) {
 		handler = sanitizedInviteTrace(route)(handler)
+	}
+	if strings.HasPrefix(route.path, "/api/v1/playback") {
+		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	return handler, nil
 }

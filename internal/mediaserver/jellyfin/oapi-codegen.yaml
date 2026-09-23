@@ -5,6 +5,7 @@ generate:
   client: true
 output-options:
   include-operation-ids:
+    - GetSessions
     - GetSystemInfo
     - GetVirtualFolders
     - GetUsers

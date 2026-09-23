@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -22,9 +24,10 @@ import (
 )
 
 const (
-	maxResponseBytes = 1 << 20
-	maxUsers         = 10000
-	defaultTimeout   = 10 * time.Second
+	maxResponseBytes            = 1 << 20
+	maxUsers                    = 10000
+	defaultTimeout              = 10 * time.Second
+	sessionsActiveWithinSeconds = 60
 )
 
 // Observer records outbound request and retry outcomes with finite labels.
@@ -298,6 +301,23 @@ func jellyfinUUID(value string) (openapi_types.UUID, error) {
 	return parsed, nil
 }
 
+// ListSessions returns active Jellyfin sessions that have a now-playing item.
+func (c *Client) ListSessions(ctx context.Context) ([]core.PlaybackSession, error) {
+	var dto []jellyfinapi.SessionInfoDto
+	path := "/Sessions?activeWithinSeconds=" + strconv.Itoa(sessionsActiveWithinSeconds)
+	started, err := c.getJSON(ctx, "list_sessions", path, &dto)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := mapSessions(dto)
+	if err != nil {
+		c.observe("list_sessions", "malformed", started)
+		return nil, err
+	}
+	c.observe("list_sessions", "success", started)
+	return sessions, nil
+}
+
 // Capabilities returns Jellyfin's known optional-operation support.
 func (*Client) Capabilities() core.Capabilities {
 	return core.Capabilities{CreateUserWithPassword: true, SetPassword: true, QuickConnectApproval: true}
@@ -322,6 +342,90 @@ func mapLibraries(folders []jellyfinapi.VirtualFolderInfo) ([]core.Library, erro
 		libraries = append(libraries, core.Library{ID: *folder.ItemId, Name: *folder.Name, Type: libraryType})
 	}
 	return libraries, nil
+}
+
+func mapSessions(values []jellyfinapi.SessionInfoDto) ([]core.PlaybackSession, error) {
+	if len(values) > core.MaxPlaybackSessions {
+		return nil, mediaError("list_sessions", core.MediaServerMalformed, errors.New("session count exceeds limit"))
+	}
+	sessions := make([]core.PlaybackSession, 0, len(values))
+	for _, value := range values {
+		if value.NowPlayingItem == nil {
+			continue
+		}
+		session, err := mapSession(value)
+		if err != nil {
+			return nil, mediaError("list_sessions", core.MediaServerMalformed, err)
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
+func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) {
+	item := value.NowPlayingItem
+	if value.UserId == nil || value.DeviceId == nil || *value.DeviceId == "" ||
+		item.Id == nil || item.Name == nil || *item.Name == "" || item.Type == nil ||
+		value.PlayState == nil || value.LastActivityDate == nil {
+		return core.PlaybackSession{}, errors.New("session is missing playback identity")
+	}
+	position, err := positionFromTicks(value.PlayState.PositionTicks)
+	if err != nil {
+		return core.PlaybackSession{}, err
+	}
+	return core.PlaybackSession{
+		ServerSessionID: stringValue(value.Id), MediaUserID: value.UserId.String(),
+		Username: stringValue(value.UserName), DeviceID: *value.DeviceId,
+		DeviceName: stringValue(value.DeviceName), Client: stringValue(value.Client),
+		ItemID: item.Id.String(), ItemName: *item.Name, ItemType: string(*item.Type),
+		SeriesName: stringValue(item.SeriesName), SeasonNumber: cloneInt32(item.ParentIndexNumber),
+		EpisodeNumber: cloneInt32(item.IndexNumber), Position: position,
+		Paused: boolValue(value.PlayState.IsPaused), PlayMethod: mapPlayMethod(value.PlayState.PlayMethod),
+		LastActivityAt: core.NormalizeTime(*value.LastActivityDate),
+	}, nil
+}
+
+func positionFromTicks(ticks *int64) (time.Duration, error) {
+	if ticks == nil {
+		return 0, nil
+	}
+	if *ticks < 0 || *ticks > math.MaxInt64/100 {
+		return 0, errors.New("session position ticks are out of range")
+	}
+	return time.Duration(*ticks) * 100 * time.Nanosecond, nil
+}
+
+func mapPlayMethod(value *jellyfinapi.PlayMethod) core.PlayMethod {
+	if value == nil {
+		return core.PlayMethodUnknown
+	}
+	switch string(*value) {
+	case "DirectPlay":
+		return core.PlayMethodDirectPlay
+	case "DirectStream":
+		return core.PlayMethodDirectStream
+	case "Transcode":
+		return core.PlayMethodTranscode
+	default:
+		return core.PlayMethodUnknown
+	}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func boolValue(value *bool) bool { return value != nil && *value }
+
+func cloneInt32(value *int32) *int32 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (c *Client) getJSON(ctx context.Context, operation, path string, target any) (time.Time, error) {

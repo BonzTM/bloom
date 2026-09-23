@@ -122,3 +122,12 @@ func (NopMetrics) ObserveMediaServerRequest(string, string, string, float64) {}
 
 // ObserveMediaServerRetry does nothing.
 func (NopMetrics) ObserveMediaServerRetry(string, string, string) {}
+
+// ObservePlaybackPoll does nothing.
+func (NopMetrics) ObservePlaybackPoll(string, string, float64) {}
+
+// SetOpenWatches does nothing.
+func (NopMetrics) SetOpenWatches(string, string, int) {}
+
+// IncWatchesClosed does nothing.
+func (NopMetrics) IncWatchesClosed(string, string) {}

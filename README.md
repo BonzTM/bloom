@@ -189,7 +189,34 @@ unset JELLYFIN_API_KEY
 Use `GET /api/v1/media-servers` to list registrations. Use
 `POST /api/v1/media-servers/{id}/probe` to recheck a connection and
 `GET /api/v1/media-servers/{id}/libraries` to list its libraries. Deleting a
-registration removes its encrypted credential.
+registration removes its encrypted credential and its associated playback data.
+
+### Playback statistics
+
+Bloom polls `GET /Sessions` on every registered Jellyfin server and records
+Bloom-owned watches with source `poll`. Every watch, active segment, and
+position sample stores its observation source. A watch retains the source that
+opened it if later observations arrive from another source. Bloom stores playing
+and paused intervals as separate segments, so active time excludes observed
+pauses. It also retains the newest 512 position and play-method samples per
+watch. Open watches are persisted on every observation and restored after a
+restart.
+
+Polling is adaptive and jittered. The default interval is five seconds while a
+watch is open and thirty seconds while the server is idle. Failed polls use
+bounded backoff and do not count as missing sessions. A watch closes at its last
+successful sighting after three successful polls omit it. A matching sighting
+within five minutes reopens that watch.
+
+Polling has finite accuracy. A play shorter than the poll interval can be
+missed. Position precision is bounded by the active polling interval. A client
+that remains present and unpaused while stalled is counted as active. Bloom
+does not import activity from before collection started in this release.
+
+An authenticated account with `stats.read.all` can use cursor-paged
+`GET /api/v1/playback/now` and `GET /api/v1/playback/history`. The history route accepts an optional
+`media_server_id` filter. Successful reads emit no playback audit event;
+authorization denials continue to use the shared security audit stream.
 
 ### Invites
 
@@ -282,12 +309,17 @@ this table.
 | `BLOOM_OIDC_DISCOVERY_TIMEOUT` | duration | no | `5s` | no | Per-attempt and total client bound for startup discovery. Valid range: `100ms`-`30s`. |
 | `BLOOM_OIDC_TOKEN_EXCHANGE_TIMEOUT` | duration | no | `5s` | no | Authorization-code exchange bound. Valid range: `100ms`-`30s`; token POSTs are not retried. |
 | `BLOOM_OIDC_JWKS_FETCH_TIMEOUT` | duration | no | `5s` | no | JWKS fetch bound. Valid range: `100ms`-`30s`; cached-key misses perform at most one bounded refetch. |
+| `BLOOM_PLAYBACK_POLL_ACTIVE` | duration | no | `5s` | no | Jittered polling interval while any watch is open. Valid range: `1s`-`60s`. |
+| `BLOOM_PLAYBACK_POLL_IDLE` | duration | no | `30s` | no | Jittered polling interval while no watch is open. Valid range: `5s`-`10m`. |
+| `BLOOM_PLAYBACK_MISSED_POLLS` | int | no | `3` | no | Consecutive successful polls that may omit a session before its watch closes. Valid range: 1-100. |
+| `BLOOM_PLAYBACK_RESUME_WINDOW` | duration | no | `5m` | no | Window in which a matching stopped watch reopens. Valid range: `1s`-`24h`. |
+| `BLOOM_PLAYBACK_STORE_TIMEOUT` | duration | no | `5s` | no | Per-operation deadline for playback database loads, lookups, and saves. Valid range: `100ms`-`30s`. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
 | `BLOOM_LOG_FORMAT` | `json` \| `text` | no | `json` | no | Log record format. |
 | `BLOOM_OTLP_ENDPOINT` | string | no | — | no | OTLP/HTTP trace collector `host:port`. Empty disables span export. |
 | `BLOOM_OTLP_INSECURE` | bool | no | `false` | no | Send spans over plaintext HTTP. |
 | `BLOOM_TRACE_SAMPLE_RATIO` | float | no | `1.0` | no | Head-based sampling ratio in `[0,1]`. |
-| `BLOOM_SHUTDOWN_GRACE` | duration | no | `15s` | no | Total ordered shutdown budget on `SIGTERM`; keep it under the platform's termination grace. Bloom drains HTTP first, then closes the OIDC provider and media-server idle connections before the database and telemetry tracer. Unused time carries forward within the same absolute deadline. Size the grace to more than twice the longest admitted request so the drain reservation can finish it. |
+| `BLOOM_SHUTDOWN_GRACE` | duration | no | `15s` | no | Total ordered shutdown budget on `SIGTERM`; keep it under the platform's termination grace. Bloom drains HTTP, stops playback collectors, then closes the OIDC provider and media-server idle connections before the database and telemetry tracer. Unused time carries forward within the same absolute deadline. Size the grace to more than twice the longest admitted request so the drain reservation can finish it. |
 
 The `-migrate` flag (no env key) applies the embedded goose migrations for the
 configured engine and exits; it is how a deployment's migration Job invokes the
@@ -310,6 +342,11 @@ effective assignment, so preserve a backup if the provenance must be restored.
 Migration `00010_invites` adds invite metadata, library selections, and
 redemption records on both engines. Its down migration removes those records,
 so back up the database before schema rollback when invite history matters.
+
+Migration `00011_playback_collection` adds watches, active-time segments, and
+bounded position samples on both engines. Apply it before enabling this binary.
+Deleting a media-server registration first stops and awaits its collector, then
+cascades to all three playback tables.
 
 ### Upgrading existing accounts to roles
 

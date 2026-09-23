@@ -33,6 +33,8 @@ const (
 	probeMediaServerSchema  = "#/components/schemas/ProbeMediaServerResponse"
 	librariesSchema         = "#/components/schemas/LibrariesResponse"
 	providersSchema         = "#/components/schemas/AuthProvidersResponse"
+	playbackNowSchema       = "#/components/schemas/PlaybackNowResponse"
+	playbackHistorySchema   = "#/components/schemas/PlaybackHistoryResponse"
 )
 
 var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Location", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
@@ -494,7 +496,8 @@ func assertResponseSchema(
 		}
 	case currentSchema, permissionsSchema, rolesSchema, errorSchema,
 		createMediaServerSchema, mediaServersSchema, mediaServerSchema,
-		probeMediaServerSchema, librariesSchema, providersSchema:
+		probeMediaServerSchema, librariesSchema, providersSchema,
+		playbackNowSchema, playbackHistorySchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)

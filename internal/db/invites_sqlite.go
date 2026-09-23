@@ -280,13 +280,6 @@ func sqliteInvite(
 	}, nil
 }
 
-func sqliteNullableTime(value *time.Time) sql.NullString {
-	if value == nil {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: formatSQLiteTime(*value), Valid: true}
-}
-
 func parseSQLiteNullableTime(value sql.NullString) (*time.Time, error) {
 	if !value.Valid {
 		return nil, nil

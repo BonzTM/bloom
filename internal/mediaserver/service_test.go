@@ -28,6 +28,22 @@ type memoryStore struct {
 	creates     atomic.Int32
 }
 
+type blockingPlaybackLifecycle struct {
+	started  chan string
+	release  chan struct{}
+	finished chan bool
+}
+
+func (l *blockingPlaybackLifecycle) StopServer(_ context.Context, id string) error {
+	l.started <- id
+	<-l.release
+	return nil
+}
+
+func (l *blockingPlaybackLifecycle) FinishServerDelete(_ string, deleted bool) {
+	l.finished <- deleted
+}
+
 func (s *memoryStore) CreateMediaServer(ctx context.Context, record core.MediaServerRecord) error {
 	s.recordDeadline(ctx)
 	s.creates.Add(1)
@@ -396,6 +412,37 @@ func TestServiceReusesAndInvalidatesRegisteredAdapter(t *testing.T) {
 	service.CloseIdleConnections()
 	if got := adapter.closeCalls.Load(); got != 2 {
 		t.Fatalf("idle closes after shutdown = %d, want 2", got)
+	}
+}
+
+func TestServiceStopsCollectorBeforeDeletingRegistration(t *testing.T) {
+	store, service := newTestService(t, fakeFactory{adapter: &fakeAdapter{}})
+	seedEncryptedRecord(t, store, service)
+	id := store.records[0].ID
+	lifecycle := &blockingPlaybackLifecycle{
+		started: make(chan string, 1), release: make(chan struct{}), finished: make(chan bool, 1),
+	}
+	service.SetPlaybackLifecycle(lifecycle)
+	result := make(chan error, 1)
+	go func() {
+		_, err := service.Delete(context.Background(), id)
+		result <- err
+	}()
+	if got := <-lifecycle.started; got != id {
+		t.Fatalf("stopped collector %q, want %q", got, id)
+	}
+	if store.recordCount() != 1 {
+		t.Fatal("registration deleted before collector stopped")
+	}
+	close(lifecycle.release)
+	if err := <-result; err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if deleted := <-lifecycle.finished; !deleted {
+		t.Fatal("playback lifecycle finished with deleted=false")
+	}
+	if store.recordCount() != 0 {
+		t.Fatal("registration remains after delete")
 	}
 }
 

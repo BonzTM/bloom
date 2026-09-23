@@ -108,3 +108,46 @@ type Session struct {
 	Data   []byte
 	Expiry int64
 }
+
+type Watch struct {
+	ID              string
+	MediaServerID   string
+	MediaUserID     string
+	Username        string
+	DeviceID        string
+	DeviceName      string
+	Client          string
+	ServerSessionID string
+	ItemID          string
+	ItemName        string
+	ItemType        string
+	SeriesName      string
+	SeasonNumber    sql.NullInt64
+	EpisodeNumber   sql.NullInt64
+	PlayMethod      string
+	State           string
+	StartedAt       string
+	LastSeenAt      string
+	EndedAt         sql.NullString
+	ActiveSeconds   int64
+	LastPositionMs  int64
+	Source          string
+	CreatedAt       string
+	UpdatedAt       string
+}
+
+type WatchPosition struct {
+	WatchID    string
+	ObservedAt string
+	PositionMs int64
+	Paused     int64
+	PlayMethod string
+	Source     string
+}
+
+type WatchSegment struct {
+	WatchID   string
+	StartedAt string
+	EndedAt   sql.NullString
+	Source    string
+}
