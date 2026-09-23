@@ -1,6 +1,8 @@
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
+  authProvidersResponseSchema,
   sessionResponseSchema,
+  type AuthProvidersResponse,
   type LoginInput,
   type Session,
 } from "./auth-schemas.js";
@@ -26,6 +28,20 @@ export class AuthApi {
     return this.#client.requestEmpty("api/v1/auth/logout", {
       method: "POST",
     });
+  }
+
+  providers(signal: AbortSignal): Promise<AuthProvidersResponse> {
+    return this.#client.requestJson(
+      "api/v1/auth/providers",
+      authProvidersResponseSchema,
+      { signal },
+    );
+  }
+
+  // The single sign-on start URL, posted to by a plain form. The return path
+  // travels as a form field and the server validates it again.
+  oidcStartUrl(): string {
+    return this.#client.url("api/v1/auth/oidc/start").toString();
   }
 
   me(signal: AbortSignal): Promise<Session> {

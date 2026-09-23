@@ -1,6 +1,7 @@
 import { expect, it } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import {
+  authProvidersResponseSchema,
   isKnownPermission,
   knownPermissions,
   loginInputSchema,
@@ -117,4 +118,62 @@ it("separates known permissions from ones a newer server may add", () => {
   expect(isKnownPermission("admin.roles")).toBe(true);
   expect(isKnownPermission("invites.revoke")).toBe(false);
   expect(isKnownPermission("")).toBe(false);
+});
+
+it("accepts the provider list and rejects unknown methods or an empty list", () => {
+  expect(
+    authProvidersResponseSchema.parse({
+      providers: [
+        { id: "local", display_name: "Password" },
+        { id: "oidc", display_name: "Homelab SSO" },
+      ],
+    }).providers,
+  ).toHaveLength(2);
+  expect(
+    authProvidersResponseSchema.safeParse({
+      providers: [{ id: "saml", display_name: "x" }],
+    }).success,
+  ).toBe(false);
+  expect(authProvidersResponseSchema.safeParse({ providers: [] }).success).toBe(
+    false,
+  );
+});
+
+it.each([
+  [
+    "two providers",
+    {
+      providers: [
+        { id: "local", display_name: "a" },
+        { id: "oidc", display_name: "b" },
+      ],
+    },
+    true,
+  ],
+  [
+    "three providers",
+    {
+      providers: [
+        { id: "local", display_name: "a" },
+        { id: "oidc", display_name: "b" },
+        { id: "oidc", display_name: "c" },
+      ],
+    },
+    false,
+  ],
+  [
+    "an 80-character name",
+    { providers: [{ id: "oidc", display_name: "n".repeat(80) }] },
+    true,
+  ],
+  [
+    "an 81-character name",
+    { providers: [{ id: "oidc", display_name: "n".repeat(81) }] },
+    false,
+  ],
+  ["a missing list", {}, false],
+  ["a null list", { providers: null }, false],
+  ["a malformed entry", { providers: [{ id: "oidc" }] }, false],
+])("provider list bounds: %s", (_label, input, ok) => {
+  expect(authProvidersResponseSchema.safeParse(input).success).toBe(ok);
 });

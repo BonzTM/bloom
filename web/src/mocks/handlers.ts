@@ -98,9 +98,27 @@ let signedIn = false;
 // permission gates.
 let granted: readonly KnownPermission[] = allPermissions;
 
+// Sign-in methods the mock server advertises. Local only by default; a test
+// enables single sign-on with `setMockProviders`.
+export const localProvider = { id: "local", display_name: "Password" } as const;
+export const oidcProvider = {
+  id: "oidc",
+  display_name: "Homelab SSO",
+} as const;
+let providers: readonly { id: "local" | "oidc"; display_name: string }[] = [
+  localProvider,
+];
+
+export function setMockProviders(
+  next: readonly { id: "local" | "oidc"; display_name: string }[],
+): void {
+  providers = next;
+}
+
 export function resetMockSession(): void {
   signedIn = false;
   granted = allPermissions;
+  providers = [localProvider];
 }
 
 export function setMockPermissions(next: readonly KnownPermission[]): void {
@@ -238,6 +256,10 @@ export const handlers = [
   http.get(
     "*/api/v1/version",
     jsonApi(() => HttpResponse.json(mockVersion)),
+  ),
+  http.get(
+    "*/api/v1/auth/providers",
+    jsonApi(() => HttpResponse.json({ providers })),
   ),
   http.get(
     "*/api/v1/auth/me",

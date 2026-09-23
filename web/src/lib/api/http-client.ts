@@ -26,6 +26,12 @@ export class ApiClient {
     this.#timeoutMs = timeoutMs;
   }
 
+  // Resolves a path against the API base for links the browser follows itself
+  // (full-page redirects), so they honour the same base as fetches.
+  url(path: string): URL {
+    return new URL(path, this.#baseUrl);
+  }
+
   async requestJson<S extends ZodType>(
     path: string,
     schema: S,
