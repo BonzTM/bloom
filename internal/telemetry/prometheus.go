@@ -46,6 +46,10 @@ type PromMetrics struct {
 	playbackRefreshFailures prometheus.Counter
 	playbackMu              sync.Mutex
 	playbackOpenByServer    map[string]int
+	metadataRequests        *prometheus.CounterVec
+	metadataSeconds         *prometheus.HistogramVec
+	metadataRetries         *prometheus.CounterVec
+	mediaRequests           *prometheus.CounterVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -62,6 +66,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	playbackCollectors := newPlaybackCollectors(namespace)
 	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
 		"Total failed playback manager refresh attempts.")
+	requestCollectors := newRequestCollectors(namespace)
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -82,9 +87,42 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
 		playbackRefreshFailures: playbackRefreshFailures,
 		playbackOpenByServer:    make(map[string]int),
+		metadataRequests:        requestCollectors.metadataRequests,
+		metadataSeconds:         requestCollectors.metadataSeconds,
+		metadataRetries:         requestCollectors.metadataRetries,
+		mediaRequests:           requestCollectors.mediaRequests,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
+}
+
+type requestCollectors struct {
+	metadataRequests *prometheus.CounterVec
+	metadataSeconds  *prometheus.HistogramVec
+	metadataRetries  *prometheus.CounterVec
+	mediaRequests    *prometheus.CounterVec
+}
+
+func newRequestCollectors(namespace string) requestCollectors {
+	metadataLabels := []string{"provider", "operation", "outcome"}
+	return requestCollectors{
+		metadataRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "metadata_requests_total",
+			Help: "Total outbound metadata requests by provider, operation, and outcome.",
+		}, metadataLabels),
+		metadataSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace, Name: "metadata_request_duration_seconds",
+			Help: "Outbound metadata request latency by provider, operation, and outcome.", Buckets: prometheus.DefBuckets,
+		}, metadataLabels),
+		metadataRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "metadata_retries_total",
+			Help: "Total outbound metadata retries by provider, operation, and outcome.",
+		}, metadataLabels),
+		mediaRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "media_requests_total",
+			Help: "Total media request lifecycle outcomes by kind and outcome.",
+		}, []string{"kind", "outcome"}),
+	}
 }
 
 type playbackCollectors struct {
@@ -248,7 +286,27 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.playbackOpenWatches,
 		m.playbackWatchesClosed,
 		m.playbackRefreshFailures,
+		m.metadataRequests,
+		m.metadataSeconds,
+		m.metadataRetries,
+		m.mediaRequests,
 	)
+}
+
+// ObserveMetadataRequest records one bounded metadata-provider operation.
+func (m *PromMetrics) ObserveMetadataRequest(provider, operation, outcome string, seconds float64) {
+	m.metadataRequests.WithLabelValues(provider, operation, outcome).Inc()
+	m.metadataSeconds.WithLabelValues(provider, operation, outcome).Observe(seconds)
+}
+
+// ObserveMetadataRetry records one metadata-provider retry outcome.
+func (m *PromMetrics) ObserveMetadataRetry(provider, operation, outcome string) {
+	m.metadataRetries.WithLabelValues(provider, operation, outcome).Inc()
+}
+
+// IncMediaRequest records one media request lifecycle outcome.
+func (m *PromMetrics) IncMediaRequest(kind, outcome string) {
+	m.mediaRequests.WithLabelValues(kind, outcome).Inc()
 }
 
 // IncInviteCreation records one invite creation outcome.

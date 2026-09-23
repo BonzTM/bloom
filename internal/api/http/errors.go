@@ -19,22 +19,27 @@ import (
 // foundations/contracts-and-compatibility.md: add codes, never repurpose or
 // silently drop one. They are deliberately NOT the HTTP status.
 const (
-	codeNotFound             = "not_found"
-	codeAlreadyExists        = "already_exists"
-	codeInvalidArgument      = "invalid_argument"
-	codeUnavailable          = "unavailable"
-	codeInternal             = "internal"
-	codeLoginRejected        = "invalid_credentials"
-	codeUnauthorized         = "unauthorized"
-	codeValidationFailed     = "validation_failed"
-	codeRateLimited          = "rate_limited"
-	codeCSRFRejected         = "csrf_rejected"
-	codeUnsupportedMediaType = "unsupported_media_type"
-	codeMethodNotAllowed     = "method_not_allowed"
-	codeForbidden            = "forbidden"
-	codeMediaServerFailure   = "media_server_failure"
-	codeOIDCRejected         = "oidc_rejected"
-	codeUsernameUnavailable  = "username_unavailable"
+	codeNotFound                = "not_found"
+	codeAlreadyExists           = "already_exists"
+	codeInvalidArgument         = "invalid_argument"
+	codeUnavailable             = "unavailable"
+	codeInternal                = "internal"
+	codeLoginRejected           = "invalid_credentials"
+	codeUnauthorized            = "unauthorized"
+	codeValidationFailed        = "validation_failed"
+	codeRateLimited             = "rate_limited"
+	codeCSRFRejected            = "csrf_rejected"
+	codeUnsupportedMediaType    = "unsupported_media_type"
+	codeMethodNotAllowed        = "method_not_allowed"
+	codeForbidden               = "forbidden"
+	codeMediaServerFailure      = "media_server_failure"
+	codeOIDCRejected            = "oidc_rejected"
+	codeUsernameUnavailable     = "username_unavailable"
+	codeQuotaExceeded           = "request_quota_exceeded"
+	codeMetadataNotConfigured   = "metadata_not_configured"
+	codeMetadataProviderFailure = "metadata_provider_failure"
+	codeProfileInUse            = "request_profile_in_use"
+	codeInvalidTransition       = "invalid_request_transition"
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -43,6 +48,18 @@ const (
 // calling writeError, which calls this.
 func errorClass(err error) (status int, code string) {
 	switch {
+	case errors.Is(err, core.ErrQuotaExceeded):
+		return http.StatusUnprocessableEntity, codeQuotaExceeded
+	case errors.Is(err, core.ErrMetadataNotConfigured):
+		return http.StatusServiceUnavailable, codeMetadataNotConfigured
+	case errors.Is(err, core.ErrMetadataUnauthorized), errors.Is(err, core.ErrMetadataMalformed):
+		return http.StatusBadGateway, codeMetadataProviderFailure
+	case errors.Is(err, core.ErrMetadataUnavailable):
+		return http.StatusServiceUnavailable, codeMetadataProviderFailure
+	case errors.Is(err, core.ErrProfileInUse):
+		return http.StatusConflict, codeProfileInUse
+	case errors.Is(err, core.ErrInvalidTransition):
+		return http.StatusConflict, codeInvalidTransition
 	case errors.Is(err, core.ErrInviteProvisioningPending):
 		return http.StatusBadGateway, codeMediaServerFailure
 	case isMediaUserNameError(err):

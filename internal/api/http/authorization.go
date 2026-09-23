@@ -34,6 +34,48 @@ func (s *Server) RequirePermission(permission core.CatalogPermission) func(http.
 	}
 }
 
+// RequireAnyPermission allows an authenticated account holding at least one listed permission.
+func (s *Server) RequireAnyPermission(permissions []core.Permission) func(http.Handler) http.Handler {
+	denialPermission, metricAllowed := firstCatalogPermission(permissions)
+	permissionID := core.Permission("")
+	if len(permissions) > 0 {
+		permissionID = permissions[0]
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			account, authenticated := accountFrom(r.Context())
+			if !authenticated {
+				if metricAllowed {
+					s.authorizationMetrics.IncAuthorizationDenial(denialPermission)
+				}
+				s.emitAuthorizationDenial(r, "anonymous", permissionID, telemetry.AuditFailure, "missing_session")
+				writeError(w, r, s.logger, errAuthenticationRequired)
+				return
+			}
+			effective, loaded := permissionsFrom(r.Context())
+			for _, required := range permissions {
+				if loaded && slices.Contains(effective, required) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			if metricAllowed {
+				s.authorizationMetrics.IncAuthorizationDenial(denialPermission)
+			}
+			s.emitAuthorizationDenial(r, account.ID, permissionID, telemetry.AuditDenied, "permission_missing")
+			writeError(w, r, s.logger, core.ErrForbidden)
+		})
+	}
+}
+
+func firstCatalogPermission(permissions []core.Permission) (core.CatalogPermission, bool) {
+	if len(permissions) == 0 {
+		return core.CatalogPermission{}, false
+	}
+	permission, err := core.NewCatalogPermission(permissions[0])
+	return permission, err == nil
+}
+
 func (s *Server) emitAuthorizationDenial(
 	r *http.Request,
 	actor string,

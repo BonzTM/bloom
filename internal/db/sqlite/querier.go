@@ -13,6 +13,9 @@ type Querier interface {
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
+	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
+	CountRequestedMoviesSince(ctx context.Context, arg CountRequestedMoviesSinceParams) (int64, error)
+	CountRequestedSeasonsSince(ctx context.Context, arg CountRequestedSeasonsSinceParams) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
 	// by both engines (ADR 0004 item 3): sqlc.yaml compiles it once against the
 	// SQLite schema into internal/db/sqlite and once against the PostgreSQL schema
@@ -25,18 +28,33 @@ type Querier interface {
 	CreateInviteLibrary(ctx context.Context, arg CreateInviteLibraryParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
 	CreateMediaServer(ctx context.Context, arg CreateMediaServerParams) error
+	CreateRequest(ctx context.Context, arg CreateRequestParams) error
+	CreateRequestProfile(ctx context.Context, arg CreateRequestProfileParams) error
+	CreateRequestProfileTag(ctx context.Context, arg CreateRequestProfileTagParams) error
+	CreateRequestSeason(ctx context.Context, arg CreateRequestSeasonParams) error
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
+	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
+	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
+	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
+	DeleteRequestProfileTags(ctx context.Context, profileID string) error
+	DeleteRoleRequestQuota(ctx context.Context, roleID string) (int64, error)
 	FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPlaybackWatchParams) (FindRecentPlaybackWatchRow, error)
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
 	// OIDC identity queries are shared by SQLite and PostgreSQL.
 	GetAccountIdentity(ctx context.Context, arg GetAccountIdentityParams) (GetAccountIdentityRow, error)
+	GetAccountRequestQuota(ctx context.Context, accountID string) (AccountRequestQuota, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
 	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
 	GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
+	// Metadata, request profile, request, and quota queries shared by both engines.
+	GetMetadataProvider(ctx context.Context, kind string) (MetadataProvider, error)
+	GetRequest(ctx context.Context, id string) (Request, error)
+	GetRequestProfile(ctx context.Context, id string) (RequestProfile, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
+	GetRoleRequestQuota(ctx context.Context, roleID string) (RoleRequestQuota, error)
 	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
 	InsertInviteProvisioningFailure(ctx context.Context, arg InsertInviteProvisioningFailureParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
@@ -51,15 +69,28 @@ type Querier interface {
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
 	ListRecentPlaybackWatches(ctx context.Context, arg ListRecentPlaybackWatchesParams) ([]ListRecentPlaybackWatchesRow, error)
+	ListRequestProfileTags(ctx context.Context, profileID string) ([]string, error)
+	ListRequestProfiles(ctx context.Context, arg ListRequestProfilesParams) ([]RequestProfile, error)
+	ListRequestSeasons(ctx context.Context, requestID string) ([]ListRequestSeasonsRow, error)
+	ListRequests(ctx context.Context, arg ListRequestsParams) ([]Request, error)
+	ListRoleRequestQuotasForAccount(ctx context.Context, accountID string) ([]RoleRequestQuota, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
+	LockRequestTitle(ctx context.Context, lockKey interface{}) error
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
+	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)
+	TransitionRequestSeasons(ctx context.Context, arg TransitionRequestSeasonsParams) error
 	TrimWatchPositions(ctx context.Context, watchID string) error
 	UpdateAccountIdentityLogin(ctx context.Context, arg UpdateAccountIdentityLoginParams) (int64, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
+	UpdateRequestProfile(ctx context.Context, arg UpdateRequestProfileParams) (int64, error)
+	UpsertAccountRequestQuota(ctx context.Context, arg UpsertAccountRequestQuotaParams) error
+	UpsertMetadataProvider(ctx context.Context, arg UpsertMetadataProviderParams) error
 	// Playback queries are portable across SQLite and PostgreSQL.
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
+	UpsertRoleRequestQuota(ctx context.Context, arg UpsertRoleRequestQuotaParams) error
 	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error
 }
 

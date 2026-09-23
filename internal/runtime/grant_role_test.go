@@ -51,7 +51,7 @@ func assertGrantRoleAudit(t *testing.T, output, accountID, reason string) {
 	}
 	want := map[string]any{
 		"level": "INFO", "msg": "audit", "log_type": "audit", "actor": "cli", "subject_id": "",
-		"action": telemetry.AuditActionRoleAssign, "resource": "account:" + accountID, "permission": "", "role": "owner", "kind": "", "provider": "",
+		"action": telemetry.AuditActionRoleAssign, "resource": "account:" + accountID, "permission": "", "role": "owner", "kind": "", "title": "", "provider": "",
 		"allow_insecure": false,
 		"result":         "success", "reason": reason, "source": "cli", "request_id": "",
 	}

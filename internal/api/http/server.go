@@ -18,6 +18,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
 	inviteapp "github.com/BonzTM/bloom/internal/invite"
+	requestapp "github.com/BonzTM/bloom/internal/request"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
@@ -57,6 +58,18 @@ type playbackReader interface {
 	ListWatches(ctx context.Context, query core.PlaybackQuery) ([]core.PlaybackWatch, error)
 }
 
+type metadataReader interface {
+	Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error)
+	Movie(context.Context, string) (core.MetadataTitle, error)
+	Series(context.Context, string, bool) (core.MetadataSeries, error)
+}
+
+type metadataManager interface {
+	SetKey(context.Context, core.MetadataProviderKind, string) error
+	HasKey(context.Context, core.MetadataProviderKind) (bool, error)
+	RemoveKey(context.Context, core.MetadataProviderKind) error
+}
+
 // Server owns the HTTP listener, mux, and middleware wiring. It holds the
 // dependencies the handlers need and the readiness flag the shutdown sequence
 // flips. It never stores a request context.
@@ -93,6 +106,9 @@ type Server struct {
 	inviteAcceptances     chan struct{}
 	inviteMetrics         telemetry.InviteMetrics
 	playbackReader        playbackReader
+	metadataReader        metadataReader
+	metadataManager       metadataManager
+	requestService        *requestapp.Service
 	clock                 core.Clock
 	oidcProvider          core.OIDCProvider
 	oidcAccounts          core.OIDCAccountStore
@@ -135,6 +151,12 @@ type Deps struct {
 	InviteManager inviteManager
 	// PlaybackReader supplies now-playing and history reads.
 	PlaybackReader playbackReader
+	// MetadataReader supplies provider-backed search and detail reads.
+	MetadataReader metadataReader
+	// MetadataManager supplies write-only provider credential administration.
+	MetadataManager metadataManager
+	// RequestService supplies request profiles, quotas, and request lifecycle policy.
+	RequestService *requestapp.Service
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -259,6 +281,9 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		inviteManager:         deps.InviteManager,
 		inviteMetrics:         telemetry.NopMetrics{},
 		playbackReader:        deps.PlaybackReader,
+		metadataReader:        deps.MetadataReader,
+		metadataManager:       deps.MetadataManager,
+		requestService:        deps.RequestService,
 		mediaOperationTimeout: derivedAuthOperationTimeout(cfg.WriteTimeout),
 		clock:                 deps.Clock,
 		oidcProvider:          deps.OIDC,
@@ -439,6 +464,14 @@ func csrfAuditResource(path string) string {
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
 		return auditResourceInvitePublic
+	case "/api/v1/metadata/providers/tmdb/key":
+		return auditResourceMetadataSettings
+	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
+		return auditResourceRequestProfiles
+	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
+		return auditResourceRequests
+	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
+		return auditResourceRequestQuotas
 	default:
 		return auditResourceRouteUnmatched
 	}

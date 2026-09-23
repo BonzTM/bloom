@@ -1180,6 +1180,16 @@ func TestCrossOriginProtectionMapsExactKnownRoutes(t *testing.T) {
 		{path: "/api/v1/media-servers", resource: auditResourceMediaServers},
 		{path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", resource: auditResourceMediaServers},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", resource: auditResourceMediaServers},
+		{path: "/api/v1/invites", resource: auditResourceInvites},
+		{path: "/api/v1/invite/ABCDEFGHIJKLMNOPQRSTUVWXYZ/accept", resource: auditResourceInvitePublic},
+		{method: http.MethodPut, path: "/api/v1/metadata/providers/tmdb/key", resource: auditResourceMetadataSettings},
+		{path: "/api/v1/request-profiles", resource: auditResourceRequestProfiles},
+		{method: http.MethodPut, path: "/api/v1/request-profiles/33333333-3333-4333-8333-333333333333", resource: auditResourceRequestProfiles},
+		{path: "/api/v1/requests", resource: auditResourceRequests},
+		{path: "/api/v1/requests/33333333-3333-4333-8333-333333333333/approve", resource: auditResourceRequests},
+		{path: "/api/v1/requests/33333333-3333-4333-8333-333333333333/decline", resource: auditResourceRequests},
+		{method: http.MethodPut, path: "/api/v1/roles/33333333-3333-4333-8333-333333333333/request-quota", resource: auditResourceRequestQuotas},
+		{method: http.MethodPut, path: "/api/v1/accounts/33333333-3333-4333-8333-333333333333/request-quota", resource: auditResourceRequestQuotas},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.path, func(t *testing.T) {

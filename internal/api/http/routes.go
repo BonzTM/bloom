@@ -24,14 +24,15 @@ const (
 type apiHandler func(*Server, http.ResponseWriter, *http.Request)
 
 type apiRoute struct {
-	method, path string
-	access       routeAccess
-	permission   core.Permission
-	sessions     bool
-	authRequired bool
-	snapshot     bool
-	oidc         bool
-	handler      apiHandler
+	method, path   string
+	access         routeAccess
+	permission     core.Permission
+	anyPermissions []core.Permission
+	sessions       bool
+	authRequired   bool
+	snapshot       bool
+	oidc           bool
+	handler        apiHandler
 }
 
 var apiRouteInventory = []apiRoute{
@@ -58,6 +59,27 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, handler: (*Server).handleAcceptInvite},
 	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
 	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
+	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSearch},
+	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataMovie},
+	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSeries},
+	{method: http.MethodGet, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMetadataKeyPresence},
+	{method: http.MethodPut, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetMetadataKey},
+	{method: http.MethodDelete, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMetadataKey},
+	{method: http.MethodPost, path: "/api/v1/request-profiles", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateRequestProfile},
+	{method: http.MethodGet, path: "/api/v1/request-profiles", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionAdminSettings}, authRequired: true, handler: (*Server).handleListRequestProfiles},
+	{method: http.MethodPut, path: "/api/v1/request-profiles/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleUpdateRequestProfile},
+	{method: http.MethodDelete, path: "/api/v1/request-profiles/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteRequestProfile},
+	{method: http.MethodPost, path: "/api/v1/requests", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleCreateRequest},
+	{method: http.MethodGet, path: "/api/v1/requests", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true, handler: (*Server).handleListRequests},
+	{method: http.MethodGet, path: "/api/v1/requests/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true, handler: (*Server).handleGetRequest},
+	{method: http.MethodPost, path: "/api/v1/requests/{id}/approve", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true, handler: (*Server).handleApproveRequest},
+	{method: http.MethodPost, path: "/api/v1/requests/{id}/decline", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true, handler: (*Server).handleDeclineRequest},
+	{method: http.MethodGet, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true, handler: (*Server).handleGetRoleRequestQuota},
+	{method: http.MethodPut, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true, handler: (*Server).handleSetRoleRequestQuota},
+	{method: http.MethodDelete, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true, handler: (*Server).handleDeleteRoleRequestQuota},
+	{method: http.MethodGet, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetAccountRequestQuota},
+	{method: http.MethodPut, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetAccountRequestQuota},
+	{method: http.MethodDelete, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteAccountRequestQuota},
 }
 
 func (r apiRoute) usesSessionAccount() bool {
@@ -71,6 +93,17 @@ func (r apiRoute) validate() (core.CatalogPermission, error) {
 	if r.access == routePermission {
 		if !r.authRequired {
 			return core.CatalogPermission{}, fmt.Errorf("permission route %q is not auth-enabled", r.path)
+		}
+		if len(r.anyPermissions) > 0 {
+			if r.permission != "" {
+				return core.CatalogPermission{}, fmt.Errorf("route %q mixes permission modes", r.path)
+			}
+			for _, item := range r.anyPermissions {
+				if _, err := core.NewCatalogPermission(item); err != nil {
+					return core.CatalogPermission{}, err
+				}
+			}
+			return core.CatalogPermission{}, nil
 		}
 		return core.NewCatalogPermission(r.permission)
 	}
@@ -116,6 +149,12 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		if strings.HasPrefix(route.path, "/api/v1/playback") && s.playbackReader == nil {
 			continue
 		}
+		if strings.HasPrefix(route.path, "/api/v1/metadata") && (s.metadataReader == nil || s.metadataManager == nil) {
+			continue
+		}
+		if (strings.HasPrefix(route.path, "/api/v1/request") || strings.Contains(route.path, "/request-quota")) && s.requestService == nil {
+			continue
+		}
 		if _, exists := handlers[route.path]; !exists {
 			paths = append(paths, route.path)
 		}
@@ -156,7 +195,11 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		route.handler(s, w, r)
 	})
 	if route.access == routePermission {
-		handler = s.RequirePermission(permission)(handler)
+		if len(route.anyPermissions) > 0 {
+			handler = s.RequireAnyPermission(route.anyPermissions)(handler)
+		} else {
+			handler = s.RequirePermission(permission)(handler)
+		}
 	}
 	if route.access == routePermission {
 		handler = s.permissionSetMiddleware(handler)

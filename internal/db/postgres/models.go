@@ -29,6 +29,14 @@ type AccountIdentity struct {
 	LastLoginAt   time.Time
 }
 
+type AccountRequestQuota struct {
+	AccountID           string
+	MovieLimit          int32
+	MoviePeriodSeconds  int64
+	SeasonLimit         int32
+	SeasonPeriodSeconds int64
+}
+
 type AccountRole struct {
 	AccountID string
 	RoleID    string
@@ -91,6 +99,57 @@ type MediaServer struct {
 	UpdatedAt            time.Time
 }
 
+type MetadataProvider struct {
+	Kind                 string
+	CredentialCiphertext []byte
+	KeyID                string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+type Request struct {
+	ID                 string
+	Kind               string
+	Provider           string
+	ProviderID         string
+	Title              string
+	ReleaseYear        int32
+	PosterPath         string
+	RequesterAccountID string
+	ProfileID          string
+	Status             string
+	DecisionReason     string
+	DecidedByAccountID sql.NullString
+	DecidedAt          sql.NullTime
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type RequestProfile struct {
+	ID                      string
+	Name                    string
+	AcceptsMovies           bool
+	AcceptsSeries           bool
+	DownloadManagerKind     string
+	DownloadManagerInstance string
+	QualityProfile          string
+	RootFolder              string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+type RequestProfileTag struct {
+	ProfileID string
+	Position  int32
+	Tag       string
+}
+
+type RequestSeason struct {
+	RequestID    string
+	SeasonNumber int32
+	Status       string
+}
+
 type Role struct {
 	ID          string
 	Name        string
@@ -102,6 +161,14 @@ type Role struct {
 type RolePermission struct {
 	RoleID     string
 	Permission string
+}
+
+type RoleRequestQuota struct {
+	RoleID              string
+	MovieLimit          int32
+	MoviePeriodSeconds  int64
+	SeasonLimit         int32
+	SeasonPeriodSeconds int64
 }
 
 type Session struct {
