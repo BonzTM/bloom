@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,12 +13,68 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/BonzTM/bloom/internal/buildinfo"
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
+
+func TestPublicInviteSpansNeverContainCode(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown tracer provider: %v", err)
+		}
+	})
+
+	h := newAuthHarness(t, nil)
+	paths := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/invite/" + testInviteCode},
+		{
+			method: http.MethodPost, path: "/api/v1/invite/" + testInviteCode + "/accept",
+			body: `{"username":"new-user","password":"Th1s-is-a-unique-password!"}`,
+		},
+	}
+	for _, request := range paths {
+		recorder := h.requestWithContentType(t, request.method, request.path, request.body, nil, "application/json")
+		if recorder.Code >= http.StatusBadRequest {
+			t.Fatalf("%s %s = %d: %s", request.method, request.path, recorder.Code, recorder.Body.String())
+		}
+	}
+	spans := exporter.GetSpans()
+	if len(spans) != len(paths) {
+		t.Fatalf("exported spans = %d, want %d", len(spans), len(paths))
+	}
+	if rendered := fmt.Sprintf("%+v", spans); strings.Contains(rendered, testInviteCode) {
+		t.Fatalf("exported span data contains invite code: %s", rendered)
+	}
+	for _, span := range spans {
+		if !strings.Contains(span.Name, "{code}") {
+			t.Errorf("span name = %q, want sanitized route pattern", span.Name)
+		}
+		for _, attribute := range span.Attributes {
+			if string(attribute.Key) != "http.route" {
+				t.Errorf("span %q attribute = %q, want only http.route", span.Name, attribute.Key)
+			}
+		}
+		if len(span.Events) != 0 || len(span.Links) != 0 {
+			t.Errorf("span %q events=%v links=%v, want none", span.Name, span.Events, span.Links)
+		}
+	}
+}
 
 // fakePinger is a hand-rolled Pinger whose outcome a test controls.
 type fakePinger struct {
@@ -47,6 +104,8 @@ type countingMetrics struct {
 	csrf           int
 	auditFailures  int
 	authzDenials   int
+	inviteCreates  []string
+	inviteAccepts  []string
 }
 
 func (m *countingMetrics) IncLoginAttempt(provider, outcome string) {
@@ -78,6 +137,18 @@ func (m *countingMetrics) IncAuthorizationDenial(core.CatalogPermission) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.authzDenials++
+}
+
+func (m *countingMetrics) IncInviteCreation(outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inviteCreates = append(m.inviteCreates, outcome)
+}
+
+func (m *countingMetrics) IncInviteAcceptance(outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inviteAccepts = append(m.inviteAccepts, outcome)
 }
 
 func (m *countingMetrics) authorizationDenialCount() int {
@@ -177,6 +248,12 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/invite/{code}", access: routePublic},
+		{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic},
 	}
 	if len(apiRouteInventory) != len(want) {
 		t.Fatalf("route inventory length = %d, want %d", len(apiRouteInventory), len(want))

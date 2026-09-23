@@ -36,6 +36,8 @@ tags:
     description: Permission-based role information.
   - name: media-servers
     description: Registered media-server connections. Credentials are write-only.
+  - name: invites
+    description: Administrative invite management and public redemption.
 paths:
   /api/v1/version:
     get:
@@ -691,6 +693,121 @@ paths:
         "502": { $ref: "#/components/responses/MediaServerFailure" }
         "503": { $ref: "#/components/responses/MediaServerBusy" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/invites:
+    post:
+      tags: [invites]
+      operationId: createInvite
+      summary: Create an invite for one registered media server.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInviteRequest" }
+      responses:
+        "201": { $ref: "#/components/responses/InviteCreated" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPostGet" }
+    get:
+      tags: [invites]
+      operationId: listInvites
+      summary: List invites newest first.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, default: 50 }
+      responses:
+        "200": { $ref: "#/components/responses/InvitesListed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPostGet" }
+  /api/v1/invites/{id}:
+    get:
+      tags: [invites]
+      operationId: getInvite
+      summary: Return one invite without its one-time code.
+      parameters:
+        - $ref: "#/components/parameters/InviteID"
+      security:
+        - sessionCookie: []
+      responses:
+        "200": { $ref: "#/components/responses/InviteReturned" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGetDelete" }
+    delete:
+      tags: [invites]
+      operationId: revokeInvite
+      summary: Revoke an invite. The record is retained.
+      parameters:
+        - $ref: "#/components/parameters/InviteID"
+      security:
+        - sessionCookie: []
+      responses:
+        "204": { $ref: "#/components/responses/InviteRevoked" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGetDelete" }
+  /api/v1/invite/{code}:
+    get:
+      tags: [invites]
+      operationId: previewInvite
+      summary: Return public rules for an acceptable invite.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/InviteCode"
+      responses:
+        "200": { $ref: "#/components/responses/InvitePreviewed" }
+        "404": { $ref: "#/components/responses/PublicInviteNotFound" }
+        "429": { $ref: "#/components/responses/PublicInviteRateLimited" }
+        "500": { $ref: "#/components/responses/PublicInternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/invite/{code}/accept:
+    post:
+      tags: [invites]
+      operationId: acceptInvite
+      summary: Create a Jellyfin user and apply this invite's library access.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/InviteCode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcceptInviteRequest" }
+      responses:
+        "201": { $ref: "#/components/responses/InviteAccepted" }
+        "403": { $ref: "#/components/responses/PublicForbidden" }
+        "404": { $ref: "#/components/responses/PublicInviteNotFound" }
+        "409": { $ref: "#/components/responses/PublicConflict" }
+        "415": { $ref: "#/components/responses/PublicUnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/PublicValidationFailed" }
+        "429": { $ref: "#/components/responses/PublicInviteRateLimited" }
+        "500": { $ref: "#/components/responses/PublicInternalError" }
+        "502": { $ref: "#/components/responses/PublicMediaServerFailure" }
+        "503": { $ref: "#/components/responses/PublicMediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPost" }
 components:
   parameters:
     MediaServerID:
@@ -698,6 +815,16 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    InviteID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    InviteCode:
+      name: code
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Z2-7]{26}$" }
   headers:
     CacheControlNoStore:
       description: Prevents storage of a response that touched browser-session state.
@@ -735,6 +862,92 @@ components:
         type: string
         format: uri-reference
   responses:
+    InviteCreated:
+      description: Invite created. The plaintext code is returned only in this response.
+      headers: &AuthenticatedHeaders
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CreateInviteResponse" }
+    InvitesListed:
+      description: At most 100 invites ordered newest first.
+      headers: *AuthenticatedHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/InvitesResponse" }
+    InviteReturned:
+      description: Invite metadata without its one-time plaintext code.
+      headers: *AuthenticatedHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Invite" }
+    InviteRevoked:
+      description: Invite revoked and retained.
+      headers: *AuthenticatedHeaders
+    InvitePreviewed:
+      description: Public server name and validation rules for an acceptable invite.
+      headers: &PublicHeaders
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PublicInviteResponse" }
+    InviteAccepted:
+      description: Jellyfin user created and library access applied.
+      headers: *PublicHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AcceptInviteResponse" }
+    PublicInviteNotFound:
+      description: Opaque response for an unknown, expired, exhausted, or revoked invite.
+      headers: *PublicHeaders
+      content: &ErrorContent
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    PublicForbidden:
+      description: Cross-origin request rejected by CSRF protection.
+      headers: *PublicHeaders
+      content: *ErrorContent
+    PublicConflict:
+      description: The requested Jellyfin username is unavailable.
+      headers: *PublicHeaders
+      content: *ErrorContent
+    PublicUnsupportedMediaType:
+      description: The acceptance request is not JSON.
+      headers: *PublicHeaders
+      content: *ErrorContent
+    PublicValidationFailed:
+      description: The acceptance body or fields are invalid.
+      headers: *PublicHeaders
+      content: *ErrorContent
+    PublicInviteRateLimited:
+      description: The client-IP or invite-code rate limit was exceeded.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content: *ErrorContent
+    PublicInternalError:
+      description: Opaque internal failure.
+      headers: *PublicHeaders
+      content: *ErrorContent
+    PublicMediaServerFailure:
+      description: Opaque Jellyfin failure. Transient failures may include Retry-After.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content: *ErrorContent
+    PublicMediaServerBusy:
+      description: The outbound or acceptance concurrency limit is full.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content: *ErrorContent
     MediaServerCreated:
       description: The connection was proved and stored with its credential encrypted.
       headers:
@@ -803,7 +1016,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     Forbidden:
-      description: The account lacks `admin.settings`, or the request was rejected as `csrf_rejected`.
+      description: The account lacks the required permission, or the request was rejected as `csrf_rejected`.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -813,7 +1026,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     NotFound:
-      description: The registered media server does not exist.
+      description: The requested resource does not exist.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -960,6 +1173,104 @@ components:
       in: cookie
       name: bloom_session
   schemas:
+    InviteStatus:
+      type: string
+      enum: [active, expired, exhausted, revoked]
+    Invite:
+      type: object
+      required: [id, media_server_id, label, use_count, library_ids, status, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        media_server_id: { type: string, format: uuid }
+        label:
+          type: string
+          minLength: 1
+          x-max-bytes: 100
+        expires_at: { type: string, format: date-time }
+        max_uses: { type: integer, minimum: 1, maximum: 1000 }
+        use_count: { type: integer, minimum: 0 }
+        library_ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { type: string, minLength: 1, x-max-bytes: 128 }
+          description: Empty means all libraries.
+        status: { $ref: "#/components/schemas/InviteStatus" }
+        created_at: { type: string, format: date-time }
+    CreateInviteRequest:
+      type: object
+      required: [media_server_id, label]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        label:
+          type: string
+          minLength: 1
+          x-max-bytes: 100
+        expires_at: { type: string, format: date-time }
+        max_uses: { type: integer, minimum: 1, maximum: 1000 }
+        library_ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items: { type: string, minLength: 1, x-max-bytes: 128 }
+          description: Omit or provide an empty array to grant all libraries.
+    CreateInviteResponse:
+      type: object
+      required: [invite, code, accept_path]
+      additionalProperties: false
+      properties:
+        invite: { $ref: "#/components/schemas/Invite" }
+        code:
+          type: string
+          pattern: "^[A-Z2-7]{26}$"
+          description: Returned once. Only its SHA-256 digest is retained.
+        accept_path:
+          type: string
+          pattern: "^/invite/[A-Z2-7]{26}$"
+    InvitesResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/Invite" }
+        next_cursor: { type: string, maxLength: 128 }
+    PublicInviteResponse:
+      type: object
+      required: [media_server_name, username_rule, password_rule]
+      additionalProperties: false
+      properties:
+        media_server_name: { type: string, minLength: 1 }
+        username_rule: { type: string, minLength: 1 }
+        password_rule: { type: string, minLength: 1 }
+    AcceptInviteRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 1
+          x-max-bytes: 64
+          description: Jellyfin-compatible username with no surrounding whitespace or control characters; `.` and `..` are invalid.
+        password:
+          type: string
+          format: password
+          minLength: 15
+          maxLength: 1024
+          x-max-bytes: 4096
+          writeOnly: true
+    AcceptInviteResponse:
+      type: object
+      required: [media_server_name, username]
+      additionalProperties: false
+      properties:
+        media_server_name: { type: string, minLength: 1 }
+        username: { type: string, minLength: 1, x-max-bytes: 64 }
     MediaServerKind:
       type: string
       enum: [jellyfin]
@@ -1261,6 +1572,7 @@ components:
         - forbidden
         - media_server_failure
         - oidc_rejected
+        - username_unavailable
     OIDCCallbackErrorCode:
       type: string
       description: Closed browser-facing OIDC callback failure code set.

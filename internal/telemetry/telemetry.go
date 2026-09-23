@@ -84,6 +84,12 @@ type AuthorizationMetrics interface {
 	IncAuthorizationDenial(permission core.CatalogPermission)
 }
 
+// InviteMetrics records bounded invite outcomes.
+type InviteMetrics interface {
+	IncInviteCreation(outcome string)
+	IncInviteAcceptance(outcome string)
+}
+
 // NopMetrics is the default no-op metrics implementation.
 type NopMetrics struct{}
 
@@ -101,6 +107,12 @@ func (NopMetrics) IncAuditWriteFailure() {}
 
 // IncAuthorizationDenial does nothing.
 func (NopMetrics) IncAuthorizationDenial(core.CatalogPermission) {}
+
+// IncInviteCreation does nothing.
+func (NopMetrics) IncInviteCreation(string) {}
+
+// IncInviteAcceptance does nothing.
+func (NopMetrics) IncInviteAcceptance(string) {}
 
 // IncSessionCleanupFailure does nothing.
 func (NopMetrics) IncSessionCleanupFailure() {}

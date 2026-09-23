@@ -39,6 +39,45 @@ type AccountUsernameMigrationBackup struct {
 	OriginalUsername string
 }
 
+type Invite struct {
+	ID                 string
+	MediaServerID      string
+	CreatedByAccountID string
+	CodeHash           []byte
+	Label              string
+	ExpiresAt          sql.NullString
+	MaxUses            sql.NullInt64
+	UseCount           int64
+	RevokedAt          sql.NullString
+	CreatedAt          string
+	UpdatedAt          string
+}
+
+type InviteLibrary struct {
+	InviteID  string
+	LibraryID string
+}
+
+type InviteProvisioningFailure struct {
+	ID            string
+	InviteID      string
+	MediaServerID string
+	MediaUserID   sql.NullString
+	Username      string
+	Reason        string
+	CreatedAt     string
+	UpdatedAt     string
+}
+
+type InviteRedemption struct {
+	ID            string
+	InviteID      string
+	MediaServerID string
+	MediaUserID   string
+	Username      string
+	RedeemedAt    string
+}
+
 type MediaServer struct {
 	ID                   string
 	Kind                 string

@@ -3,6 +3,7 @@ package jellyfin
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/BonzTM/bloom/internal/core"
@@ -21,6 +23,7 @@ import (
 
 const (
 	maxResponseBytes = 1 << 20
+	maxUsers         = 10000
 	defaultTimeout   = 10 * time.Second
 )
 
@@ -54,7 +57,10 @@ type Client struct {
 	now           func() time.Time
 }
 
-var _ core.MediaServerAdapter = (*Client)(nil)
+var (
+	_ core.MediaServerAdapter   = (*Client)(nil)
+	_ core.MediaUserProvisioner = (*Client)(nil)
+)
 
 // New validates cfg and returns a bounded Jellyfin client.
 func New(cfg Config) (*Client, error) {
@@ -142,6 +148,154 @@ func (c *Client) ListLibraries(ctx context.Context) ([]core.Library, error) {
 	}
 	c.observe("list_libraries", "success", started)
 	return libraries, nil
+}
+
+// CreateUser creates one Jellyfin user. POST /Users/New is not idempotent and
+// is deliberately attempted once even when the response is unavailable.
+func (c *Client) CreateUser(ctx context.Context, name, password string) (core.MediaUser, error) {
+	request := jellyfinapi.CreateUserByName{Name: name, Password: &password}
+	body, err := json.Marshal(request) //nolint:gosec // Required one-use upstream credential body; cleared below.
+	if err != nil {
+		return core.MediaUser{}, mediaError("create_user", core.MediaServerMalformed, err)
+	}
+	defer clear(body)
+	response, started, err := c.doOnce(ctx, "create_user", http.MethodPost, "/Users/New", body)
+	if err != nil {
+		return c.reconcileAmbiguousCreate(ctx, name, err)
+	}
+	var dto jellyfinapi.UserDto
+	if err := json.Unmarshal(response, &dto); err != nil || dto.Id == nil || dto.Name == nil || *dto.Name == "" {
+		c.observe("create_user", "malformed", started)
+		malformed := mediaError("create_user", core.MediaServerMalformed, errors.New("missing user identity"))
+		return c.reconcileAmbiguousCreate(ctx, name, malformed)
+	}
+	c.observe("create_user", "success", started)
+	return core.MediaUser{ID: dto.Id.String(), Name: *dto.Name}, nil
+}
+
+func (c *Client) reconcileAmbiguousCreate(ctx context.Context, name string, createErr error) (core.MediaUser, error) {
+	if !ambiguousCreateError(createErr) {
+		return core.MediaUser{}, createErr
+	}
+	lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.callTimeout)
+	defer cancel()
+	user, found, err := c.findUserByName(lookupCtx, name)
+	if err != nil {
+		return core.MediaUser{}, errors.Join(core.ErrMediaUserCreateAmbiguous, createErr, err)
+	}
+	if found {
+		return user, errors.Join(core.ErrMediaUserCreateAmbiguous, createErr)
+	}
+	return core.MediaUser{}, createErr
+}
+
+func ambiguousCreateError(err error) bool {
+	var mediaErr *core.MediaServerError
+	return errors.As(err, &mediaErr) &&
+		(mediaErr.Kind == core.MediaServerUnavailable || mediaErr.Kind == core.MediaServerMalformed)
+}
+
+func (c *Client) findUserByName(ctx context.Context, name string) (core.MediaUser, bool, error) {
+	var users []jellyfinapi.UserDto
+	started, err := c.getJSON(ctx, "list_users", "/Users", &users)
+	if err != nil {
+		return core.MediaUser{}, false, err
+	}
+	if len(users) > maxUsers {
+		c.observe("list_users", "malformed", started)
+		return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("user count exceeds limit"))
+	}
+	for _, user := range users {
+		if user.Name == nil || *user.Name != name {
+			continue
+		}
+		if user.Id == nil || !core.ValidID(user.Id.String()) {
+			c.observe("list_users", "malformed", started)
+			return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("missing user identity"))
+		}
+		c.observe("list_users", "success", started)
+		return core.MediaUser{ID: user.Id.String(), Name: *user.Name}, true, nil
+	}
+	c.observe("list_users", "success", started)
+	return core.MediaUser{}, false, nil
+}
+
+// SetLibraryAccess reads the current whole policy, changes only folder access,
+// and posts the complete policy because Jellyfin treats policy updates as replace.
+func (c *Client) SetLibraryAccess(ctx context.Context, userID string, libraryIDs []string, all bool) error {
+	if !core.ValidID(userID) {
+		return core.ErrInvalidArgument
+	}
+	var dto jellyfinapi.UserDto
+	started, err := c.getJSON(ctx, "get_user_policy", "/Users/"+url.PathEscape(userID), &dto)
+	if err != nil {
+		return err
+	}
+	if dto.Policy == nil {
+		c.observe("get_user_policy", "malformed", started)
+		return mediaError("get_user_policy", core.MediaServerMalformed, errors.New("missing user policy"))
+	}
+	c.observe("get_user_policy", "success", started)
+	folders, err := jellyfinUUIDs(libraryIDs)
+	if err != nil {
+		return err
+	}
+	dto.Policy.EnableAllFolders = &all
+	dto.Policy.EnabledFolders = &folders
+	body, err := json.Marshal(dto.Policy)
+	if err != nil {
+		return mediaError("set_library_access", core.MediaServerMalformed, err)
+	}
+	_, started, err = c.doWithRetry(ctx, "set_library_access", http.MethodPost,
+		"/Users/"+url.PathEscape(userID)+"/Policy", body)
+	if err == nil {
+		c.observe("set_library_access", "success", started)
+	}
+	return err
+}
+
+// DeleteUser removes a Jellyfin user and may be retried because deletion is idempotent.
+func (c *Client) DeleteUser(ctx context.Context, userID string) error {
+	if !core.ValidID(userID) {
+		return core.ErrInvalidArgument
+	}
+	_, started, err := c.doWithRetry(ctx, "delete_user", http.MethodDelete, "/Users/"+url.PathEscape(userID), nil)
+	if isMediaNotFound(err) {
+		return nil
+	}
+	if err == nil {
+		c.observe("delete_user", "success", started)
+	}
+	return err
+}
+
+func isMediaNotFound(err error) bool {
+	var mediaErr *core.MediaServerError
+	return errors.As(err, &mediaErr) && mediaErr.Kind == core.MediaServerNotFound
+}
+
+func jellyfinUUIDs(values []string) ([]openapi_types.UUID, error) {
+	result := make([]openapi_types.UUID, 0, len(values))
+	for _, value := range values {
+		parsed, err := jellyfinUUID(value)
+		if err != nil {
+			return nil, mediaError("set_library_access", core.MediaServerMalformed, err)
+		}
+		result = append(result, parsed)
+	}
+	return result, nil
+}
+
+func jellyfinUUID(value string) (openapi_types.UUID, error) {
+	if !core.ValidID(value) {
+		return openapi_types.UUID{}, core.ErrInvalidArgument
+	}
+	var parsed openapi_types.UUID
+	compact := strings.ReplaceAll(value, "-", "")
+	if _, err := hex.Decode(parsed[:], []byte(compact)); err != nil {
+		return openapi_types.UUID{}, fmt.Errorf("decode Jellyfin UUID: %w", err)
+	}
+	return parsed, nil
 }
 
 // Capabilities returns Jellyfin's known optional-operation support.

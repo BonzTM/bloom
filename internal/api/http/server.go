@@ -17,6 +17,7 @@ import (
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
+	inviteapp "github.com/BonzTM/bloom/internal/invite"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
@@ -38,6 +39,18 @@ type mediaServerManager interface {
 	Register(ctx context.Context, kind core.MediaServerKind, name, baseURL, credential string, allowInsecure bool) (core.MediaServerConnection, error)
 	Probe(ctx context.Context, id string) (core.ServerInfo, error)
 	Delete(ctx context.Context, id string) (core.MediaServer, error)
+}
+
+type inviteReader interface {
+	List(ctx context.Context, after *core.InviteCursor, pageSize int) ([]core.Invite, error)
+	Get(ctx context.Context, id string) (core.Invite, error)
+	Preview(ctx context.Context, code string) (inviteapp.Preview, error)
+}
+
+type inviteManager interface {
+	Create(ctx context.Context, input inviteapp.CreateInput) (inviteapp.Created, error)
+	Revoke(ctx context.Context, id string) (core.Invite, error)
+	Accept(ctx context.Context, code, username, password string) (inviteapp.Accepted, error)
 }
 
 // Server owns the HTTP listener, mux, and middleware wiring. It holds the
@@ -70,6 +83,11 @@ type Server struct {
 	roles                 core.RoleReader
 	mediaServerReader     mediaServerReader
 	mediaServerManager    mediaServerManager
+	inviteReader          inviteReader
+	inviteManager         inviteManager
+	inviteLimiter         *loginLimiter
+	inviteAcceptances     chan struct{}
+	inviteMetrics         telemetry.InviteMetrics
 	clock                 core.Clock
 	oidcProvider          core.OIDCProvider
 	oidcAccounts          core.OIDCAccountStore
@@ -106,6 +124,10 @@ type Deps struct {
 	MediaServerReader mediaServerReader
 	// MediaServerManager supplies registered-server changes and probes.
 	MediaServerManager mediaServerManager
+	// InviteReader supplies invite administration and public reads.
+	InviteReader inviteReader
+	// InviteManager supplies invite creation, revocation, and acceptance.
+	InviteManager inviteManager
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -131,7 +153,6 @@ type Deps struct {
 
 // metricsExposer is the optional seam a Metrics implementation can satisfy to
 // publish a scrape endpoint. The Prometheus adapter implements it; the no-op
-// seam does not, so /metrics is mounted only when a real registry is wired.
 type metricsExposer interface {
 	Handler() http.Handler
 }
@@ -227,6 +248,9 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		roles:                 deps.Roles,
 		mediaServerReader:     deps.MediaServerReader,
 		mediaServerManager:    deps.MediaServerManager,
+		inviteReader:          deps.InviteReader,
+		inviteManager:         deps.InviteManager,
+		inviteMetrics:         telemetry.NopMetrics{},
 		mediaOperationTimeout: derivedAuthOperationTimeout(cfg.WriteTimeout),
 		clock:                 deps.Clock,
 		oidcProvider:          deps.OIDC,
@@ -252,6 +276,13 @@ func (s *Server) configureAuthentication(writeTimeout time.Duration, deps Deps) 
 		s.oidcExchanges = make(chan struct{}, oidcMaxConcurrentExchanges)
 		s.authOperationTimeout = derivedAuthOperationTimeout(writeTimeout)
 	}
+	if deps.InviteReader != nil && deps.InviteManager != nil && deps.Clock != nil {
+		s.inviteLimiter = newLoginLimiter(
+			deps.Clock, deps.Auth.LoginRateRefillInterval,
+			deps.Auth.LoginRateBurst, deps.Auth.LoginRateMaxKeys,
+		)
+		s.inviteAcceptances = make(chan struct{}, deps.Auth.LoginMaxConcurrent)
+	}
 }
 
 func (s *Server) configureMetrics(metrics telemetry.Metrics) {
@@ -260,6 +291,9 @@ func (s *Server) configureMetrics(metrics telemetry.Metrics) {
 	}
 	if metrics, ok := metrics.(telemetry.AuthorizationMetrics); ok {
 		s.authorizationMetrics = metrics
+	}
+	if metrics, ok := metrics.(telemetry.InviteMetrics); ok {
+		s.inviteMetrics = metrics
 	}
 	if exposer, ok := metrics.(metricsExposer); ok {
 		s.metricsHandler = exposer.Handler()
@@ -328,7 +362,7 @@ func (s *Server) routes() http.Handler {
 	var apiHandler http.Handler = apiMux
 	apiHandler = httputil.MaxBytes(s.maxBodyBytes)(apiHandler)
 	apiHandler = loggingMiddleware(s.logger, s.metrics)(apiHandler)
-	apiHandler = otelhttp.NewHandler(apiHandler, "http.server")
+	apiHandler = otelhttp.NewHandler(apiHandler, "http.server", otelhttp.WithFilter(traceGeneralAPIRequest))
 
 	probeMux := http.NewServeMux()
 	probeMux.HandleFunc("GET /livez", s.handleLivez)
@@ -354,6 +388,10 @@ func (s *Server) routes() http.Handler {
 	h = securityHeadersMiddleware(h)
 	h = requestIDMiddleware(h)
 	return h
+}
+
+func traceGeneralAPIRequest(r *http.Request) bool {
+	return !strings.HasPrefix(r.URL.Path, "/api/v1/invite/")
 }
 
 func (s *Server) sessionHandler(handler http.Handler, accountRequired bool) http.Handler {
@@ -389,6 +427,10 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
 		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
 		return auditResourceMediaServers
+	case "/api/v1/invites", "/api/v1/invites/{id}":
+		return auditResourceInvites
+	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
+		return auditResourceInvitePublic
 	default:
 		return auditResourceRouteUnmatched
 	}
@@ -404,8 +446,12 @@ func inventoryPattern(path string) string {
 }
 
 func routePathMatches(pattern, path string) bool {
-	const parameter = "{id}"
-	prefix, suffix, found := strings.Cut(pattern, parameter)
+	open := strings.IndexByte(pattern, '{')
+	close := strings.IndexByte(pattern, '}')
+	if open < 0 || close < open {
+		return path == pattern
+	}
+	prefix, suffix, found := strings.Cut(pattern, pattern[open:close+1])
 	if !found {
 		return path == pattern
 	}

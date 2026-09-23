@@ -34,6 +34,7 @@ const (
 	codeForbidden            = "forbidden"
 	codeMediaServerFailure   = "media_server_failure"
 	codeOIDCRejected         = "oidc_rejected"
+	codeUsernameUnavailable  = "username_unavailable"
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -42,6 +43,12 @@ const (
 // calling writeError, which calls this.
 func errorClass(err error) (status int, code string) {
 	switch {
+	case errors.Is(err, core.ErrInviteProvisioningPending):
+		return http.StatusBadGateway, codeMediaServerFailure
+	case isMediaUserNameError(err):
+		return http.StatusConflict, codeUsernameUnavailable
+	case errors.Is(err, core.ErrInviteUnavailable):
+		return http.StatusNotFound, codeNotFound
 	case isMediaServerErrorKind(err, core.MediaServerSaturated):
 		return http.StatusServiceUnavailable, codeUnavailable
 	case isMediaServerError(err):
@@ -77,6 +84,11 @@ func errorClass(err error) (status int, code string) {
 	default:
 		return http.StatusInternalServerError, codeInternal
 	}
+}
+
+func isMediaUserNameError(err error) bool {
+	var nameErr *core.MediaUserNameError
+	return errors.As(err, &nameErr)
 }
 
 func isMediaServerError(err error) bool {
@@ -129,6 +141,9 @@ func writeError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 // opaque: the detail goes to the boundary log under the request_id, never the
 // body.
 func safeMessage(status int, err error) string {
+	if errors.Is(err, core.ErrInviteUnavailable) {
+		return core.ErrInviteUnavailable.Error()
+	}
 	if status >= http.StatusInternalServerError {
 		return http.StatusText(status)
 	}

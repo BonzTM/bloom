@@ -186,6 +186,34 @@ Use `GET /api/v1/media-servers` to list registrations. Use
 `GET /api/v1/media-servers/{id}/libraries` to list its libraries. Deleting a
 registration removes its encrypted credential.
 
+### Invites
+
+An account with `users.invite` can create an invite with
+`POST /api/v1/invites`. Each invite targets one registered media server. It can
+have an optional future expiry, a limit of 1 through 1000 uses, and either all
+libraries or an explicit selection from that server. The create response is the
+only response that contains the 26-character invite code. Copy and share its
+`accept_path` immediately. Bloom stores only a SHA-256 digest of the code and
+cannot recover it later.
+
+Use `GET /api/v1/invites` to review status and use counts. Use
+`DELETE /api/v1/invites/{id}` to revoke an invite. Revocation retains the invite
+and its redemption history; Bloom does not offer invite deletion.
+
+The recipient opens `/invite/<code>` and chooses a Jellyfin username and
+password. Usernames must be 1 through 64 UTF-8 bytes, must not have leading or
+trailing whitespace or control characters, and otherwise follow Jellyfin's
+username character rule. Passwords must contain 15 through 1024 Unicode
+characters, must not exceed 4096 UTF-8 bytes, and must not appear in Bloom's
+offline common-password denylist. Bloom sends the password to Jellyfin for user
+creation. It never stores, logs, or audits the password.
+
+Bloom applies the invite's library access immediately after creating the
+Jellyfin user. If that update fails, Bloom deletes the new user and returns an
+upstream failure. A used, expired, exhausted, revoked, or unknown code returns
+the same public not-found response. A username that Jellyfin rejects as taken
+or invalid returns a conflict response.
+
 ### Back up the master secret
 
 Back up `BLOOM_SECRET_KEY` with the database and keep it stable across restarts,
@@ -274,6 +302,9 @@ links on both engines. Migration `00009_account_role_sources` adds `manual` and
 both before the new binary receives traffic. Their down migrations restore the
 prior schema. Rolling back `00009` collapses duplicate manual/OIDC grants to one
 effective assignment, so preserve a backup if the provenance must be restored.
+Migration `00010_invites` adds invite metadata, library selections, and
+redemption records on both engines. Its down migration removes those records,
+so back up the database before schema rollback when invite history matters.
 
 ### Upgrading existing accounts to roles
 

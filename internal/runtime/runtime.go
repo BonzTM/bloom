@@ -25,6 +25,7 @@ import (
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
+	inviteapp "github.com/BonzTM/bloom/internal/invite"
 	"github.com/BonzTM/bloom/internal/mediaserver"
 	oidcadapter "github.com/BonzTM/bloom/internal/oidc"
 	"github.com/BonzTM/bloom/internal/secrets"
@@ -119,40 +120,75 @@ func runService(
 	if bootstrapErr := bootstrapFirstAdmin(ctx, cfg, auditSink, pool, logger, clock); bootstrapErr != nil {
 		return bootstrapErr
 	}
-	accounts, localIdentities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
+	wiring, err := wireServiceDependencies(ctx, pool, cfg, logger, metrics, deps, &ownership)
 	if err != nil {
 		return err
 	}
-	mediaServers, err := mediaServerDependencies(pool, cfg, metrics, clock)
-	if err != nil {
-		return err
-	}
-	ownership.media = mediaServers
-	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
-		return roleErr
-	}
-	oidcProvider, oidcAccounts, oidcFlows, err := oidcDependencies(ctx, pool, cfg, metrics, deps)
-	if err != nil {
-		return err
-	}
-	ownership.provider = oidcProvider
 	srv, err := assembleHTTPServer(
 		cfg, auditSink, logger, metrics, pool,
-		accounts, localIdentities, authorizer, roles, sessions, mediaServers, clock,
-		oidcProvider, oidcAccounts, oidcFlows,
+		wiring.accounts, wiring.localIdentities, wiring.authorizer, wiring.roles, wiring.sessions,
+		wiring.mediaServers, wiring.invites, clock,
+		wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows,
 	)
 	if err != nil {
 		return err
 	}
 
 	serving, err := serve(
-		ctx, srv, oidcProvider, mediaServers, pool, tracerProvider, logger, cfg.ShutdownGrace,
+		ctx, srv, wiring.oidcProvider, wiring.mediaServers, pool, tracerProvider, logger, cfg.ShutdownGrace,
 		deps.ListenerReady, deps.listen,
 	)
 	if serving {
 		ownership.transferred = true
 	}
 	return err
+}
+
+type serviceWiring struct {
+	accounts        core.AccountStore
+	localIdentities core.LocalIdentityStore
+	authorizer      core.Authorizer
+	roles           core.RoleReader
+	sessions        *scs.SessionManager
+	mediaServers    *mediaserver.Service
+	invites         *inviteapp.Service
+	oidcProvider    oidcLifecycle
+	oidcAccounts    core.OIDCAccountStore
+	oidcFlows       core.OIDCFlowStore
+}
+
+func wireServiceDependencies(
+	ctx context.Context, pool *sql.DB, cfg config.Config, logger *slog.Logger,
+	metrics *telemetry.PromMetrics, deps Dependencies, ownership *startupOwnership,
+) (serviceWiring, error) {
+	accounts, identities, authorizer, roles, sessions, err := authDependencies(
+		pool, cfg, metrics, logger, deps.Clock,
+	)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	mediaServers, err := mediaServerDependencies(pool, cfg, metrics, deps.Clock)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	ownership.media = mediaServers
+	invites, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
+		return serviceWiring{}, roleErr
+	}
+	provider, oidcAccounts, oidcFlows, err := oidcDependencies(ctx, pool, cfg, metrics, deps)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	ownership.provider = provider
+	return serviceWiring{
+		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
+		sessions: sessions, mediaServers: mediaServers, invites: invites,
+		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
+	}, nil
 }
 
 type startupOwnership struct {
@@ -258,6 +294,7 @@ func assembleHTTPServer(
 	roles core.RoleReader,
 	sessions *scs.SessionManager,
 	mediaServers *mediaserver.Service,
+	invites *inviteapp.Service,
 	clock core.Clock,
 	oidcProvider core.OIDCProvider,
 	oidcAccounts core.OIDCAccountStore,
@@ -280,6 +317,8 @@ func assembleHTTPServer(
 		Roles:               roles,
 		MediaServerReader:   mediaServers,
 		MediaServerManager:  mediaServers,
+		InviteReader:        invites,
+		InviteManager:       invites,
 		Sessions:            sessions,
 		Audit:               audit,
 		AuditCorrelationKey: cfg.SecretKey.Bytes(),
@@ -291,6 +330,20 @@ func assembleHTTPServer(
 		OIDCConfig:          cfg.OIDC,
 		PublicURL:           cfg.PublicURL,
 	}), nil
+}
+
+func inviteDependencies(
+	pool *sql.DB, cfg config.Config, mediaServers *mediaserver.Service, clock core.Clock,
+) (*inviteapp.Service, error) {
+	reader, store, err := db.NewInviteStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build invite stores: %w", err)
+	}
+	service, err := inviteapp.NewService(reader, store, mediaServers, mediaServers, clock)
+	if err != nil {
+		return nil, fmt.Errorf("build invite service: %w", err)
+	}
+	return service, nil
 }
 
 func mediaServerDependencies(

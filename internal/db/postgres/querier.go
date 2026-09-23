@@ -20,6 +20,8 @@ type Querier interface {
 	// engine-specific. Regenerate with: go tool sqlc generate.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
 	CreateAccountIdentity(ctx context.Context, arg CreateAccountIdentityParams) error
+	CreateInvite(ctx context.Context, arg CreateInviteParams) error
+	CreateInviteLibrary(ctx context.Context, arg CreateInviteLibraryParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
 	CreateMediaServer(ctx context.Context, arg CreateMediaServerParams) error
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
@@ -28,14 +30,24 @@ type Querier interface {
 	// OIDC identity queries are shared by SQLite and PostgreSQL.
 	GetAccountIdentity(ctx context.Context, arg GetAccountIdentityParams) (GetAccountIdentityRow, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
+	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
+	GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
+	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
+	InsertInviteProvisioningFailure(ctx context.Context, arg InsertInviteProvisioningFailureParams) error
+	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
+	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
+	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
+	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	UpdateAccountIdentityLogin(ctx context.Context, arg UpdateAccountIdentityLoginParams) (int64, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
 }

@@ -31,14 +31,20 @@ func (e *retryAfterError) Error() string { return e.err.Error() }
 func (e *retryAfterError) Unwrap() error { return e.err }
 
 func (c *Client) getWithRetry(ctx context.Context, operation, path string) ([]byte, time.Time, error) {
+	return c.doWithRetry(ctx, operation, http.MethodGet, path, nil)
+}
+
+func (c *Client) doWithRetry(
+	ctx context.Context, operation, method, path string, body []byte,
+) ([]byte, time.Time, error) {
 	operationCtx, cancel := context.WithTimeout(ctx, c.callTimeout)
 	defer cancel()
 	var last error
 	for attempt := range maxAttempts {
 		started := c.now()
-		body, retry, err := c.getAttempt(operationCtx, operation, path, started)
+		response, retry, err := c.requestAttempt(operationCtx, operation, method, path, body, started)
 		if err == nil {
-			return body, started, nil
+			return response, started, nil
 		}
 		last = err
 		if !retry {
@@ -59,6 +65,16 @@ func (c *Client) getWithRetry(ctx context.Context, operation, path string) ([]by
 		}
 	}
 	return nil, time.Time{}, last
+}
+
+func (c *Client) doOnce(
+	ctx context.Context, operation, method, path string, body []byte,
+) ([]byte, time.Time, error) {
+	operationCtx, cancel := context.WithTimeout(ctx, c.callTimeout)
+	defer cancel()
+	started := c.now()
+	response, _, err := c.requestAttempt(operationCtx, operation, method, path, body, started)
+	return response, started, err
 }
 
 func retryableStatus(status int) bool {

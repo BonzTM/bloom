@@ -4,6 +4,7 @@
 package jellyfinapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -268,31 +269,73 @@ func (e CollectionTypeOptions) Valid() bool {
 
 // Defines values for DayOfWeek.
 const (
-	Friday    DayOfWeek = "Friday"
-	Monday    DayOfWeek = "Monday"
-	Saturday  DayOfWeek = "Saturday"
-	Sunday    DayOfWeek = "Sunday"
-	Thursday  DayOfWeek = "Thursday"
-	Tuesday   DayOfWeek = "Tuesday"
-	Wednesday DayOfWeek = "Wednesday"
+	DayOfWeekFriday    DayOfWeek = "Friday"
+	DayOfWeekMonday    DayOfWeek = "Monday"
+	DayOfWeekSaturday  DayOfWeek = "Saturday"
+	DayOfWeekSunday    DayOfWeek = "Sunday"
+	DayOfWeekThursday  DayOfWeek = "Thursday"
+	DayOfWeekTuesday   DayOfWeek = "Tuesday"
+	DayOfWeekWednesday DayOfWeek = "Wednesday"
 )
 
 // Valid indicates whether the value is a known member of the DayOfWeek enum.
 func (e DayOfWeek) Valid() bool {
 	switch e {
-	case Friday:
+	case DayOfWeekFriday:
 		return true
-	case Monday:
+	case DayOfWeekMonday:
 		return true
-	case Saturday:
+	case DayOfWeekSaturday:
 		return true
-	case Sunday:
+	case DayOfWeekSunday:
 		return true
-	case Thursday:
+	case DayOfWeekThursday:
 		return true
-	case Tuesday:
+	case DayOfWeekTuesday:
 		return true
-	case Wednesday:
+	case DayOfWeekWednesday:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DynamicDayOfWeek.
+const (
+	DynamicDayOfWeekEveryday  DynamicDayOfWeek = "Everyday"
+	DynamicDayOfWeekFriday    DynamicDayOfWeek = "Friday"
+	DynamicDayOfWeekMonday    DynamicDayOfWeek = "Monday"
+	DynamicDayOfWeekSaturday  DynamicDayOfWeek = "Saturday"
+	DynamicDayOfWeekSunday    DynamicDayOfWeek = "Sunday"
+	DynamicDayOfWeekThursday  DynamicDayOfWeek = "Thursday"
+	DynamicDayOfWeekTuesday   DynamicDayOfWeek = "Tuesday"
+	DynamicDayOfWeekWednesday DynamicDayOfWeek = "Wednesday"
+	DynamicDayOfWeekWeekday   DynamicDayOfWeek = "Weekday"
+	DynamicDayOfWeekWeekend   DynamicDayOfWeek = "Weekend"
+)
+
+// Valid indicates whether the value is a known member of the DynamicDayOfWeek enum.
+func (e DynamicDayOfWeek) Valid() bool {
+	switch e {
+	case DynamicDayOfWeekEveryday:
+		return true
+	case DynamicDayOfWeekFriday:
+		return true
+	case DynamicDayOfWeekMonday:
+		return true
+	case DynamicDayOfWeekSaturday:
+		return true
+	case DynamicDayOfWeekSunday:
+		return true
+	case DynamicDayOfWeekThursday:
+		return true
+	case DynamicDayOfWeekTuesday:
+		return true
+	case DynamicDayOfWeekWednesday:
+		return true
+	case DynamicDayOfWeekWeekday:
+		return true
+	case DynamicDayOfWeekWeekend:
 		return true
 	default:
 		return false
@@ -535,19 +578,19 @@ func (e MediaProtocol) Valid() bool {
 
 // Defines values for MediaSourceType.
 const (
-	Default     MediaSourceType = "Default"
-	Grouping    MediaSourceType = "Grouping"
-	Placeholder MediaSourceType = "Placeholder"
+	MediaSourceTypeDefault     MediaSourceType = "Default"
+	MediaSourceTypeGrouping    MediaSourceType = "Grouping"
+	MediaSourceTypePlaceholder MediaSourceType = "Placeholder"
 )
 
 // Valid indicates whether the value is a known member of the MediaSourceType enum.
 func (e MediaSourceType) Valid() bool {
 	switch e {
-	case Default:
+	case MediaSourceTypeDefault:
 		return true
-	case Grouping:
+	case MediaSourceTypeGrouping:
 		return true
-	case Placeholder:
+	case MediaSourceTypePlaceholder:
 		return true
 	default:
 		return false
@@ -833,6 +876,54 @@ func (e SubtitleDeliveryMethod) Valid() bool {
 	}
 }
 
+// Defines values for SubtitlePlaybackMode.
+const (
+	SubtitlePlaybackModeAlways     SubtitlePlaybackMode = "Always"
+	SubtitlePlaybackModeDefault    SubtitlePlaybackMode = "Default"
+	SubtitlePlaybackModeNone       SubtitlePlaybackMode = "None"
+	SubtitlePlaybackModeOnlyForced SubtitlePlaybackMode = "OnlyForced"
+	SubtitlePlaybackModeSmart      SubtitlePlaybackMode = "Smart"
+)
+
+// Valid indicates whether the value is a known member of the SubtitlePlaybackMode enum.
+func (e SubtitlePlaybackMode) Valid() bool {
+	switch e {
+	case SubtitlePlaybackModeAlways:
+		return true
+	case SubtitlePlaybackModeDefault:
+		return true
+	case SubtitlePlaybackModeNone:
+		return true
+	case SubtitlePlaybackModeOnlyForced:
+		return true
+	case SubtitlePlaybackModeSmart:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SyncPlayUserAccessType.
+const (
+	SyncPlayUserAccessTypeCreateAndJoinGroups SyncPlayUserAccessType = "CreateAndJoinGroups"
+	SyncPlayUserAccessTypeJoinGroups          SyncPlayUserAccessType = "JoinGroups"
+	SyncPlayUserAccessTypeNone                SyncPlayUserAccessType = "None"
+)
+
+// Valid indicates whether the value is a known member of the SyncPlayUserAccessType enum.
+func (e SyncPlayUserAccessType) Valid() bool {
+	switch e {
+	case SyncPlayUserAccessTypeCreateAndJoinGroups:
+		return true
+	case SyncPlayUserAccessTypeJoinGroups:
+		return true
+	case SyncPlayUserAccessTypeNone:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransportStreamTimestamp.
 const (
 	TransportStreamTimestampNone  TransportStreamTimestamp = "None"
@@ -848,6 +939,45 @@ func (e TransportStreamTimestamp) Valid() bool {
 	case TransportStreamTimestampValid:
 		return true
 	case TransportStreamTimestampZero:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UnratedItem.
+const (
+	UnratedItemBook           UnratedItem = "Book"
+	UnratedItemChannelContent UnratedItem = "ChannelContent"
+	UnratedItemLiveTvChannel  UnratedItem = "LiveTvChannel"
+	UnratedItemLiveTvProgram  UnratedItem = "LiveTvProgram"
+	UnratedItemMovie          UnratedItem = "Movie"
+	UnratedItemMusic          UnratedItem = "Music"
+	UnratedItemOther          UnratedItem = "Other"
+	UnratedItemSeries         UnratedItem = "Series"
+	UnratedItemTrailer        UnratedItem = "Trailer"
+)
+
+// Valid indicates whether the value is a known member of the UnratedItem enum.
+func (e UnratedItem) Valid() bool {
+	switch e {
+	case UnratedItemBook:
+		return true
+	case UnratedItemChannelContent:
+		return true
+	case UnratedItemLiveTvChannel:
+		return true
+	case UnratedItemLiveTvProgram:
+		return true
+	case UnratedItemMovie:
+		return true
+	case UnratedItemMusic:
+		return true
+	case UnratedItemOther:
+		return true
+	case UnratedItemSeries:
+		return true
+	case UnratedItemTrailer:
 		return true
 	default:
 		return false
@@ -975,6 +1105,24 @@ func (e VideoType) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AccessSchedule An entity representing a user's access schedule.
+type AccessSchedule struct {
+	// DayOfWeek Gets or sets the day of week.
+	DayOfWeek *DynamicDayOfWeek `json:"DayOfWeek,omitempty"`
+
+	// EndHour Gets or sets the end hour.
+	EndHour *float64 `json:"EndHour,omitempty"`
+
+	// Id Gets the id of this instance.
+	Id *int32 `json:"Id,omitempty"`
+
+	// StartHour Gets or sets the start hour.
+	StartHour *float64 `json:"StartHour,omitempty"`
+
+	// UserId Gets the id of the associated user.
+	UserId *openapi_types.UUID `json:"UserId,omitempty"`
 }
 
 // AudioSpatialFormat An enum representing formats of spatial audio.
@@ -1461,8 +1609,20 @@ type CollectionType string
 // CollectionTypeOptions The collection type options.
 type CollectionTypeOptions string
 
+// CreateUserByName The create user by name request body.
+type CreateUserByName struct {
+	// Name Gets or sets the username.
+	Name string `json:"Name"`
+
+	// Password Gets or sets the password.
+	Password *string `json:"Password,omitempty"`
+}
+
 // DayOfWeek defines model for DayOfWeek.
 type DayOfWeek string
+
+// DynamicDayOfWeek An enum that represents a day of the week, weekdays, weekends, or all days.
+type DynamicDayOfWeek string
 
 // EmbeddedSubtitleOptions An enum representing the options to disable embedded subs.
 type EmbeddedSubtitleOptions string
@@ -1950,6 +2110,12 @@ type RemoteSearchResult struct {
 // SubtitleDeliveryMethod Delivery method to use during playback of a specific subtitle format.
 type SubtitleDeliveryMethod string
 
+// SubtitlePlaybackMode An enum representing a subtitle playback mode.
+type SubtitlePlaybackMode string
+
+// SyncPlayUserAccessType Enum SyncPlayUserAccessType.
+type SyncPlayUserAccessType string
+
 // SystemInfo Class SystemInfo.
 type SystemInfo struct {
 	// CachePath Gets or sets the cache path.
@@ -2079,6 +2245,87 @@ type TypeOptions struct {
 	Type                     *string        `json:"Type,omitempty"`
 }
 
+// UnratedItem An enum representing an unrated item.
+type UnratedItem string
+
+// UserConfiguration Class UserConfiguration.
+type UserConfiguration struct {
+	// AudioLanguagePreference Gets or sets the audio language preference.
+	AudioLanguagePreference *string `json:"AudioLanguagePreference,omitempty"`
+
+	// CastReceiverId Gets or sets the id of the selected cast receiver.
+	CastReceiverId            *string               `json:"CastReceiverId,omitempty"`
+	DisplayCollectionsView    *bool                 `json:"DisplayCollectionsView,omitempty"`
+	DisplayMissingEpisodes    *bool                 `json:"DisplayMissingEpisodes,omitempty"`
+	EnableLocalPassword       *bool                 `json:"EnableLocalPassword,omitempty"`
+	EnableNextEpisodeAutoPlay *bool                 `json:"EnableNextEpisodeAutoPlay,omitempty"`
+	GroupedFolders            *[]openapi_types.UUID `json:"GroupedFolders,omitempty"`
+	HidePlayedInLatest        *bool                 `json:"HidePlayedInLatest,omitempty"`
+	LatestItemsExcludes       *[]openapi_types.UUID `json:"LatestItemsExcludes,omitempty"`
+	MyMediaExcludes           *[]openapi_types.UUID `json:"MyMediaExcludes,omitempty"`
+	OrderedViews              *[]openapi_types.UUID `json:"OrderedViews,omitempty"`
+
+	// PlayDefaultAudioTrack Gets or sets a value indicating whether [play default audio track].
+	PlayDefaultAudioTrack      *bool `json:"PlayDefaultAudioTrack,omitempty"`
+	RememberAudioSelections    *bool `json:"RememberAudioSelections,omitempty"`
+	RememberSubtitleSelections *bool `json:"RememberSubtitleSelections,omitempty"`
+
+	// SubtitleLanguagePreference Gets or sets the subtitle language preference.
+	SubtitleLanguagePreference *string `json:"SubtitleLanguagePreference,omitempty"`
+
+	// SubtitleMode An enum representing a subtitle playback mode.
+	SubtitleMode *SubtitlePlaybackMode `json:"SubtitleMode,omitempty"`
+}
+
+// UserDto Class UserDto.
+type UserDto struct {
+	// Configuration Gets or sets the configuration.
+	Configuration *UserConfiguration `json:"Configuration,omitempty"`
+
+	// EnableAutoLogin Gets or sets whether async login is enabled or not.
+	EnableAutoLogin *bool `json:"EnableAutoLogin,omitempty"`
+
+	// HasConfiguredEasyPassword Gets or sets a value indicating whether this instance has configured easy password.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	HasConfiguredEasyPassword *bool `json:"HasConfiguredEasyPassword,omitempty"`
+
+	// HasConfiguredPassword Gets or sets a value indicating whether this instance has configured password.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	HasConfiguredPassword *bool `json:"HasConfiguredPassword,omitempty"`
+
+	// HasPassword Gets or sets a value indicating whether this instance has password.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	HasPassword *bool `json:"HasPassword,omitempty"`
+
+	// Id Gets or sets the id.
+	Id *openapi_types.UUID `json:"Id,omitempty"`
+
+	// LastActivityDate Gets or sets the last activity date.
+	LastActivityDate *time.Time `json:"LastActivityDate,omitempty"`
+
+	// LastLoginDate Gets or sets the last login date.
+	LastLoginDate *time.Time `json:"LastLoginDate,omitempty"`
+
+	// Name Gets or sets the name.
+	Name *string `json:"Name,omitempty"`
+
+	// Policy Gets or sets the policy.
+	Policy *UserPolicy `json:"Policy,omitempty"`
+
+	// PrimaryImageAspectRatio Gets or sets the primary image aspect ratio.
+	PrimaryImageAspectRatio *float64 `json:"PrimaryImageAspectRatio,omitempty"`
+
+	// PrimaryImageTag Gets or sets the primary image tag.
+	PrimaryImageTag *string `json:"PrimaryImageTag,omitempty"`
+
+	// ServerId Gets or sets the server identifier.
+	ServerId *string `json:"ServerId,omitempty"`
+
+	// ServerName Gets or sets the name of the server.
+	// This is not used by the server and is for client-side usage only.
+	ServerName *string `json:"ServerName,omitempty"`
+}
+
 // UserItemDataDto Class UserItemDataDto.
 type UserItemDataDto struct {
 	// IsFavorite Gets or sets a value indicating whether this instance is favorite.
@@ -2113,6 +2360,72 @@ type UserItemDataDto struct {
 
 	// UnplayedItemCount Gets or sets the unplayed item count.
 	UnplayedItemCount *int32 `json:"UnplayedItemCount,omitempty"`
+}
+
+// UserPolicy defines model for UserPolicy.
+type UserPolicy struct {
+	AccessSchedules                *[]AccessSchedule     `json:"AccessSchedules,omitempty"`
+	AllowedTags                    *[]string             `json:"AllowedTags,omitempty"`
+	AuthenticationProviderId       string                `json:"AuthenticationProviderId"`
+	BlockUnratedItems              *[]UnratedItem        `json:"BlockUnratedItems,omitempty"`
+	BlockedChannels                *[]openapi_types.UUID `json:"BlockedChannels,omitempty"`
+	BlockedMediaFolders            *[]openapi_types.UUID `json:"BlockedMediaFolders,omitempty"`
+	BlockedTags                    *[]string             `json:"BlockedTags,omitempty"`
+	EnableAllChannels              *bool                 `json:"EnableAllChannels,omitempty"`
+	EnableAllDevices               *bool                 `json:"EnableAllDevices,omitempty"`
+	EnableAllFolders               *bool                 `json:"EnableAllFolders,omitempty"`
+	EnableAudioPlaybackTranscoding *bool                 `json:"EnableAudioPlaybackTranscoding,omitempty"`
+
+	// EnableCollectionManagement Gets or sets a value indicating whether this instance can manage collections.
+	EnableCollectionManagement       *bool     `json:"EnableCollectionManagement,omitempty"`
+	EnableContentDeletion            *bool     `json:"EnableContentDeletion,omitempty"`
+	EnableContentDeletionFromFolders *[]string `json:"EnableContentDeletionFromFolders,omitempty"`
+	EnableContentDownloading         *bool     `json:"EnableContentDownloading,omitempty"`
+	EnableLiveTvAccess               *bool     `json:"EnableLiveTvAccess,omitempty"`
+	EnableLiveTvManagement           *bool     `json:"EnableLiveTvManagement,omitempty"`
+
+	// EnableLyricManagement Gets or sets a value indicating whether this user can manage lyrics.
+	EnableLyricManagement           *bool `json:"EnableLyricManagement,omitempty"`
+	EnableMediaConversion           *bool `json:"EnableMediaConversion,omitempty"`
+	EnableMediaPlayback             *bool `json:"EnableMediaPlayback,omitempty"`
+	EnablePlaybackRemuxing          *bool `json:"EnablePlaybackRemuxing,omitempty"`
+	EnablePublicSharing             *bool `json:"EnablePublicSharing,omitempty"`
+	EnableRemoteAccess              *bool `json:"EnableRemoteAccess,omitempty"`
+	EnableRemoteControlOfOtherUsers *bool `json:"EnableRemoteControlOfOtherUsers,omitempty"`
+	EnableSharedDeviceControl       *bool `json:"EnableSharedDeviceControl,omitempty"`
+
+	// EnableSubtitleManagement Gets or sets a value indicating whether this instance can manage subtitles.
+	EnableSubtitleManagement *bool `json:"EnableSubtitleManagement,omitempty"`
+
+	// EnableSyncTranscoding Gets or sets a value indicating whether [enable synchronize].
+	EnableSyncTranscoding          *bool                 `json:"EnableSyncTranscoding,omitempty"`
+	EnableUserPreferenceAccess     *bool                 `json:"EnableUserPreferenceAccess,omitempty"`
+	EnableVideoPlaybackTranscoding *bool                 `json:"EnableVideoPlaybackTranscoding,omitempty"`
+	EnabledChannels                *[]openapi_types.UUID `json:"EnabledChannels,omitempty"`
+	EnabledDevices                 *[]string             `json:"EnabledDevices,omitempty"`
+	EnabledFolders                 *[]openapi_types.UUID `json:"EnabledFolders,omitempty"`
+	ForceRemoteSourceTranscoding   *bool                 `json:"ForceRemoteSourceTranscoding,omitempty"`
+	InvalidLoginAttemptCount       *int32                `json:"InvalidLoginAttemptCount,omitempty"`
+
+	// IsAdministrator Gets or sets a value indicating whether this instance is administrator.
+	IsAdministrator *bool `json:"IsAdministrator,omitempty"`
+
+	// IsDisabled Gets or sets a value indicating whether this instance is disabled.
+	IsDisabled *bool `json:"IsDisabled,omitempty"`
+
+	// IsHidden Gets or sets a value indicating whether this instance is hidden.
+	IsHidden                   *bool  `json:"IsHidden,omitempty"`
+	LoginAttemptsBeforeLockout *int32 `json:"LoginAttemptsBeforeLockout,omitempty"`
+	MaxActiveSessions          *int32 `json:"MaxActiveSessions,omitempty"`
+
+	// MaxParentalRating Gets or sets the max parental rating.
+	MaxParentalRating        *int32 `json:"MaxParentalRating,omitempty"`
+	MaxParentalSubRating     *int32 `json:"MaxParentalSubRating,omitempty"`
+	PasswordResetProviderId  string `json:"PasswordResetProviderId"`
+	RemoteClientBitrateLimit *int32 `json:"RemoteClientBitrateLimit,omitempty"`
+
+	// SyncPlayAccess Enum SyncPlayUserAccessType.
+	SyncPlayAccess *SyncPlayUserAccessType `json:"SyncPlayAccess,omitempty"`
 }
 
 // VersionInfo Defines the MediaBrowser.Model.Updates.VersionInfo class.
@@ -2177,6 +2490,39 @@ type VirtualFolderInfo struct {
 	RefreshProgress    *float64 `json:"RefreshProgress,omitempty"`
 	RefreshStatus      *string  `json:"RefreshStatus,omitempty"`
 }
+
+// GetUsersParams defines parameters for GetUsers.
+type GetUsersParams struct {
+	// IsHidden Optional filter by IsHidden=true or false.
+	IsHidden *bool `form:"isHidden,omitempty" json:"isHidden,omitempty"`
+
+	// IsDisabled Optional filter by IsDisabled=true or false.
+	IsDisabled *bool `form:"isDisabled,omitempty" json:"isDisabled,omitempty"`
+}
+
+// CreateUserByNameApplicationWildcardPlusJSONBody defines parameters for CreateUserByName.
+type CreateUserByNameApplicationWildcardPlusJSONBody = CreateUserByName
+
+// CreateUserByNameJSONBody defines parameters for CreateUserByName.
+type CreateUserByNameJSONBody = CreateUserByName
+
+// UpdateUserPolicyApplicationWildcardPlusJSONBody defines parameters for UpdateUserPolicy.
+type UpdateUserPolicyApplicationWildcardPlusJSONBody = UserPolicy
+
+// UpdateUserPolicyJSONBody defines parameters for UpdateUserPolicy.
+type UpdateUserPolicyJSONBody = UserPolicy
+
+// CreateUserByNameApplicationWildcardPlusJSONRequestBody defines body for CreateUserByName for application/*+json ContentType.
+type CreateUserByNameApplicationWildcardPlusJSONRequestBody = CreateUserByNameApplicationWildcardPlusJSONBody
+
+// CreateUserByNameJSONRequestBody defines body for CreateUserByName for application/json ContentType.
+type CreateUserByNameJSONRequestBody = CreateUserByNameJSONBody
+
+// UpdateUserPolicyApplicationWildcardPlusJSONRequestBody defines body for UpdateUserPolicy for application/*+json ContentType.
+type UpdateUserPolicyApplicationWildcardPlusJSONRequestBody = UpdateUserPolicyApplicationWildcardPlusJSONBody
+
+// UpdateUserPolicyJSONRequestBody defines body for UpdateUserPolicy for application/json ContentType.
+type UpdateUserPolicyJSONRequestBody = UpdateUserPolicyJSONBody
 
 // Getter for additional properties for ProblemDetails. Returns the specified
 // element and whether it was found
@@ -2389,6 +2735,63 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /System/Info (the `GetSystemInfo` operationId).
 	GetSystemInfo(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetUsers Gets a list of users.
+	//
+	// Corresponds with GET /Users (the `GetUsers` operationId).
+	GetUsers(ctx context.Context, params *GetUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateUserByNameWithBody Creates a user.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+	CreateUserByNameWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateUserByNameWithApplicationWildcardPlusJSONBody Creates a user.
+	//
+	// Takes a body of the `application/*+json` content type.
+	//
+	// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+	CreateUserByNameWithApplicationWildcardPlusJSONBody(ctx context.Context, body CreateUserByNameApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateUserByName Creates a user.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+	CreateUserByName(ctx context.Context, body CreateUserByNameJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteUser Deletes a user.
+	//
+	// Corresponds with DELETE /Users/{userId} (the `DeleteUser` operationId).
+	DeleteUser(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetUserById Gets a user by Id.
+	//
+	// Corresponds with GET /Users/{userId} (the `GetUserById` operationId).
+	GetUserById(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserPolicyWithBody Updates a user policy.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+	UpdateUserPolicyWithBody(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserPolicyWithApplicationWildcardPlusJSONBody Updates a user policy.
+	//
+	// Takes a body of the `application/*+json` content type.
+	//
+	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+	UpdateUserPolicyWithApplicationWildcardPlusJSONBody(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserPolicy Updates a user policy.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+	UpdateUserPolicy(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetVirtualFolders Gets all virtual folders.
@@ -2411,6 +2814,153 @@ func (c *Client) GetVirtualFolders(ctx context.Context, reqEditors ...RequestEdi
 // Corresponds with GET /System/Info (the `GetSystemInfo` operationId).
 func (c *Client) GetSystemInfo(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSystemInfoRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetUsers Gets a list of users.
+//
+// Corresponds with GET /Users (the `GetUsers` operationId).
+func (c *Client) GetUsers(ctx context.Context, params *GetUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetUsersRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateUserByNameWithBody Creates a user.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+func (c *Client) CreateUserByNameWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateUserByNameRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateUserByNameWithApplicationWildcardPlusJSONBody Creates a user.
+//
+// Takes a body of the `application/*+json` content type.
+//
+// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+func (c *Client) CreateUserByNameWithApplicationWildcardPlusJSONBody(ctx context.Context, body CreateUserByNameApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateUserByNameRequestWithApplicationWildcardPlusJSONBody(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateUserByName Creates a user.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+func (c *Client) CreateUserByName(ctx context.Context, body CreateUserByNameJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateUserByNameRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteUser Deletes a user.
+//
+// Corresponds with DELETE /Users/{userId} (the `DeleteUser` operationId).
+func (c *Client) DeleteUser(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteUserRequest(c.Server, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetUserById Gets a user by Id.
+//
+// Corresponds with GET /Users/{userId} (the `GetUserById` operationId).
+func (c *Client) GetUserById(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetUserByIdRequest(c.Server, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserPolicyWithBody Updates a user policy.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+func (c *Client) UpdateUserPolicyWithBody(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserPolicyRequestWithBody(c.Server, userId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserPolicyWithApplicationWildcardPlusJSONBody Updates a user policy.
+//
+// Takes a body of the `application/*+json` content type.
+//
+// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+func (c *Client) UpdateUserPolicyWithApplicationWildcardPlusJSONBody(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserPolicyRequestWithApplicationWildcardPlusJSONBody(c.Server, userId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserPolicy Updates a user policy.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+func (c *Client) UpdateUserPolicy(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserPolicyRequest(c.Server, userId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2475,6 +3025,249 @@ func NewGetSystemInfoRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetUsersRequest constructs an http.Request for the GetUsers method
+func NewGetUsersRequest(server string, params *GetUsersParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Users")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.IsHidden != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isHidden", *params.IsHidden, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsDisabled != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isDisabled", *params.IsDisabled, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateUserByNameRequestWithApplicationWildcardPlusJSONBody calls the generic CreateUserByName builder with application/*+json body
+func NewCreateUserByNameRequestWithApplicationWildcardPlusJSONBody(server string, body CreateUserByNameApplicationWildcardPlusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateUserByNameRequestWithBody(server, "application/*+json", bodyReader)
+}
+
+// NewCreateUserByNameRequest calls the generic CreateUserByName builder with application/json body
+func NewCreateUserByNameRequest(server string, body CreateUserByNameJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateUserByNameRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateUserByNameRequestWithBody constructs an http.Request for the CreateUserByName method, with any body, and a specified content type
+func NewCreateUserByNameRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Users/New")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteUserRequest constructs an http.Request for the DeleteUser method
+func NewDeleteUserRequest(server string, userId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "userId", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Users/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetUserByIdRequest constructs an http.Request for the GetUserById method
+func NewGetUserByIdRequest(server string, userId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "userId", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Users/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateUserPolicyRequestWithApplicationWildcardPlusJSONBody calls the generic UpdateUserPolicy builder with application/*+json body
+func NewUpdateUserPolicyRequestWithApplicationWildcardPlusJSONBody(server string, userId openapi_types.UUID, body UpdateUserPolicyApplicationWildcardPlusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateUserPolicyRequestWithBody(server, userId, "application/*+json", bodyReader)
+}
+
+// NewUpdateUserPolicyRequest calls the generic UpdateUserPolicy builder with application/json body
+func NewUpdateUserPolicyRequest(server string, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateUserPolicyRequestWithBody(server, userId, "application/json", bodyReader)
+}
+
+// NewUpdateUserPolicyRequestWithBody constructs an http.Request for the UpdateUserPolicy method, with any body, and a specified content type
+func NewUpdateUserPolicyRequestWithBody(server string, userId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "userId", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Users/%s/Policy", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -2532,6 +3325,69 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /System/Info (the `GetSystemInfo` operationId).
 	GetSystemInfoWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSystemInfoResponse, error)
+
+	// GetUsersWithResponse Gets a list of users.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /Users (the `GetUsers` operationId).
+	GetUsersWithResponse(ctx context.Context, params *GetUsersParams, reqEditors ...RequestEditorFn) (*GetUsersResponse, error)
+
+	// CreateUserByNameWithBodyWithResponse Creates a user.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+	CreateUserByNameWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateUserByNameResponse, error)
+
+	// CreateUserByNameWithApplicationWildcardPlusJSONBodyWithResponse Creates a user.
+	//
+	// Takes a body of the `application/*+json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+	CreateUserByNameWithApplicationWildcardPlusJSONBodyWithResponse(ctx context.Context, body CreateUserByNameApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateUserByNameResponse, error)
+
+	// CreateUserByNameWithResponse Creates a user.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+	CreateUserByNameWithResponse(ctx context.Context, body CreateUserByNameJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateUserByNameResponse, error)
+
+	// DeleteUserWithResponse Deletes a user.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /Users/{userId} (the `DeleteUser` operationId).
+	DeleteUserWithResponse(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteUserResponse, error)
+
+	// GetUserByIdWithResponse Gets a user by Id.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /Users/{userId} (the `GetUserById` operationId).
+	GetUserByIdWithResponse(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetUserByIdResponse, error)
+
+	// UpdateUserPolicyWithBodyWithResponse Updates a user policy.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+	UpdateUserPolicyWithBodyWithResponse(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error)
+
+	// UpdateUserPolicyWithApplicationWildcardPlusJSONBodyWithResponse Updates a user policy.
+	//
+	// Takes a body of the `application/*+json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+	UpdateUserPolicyWithApplicationWildcardPlusJSONBodyWithResponse(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error)
+
+	// UpdateUserPolicyWithResponse Updates a user policy.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+	UpdateUserPolicyWithResponse(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error)
 }
 
 // GetVirtualFoldersResponse503Headers the declared response headers of an HTTP 503 response for GetVirtualFolders
@@ -2681,6 +3537,363 @@ func (r GetSystemInfoResponse) ContentType() string {
 	return ""
 }
 
+// GetUsersResponse503Headers the declared response headers of an HTTP 503 response for GetUsers
+type GetUsersResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type GetUsersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]UserDto
+	// ApplicationjsonProfileCamelCase200 the response for an HTTP 200 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase200 *[]UserDto
+	// ApplicationjsonProfilePascalCase200 the response for an HTTP 200 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase200 *[]UserDto
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *GetUsersResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetUsersResponse) GetJSON200() *[]UserDto {
+	return r.JSON200
+}
+
+// GetApplicationjsonProfileCamelCase200 returns the response for an HTTP 200 `application/json; profile="CamelCase"` response
+func (r GetUsersResponse) GetApplicationjsonProfileCamelCase200() *[]UserDto {
+	return r.ApplicationjsonProfileCamelCase200
+}
+
+// GetApplicationjsonProfilePascalCase200 returns the response for an HTTP 200 `application/json; profile="PascalCase"` response
+func (r GetUsersResponse) GetApplicationjsonProfilePascalCase200() *[]UserDto {
+	return r.ApplicationjsonProfilePascalCase200
+}
+
+// GetBody returns the raw response body bytes
+func (r GetUsersResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetUsersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetUsersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetUsersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CreateUserByNameResponse503Headers the declared response headers of an HTTP 503 response for CreateUserByName
+type CreateUserByNameResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type CreateUserByNameResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *UserDto
+	// ApplicationjsonProfileCamelCase200 the response for an HTTP 200 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase200 *UserDto
+	// ApplicationjsonProfilePascalCase200 the response for an HTTP 200 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase200 *UserDto
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *CreateUserByNameResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateUserByNameResponse) GetJSON200() *UserDto {
+	return r.JSON200
+}
+
+// GetApplicationjsonProfileCamelCase200 returns the response for an HTTP 200 `application/json; profile="CamelCase"` response
+func (r CreateUserByNameResponse) GetApplicationjsonProfileCamelCase200() *UserDto {
+	return r.ApplicationjsonProfileCamelCase200
+}
+
+// GetApplicationjsonProfilePascalCase200 returns the response for an HTTP 200 `application/json; profile="PascalCase"` response
+func (r CreateUserByNameResponse) GetApplicationjsonProfilePascalCase200() *UserDto {
+	return r.ApplicationjsonProfilePascalCase200
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateUserByNameResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateUserByNameResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateUserByNameResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateUserByNameResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// DeleteUserResponse503Headers the declared response headers of an HTTP 503 response for DeleteUser
+type DeleteUserResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type DeleteUserResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// ApplicationjsonProfileCamelCase404 the response for an HTTP 404 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase404 *ProblemDetails
+	// ApplicationjsonProfilePascalCase404 the response for an HTTP 404 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase404 *ProblemDetails
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *DeleteUserResponse503Headers
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteUserResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetApplicationjsonProfileCamelCase404 returns the response for an HTTP 404 `application/json; profile="CamelCase"` response
+func (r DeleteUserResponse) GetApplicationjsonProfileCamelCase404() *ProblemDetails {
+	return r.ApplicationjsonProfileCamelCase404
+}
+
+// GetApplicationjsonProfilePascalCase404 returns the response for an HTTP 404 `application/json; profile="PascalCase"` response
+func (r DeleteUserResponse) GetApplicationjsonProfilePascalCase404() *ProblemDetails {
+	return r.ApplicationjsonProfilePascalCase404
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteUserResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteUserResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteUserResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteUserResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetUserByIdResponse503Headers the declared response headers of an HTTP 503 response for GetUserById
+type GetUserByIdResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type GetUserByIdResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *UserDto
+	// ApplicationjsonProfileCamelCase200 the response for an HTTP 200 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase200 *UserDto
+	// ApplicationjsonProfilePascalCase200 the response for an HTTP 200 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase200 *UserDto
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// ApplicationjsonProfileCamelCase404 the response for an HTTP 404 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase404 *ProblemDetails
+	// ApplicationjsonProfilePascalCase404 the response for an HTTP 404 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase404 *ProblemDetails
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *GetUserByIdResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetUserByIdResponse) GetJSON200() *UserDto {
+	return r.JSON200
+}
+
+// GetApplicationjsonProfileCamelCase200 returns the response for an HTTP 200 `application/json; profile="CamelCase"` response
+func (r GetUserByIdResponse) GetApplicationjsonProfileCamelCase200() *UserDto {
+	return r.ApplicationjsonProfileCamelCase200
+}
+
+// GetApplicationjsonProfilePascalCase200 returns the response for an HTTP 200 `application/json; profile="PascalCase"` response
+func (r GetUserByIdResponse) GetApplicationjsonProfilePascalCase200() *UserDto {
+	return r.ApplicationjsonProfilePascalCase200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetUserByIdResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetApplicationjsonProfileCamelCase404 returns the response for an HTTP 404 `application/json; profile="CamelCase"` response
+func (r GetUserByIdResponse) GetApplicationjsonProfileCamelCase404() *ProblemDetails {
+	return r.ApplicationjsonProfileCamelCase404
+}
+
+// GetApplicationjsonProfilePascalCase404 returns the response for an HTTP 404 `application/json; profile="PascalCase"` response
+func (r GetUserByIdResponse) GetApplicationjsonProfilePascalCase404() *ProblemDetails {
+	return r.ApplicationjsonProfilePascalCase404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetUserByIdResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetUserByIdResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetUserByIdResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetUserByIdResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// UpdateUserPolicyResponse503Headers the declared response headers of an HTTP 503 response for UpdateUserPolicy
+type UpdateUserPolicyResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type UpdateUserPolicyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// ApplicationjsonProfileCamelCase400 the response for an HTTP 400 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase400 *ProblemDetails
+	// ApplicationjsonProfilePascalCase400 the response for an HTTP 400 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// ApplicationjsonProfileCamelCase403 the response for an HTTP 403 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase403 *ProblemDetails
+	// ApplicationjsonProfilePascalCase403 the response for an HTTP 403 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase403 *ProblemDetails
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *UpdateUserPolicyResponse503Headers
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpdateUserPolicyResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetApplicationjsonProfileCamelCase400 returns the response for an HTTP 400 `application/json; profile="CamelCase"` response
+func (r UpdateUserPolicyResponse) GetApplicationjsonProfileCamelCase400() *ProblemDetails {
+	return r.ApplicationjsonProfileCamelCase400
+}
+
+// GetApplicationjsonProfilePascalCase400 returns the response for an HTTP 400 `application/json; profile="PascalCase"` response
+func (r UpdateUserPolicyResponse) GetApplicationjsonProfilePascalCase400() *ProblemDetails {
+	return r.ApplicationjsonProfilePascalCase400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UpdateUserPolicyResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetApplicationjsonProfileCamelCase403 returns the response for an HTTP 403 `application/json; profile="CamelCase"` response
+func (r UpdateUserPolicyResponse) GetApplicationjsonProfileCamelCase403() *ProblemDetails {
+	return r.ApplicationjsonProfileCamelCase403
+}
+
+// GetApplicationjsonProfilePascalCase403 returns the response for an HTTP 403 `application/json; profile="PascalCase"` response
+func (r UpdateUserPolicyResponse) GetApplicationjsonProfilePascalCase403() *ProblemDetails {
+	return r.ApplicationjsonProfilePascalCase403
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateUserPolicyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateUserPolicyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateUserPolicyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateUserPolicyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetVirtualFoldersWithResponse Gets all virtual folders.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -2705,6 +3918,123 @@ func (c *ClientWithResponses) GetSystemInfoWithResponse(ctx context.Context, req
 		return nil, err
 	}
 	return ParseGetSystemInfoResponse(rsp)
+}
+
+// GetUsersWithResponse Gets a list of users.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /Users (the `GetUsers` operationId).
+func (c *ClientWithResponses) GetUsersWithResponse(ctx context.Context, params *GetUsersParams, reqEditors ...RequestEditorFn) (*GetUsersResponse, error) {
+	rsp, err := c.GetUsers(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetUsersResponse(rsp)
+}
+
+// CreateUserByNameWithBodyWithResponse Creates a user.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+func (c *ClientWithResponses) CreateUserByNameWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateUserByNameResponse, error) {
+	rsp, err := c.CreateUserByNameWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateUserByNameResponse(rsp)
+}
+
+// CreateUserByNameWithApplicationWildcardPlusJSONBodyWithResponse Creates a user.
+//
+// Takes a body of the `application/*+json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+func (c *ClientWithResponses) CreateUserByNameWithApplicationWildcardPlusJSONBodyWithResponse(ctx context.Context, body CreateUserByNameApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateUserByNameResponse, error) {
+	rsp, err := c.CreateUserByNameWithApplicationWildcardPlusJSONBody(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateUserByNameResponse(rsp)
+}
+
+// CreateUserByNameWithResponse Creates a user.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /Users/New (the `CreateUserByName` operationId).
+func (c *ClientWithResponses) CreateUserByNameWithResponse(ctx context.Context, body CreateUserByNameJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateUserByNameResponse, error) {
+	rsp, err := c.CreateUserByName(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateUserByNameResponse(rsp)
+}
+
+// DeleteUserWithResponse Deletes a user.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /Users/{userId} (the `DeleteUser` operationId).
+func (c *ClientWithResponses) DeleteUserWithResponse(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteUserResponse, error) {
+	rsp, err := c.DeleteUser(ctx, userId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteUserResponse(rsp)
+}
+
+// GetUserByIdWithResponse Gets a user by Id.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /Users/{userId} (the `GetUserById` operationId).
+func (c *ClientWithResponses) GetUserByIdWithResponse(ctx context.Context, userId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetUserByIdResponse, error) {
+	rsp, err := c.GetUserById(ctx, userId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetUserByIdResponse(rsp)
+}
+
+// UpdateUserPolicyWithBodyWithResponse Updates a user policy.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+func (c *ClientWithResponses) UpdateUserPolicyWithBodyWithResponse(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error) {
+	rsp, err := c.UpdateUserPolicyWithBody(ctx, userId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserPolicyResponse(rsp)
+}
+
+// UpdateUserPolicyWithApplicationWildcardPlusJSONBodyWithResponse Updates a user policy.
+//
+// Takes a body of the `application/*+json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+func (c *ClientWithResponses) UpdateUserPolicyWithApplicationWildcardPlusJSONBodyWithResponse(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyApplicationWildcardPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error) {
+	rsp, err := c.UpdateUserPolicyWithApplicationWildcardPlusJSONBody(ctx, userId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserPolicyResponse(rsp)
+}
+
+// UpdateUserPolicyWithResponse Updates a user policy.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
+func (c *ClientWithResponses) UpdateUserPolicyWithResponse(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error) {
+	rsp, err := c.UpdateUserPolicy(ctx, userId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserPolicyResponse(rsp)
 }
 
 // ParseGetVirtualFoldersResponse parses an HTTP response from a GetVirtualFoldersWithResponse call
@@ -2837,6 +4167,381 @@ func ParseGetSystemInfoResponse(rsp *http.Response) (*GetSystemInfoResponse, err
 	switch {
 	case rsp.StatusCode == 503:
 		var headers GetSystemInfoResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetUsersResponse parses an HTTP response from a GetUsersWithResponse call
+func ParseGetUsersResponse(rsp *http.Response) (*GetUsersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetUsersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 200:
+		var dest []UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 200:
+		var dest []UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 200:
+		var dest []UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers GetUsersResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseCreateUserByNameResponse parses an HTTP response from a CreateUserByNameWithResponse call
+func ParseCreateUserByNameResponse(rsp *http.Response) (*CreateUserByNameResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateUserByNameResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 200:
+		var dest UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 200:
+		var dest UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 200:
+		var dest UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers CreateUserByNameResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseDeleteUserResponse parses an HTTP response from a DeleteUserWithResponse call
+func ParseDeleteUserResponse(rsp *http.Response) (*DeleteUserResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteUserResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase404 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase404 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers DeleteUserResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetUserByIdResponse parses an HTTP response from a GetUserByIdWithResponse call
+func ParseGetUserByIdResponse(rsp *http.Response) (*GetUserByIdResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetUserByIdResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 200:
+		var dest UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 200:
+		var dest UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 200:
+		var dest UserDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase404 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase404 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers GetUserByIdResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseUpdateUserPolicyResponse parses an HTTP response from a UpdateUserPolicyWithResponse call
+func ParseUpdateUserPolicyResponse(rsp *http.Response) (*UpdateUserPolicyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateUserPolicyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase400 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase400 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase403 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase403 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers UpdateUserPolicyResponse503Headers
 		if values := rsp.Header.Values("Message"); len(values) > 0 {
 			var value string
 			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {

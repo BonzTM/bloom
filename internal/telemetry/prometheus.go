@@ -36,6 +36,8 @@ type PromMetrics struct {
 	mediaServerRetries     *prometheus.CounterVec
 	oidcDependencyEvents   *prometheus.CounterVec
 	oidcDependencySeconds  *prometheus.HistogramVec
+	inviteCreations        *prometheus.CounterVec
+	inviteAcceptances      *prometheus.CounterVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -47,6 +49,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	authCollectors := newAuthenticationCollectors(namespace)
 	mediaCollectors := newMediaServerCollectors(namespace)
 	oidcCollectors := newOIDCCollectors(namespace)
+	inviteCreations := newOutcomeCounter(namespace, "invite_creations_total", "Total invite creation attempts by finite outcome.")
+	inviteAcceptances := newOutcomeCounter(namespace, "invite_acceptances_total", "Total invite acceptance attempts by finite outcome.")
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -61,6 +65,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		mediaServerRetries:    mediaCollectors.retries,
 		oidcDependencyEvents:  oidcCollectors.events,
 		oidcDependencySeconds: oidcCollectors.seconds,
+		inviteCreations:       inviteCreations,
+		inviteAcceptances:     inviteAcceptances,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -111,6 +117,10 @@ func newAuthenticationCollectors(namespace string) authenticationCollectors {
 
 func newCounter(namespace, name, help string) prometheus.Counter {
 	return prometheus.NewCounter(prometheus.CounterOpts{Namespace: namespace, Name: name, Help: help})
+}
+
+func newOutcomeCounter(namespace, name, help string) *prometheus.CounterVec {
+	return prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Name: name, Help: help}, []string{"outcome"})
 }
 
 type mediaServerCollectors struct {
@@ -187,7 +197,19 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.mediaServerRetries,
 		m.oidcDependencyEvents,
 		m.oidcDependencySeconds,
+		m.inviteCreations,
+		m.inviteAcceptances,
 	)
+}
+
+// IncInviteCreation records one invite creation outcome.
+func (m *PromMetrics) IncInviteCreation(outcome string) {
+	m.inviteCreations.WithLabelValues(outcome).Inc()
+}
+
+// IncInviteAcceptance records one invite acceptance outcome.
+func (m *PromMetrics) IncInviteAcceptance(outcome string) {
+	m.inviteAcceptances.WithLabelValues(outcome).Inc()
 }
 
 // ObserveMediaServerRetry records one bounded retry decision.

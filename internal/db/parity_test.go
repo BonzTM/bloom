@@ -78,18 +78,26 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteAccountRoleColumns, expectedAccountRoleColumns)
 	assertColumns(t, pool, sqliteMediaServerColumns, expectedMediaServerColumns)
 	assertColumns(t, pool, sqliteIdentityColumns, expectedIdentityColumns)
+	assertColumns(t, pool, sqliteInviteColumns, expectedInviteColumns)
+	assertColumns(t, pool, sqliteInviteLibraryColumns, expectedInviteLibraryColumns)
+	assertColumns(t, pool, sqliteInviteRedemptionColumns, expectedInviteRedemptionColumns)
+	assertColumns(t, pool, sqliteInviteProvisioningFailureColumns, expectedInviteProvisioningFailureColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
 // engines to expose for the accounts table.
 var (
-	expectedAccountColumns        = []string{"created_at", "disabled", "id", "password_hash", "username", "username_key"}
-	expectedSessionColumns        = []string{"data", "expiry", "token"}
-	expectedRoleColumns           = []string{"built_in", "created_at", "description", "id", "name"}
-	expectedRolePermissionColumns = []string{"permission", "role_id"}
-	expectedAccountRoleColumns    = []string{"account_id", "role_id", "source"}
-	expectedMediaServerColumns    = []string{"allow_insecure", "base_url", "created_at", "credential_ciphertext", "id", "kind", "name", "name_key", "updated_at"}
-	expectedIdentityColumns       = []string{"account_id", "created_at", "issuer", "last_login_at", "mapped_roles", "provider", "subject", "username_claim"}
+	expectedAccountColumns                   = []string{"created_at", "disabled", "id", "password_hash", "username", "username_key"}
+	expectedSessionColumns                   = []string{"data", "expiry", "token"}
+	expectedRoleColumns                      = []string{"built_in", "created_at", "description", "id", "name"}
+	expectedRolePermissionColumns            = []string{"permission", "role_id"}
+	expectedAccountRoleColumns               = []string{"account_id", "role_id", "source"}
+	expectedMediaServerColumns               = []string{"allow_insecure", "base_url", "created_at", "credential_ciphertext", "id", "kind", "name", "name_key", "updated_at"}
+	expectedIdentityColumns                  = []string{"account_id", "created_at", "issuer", "last_login_at", "mapped_roles", "provider", "subject", "username_claim"}
+	expectedInviteColumns                    = []string{"code_hash", "created_at", "created_by_account_id", "expires_at", "id", "label", "max_uses", "media_server_id", "revoked_at", "updated_at", "use_count"}
+	expectedInviteLibraryColumns             = []string{"invite_id", "library_id"}
+	expectedInviteRedemptionColumns          = []string{"id", "invite_id", "media_server_id", "media_user_id", "redeemed_at", "username"}
+	expectedInviteProvisioningFailureColumns = []string{"created_at", "id", "invite_id", "media_server_id", "media_user_id", "reason", "updated_at", "username"}
 )
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
@@ -196,6 +204,22 @@ func sqliteSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	}
 	defer func() { _ = rows.Close() }()
 	return scanStrings(rows)
+}
+
+func sqliteInviteColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "invites")
+}
+
+func sqliteInviteLibraryColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "invite_libraries")
+}
+
+func sqliteInviteRedemptionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "invite_redemptions")
+}
+
+func sqliteInviteProvisioningFailureColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "invite_provisioning_failures")
 }
 
 func sqliteRoleColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
