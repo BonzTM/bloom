@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
 import { ApiError } from "../../../lib/api/errors.js";
-import type { Account, LoginInput } from "../api/auth-schemas.js";
+import type { LoginInput, Session } from "../api/auth-schemas.js";
 import { useAuthApi } from "../auth-context.js";
 
 export const authKeys = {
@@ -9,21 +9,24 @@ export const authKeys = {
 };
 
 // The current session, or null when the visitor is signed out. A 401 from
-// `/me` is the normal signed-out answer, not an error to surface.
+// `/me` is the normal signed-out answer, not an error to surface. Every
+// answer is compared with the cached one: when the principal changed (a
+// sign-out elsewhere, a different account), data fetched for the previous
+// principal is dropped before the new answer is written.
 export function useSession() {
   const api = useAuthApi();
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: authKeys.session(),
-    queryFn: async ({ signal }): Promise<Account | null> => {
-      try {
-        const response = await api.me(signal);
-        return response.account;
-      } catch (error: unknown) {
-        if (isUnauthorized(error)) {
-          return null;
-        }
-        throw error;
+    queryFn: async ({ signal }): Promise<Session | null> => {
+      const next = await fetchSession(api, signal);
+      const previous = queryClient.getQueryData<Session | null>(
+        authKeys.session(),
+      );
+      if (principalChanged(previous, next)) {
+        forgetSessionScopedQueries(queryClient);
       }
+      return next;
     },
     staleTime: 60_000,
     // The session can change outside this tab (expiry, sign-out elsewhere),
@@ -57,9 +60,9 @@ export function useLogin() {
     onMutate: () => cancelSessionCheck(queryClient),
     // Cancel again right before writing: a focus-triggered check may have
     // started after onMutate and must not land after the canonical answer.
-    onSuccess: async (response) => {
+    onSuccess: async (session) => {
       await cancelSessionCheck(queryClient);
-      writeSession(queryClient, response.account);
+      writeSession(queryClient, session);
     },
     onError: (error) => reconcileAfterAmbiguousFailure(queryClient, error),
   });
@@ -112,9 +115,35 @@ export function useLogout() {
   });
 }
 
+async function fetchSession(
+  api: ReturnType<typeof useAuthApi>,
+  signal: AbortSignal,
+): Promise<Session | null> {
+  try {
+    return await api.me(signal);
+  } catch (error: unknown) {
+    if (isUnauthorized(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+// An answer that has never been cached is not a change; after that, a
+// different account id, including to or from signed out, is one.
+function principalChanged(
+  previous: Session | null | undefined,
+  next: Session | null,
+): boolean {
+  if (previous === undefined) {
+    return false;
+  }
+  return (previous?.account.id ?? null) !== (next?.account.id ?? null);
+}
+
 type SessionCache = Pick<
   ReturnType<typeof useQueryClient>,
-  "cancelQueries" | "setQueryData" | "invalidateQueries"
+  "cancelQueries" | "setQueryData" | "invalidateQueries" | "removeQueries"
 >;
 
 // A definite rejection (4xx) means the server did nothing. Anything else, a
@@ -143,8 +172,18 @@ function cancelSessionCheck(cache: SessionCache): Promise<void> {
   return cache.cancelQueries({ queryKey: authKeys.session() });
 }
 
-function writeSession(cache: SessionCache, account: Account | null): void {
-  cache.setQueryData<Account | null>(authKeys.session(), account);
+// Nothing fetched on one principal's behalf may be shown to, or reused for,
+// the next one. Queries that carry the `sessionScoped` meta flag are dropped
+// before the new principal is written, so no render sees both.
+function forgetSessionScopedQueries(cache: SessionCache): void {
+  cache.removeQueries({
+    predicate: (query) => query.meta?.sessionScoped === true,
+  });
+}
+
+function writeSession(cache: SessionCache, session: Session | null): void {
+  forgetSessionScopedQueries(cache);
+  cache.setQueryData<Session | null>(authKeys.session(), session);
 }
 
 function isUnauthorized(error: unknown): boolean {

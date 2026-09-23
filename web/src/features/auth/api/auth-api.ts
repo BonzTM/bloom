@@ -2,7 +2,7 @@ import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
   sessionResponseSchema,
   type LoginInput,
-  type SessionResponse,
+  type Session,
 } from "./auth-schemas.js";
 
 export class AuthApi {
@@ -14,7 +14,7 @@ export class AuthApi {
 
   // Mutations are not cancellable: an abandoned sign-in must still settle so
   // the session cache never disagrees with the cookie the server set.
-  login(input: LoginInput): Promise<SessionResponse> {
+  login(input: LoginInput): Promise<Session> {
     return this.#client.requestJson(
       "api/v1/auth/login",
       sessionResponseSchema,
@@ -28,7 +28,7 @@ export class AuthApi {
     });
   }
 
-  me(signal: AbortSignal): Promise<SessionResponse> {
+  me(signal: AbortSignal): Promise<Session> {
     return this.#client.requestJson("api/v1/auth/me", sessionResponseSchema, {
       signal,
     });

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useLogout, useSession } from "../hooks/auth-queries.js";
+import { SessionUnavailable } from "./session-unavailable.js";
 
 // Who is signed in, with sign-in and sign-out actions. Lives in the site
 // navigation so every page shows the current session. A failed refresh keeps
@@ -36,7 +37,7 @@ export function SessionControls(): ReactNode {
   }
   return (
     <>
-      <span>Signed in as {session.data.username}</span>
+      <span>Signed in as {session.data.account.username}</span>
       <button
         type="button"
         onClick={() => {
@@ -50,24 +51,6 @@ export function SessionControls(): ReactNode {
         {logoutStatus(logout.isPending, logout.isError)}
       </span>
       {refreshFailed}
-    </>
-  );
-}
-
-function SessionUnavailable({
-  onRetry,
-}: Readonly<{ onRetry: () => Promise<unknown> }>): ReactNode {
-  return (
-    <>
-      <span role="alert">Sign-in status is unavailable.</span>
-      <button
-        type="button"
-        onClick={() => {
-          void onRetry();
-        }}
-      >
-        Retry
-      </button>
     </>
   );
 }
