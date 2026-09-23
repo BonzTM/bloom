@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db/sqlite"
@@ -15,9 +17,10 @@ type sqliteAuthorization struct {
 }
 
 var (
-	_ core.Authorizer        = (*sqliteAuthorization)(nil)
-	_ core.RoleReader        = (*sqliteAuthorization)(nil)
-	_ core.AdminAccountStore = (*sqliteAuthorization)(nil)
+	_ core.Authorizer            = (*sqliteAuthorization)(nil)
+	_ core.RoleReader            = (*sqliteAuthorization)(nil)
+	_ core.AdminAccountStore     = (*sqliteAuthorization)(nil)
+	_ core.BootstrapAccountStore = (*sqliteAuthorization)(nil)
 )
 
 func newSQLiteAuthorization(pool *sql.DB) *sqliteAuthorization {
@@ -84,24 +87,87 @@ func (s *sqliteAuthorization) CreateAccountWithRole(ctx context.Context, account
 		return fmt.Errorf("create account with role: %w", core.ErrInvalidArgument)
 	}
 	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
-		q := s.q.WithTx(tx)
-		roleID, err := q.GetRoleIDByName(ctx, roleName)
+		return createSQLiteAccountWithRole(ctx, s.q.WithTx(tx), account, roleName)
+	})
+}
+
+func (s *sqliteAuthorization) CreateFirstAccountWithRole(
+	ctx context.Context, account core.Account, roleName string,
+) (bool, error) {
+	if account.ID == "" || roleName == "" {
+		return false, fmt.Errorf("create first account with role: %w", core.ErrInvalidArgument)
+	}
+	created := false
+	err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+		q := sqlite.New(conn)
+		count, err := q.CountAccounts(ctx)
 		if err != nil {
-			return roleNotFound(roleName, err)
+			return fmt.Errorf("count accounts: %w", err)
 		}
-		createErr := (&sqliteAccounts{q: q}).CreateAccount(ctx, account)
-		if createErr != nil {
-			return createErr
+		if count > 0 {
+			return nil
 		}
-		rows, err := q.AssignRoleIDToAccount(ctx, sqlite.AssignRoleIDToAccountParams{AccountID: account.ID, RoleID: roleID})
-		if err != nil {
-			return fmt.Errorf("assign initial role %q: %w", roleName, err)
+		if err := createSQLiteAccountWithRole(ctx, q, account, roleName); err != nil {
+			return err
 		}
-		if rows != 1 {
-			return fmt.Errorf("assign initial role %q: affected %d rows", roleName, rows)
-		}
+		created = true
 		return nil
 	})
+	return created, err
+}
+
+func createSQLiteAccountWithRole(
+	ctx context.Context, q *sqlite.Queries, account core.Account, roleName string,
+) error {
+	if err := (&sqliteAccounts{q: q}).CreateAccount(ctx, account); err != nil {
+		return err
+	}
+	roleID, err := q.GetRoleIDByName(ctx, roleName)
+	if err != nil {
+		return roleNotFound(roleName, err)
+	}
+	rows, err := q.AssignRoleIDToAccount(ctx, sqlite.AssignRoleIDToAccountParams{
+		AccountID: account.ID, RoleID: roleID,
+	})
+	if err != nil {
+		return fmt.Errorf("assign initial role %q: %w", roleName, err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("assign initial role %q: affected %d rows", roleName, rows)
+	}
+	return nil
+}
+
+func withSQLiteWriteTransaction(
+	ctx context.Context, pool *sql.DB, work func(*sql.Conn) error,
+) (retErr error) {
+	if pool == nil || work == nil {
+		return fmt.Errorf("SQLite write transaction: %w", core.ErrInvalidArgument)
+	}
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire SQLite write connection: %w", err)
+	}
+	defer func() { retErr = errors.Join(retErr, conn.Close()) }()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("begin SQLite write transaction: %w", err)
+	}
+	if err := work(conn); err != nil {
+		return errors.Join(err, rollbackSQLiteWriteTransaction(conn))
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return errors.Join(fmt.Errorf("commit SQLite write transaction: %w", err), rollbackSQLiteWriteTransaction(conn))
+	}
+	return nil
+}
+
+func rollbackSQLiteWriteTransaction(conn *sql.Conn) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+		return fmt.Errorf("roll back SQLite write transaction: %w", err)
+	}
+	return nil
 }
 
 func (s *sqliteAuthorization) GrantRole(ctx context.Context, accountID, roleName string) (bool, error) {

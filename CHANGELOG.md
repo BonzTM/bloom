@@ -14,8 +14,20 @@ contracts) gets an entry here.
 - The image workflow no longer opens deployment pull requests or needs a
   deployment token; it publishes and promotes images only.
 
+### Changed
+
+- `create-admin` is now the recovery path for administrator access. Normal
+  first-run setup starts Bloom with `BLOOM_BOOTSTRAP_PASSWORD`, signs in, and
+  then removes the variable from the service environment.
+- Successful login responses now include the account's sorted role names and
+  effective permissions, matching `GET /api/v1/auth/me`.
+
 ### Added
 
+- Automatic first-administrator startup bootstrap with the `admin` username,
+  the built-in `owner` role, and the optional `BLOOM_BOOTSTRAP_USERNAME`
+  override. Existing accounts are never changed, and concurrent startup
+  attempts converge on one account.
 - Administration area in the web UI: an `Admin` entry for accounts holding an
   admin permission, and a roles page that lists every role with its kind and
   permissions, paged through the roles API.
@@ -32,7 +44,7 @@ contracts) gets an entry here.
   policy, and this changelog.
 - Local authentication with `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`,
   and `GET /api/v1/auth/me`; server-side `bloom_session` cookies; and the
-  `create-admin` bootstrap command.
+  `create-admin` recovery command.
 - Permission-based authorization with a stable public catalog at
   `GET /api/v1/auth/permissions`, effective roles and permissions in
   `GET /api/v1/auth/me`, guarded role listing at `GET /api/v1/roles`, denial
@@ -59,12 +71,14 @@ contracts) gets an entry here.
   `BLOOM_LOGIN_RATE_REFILL_INTERVAL`, `BLOOM_LOGIN_RATE_BURST`, and
   `BLOOM_LOGIN_RATE_MAX_KEYS`, plus `BLOOM_LOGIN_MAX_CONCURRENT` for bounded
   Argon2id admission.
-- `BLOOM_BOOTSTRAP_PASSWORD` as non-interactive secret input for
-  `create-admin`, and `BLOOM_TRUSTED_PROXY_CIDRS` as an off-by-default
-  forwarded-client-address allowlist.
-- A new-password policy for `create-admin`: 15 through 1024 Unicode characters,
-  subject to the existing 4096-byte input bound and an embedded offline
-  common-password denylist, with no character-composition rules.
+- `BLOOM_BOOTSTRAP_PASSWORD` as automatic first-administrator input and as
+  non-interactive secret input for the `create-admin` recovery command, plus
+  `BLOOM_TRUSTED_PROXY_CIDRS` as an off-by-default forwarded-client-address
+  allowlist.
+- A shared new-password policy for automatic bootstrap and `create-admin`: 15
+  through 1024 Unicode characters, subject to the existing 4096-byte input
+  bound and an embedded offline common-password denylist, with no
+  character-composition rules.
 
 ### Fixed
 

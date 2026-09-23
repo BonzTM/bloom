@@ -48,12 +48,16 @@ func runCreateAdmin(ctx context.Context, args []string, streams Streams, input C
 	if err != nil {
 		return core.Account{}, err
 	}
+	account, err := newAdminAccount(canonicalUsername, password, systemClock{})
+	if err != nil {
+		return core.Account{}, err
+	}
 	cfg, err := config.Load(nil)
 	if err != nil {
 		return core.Account{}, fmt.Errorf("load config: %w", err)
 	}
 	logger := telemetry.NewLogger(streams.Log, cfg.Telemetry)
-	return createAdmin(ctx, cfg, canonicalUsername, password, logger, systemClock{})
+	return createAdmin(ctx, cfg, account, logger)
 }
 
 func bootstrapPassword(input CommandInput) (string, error) {
@@ -67,47 +71,40 @@ func bootstrapPassword(input CommandInput) (string, error) {
 	if len(password) == 0 {
 		return "", core.ErrEmptyPassword
 	}
-	value := string(password)
-	if err := core.ValidateNewPassword(value); err != nil {
-		return "", err
-	}
-	return value, nil
+	return string(password), nil
 }
 
 func createAdmin(
 	ctx context.Context,
 	cfg config.Config,
-	username, password string,
+	account core.Account,
 	logger *slog.Logger,
-	clock core.Clock,
-) (account core.Account, retErr error) {
+) (result core.Account, retErr error) {
 	pool, err := db.Open(ctx, cfg.Database, logger)
 	if err != nil {
 		return core.Account{}, fmt.Errorf("create-admin: open database: %w", err)
 	}
 	defer closeAdminResource(&retErr, pool, logger)
-	store, _, err := db.NewAccountStores(pool, cfg.Database.Driver)
-	if err != nil {
-		return core.Account{}, fmt.Errorf("create-admin: build account store: %w", err)
-	}
 	adminStore, err := db.NewAdminAccountStore(pool, cfg.Database.Driver)
 	if err != nil {
 		return core.Account{}, fmt.Errorf("create-admin: build role store: %w", err)
 	}
-	if existing, lookupErr := store.GetAccountByUsername(ctx, username); lookupErr == nil {
-		return existing, fmt.Errorf("create-admin: username %q: %w", username, core.ErrAlreadyExists)
-	} else if !errors.Is(lookupErr, core.ErrNotFound) {
-		return core.Account{}, fmt.Errorf("create-admin: check username: %w", lookupErr)
-	}
-	account, err = newAdminAccount(username, password, clock)
-	if err != nil {
-		return core.Account{}, err
-	}
-	if err := adminStore.CreateAccountWithRole(ctx, account, "owner"); err != nil {
-		return account, fmt.Errorf("create-admin: persist account: %w", err)
+	if err := persistAdminAccount(ctx, adminStore, account); err != nil {
+		return account, err
 	}
 	logger.Info("admin account created", "account_id", account.ID, "username", account.Username)
 	return account, nil
+}
+
+type adminAccountCreator interface {
+	CreateAccountWithRole(context.Context, core.Account, string) error
+}
+
+func persistAdminAccount(ctx context.Context, store adminAccountCreator, account core.Account) error {
+	if err := store.CreateAccountWithRole(ctx, account, "owner"); err != nil {
+		return fmt.Errorf("create-admin: persist account: %w", err)
+	}
+	return nil
 }
 
 func closeAdminResource(result *error, closer io.Closer, logger *slog.Logger) {
@@ -115,23 +112,23 @@ func closeAdminResource(result *error, closer io.Closer, logger *slog.Logger) {
 }
 
 func emitCreateAdminAudits(ctx context.Context, audit auditEmitter, accountID string, err error) error {
-	result := telemetry.AuditSuccess
-	reason := "created"
-	resource := "account:" + accountID
-	if err != nil {
-		result = telemetry.AuditFailure
-		reason = createAdminFailureReason(err)
-		resource = "command:create-admin"
+	if err == nil {
+		return emitAdminCreationAudits(ctx, audit, accountID, "cli", "cli")
 	}
 	createErr := audit.Emit(ctx, telemetry.AuditEvent{
-		Actor: "cli", Action: "account.create_admin", Resource: resource,
-		Result: result, Reason: reason, Source: "cli",
+		Actor: "cli", Action: "account.create_admin", Resource: "command:create-admin",
+		Result: telemetry.AuditFailure, Reason: createAdminFailureReason(err), Source: "cli",
 	})
-	if err != nil {
-		return newAuditWriteFailures(createErr, nil)
-	}
+	return newAuditWriteFailures(createErr, nil)
+}
+
+func emitAdminCreationAudits(ctx context.Context, audit auditEmitter, accountID, actor, source string) error {
+	createErr := audit.Emit(ctx, telemetry.AuditEvent{
+		Actor: actor, Action: "account.create_admin", Resource: "account:" + accountID,
+		Result: telemetry.AuditSuccess, Reason: "created", Source: source,
+	})
 	roleErr := audit.Emit(ctx, telemetry.RoleAssignmentAuditEvent(
-		"cli", accountID, "owner", telemetry.AuditSuccess, "assigned", "cli",
+		actor, accountID, "owner", telemetry.AuditSuccess, "assigned", source,
 	))
 	return newAuditWriteFailures(createErr, roleErr)
 }
@@ -198,6 +195,9 @@ func newAdminAccount(username, password string, clock core.Clock) (core.Account,
 	canonicalUsername, err := core.CanonicalUsername(username)
 	if err != nil {
 		return core.Account{}, fmt.Errorf("create-admin: canonicalize username: %w", err)
+	}
+	if validationErr := core.ValidateNewPassword(password); validationErr != nil {
+		return core.Account{}, validationErr
 	}
 	hash, err := core.HashPassword(password)
 	if err != nil {

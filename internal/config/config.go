@@ -17,6 +17,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/BonzTM/bloom/internal/core"
 )
 
 // Driver names the database engine, per ADR 0004: exactly two are supported.
@@ -50,6 +52,8 @@ type Config struct {
 	Telemetry TelemetryConfig
 	// Auth holds browser-session and login-rate-limit settings.
 	Auth AuthConfig
+	// Bootstrap holds the optional automatic first-administrator credentials.
+	Bootstrap BootstrapConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -62,6 +66,14 @@ type Config struct {
 	// ShutdownGrace bounds ordered shutdown. It must exceed worst-case in-flight
 	// work and stay under the platform termination grace.
 	ShutdownGrace time.Duration
+}
+
+// BootstrapConfig configures the one-time first-administrator startup path.
+type BootstrapConfig struct {
+	// Username is the canonical username assigned when no account exists.
+	Username string
+	// Password enables startup bootstrap when it is non-empty. It never renders.
+	Password Secret
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -176,6 +188,7 @@ const (
 	maxLoginRateMaxKeys            = 100_000
 	defaultLoginMaxConcurrent      = 4
 	maxLoginMaxConcurrent          = 64
+	defaultBootstrapUsername       = "admin"
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -215,6 +228,8 @@ func Load(args []string) (Config, error) {
 // so Load stays short and each step is testable in isolation.
 type rawFlags struct {
 	addr, dsn, driver, logLevel, logFormat, otlpEndpoint, secretKey *string
+	bootstrapUsername                                               *string
+	bootstrapPassword                                               string
 	readHeaderTimeout, readTimeout, writeTimeout, idleTimeout       *time.Duration
 	connMaxLifetime, connMaxIdleTime, shutdownGrace                 *time.Duration
 	maxBodyBytes                                                    *int64
@@ -252,6 +267,9 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		migrateOnStartup: fs.Bool("db-migrate-on-startup", env.bool("BLOOM_DB_MIGRATE_ON_STARTUP", false), "apply embedded goose migrations on startup"),
 
 		secretKey: fs.String("secret-key", env.string("BLOOM_SECRET_KEY", ""), "master secret for at-rest encryption (required, >= 32 bytes; prefer the env var)"),
+		bootstrapUsername: fs.String("bootstrap-username",
+			env.string("BLOOM_BOOTSTRAP_USERNAME", defaultBootstrapUsername), "username for automatic first-administrator bootstrap"),
+		bootstrapPassword: env.string("BLOOM_BOOTSTRAP_PASSWORD", ""),
 
 		logLevel:         fs.String("log-level", env.string("BLOOM_LOG_LEVEL", "info"), "log level (debug|info|warn|error)"),
 		logFormat:        fs.String("log-format", env.string("BLOOM_LOG_FORMAT", string(LogFormatJSON)), "log format (json|text)"),
@@ -287,54 +305,68 @@ func (r rawFlags) build() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	driver := Driver(*r.driver)
 	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(*r.auth.trustedProxyCIDRs)
 	if err != nil {
 		return Config{}, err
 	}
-	dsn := *r.dsn
-	if driver == DriverSQLite && dsn == "" {
-		dsn = DefaultSQLiteDSN
+	bootstrap, err := r.buildBootstrap()
+	if err != nil {
+		return Config{}, err
 	}
 	return Config{
-		HTTP: HTTPConfig{
-			Addr:              *r.addr,
-			ReadHeaderTimeout: *r.readHeaderTimeout,
-			ReadTimeout:       *r.readTimeout,
-			WriteTimeout:      *r.writeTimeout,
-			IdleTimeout:       *r.idleTimeout,
-			MaxBodyBytes:      *r.maxBodyBytes,
-		},
-		Database: DatabaseConfig{
-			Driver:           driver,
-			DSN:              dsn,
-			MaxOpenConns:     *r.maxOpenConns,
-			MaxIdleConns:     *r.maxIdleConns,
-			ConnMaxLifetime:  *r.connMaxLifetime,
-			ConnMaxIdleTime:  *r.connMaxIdleTime,
-			MigrateOnStartup: *r.migrateOnStartup,
-		},
-		Telemetry: TelemetryConfig{
-			LogLevel:         level,
-			LogFormat:        LogFormat(*r.logFormat),
-			OTLPEndpoint:     *r.otlpEndpoint,
-			OTLPInsecure:     *r.otlpInsecure,
-			TraceSampleRatio: *r.traceSampleRatio,
-		},
-		Auth: AuthConfig{
-			SessionCookieSecure:     *r.auth.sessionCookieSecure,
-			SessionLifetime:         *r.auth.sessionLifetime,
-			SessionIdleTimeout:      *r.auth.sessionIdleTimeout,
-			LoginRateRefillInterval: *r.auth.loginRateRefillInterval,
-			LoginRateBurst:          *r.auth.loginRateBurst,
-			LoginRateMaxKeys:        *r.auth.loginRateMaxKeys,
-			LoginMaxConcurrent:      *r.auth.loginMaxConcurrent,
-			TrustedProxyCIDRs:       trustedProxyCIDRs,
-		},
+		HTTP:          r.buildHTTP(),
+		Database:      r.buildDatabase(),
+		Telemetry:     r.buildTelemetry(level),
+		Auth:          r.auth.build(trustedProxyCIDRs),
+		Bootstrap:     bootstrap,
 		SecretKey:     NewSecret([]byte(*r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
 	}, nil
+}
+
+func (r rawFlags) buildHTTP() HTTPConfig {
+	return HTTPConfig{
+		Addr: *r.addr, ReadHeaderTimeout: *r.readHeaderTimeout, ReadTimeout: *r.readTimeout,
+		WriteTimeout: *r.writeTimeout, IdleTimeout: *r.idleTimeout, MaxBodyBytes: *r.maxBodyBytes,
+	}
+}
+
+func (r rawFlags) buildDatabase() DatabaseConfig {
+	driver, dsn := Driver(*r.driver), *r.dsn
+	if driver == DriverSQLite && dsn == "" {
+		dsn = DefaultSQLiteDSN
+	}
+	return DatabaseConfig{
+		Driver: driver, DSN: dsn, MaxOpenConns: *r.maxOpenConns, MaxIdleConns: *r.maxIdleConns,
+		ConnMaxLifetime: *r.connMaxLifetime, ConnMaxIdleTime: *r.connMaxIdleTime,
+		MigrateOnStartup: *r.migrateOnStartup,
+	}
+}
+
+func (r rawFlags) buildTelemetry(level slog.Level) TelemetryConfig {
+	return TelemetryConfig{
+		LogLevel: level, LogFormat: LogFormat(*r.logFormat), OTLPEndpoint: *r.otlpEndpoint,
+		OTLPInsecure: *r.otlpInsecure, TraceSampleRatio: *r.traceSampleRatio,
+	}
+}
+
+func (r rawFlags) buildBootstrap() (BootstrapConfig, error) {
+	username, err := core.CanonicalUsername(*r.bootstrapUsername)
+	if err != nil {
+		return BootstrapConfig{}, fmt.Errorf("config: BLOOM_BOOTSTRAP_USERNAME: %w", err)
+	}
+	return BootstrapConfig{Username: username, Password: NewSecret([]byte(r.bootstrapPassword))}, nil
+}
+
+func (r authRawFlags) build(trustedProxyCIDRs []netip.Prefix) AuthConfig {
+	return AuthConfig{
+		SessionCookieSecure: *r.sessionCookieSecure,
+		SessionLifetime:     *r.sessionLifetime, SessionIdleTimeout: *r.sessionIdleTimeout,
+		LoginRateRefillInterval: *r.loginRateRefillInterval, LoginRateBurst: *r.loginRateBurst,
+		LoginRateMaxKeys: *r.loginRateMaxKeys, LoginMaxConcurrent: *r.loginMaxConcurrent,
+		TrustedProxyCIDRs: trustedProxyCIDRs,
+	}
 }
 
 func parseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
@@ -372,11 +404,21 @@ func (c Config) Validate() error {
 	if err := c.Auth.validate(); err != nil {
 		return err
 	}
+	if err := c.Bootstrap.validate(); err != nil {
+		return err
+	}
 	if c.SecretKey.Len() < MinSecretKeyBytes {
 		return fmt.Errorf("config: BLOOM_SECRET_KEY must be set and at least %d bytes long (got %d)", MinSecretKeyBytes, c.SecretKey.Len())
 	}
 	if c.ShutdownGrace <= 0 {
 		return fmt.Errorf("config: BLOOM_SHUTDOWN_GRACE must be positive, got %s", c.ShutdownGrace)
+	}
+	return nil
+}
+
+func (b BootstrapConfig) validate() error {
+	if _, err := core.CanonicalUsername(b.Username); err != nil {
+		return fmt.Errorf("config: BLOOM_BOOTSTRAP_USERNAME: %w", err)
 	}
 	return nil
 }

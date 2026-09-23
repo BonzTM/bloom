@@ -10,6 +10,7 @@ import (
 
 type Querier interface {
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
+	CountAccounts(ctx context.Context) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
 	// by both engines (ADR 0004 item 3): sqlc.yaml compiles it once against the
 	// SQLite schema into internal/db/sqlite and once against the PostgreSQL schema

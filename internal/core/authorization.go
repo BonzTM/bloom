@@ -141,6 +141,12 @@ type AdminAccountStore interface {
 	GrantRole(ctx context.Context, accountID, roleName string) (bool, error)
 }
 
+// BootstrapAccountStore creates the first account and role assignment in one
+// serialized transaction, or reports that an account already exists.
+type BootstrapAccountStore interface {
+	CreateFirstAccountWithRole(ctx context.Context, account Account, roleName string) (bool, error)
+}
+
 // ErrForbidden reports a denied authorization decision.
 var ErrForbidden = errors.New("forbidden")
 
