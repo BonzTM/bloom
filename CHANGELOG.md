@@ -9,10 +9,10 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
-### Changed
+### Removed
 
-- Successful login responses now include the account's sorted role names and
-  effective permissions, matching `GET /api/v1/auth/me`.
+- The image workflow no longer opens deployment pull requests or needs a
+  deployment token; it publishes and promotes images only.
 
 ### Added
 
@@ -24,8 +24,7 @@ contracts) gets an entry here.
   immutable-image reuse, required CI and PostgreSQL gates, pre-promotion
   provenance, ancestry-guarded `main` and version-guarded stable aliases,
   deterministic bounded seven-day cleanup of unpromoted candidates,
-  anonymous-pull validation, an SBOM, and one reusable automated homelab
-  deployment pull request.
+  anonymous-pull validation, and an SBOM.
 - Bootstrap of the service: Go HTTP server with `/livez`, `/readyz`, `/metrics`,
   and `GET /api/v1/version`; embedded React UI; SQLite (default) and PostgreSQL
   storage at parity; container image and CI.

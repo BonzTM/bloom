@@ -16,7 +16,7 @@ The handbook's default primary store is PostgreSQL, and its persistence default 
 Prior art shows both failure modes. Wizarr is SQLite-only and its users ask for
 PostgreSQL. Jellystat is PostgreSQL-only, with "most reporting logic in PL/pgSQL
 functions and materialized views", and its most-reacted declined issue is a
-request for SQLite (`docs/research/jellystat.md`). Bloom must serve homelab users
+request for SQLite (`docs/research/jellystat.md`). Bloom must serve self-hosting users
 who want one container and one volume, and operators who already run PostgreSQL.
 
 Tooling facts (verified 2026-09-21):
@@ -68,7 +68,7 @@ repository layer in `internal/db`, with these rules:
 
 ### Good
 
-- Homelab default is a single file on a single volume; no second container.
+- Self-hosted default is a single file on a single volume; no second container.
 - Operators with PostgreSQL get it with no loss of features, satisfying the
   owner's own deployment.
 - No engine-specific reporting logic to port later, unlike Jellystat.

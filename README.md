@@ -267,21 +267,10 @@ stores tags on a shared digest version, so promoted versions carry both their
 candidate tag and public tags. Those promoted candidates remain in the registry
 because deleting their package version would also delete the promoted image.
 
-After a new image passes the smoke test, or after a rerun reuses the immutable
-digest, the workflow opens a pull request in `bonztm/homelab`. That pull request
-pins both the `bloom` container and the `migrate` init container in
-`apps/internal/bloom/deployment.yaml` to the same `main-<commit>` tag and image
-digest. A rerun updates the existing pull request on the workflow-owned
-`chore/bloom-main` branch. Each run recreates that branch from the current
-homelab `main`, renders the Bloom manifests, and skips the commit when the
-manifest is already current. The branch push uses an exact-OID lease. After each
-push, the workflow re-reads homelab `main`; if it moved, the workflow recreates
-the branch from the newer base, reapplies and renders the change, and retries up
-to three times before failing. It opens or updates the pull request only after a
-push whose base still matches the re-read `main`. If `main` changes after that
-check, GitHub may mark the pull request behind or conflicting; the next Bloom run
-recreates the branch from the new base. If the deployment file does not exist
-yet, the workflow skips the pull request without failing the image build.
+The workflow publishes images and does nothing else; deploying them is your
+platform's job. The `main` alias is ancestry-guarded and never moves backwards,
+so a platform that always pulls the alias can only run the same or a newer
+build than it ran before.
 
 Pushing a `v<major>.<minor>.<patch>` tag keeps the release flow separate from
 deployment. A `v1.2.3` release publishes immutable `v1.2.3` and `1.2.3` tags.
@@ -289,28 +278,15 @@ It moves `1.2` and `latest` only when `1.2.3` is newer than the version that the
 alias already references. A prerelease such as `v1.2.3-rc.1` publishes only
 that exact tag. Invalid release tags fail before an image is pushed. Manual runs
 accept only `main` or an actual valid release tag; a similarly named branch is
-rejected. Tagged releases do not open homelab pull requests. Image runs share a
-serialized queue so promotion and the reusable deployment branch cannot race.
+rejected. Image runs share a serialized queue so promotions cannot race.
 
 [GitHub creates a newly published container package as private by
 default](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#about-visibility-of-packages).
 After the first image is published, open the
 [`bonztm/bloom` package settings](https://github.com/users/BonzTM/packages/container/bloom/settings)
-and change its visibility to public. This is a one-time bootstrap step. The
-deploy job pulls the promoted digest without logging in before it opens or
-updates a pull request. It fails with an actionable error while anonymous pulls
-are disabled. If the first deploy job reaches that check before the visibility
-change, make the package public and rerun the failed workflow.
-
-The repository also needs one secret before the first main deployment:
-
-1. Create a fine-grained personal access token for the `bonztm/homelab`
-   repository.
-2. Grant the token **Contents: Read and write** and **Pull requests: Read and
-   write** repository permissions. Do not grant additional repository access or
-   permissions.
-3. Add the token to the Bloom repository as an Actions secret named
-   `HOMELAB_DEPLOY_TOKEN`.
+and change its visibility to public. This is a one-time bootstrap step; the
+promote job validates that anonymous pulls work and fails with an actionable
+error while they are disabled.
 
 Release builds add `-trimpath` and stamp `internal/buildinfo` through the
 Dockerfile's `VERSION`, `COMMIT`, and `CREATED` build arguments. Run the image
