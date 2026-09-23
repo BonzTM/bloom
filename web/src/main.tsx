@@ -5,6 +5,7 @@ import { readPublicConfig } from "./lib/config.js";
 import { AuthApi } from "./features/auth/api/auth-api.js";
 import { InvitesApi } from "./features/invites/api/invites-api.js";
 import { MediaServersApi } from "./features/media-servers/api/media-servers-api.js";
+import { PlaybackApi } from "./features/playback/api/playback-api.js";
 import { RolesApi } from "./features/roles/api/roles-api.js";
 import { SystemApi } from "./features/system/api/system-api.js";
 import { AppProviders } from "./app/providers.js";
@@ -28,6 +29,7 @@ async function start(): Promise<void> {
   const rolesApi = new RolesApi(client);
   const mediaServersApi = new MediaServersApi(client);
   const invitesApi = new InvitesApi(client);
+  const playbackApi = new PlaybackApi(client);
   createRoot(rootElement).render(
     <StrictMode>
       <AppProviders
@@ -36,6 +38,7 @@ async function start(): Promise<void> {
         rolesApi={rolesApi}
         mediaServersApi={mediaServersApi}
         invitesApi={invitesApi}
+        playbackApi={playbackApi}
         queryClient={createQueryClient()}
         router={createAppRouter()}
       />

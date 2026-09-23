@@ -24,6 +24,7 @@ const LazyMediaServersRoute = lazy(
   () => import("../routes/media-servers-route.js"),
 );
 const LazyInvitesRoute = lazy(() => import("../routes/invites-route.js"));
+const LazyPlaybackRoute = lazy(() => import("../routes/playback-route.js"));
 const LazyInviteAcceptRoute = lazy(
   () => import("../routes/invite-accept-route.js"),
 );
@@ -122,6 +123,16 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.usersInvite]}>
                 <LazyPage loading="Loading invites…">
                   <LazyInvitesRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "playback",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading playback…">
+                  <LazyPlaybackRoute />
                 </LazyPage>
               </RequirePermission>
             ),

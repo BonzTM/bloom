@@ -52,6 +52,10 @@ contracts) gets an entry here.
   `BLOOM_PLAYBACK_POLL_IDLE`, `BLOOM_PLAYBACK_MISSED_POLLS`, and
   `BLOOM_PLAYBACK_RESUME_WINDOW`, plus poll, latency, open-watch, and closure
   metrics.
+- Playback page in the administration area (`/admin/playback`, guarded by
+  `stats.read.all`): what is playing now on every media server, refreshed
+  every ten seconds, and the recent finished watches with their watch time,
+  paged and filterable by server.
 - Media servers page in the administration area (`/admin/media-servers`,
   guarded by `admin.settings`): register a Jellyfin server with its API key,
   see the capabilities Bloom detected, and remove it.
