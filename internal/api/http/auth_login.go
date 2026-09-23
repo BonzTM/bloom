@@ -283,6 +283,11 @@ const (
 	auditResourceInvites          = "route:invites"
 	auditResourceInvitePublic     = "route:invite_public"
 	auditResourcePlayback         = "route:playback"
+	auditResourceMetadata         = "route:metadata"
+	auditResourceMetadataSettings = "route:metadata.settings"
+	auditResourceRequestProfiles  = "route:request_profiles"
+	auditResourceRequests         = "route:requests"
+	auditResourceRequestQuotas    = "route:request_quotas"
 )
 
 func routeResource(r *http.Request) string {
@@ -312,6 +317,16 @@ func routeResource(r *http.Request) string {
 		return auditResourceInvitePublic
 	case "/api/v1/playback/now", "/api/v1/playback/history":
 		return auditResourcePlayback
+	case "/api/v1/metadata/search", "/api/v1/metadata/movies/{id}", "/api/v1/metadata/series/{id}":
+		return auditResourceMetadata
+	case "/api/v1/metadata/providers/tmdb/key":
+		return auditResourceMetadataSettings
+	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
+		return auditResourceRequestProfiles
+	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
+		return auditResourceRequests
+	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
+		return auditResourceRequestQuotas
 	default:
 		return auditResourceRouteUnmatched
 	}

@@ -283,14 +283,14 @@ func TestAuditLoggerSchema(t *testing.T) {
 		"log_type": "audit", "actor": "acct-1", "action": "auth.login", "resource": "account:acct-1",
 		"result": "success", "request_id": "req-1", "time": "2026-09-22T11:00:00Z",
 		"reason": "authenticated", "source": "192.0.2.1", "subject_id": "username:opaque",
-		"permission": "admin.roles", "role": "owner", "kind": "", "provider": "",
+		"permission": "admin.roles", "role": "owner", "kind": "", "title": "", "provider": "",
 	} {
 		if rec[k] != want {
 			t.Errorf("%s = %v, want %q", k, rec[k], want)
 		}
 	}
-	if len(rec) != 17 {
-		t.Fatalf("audit field count = %d, want 17: %v", len(rec), rec)
+	if len(rec) != 18 {
+		t.Fatalf("audit field count = %d, want 18: %v", len(rec), rec)
 	}
 }
 

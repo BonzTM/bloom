@@ -175,3 +175,12 @@ func isSQLiteUnique(err error) bool {
 	code := serr.Code()
 	return code == sqlite3.SQLITE_CONSTRAINT_UNIQUE || code == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
 }
+
+func isSQLiteForeignKey(err error) bool {
+	var serr *sqlitelib.Error
+	if !errors.As(err, &serr) {
+		return false
+	}
+	code := serr.Code()
+	return code == sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY || code == sqlite3.SQLITE_CONSTRAINT_TRIGGER
+}

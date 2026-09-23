@@ -84,6 +84,9 @@ type AuditEvent struct {
 	Role string
 	// Kind is the finite integration kind for integration configuration events.
 	Kind string
+	// Title is the media title snapshot for request lifecycle events. It never
+	// contains a credential or requester-supplied decision text.
+	Title string
 	// AllowInsecure records an explicit plaintext-transport exception.
 	AllowInsecure bool
 	// Result is the outcome: success, failure, or denied.
@@ -159,6 +162,7 @@ func (a *AuditLogger) Emit(ctx context.Context, e AuditEvent) error {
 		slog.String("permission", e.Permission),
 		slog.String("role", e.Role),
 		slog.String("kind", e.Kind),
+		slog.String("title", e.Title),
 		slog.Bool("allow_insecure", e.AllowInsecure),
 		slog.String("result", string(e.Result)),
 		slog.String("reason", e.Reason),

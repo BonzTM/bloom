@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -256,6 +257,27 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic},
 		{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPut, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/request-profiles", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/request-profiles", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionAdminSettings}, authRequired: true},
+		{method: http.MethodPut, path: "/api/v1/request-profiles/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/request-profiles/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/requests", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/requests", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/requests/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/requests/{id}/approve", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/requests/{id}/decline", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
+		{method: http.MethodPut, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPut, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 	}
 	if len(apiRouteInventory) != len(want) {
 		t.Fatalf("route inventory length = %d, want %d", len(apiRouteInventory), len(want))
@@ -263,7 +285,7 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 	for index, expected := range want {
 		got := apiRouteInventory[index]
 		if got.method != expected.method || got.path != expected.path || got.access != expected.access ||
-			got.permission != expected.permission || got.sessions != expected.sessions ||
+			got.permission != expected.permission || !slices.Equal(got.anyPermissions, expected.anyPermissions) || got.sessions != expected.sessions ||
 			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot || got.oidc != expected.oidc {
 			t.Errorf("route %d = %+v, want %+v", index, got, expected)
 		}

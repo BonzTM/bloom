@@ -34,6 +34,16 @@ contracts) gets an entry here.
 - Runtime restart coverage on SQLite and PostgreSQL proves that database-backed
   browser sessions survive process replacement and logout revocations remain
   effective.
+- SQLite and PostgreSQL migration `00012` for encrypted metadata-provider
+  credentials, request profiles and tags, media requests and seasons, and role
+  and account rolling request quotas.
+- TMDB movie and series search and detail routes, encrypted TMDB key settings,
+  request-profile administration, request create/list/detail/approve/decline,
+  and role and account quota routes with OpenAPI contracts, audit events,
+  metrics, bounded caching, rate limiting, and transient-only retries.
+- Request authorization using `requests.create`, `requests.read.own`, and
+  `requests.approve`; `admin.settings` protects provider credentials, profiles,
+  and account quota overrides, while `admin.roles` protects role quotas.
 - Invites in the web UI: `/admin/invites` (guarded by `users.invite`) creates
   an invite for a registered media server with an expiry and a use limit,
   shows the link once, lists invites with their status, and revokes them; the

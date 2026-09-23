@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -105,6 +106,14 @@ func (c *Cipher) Encrypt(plaintext []byte, metadata Context) ([]byte, error) {
 	copy(out[1:1+keyIDSize], c.keyID[:])
 	copy(out[1+keyIDSize:], nonce)
 	return c.aead.Seal(out, nonce, plaintext, associatedData(metadata)), nil
+}
+
+// KeyID returns the non-secret identifier embedded in new envelopes.
+func (c *Cipher) KeyID() string {
+	if c == nil {
+		return ""
+	}
+	return hex.EncodeToString(c.keyID[:])
 }
 
 // Decrypt verifies the key identity, metadata, and ciphertext before opening it.

@@ -27,8 +27,11 @@ import (
 	"github.com/BonzTM/bloom/internal/db"
 	inviteapp "github.com/BonzTM/bloom/internal/invite"
 	"github.com/BonzTM/bloom/internal/mediaserver"
+	"github.com/BonzTM/bloom/internal/metadata"
+	"github.com/BonzTM/bloom/internal/metadata/tmdb"
 	oidcadapter "github.com/BonzTM/bloom/internal/oidc"
 	"github.com/BonzTM/bloom/internal/playback"
+	requestapp "github.com/BonzTM/bloom/internal/request"
 	"github.com/BonzTM/bloom/internal/secrets"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -136,6 +139,7 @@ func runService(
 		cfg, auditSink, logger, metrics, pool,
 		wiring.accounts, wiring.localIdentities, wiring.authorizer, wiring.roles, wiring.sessions,
 		wiring.mediaServers, wiring.invites, wiring.playbackStore, clock,
+		wiring.metadata, wiring.requests,
 		wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows,
 	)
 	if err != nil {
@@ -143,7 +147,8 @@ func runService(
 	}
 
 	serving, err := serve(
-		ctx, srv, wiring.oidcProvider, wiring.playbackManager, wiring.mediaServers,
+		ctx, srv, wiring.oidcProvider, wiring.playbackManager,
+		connectionGroup{wiring.mediaServers, wiring.metadata},
 		pool, tracerProvider, logger, cfg.ShutdownGrace,
 		deps.ListenerReady, deps.listen,
 	)
@@ -160,6 +165,8 @@ type serviceWiring struct {
 	roles           core.RoleReader
 	sessions        *scs.SessionManager
 	mediaServers    *mediaserver.Service
+	metadata        *metadata.Service
+	requests        *requestapp.Service
 	invites         *inviteapp.Service
 	playbackStore   core.PlaybackStore
 	playbackManager *playback.Manager
@@ -183,6 +190,11 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	ownership.media = mediaServers
+	metadataService, requestService, err := requestDependencies(pool, cfg, metrics, deps.Clock)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	ownership.media = connectionGroup{mediaServers, metadataService}
 	invites, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock)
 	if err != nil {
 		return serviceWiring{}, err
@@ -206,6 +218,7 @@ func wireServiceDependencies(
 		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, invites: invites,
 		playbackStore: playbackStore, playbackManager: playbackManager,
+		metadata: metadataService, requests: requestService,
 		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
 	}, nil
 }
@@ -335,6 +348,8 @@ func assembleHTTPServer(
 	invites *inviteapp.Service,
 	playbackStore core.PlaybackStore,
 	clock core.Clock,
+	metadataService *metadata.Service,
+	requestService *requestapp.Service,
 	oidcProvider core.OIDCProvider,
 	oidcAccounts core.OIDCAccountStore,
 	oidcFlows core.OIDCFlowStore,
@@ -359,6 +374,9 @@ func assembleHTTPServer(
 		InviteReader:        invites,
 		InviteManager:       invites,
 		PlaybackReader:      playbackStore,
+		MetadataReader:      metadataService,
+		MetadataManager:     metadataService,
+		RequestService:      requestService,
 		Sessions:            sessions,
 		Audit:               audit,
 		AuditCorrelationKey: cfg.SecretKey.Bytes(),
@@ -370,6 +388,49 @@ func assembleHTTPServer(
 		OIDCConfig:          cfg.OIDC,
 		PublicURL:           cfg.PublicURL,
 	}), nil
+}
+
+type connectionGroup []mediaConnectionCloser
+
+func (g connectionGroup) CloseIdleConnections() {
+	for _, closer := range g {
+		if closer != nil {
+			closer.CloseIdleConnections()
+		}
+	}
+}
+
+func requestDependencies(pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock) (*metadata.Service, *requestapp.Service, error) {
+	providerReader, providerWriter, err := db.NewMetadataProviderStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build metadata provider stores: %w", err)
+	}
+	cipher, err := secrets.New(cfg.SecretKey.Bytes())
+	if err != nil {
+		return nil, nil, fmt.Errorf("build metadata credential cipher: %w", err)
+	}
+	registry := metadata.NewRegistry(tmdb.Dependencies{Metrics: metrics, Clock: clock})
+	metadataService, err := metadata.NewService(providerReader, providerWriter, cipher, registry, clock)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build metadata service: %w", err)
+	}
+	profileReader, profileWriter, err := db.NewRequestProfileStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build request profile stores: %w", err)
+	}
+	requestReader, requestWriter, quotaReader, quotaWriter, quotaDeleter, err := db.NewRequestStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build request stores: %w", err)
+	}
+	service, err := requestapp.NewService(requestapp.Dependencies{
+		Profiles: profileReader, ProfileWriter: profileWriter,
+		Requests: requestReader, RequestWriter: requestWriter, QuotaReader: quotaReader, QuotaWriter: quotaWriter,
+		QuotaDeleter: quotaDeleter, Metadata: metadataService, Clock: clock, Metrics: metrics,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("build request service: %w", err)
+	}
+	return metadataService, service, nil
 }
 
 func inviteDependencies(

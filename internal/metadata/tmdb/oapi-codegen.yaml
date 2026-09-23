@@ -1,0 +1,12 @@
+package: tmdbapi
+output: api/zz_generated.openapi.go
+generate:
+  models: true
+  client: true
+output-options:
+  include-operation-ids:
+    - search-multi
+    - search-movie
+    - search-tv
+    - movie-details
+    - tv-series-details

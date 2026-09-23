@@ -246,6 +246,41 @@ upstream failure. A used, expired, exhausted, revoked, or unknown code returns
 the same public not-found response. A username that Jellyfin rejects as taken
 or invalid returns a conflict response.
 
+### Requests
+
+Bloom starts without a metadata credential. An account with `admin.settings`
+stores the TMDB API key with `PUT /api/v1/metadata/providers/tmdb/key`. Bloom
+encrypts the key under `BLOOM_SECRET_KEY`, never returns it, and exposes only
+its presence through `GET` on the same route. Removing the key disables new
+metadata searches and returns `metadata_not_configured` until another key is
+stored.
+
+Create at least one request profile with `POST /api/v1/request-profiles`.
+Profiles select movies, series, or both and retain the download-manager kind,
+instance, quality profile, root folder, and tags needed by the later dispatch
+slice. List profiles from the collection and update a profile with
+`PUT /api/v1/request-profiles/{id}`. Delete a profile with `DELETE` on the same
+item route. Bloom refuses deletion after a request references the profile.
+
+Accounts with `requests.create` can search TMDB, open movie or series details,
+and submit a movie or selected series seasons to `POST /api/v1/requests`.
+Accounts with `requests.approve` are exempt from quotas and their own requests
+are approved immediately. Other requests remain pending until an approver uses
+the request's `/approve` or `/decline` route. This slice records approval only;
+it does not send approved requests to a download manager.
+
+Role quotas are managed at `/api/v1/roles/{id}/request-quota` with
+`admin.roles`. Account overrides are managed at
+`/api/v1/accounts/{id}/request-quota` with `admin.settings`. Movie and season
+limits each use a rolling period in days. A zero limit and zero period disable
+that limit. Declined requests do not consume quota. When several assigned roles
+define quotas, Bloom permits the request when any applicable role quota permits
+it; an account override replaces the role calculation.
+
+Accounts with `requests.read.own` see their own requests. Approvers see all
+requests and can filter by status or requester. Lists are cursor-paged newest
+first.
+
 ### Back up the master secret
 
 Back up `BLOOM_SECRET_KEY` with the database and keep it stable across restarts,
@@ -347,6 +382,11 @@ Migration `00011_playback_collection` adds watches, active-time segments, and
 bounded position samples on both engines. Apply it before enabling this binary.
 Deleting a media-server registration first stops and awaits its collector, then
 cascades to all three playback tables.
+
+Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
+request profiles and tags, media requests and seasons, and role and account
+rolling request quotas on both engines. Apply it before enabling metadata and
+request routes.
 
 ### Upgrading existing accounts to roles
 

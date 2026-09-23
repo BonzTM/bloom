@@ -22,6 +22,8 @@ sql:
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_sqlite.sql
       - internal/db/queries/playback.sql
+      - internal/db/queries/requests.sql
+      - internal/db/queries/requests_sqlite.sql
     gen:
       go:
         package: sqlite
@@ -43,6 +45,8 @@ sql:
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_postgres.sql
       - internal/db/queries/playback.sql
+      - internal/db/queries/requests.sql
+      - internal/db/queries/requests_postgres.sql
     gen:
       go:
         package: postgres

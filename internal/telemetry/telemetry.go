@@ -131,3 +131,15 @@ func (NopMetrics) SetOpenWatches(string, string, int) {}
 
 // IncWatchesClosed does nothing.
 func (NopMetrics) IncWatchesClosed(string, string) {}
+
+// IncPlaybackRefreshFailure does nothing.
+func (NopMetrics) IncPlaybackRefreshFailure() {}
+
+// ObserveMetadataRequest discards a metadata-provider observation.
+func (NopMetrics) ObserveMetadataRequest(string, string, string, float64) {}
+
+// ObserveMetadataRetry discards a metadata-provider retry observation.
+func (NopMetrics) ObserveMetadataRetry(string, string, string) {}
+
+// IncMediaRequest discards a media request outcome.
+func (NopMetrics) IncMediaRequest(string, string) {}
