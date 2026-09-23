@@ -129,6 +129,18 @@ type recordingAudit struct {
 	err    error
 }
 
+func (a *recordingAudit) reset() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = nil
+}
+
+func (a *recordingAudit) snapshot() []telemetry.AuditEvent {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.events)
+}
+
 type authAuthorization struct {
 	mu                      sync.Mutex
 	permissions             map[string][]core.Permission
@@ -141,6 +153,7 @@ type authAuthorization struct {
 	snapshotCalls           int
 	listRolesCalls          int
 	advanceAfterPermissions bool
+	beforeSnapshot          func(context.Context, string)
 	lastAfterName           string
 	lastPageSize            int
 }
@@ -160,10 +173,16 @@ func (a *authAuthorization) Permissions(_ context.Context, accountID string) ([]
 	return permissions, nil
 }
 
-func (a *authAuthorization) Snapshot(_ context.Context, accountID string) (core.AuthorizationSnapshot, error) {
+func (a *authAuthorization) Snapshot(ctx context.Context, accountID string) (core.AuthorizationSnapshot, error) {
+	a.mu.Lock()
+	a.snapshotCalls++
+	beforeSnapshot := a.beforeSnapshot
+	a.mu.Unlock()
+	if beforeSnapshot != nil {
+		beforeSnapshot(ctx, accountID)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.snapshotCalls++
 	if a.snapshotErr != nil {
 		return core.AuthorizationSnapshot{}, a.snapshotErr
 	}
@@ -188,6 +207,14 @@ func (a *authAuthorization) ListRoles(_ context.Context, afterName string, pageS
 		}
 	}
 	return roles, nil
+}
+
+func (a *authAuthorization) resetCalls() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.permissionsCalls = 0
+	a.snapshotCalls = 0
+	a.listRolesCalls = 0
 }
 
 func (a *recordingAudit) Emit(_ context.Context, event telemetry.AuditEvent) error {
@@ -224,7 +251,9 @@ type controllableSessionStore struct {
 	mu                            sync.Mutex
 	base                          scs.Store
 	findErr, commitErr, deleteErr error
+	deleteAfterErr                error
 	deleted                       []string
+	beforeCommit                  func(context.Context) error
 }
 
 func (s *controllableSessionStore) Find(token string) ([]byte, bool, error) {
@@ -239,7 +268,10 @@ func (s *controllableSessionStore) Delete(token string) error {
 	return s.DeleteCtx(context.Background(), token)
 }
 
-func (s *controllableSessionStore) FindCtx(_ context.Context, token string) ([]byte, bool, error) {
+func (s *controllableSessionStore) FindCtx(ctx context.Context, token string) ([]byte, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.findErr != nil {
@@ -248,23 +280,42 @@ func (s *controllableSessionStore) FindCtx(_ context.Context, token string) ([]b
 	return s.base.Find(token)
 }
 
-func (s *controllableSessionStore) CommitCtx(_ context.Context, token string, data []byte, expiry time.Time) error {
+func (s *controllableSessionStore) CommitCtx(ctx context.Context, token string, data []byte, expiry time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.commitErr != nil {
-		return s.commitErr
+	beforeCommit := s.beforeCommit
+	commitErr := s.commitErr
+	s.mu.Unlock()
+	if beforeCommit != nil {
+		if err := beforeCommit(ctx); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if commitErr != nil {
+		return commitErr
 	}
 	return s.base.Commit(token, data, expiry)
 }
 
-func (s *controllableSessionStore) DeleteCtx(_ context.Context, token string) error {
+func (s *controllableSessionStore) DeleteCtx(ctx context.Context, token string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
 	s.deleted = append(s.deleted, token)
-	return s.base.Delete(token)
+	if err := s.base.Delete(token); err != nil {
+		return err
+	}
+	return s.deleteAfterErr
 }
 
 func newAuthHarness(t *testing.T, mutate func(*config.AuthConfig)) authHarness {
@@ -420,12 +471,15 @@ func TestLoginSuccessCookieAuditAndMetric(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login = %d %s, want 200", rec.Code, rec.Body.String())
 	}
-	var body authResponse
+	var body currentAccountResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body.Account.ID != "11111111-1111-4111-8111-111111111111" || body.Account.Username != "alice" {
 		t.Errorf("response = %+v", body)
+	}
+	if !slices.Equal(body.Roles, []string{"owner"}) || !slices.IsSorted(body.Permissions) {
+		t.Errorf("authorization = roles %v permissions %v", body.Roles, body.Permissions)
 	}
 	cookie := sessionCookie(t, rec)
 	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
@@ -444,6 +498,133 @@ func TestLoginSuccessCookieAuditAndMetric(t *testing.T) {
 	if got := h.metrics.loginOutcome(); got != "success" {
 		t.Errorf("metric outcome = %q, want success", got)
 	}
+}
+
+func TestLoginReturnsBootstrapAdminAuthorization(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	response := decodeCurrentAccount(t, h.login(t, "alice", "secret-password"))
+	wantPermissions := make([]core.Permission, 0, len(core.PermissionCatalog()))
+	for _, definition := range core.PermissionCatalog() {
+		wantPermissions = append(wantPermissions, definition.ID)
+	}
+	slices.Sort(wantPermissions)
+	if !slices.Equal(response.Roles, []string{"owner"}) || !slices.Equal(response.Permissions, wantPermissions) {
+		t.Fatalf("bootstrap admin authorization = roles %v permissions %v", response.Roles, response.Permissions)
+	}
+}
+
+func TestLoginReturnsEmptyAuthorizationForRolelessAccount(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	addRolelessLoginAccount(h, "roleless", "33333333-3333-4333-8333-333333333333")
+	response := decodeCurrentAccount(t, h.login(t, "roleless", "secret-password"))
+	if response.Roles == nil || response.Permissions == nil {
+		t.Fatalf("roleless authorization = roles %v permissions %v, want empty arrays", response.Roles, response.Permissions)
+	}
+	if len(response.Roles) != 0 || len(response.Permissions) != 0 {
+		t.Fatalf("roleless authorization = roles %v permissions %v", response.Roles, response.Permissions)
+	}
+}
+
+func TestLoginResponseMatchesMe(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	login := h.login(t, "alice", "secret-password")
+	cookie := sessionCookie(t, login)
+	me := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
+	if login.Code != http.StatusOK || me.Code != http.StatusOK {
+		t.Fatalf("statuses = login %d, me %d", login.Code, me.Code)
+	}
+	if login.Body.String() != me.Body.String() {
+		t.Fatalf("bodies differ: login %s me %s", login.Body.String(), me.Body.String())
+	}
+}
+
+func TestLoginReadsRevokedAuthorizationBeforeCreatingSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	accountID := "11111111-1111-4111-8111-111111111111"
+	h.authorization.beforeSnapshot = func(ctx context.Context, snapshotID string) {
+		if got := h.sessions.GetString(ctx, sessionAccountIDKey); got != "" || snapshotID != accountID {
+			t.Errorf("session account = %q, snapshot account = %q, want empty and %q", got, snapshotID, accountID)
+		}
+		h.authorization.mu.Lock()
+		defer h.authorization.mu.Unlock()
+		h.authorization.roleNames[accountID] = nil
+		h.authorization.permissions[accountID] = nil
+	}
+	response := decodeCurrentAccount(t, h.login(t, "alice", "secret-password"))
+	if len(response.Roles) != 0 || len(response.Permissions) != 0 {
+		t.Fatalf("revoked authorization = roles %v permissions %v", response.Roles, response.Permissions)
+	}
+}
+
+func TestLoginAuthorizationFailureDestroysInboundSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	oldCookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.audit.reset()
+	h.metrics.resetLoginOutcomes()
+	h.authorization.snapshotErr = errors.New("authorization unavailable")
+	recorder := h.request(t, http.MethodPost, "/api/v1/auth/login",
+		`{"username":"alice","password":"secret-password"}`, oldCookie)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+	}
+	if expired := sessionCookie(t, recorder); expired.MaxAge >= 0 {
+		t.Fatalf("authorization failure cookie MaxAge = %d, want deletion", expired.MaxAge)
+	}
+	assertAuthorizationFailureTelemetry(t, h)
+	if got := h.request(t, http.MethodGet, "/api/v1/auth/me", "", oldCookie).Code; got != http.StatusUnauthorized {
+		t.Fatalf("old session status = %d, want 401", got)
+	}
+}
+
+func TestLoginAuthorizationFailureExpiresUnresolvedInboundSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.authorization.snapshotErr = errors.New("authorization unavailable")
+	unresolved := &http.Cookie{Name: sessionCookieName, Value: "unresolved-token"}
+	recorder := h.request(t, http.MethodPost, "/api/v1/auth/login",
+		`{"username":"alice","password":"secret-password"}`, unresolved)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+	}
+	if expired := sessionCookie(t, recorder); expired.MaxAge >= 0 {
+		t.Fatalf("authorization failure cookie MaxAge = %d, want deletion", expired.MaxAge)
+	}
+	assertAuthorizationFailureTelemetry(t, h)
+}
+
+func assertAuthorizationFailureTelemetry(t *testing.T, h authHarness) {
+	t.Helper()
+	if outcomes := h.metrics.loginOutcomes(); !slices.Equal(outcomes, []string{"internal_error"}) {
+		t.Fatalf("login metrics = %v, want [internal_error]", outcomes)
+	}
+	events := h.audit.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("audit events = %+v, want one", events)
+	}
+	event := events[0]
+	if event.Actor != "anonymous" || event.SubjectID != h.server.usernameSubjectID("alice") ||
+		event.Action != "auth.login" || event.Resource != auditResourceAuthLogin ||
+		event.Result != telemetry.AuditFailure || event.Reason != "internal_error" {
+		t.Fatalf("authorization failure audit = %+v", event)
+	}
+}
+
+func decodeCurrentAccount(t *testing.T, recorder *httptest.ResponseRecorder) currentAccountResponse {
+	t.Helper()
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response currentAccountResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode current account: %v", err)
+	}
+	return response
+}
+
+func addRolelessLoginAccount(h authHarness, username, accountID string) {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	hash := h.store.accounts["alice"].PasswordHash
+	h.store.accounts[username] = core.Account{ID: accountID, Username: username, PasswordHash: hash}
 }
 
 func TestLoginCanonicalizesUsernameAtEveryIdentityBoundary(t *testing.T) {
@@ -780,6 +961,26 @@ func TestLoginRenewalDeletesOldStoredToken(t *testing.T) {
 	}
 }
 
+func TestLoginRevocationFailureDoesNotRestoreOldSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	oldCookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.sessionStore.mu.Lock()
+	h.sessionStore.deleteAfterErr = errors.New("delete result unavailable")
+	h.sessionStore.mu.Unlock()
+
+	recorder := h.request(t, http.MethodPost, "/api/v1/auth/login",
+		`{"username":"alice","password":"secret-password"}`, oldCookie)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("revocation failure = %d, want 500", recorder.Code)
+	}
+	if cleared := sessionCookie(t, recorder); cleared.MaxAge >= 0 {
+		t.Fatalf("revocation failure cookie MaxAge = %d, want deletion", cleared.MaxAge)
+	}
+	if got := h.request(t, http.MethodGet, "/api/v1/auth/me", "", oldCookie).Code; got != http.StatusUnauthorized {
+		t.Fatalf("old session status = %d, want 401", got)
+	}
+}
+
 func TestSessionStoreFailuresReturnOneOpaqueEnvelope(t *testing.T) {
 	store := &controllableSessionStore{base: memstore.NewWithCleanupInterval(0)}
 	h := newAuthHarnessWithSessionStore(t, nil, store)
@@ -1002,4 +1203,16 @@ func (m *countingMetrics) loginOutcome() string {
 		return ""
 	}
 	return m.logins[len(m.logins)-1]
+}
+
+func (m *countingMetrics) loginOutcomes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.logins)
+}
+
+func (m *countingMetrics) resetLoginOutcomes() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logins = nil
 }

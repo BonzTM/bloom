@@ -138,7 +138,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthResponse"
+                $ref: "#/components/schemas/CurrentAccountResponse"
         "401":
           description: Invalid credentials, or a malformed inbound session. Credential failures are indistinguishable. A rejected session expires the cookie with `Set-Cookie` before credential authentication runs.
           headers:
@@ -494,13 +494,6 @@ components:
           maxLength: 64
           pattern: "^[\\p{L}\\p{Nd}](?:[\\p{L}\\p{Nd}._-]*[\\p{L}\\p{Nd}])?$"
           description: Canonical PRECIS UsernameCaseMapped display username.
-    AuthResponse:
-      type: object
-      required: [account]
-      additionalProperties: false
-      properties:
-        account:
-          $ref: "#/components/schemas/AccountSummary"
     CurrentAccountResponse:
       type: object
       required: [account, roles, permissions]

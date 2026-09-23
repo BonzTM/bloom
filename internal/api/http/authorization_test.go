@@ -151,6 +151,7 @@ func TestMeReturnsOneCoherentAuthorizationState(t *testing.T) {
 	h.authorization.advanceAfterPermissions = true
 	h.authorization.mu.Unlock()
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.authorization.resetCalls()
 	recorder := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("me = %d %s", recorder.Code, recorder.Body.String())
@@ -191,6 +192,7 @@ func TestSessionRoutesIsolateAuthorizationStoreFailure(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newAuthHarness(t, nil)
 			cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+			h.authorization.resetCalls()
 			h.authorization.permissionsErr = errors.New("permissions database unavailable")
 			h.authorization.snapshotErr = errors.New("authorization database unavailable")
 			recorder := h.request(t, testCase.method, testCase.path, "", cookie)
