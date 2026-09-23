@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { ApiError } from "../../../lib/api/errors.js";
 import type { LoginInput, Session } from "../api/auth-schemas.js";
 import { useAuthApi } from "../auth-context.js";
@@ -139,6 +139,19 @@ function principalChanged(
     return false;
   }
   return (previous?.account.id ?? null) !== (next?.account.id ?? null);
+}
+
+// Asks the server again whether the session is live. A page uses it when a
+// request it made came back 401: the cache still says signed in, but the
+// server disagrees, and the guard around the page follows the cache.
+export function useSessionRecheck(when: boolean, errorUpdatedAt: number): void {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!when) {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: authKeys.session() });
+  }, [when, errorUpdatedAt, queryClient]);
 }
 
 type SessionCache = Pick<

@@ -16,6 +16,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- Administration area in the web UI: an `Admin` entry for accounts holding an
+  admin permission, and a roles page that lists every role with its kind and
+  permissions, paged through the roles API.
 - Main-branch and tagged-release image publishing with candidate-first smoke
   tests, source- and signer-bound attestation plus SBOM verification for
   immutable-image reuse, required CI and PostgreSQL gates, pre-promotion

@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 import { RouterProvider, type RouterProviderProps } from "react-router-dom";
 import type { AuthApi } from "../features/auth/api/auth-api.js";
 import { AuthApiContext } from "../features/auth/auth-context.js";
+import type { RolesApi } from "../features/roles/api/roles-api.js";
+import { RolesApiContext } from "../features/roles/roles-context.js";
 import type { SystemApi } from "../features/system/api/system-api.js";
 import { SystemApiContext } from "../features/system/system-context.js";
 
 type AppProvidersProps = Readonly<{
   systemApi: SystemApi;
   authApi: AuthApi;
+  rolesApi: RolesApi;
   queryClient: QueryClient;
   router: RouterProviderProps["router"];
 }>;
@@ -16,6 +19,7 @@ type AppProvidersProps = Readonly<{
 export function AppProviders({
   systemApi,
   authApi,
+  rolesApi,
   queryClient,
   router,
 }: AppProvidersProps): ReactNode {
@@ -23,7 +27,9 @@ export function AppProviders({
     <QueryClientProvider client={queryClient}>
       <SystemApiContext value={systemApi}>
         <AuthApiContext value={authApi}>
-          <RouterProvider router={router} />
+          <RolesApiContext value={rolesApi}>
+            <RouterProvider router={router} />
+          </RolesApiContext>
         </AuthApiContext>
       </SystemApiContext>
     </QueryClientProvider>

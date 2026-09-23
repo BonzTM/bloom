@@ -42,6 +42,21 @@ export class ApiError extends Error {
   }
 }
 
+export type AccessDenial = "unauthenticated" | "forbidden";
+
+// Whether a failed request means the session is gone (401) or the account may
+// not do this (403). Both are terminal for the caller: retrying the same
+// request cannot succeed until the person signs in again or gains the right.
+export function accessDenial(error: unknown): AccessDenial | undefined {
+  if (!(error instanceof ApiError)) {
+    return undefined;
+  }
+  if (error.status === 401) {
+    return "unauthenticated";
+  }
+  return error.status === 403 ? "forbidden" : undefined;
+}
+
 export function mapHttpError(
   status: number,
   body: unknown,
