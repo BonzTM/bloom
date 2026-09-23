@@ -180,6 +180,27 @@ func (e ChannelType) Valid() bool {
 	}
 }
 
+// Defines values for CodecType.
+const (
+	CodecTypeAudio      CodecType = "Audio"
+	CodecTypeVideo      CodecType = "Video"
+	CodecTypeVideoAudio CodecType = "VideoAudio"
+)
+
+// Valid indicates whether the value is a known member of the CodecType enum.
+func (e CodecType) Valid() bool {
+	switch e {
+	case CodecTypeAudio:
+		return true
+	case CodecTypeVideo:
+		return true
+	case CodecTypeVideoAudio:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CollectionType.
 const (
 	CollectionTypeBooks       CollectionType = "books"
@@ -300,6 +321,33 @@ func (e DayOfWeek) Valid() bool {
 	}
 }
 
+// Defines values for DlnaProfileType.
+const (
+	DlnaProfileTypeAudio    DlnaProfileType = "Audio"
+	DlnaProfileTypeLyric    DlnaProfileType = "Lyric"
+	DlnaProfileTypePhoto    DlnaProfileType = "Photo"
+	DlnaProfileTypeSubtitle DlnaProfileType = "Subtitle"
+	DlnaProfileTypeVideo    DlnaProfileType = "Video"
+)
+
+// Valid indicates whether the value is a known member of the DlnaProfileType enum.
+func (e DlnaProfileType) Valid() bool {
+	switch e {
+	case DlnaProfileTypeAudio:
+		return true
+	case DlnaProfileTypeLyric:
+		return true
+	case DlnaProfileTypePhoto:
+		return true
+	case DlnaProfileTypeSubtitle:
+		return true
+	case DlnaProfileTypeVideo:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DynamicDayOfWeek.
 const (
 	DynamicDayOfWeekEveryday  DynamicDayOfWeek = "Everyday"
@@ -366,6 +414,24 @@ func (e EmbeddedSubtitleOptions) Valid() bool {
 	}
 }
 
+// Defines values for EncodingContext.
+const (
+	Static    EncodingContext = "Static"
+	Streaming EncodingContext = "Streaming"
+)
+
+// Valid indicates whether the value is a known member of the EncodingContext enum.
+func (e EncodingContext) Valid() bool {
+	switch e {
+	case Static:
+		return true
+	case Streaming:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExtraType.
 const (
 	ExtraTypeBehindTheScenes ExtraType = "BehindTheScenes"
@@ -408,6 +474,183 @@ func (e ExtraType) Valid() bool {
 	case ExtraTypeTrailer:
 		return true
 	case ExtraTypeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GeneralCommandType.
+const (
+	Back                   GeneralCommandType = "Back"
+	ChannelDown            GeneralCommandType = "ChannelDown"
+	ChannelUp              GeneralCommandType = "ChannelUp"
+	DisplayContent         GeneralCommandType = "DisplayContent"
+	DisplayMessage         GeneralCommandType = "DisplayMessage"
+	GoHome                 GeneralCommandType = "GoHome"
+	GoToSearch             GeneralCommandType = "GoToSearch"
+	GoToSettings           GeneralCommandType = "GoToSettings"
+	Guide                  GeneralCommandType = "Guide"
+	MoveDown               GeneralCommandType = "MoveDown"
+	MoveLeft               GeneralCommandType = "MoveLeft"
+	MoveRight              GeneralCommandType = "MoveRight"
+	MoveUp                 GeneralCommandType = "MoveUp"
+	Mute                   GeneralCommandType = "Mute"
+	NextLetter             GeneralCommandType = "NextLetter"
+	PageDown               GeneralCommandType = "PageDown"
+	PageUp                 GeneralCommandType = "PageUp"
+	Play                   GeneralCommandType = "Play"
+	PlayMediaSource        GeneralCommandType = "PlayMediaSource"
+	PlayNext               GeneralCommandType = "PlayNext"
+	PlayState              GeneralCommandType = "PlayState"
+	PlayTrailers           GeneralCommandType = "PlayTrailers"
+	PreviousLetter         GeneralCommandType = "PreviousLetter"
+	Select                 GeneralCommandType = "Select"
+	SendKey                GeneralCommandType = "SendKey"
+	SendString             GeneralCommandType = "SendString"
+	SetAudioStreamIndex    GeneralCommandType = "SetAudioStreamIndex"
+	SetMaxStreamingBitrate GeneralCommandType = "SetMaxStreamingBitrate"
+	SetPlaybackOrder       GeneralCommandType = "SetPlaybackOrder"
+	SetRepeatMode          GeneralCommandType = "SetRepeatMode"
+	SetShuffleQueue        GeneralCommandType = "SetShuffleQueue"
+	SetSubtitleStreamIndex GeneralCommandType = "SetSubtitleStreamIndex"
+	SetVolume              GeneralCommandType = "SetVolume"
+	TakeScreenshot         GeneralCommandType = "TakeScreenshot"
+	ToggleContextMenu      GeneralCommandType = "ToggleContextMenu"
+	ToggleFullscreen       GeneralCommandType = "ToggleFullscreen"
+	ToggleMute             GeneralCommandType = "ToggleMute"
+	ToggleOsd              GeneralCommandType = "ToggleOsd"
+	ToggleOsdMenu          GeneralCommandType = "ToggleOsdMenu"
+	ToggleStats            GeneralCommandType = "ToggleStats"
+	Unmute                 GeneralCommandType = "Unmute"
+	VolumeDown             GeneralCommandType = "VolumeDown"
+	VolumeUp               GeneralCommandType = "VolumeUp"
+)
+
+// Valid indicates whether the value is a known member of the GeneralCommandType enum.
+func (e GeneralCommandType) Valid() bool {
+	switch e {
+	case Back:
+		return true
+	case ChannelDown:
+		return true
+	case ChannelUp:
+		return true
+	case DisplayContent:
+		return true
+	case DisplayMessage:
+		return true
+	case GoHome:
+		return true
+	case GoToSearch:
+		return true
+	case GoToSettings:
+		return true
+	case Guide:
+		return true
+	case MoveDown:
+		return true
+	case MoveLeft:
+		return true
+	case MoveRight:
+		return true
+	case MoveUp:
+		return true
+	case Mute:
+		return true
+	case NextLetter:
+		return true
+	case PageDown:
+		return true
+	case PageUp:
+		return true
+	case Play:
+		return true
+	case PlayMediaSource:
+		return true
+	case PlayNext:
+		return true
+	case PlayState:
+		return true
+	case PlayTrailers:
+		return true
+	case PreviousLetter:
+		return true
+	case Select:
+		return true
+	case SendKey:
+		return true
+	case SendString:
+		return true
+	case SetAudioStreamIndex:
+		return true
+	case SetMaxStreamingBitrate:
+		return true
+	case SetPlaybackOrder:
+		return true
+	case SetRepeatMode:
+		return true
+	case SetShuffleQueue:
+		return true
+	case SetSubtitleStreamIndex:
+		return true
+	case SetVolume:
+		return true
+	case TakeScreenshot:
+		return true
+	case ToggleContextMenu:
+		return true
+	case ToggleFullscreen:
+		return true
+	case ToggleMute:
+		return true
+	case ToggleOsd:
+		return true
+	case ToggleOsdMenu:
+		return true
+	case ToggleStats:
+		return true
+	case Unmute:
+		return true
+	case VolumeDown:
+		return true
+	case VolumeUp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HardwareAccelerationType.
+const (
+	HardwareAccelerationTypeAmf          HardwareAccelerationType = "amf"
+	HardwareAccelerationTypeNone         HardwareAccelerationType = "none"
+	HardwareAccelerationTypeNvenc        HardwareAccelerationType = "nvenc"
+	HardwareAccelerationTypeQsv          HardwareAccelerationType = "qsv"
+	HardwareAccelerationTypeRkmpp        HardwareAccelerationType = "rkmpp"
+	HardwareAccelerationTypeV4l2m2m      HardwareAccelerationType = "v4l2m2m"
+	HardwareAccelerationTypeVaapi        HardwareAccelerationType = "vaapi"
+	HardwareAccelerationTypeVideotoolbox HardwareAccelerationType = "videotoolbox"
+)
+
+// Valid indicates whether the value is a known member of the HardwareAccelerationType enum.
+func (e HardwareAccelerationType) Valid() bool {
+	switch e {
+	case HardwareAccelerationTypeAmf:
+		return true
+	case HardwareAccelerationTypeNone:
+		return true
+	case HardwareAccelerationTypeNvenc:
+		return true
+	case HardwareAccelerationTypeQsv:
+		return true
+	case HardwareAccelerationTypeRkmpp:
+		return true
+	case HardwareAccelerationTypeV4l2m2m:
+		return true
+	case HardwareAccelerationTypeVaapi:
+		return true
+	case HardwareAccelerationTypeVideotoolbox:
 		return true
 	default:
 		return false
@@ -819,6 +1062,162 @@ func (e PlayAccess) Valid() bool {
 	}
 }
 
+// Defines values for PlayMethod.
+const (
+	DirectPlay   PlayMethod = "DirectPlay"
+	DirectStream PlayMethod = "DirectStream"
+	Transcode    PlayMethod = "Transcode"
+)
+
+// Valid indicates whether the value is a known member of the PlayMethod enum.
+func (e PlayMethod) Valid() bool {
+	switch e {
+	case DirectPlay:
+		return true
+	case DirectStream:
+		return true
+	case Transcode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlaybackOrder.
+const (
+	PlaybackOrderDefault PlaybackOrder = "Default"
+	PlaybackOrderShuffle PlaybackOrder = "Shuffle"
+)
+
+// Valid indicates whether the value is a known member of the PlaybackOrder enum.
+func (e PlaybackOrder) Valid() bool {
+	switch e {
+	case PlaybackOrderDefault:
+		return true
+	case PlaybackOrderShuffle:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProfileConditionType.
+const (
+	Equals           ProfileConditionType = "Equals"
+	EqualsAny        ProfileConditionType = "EqualsAny"
+	GreaterThanEqual ProfileConditionType = "GreaterThanEqual"
+	LessThanEqual    ProfileConditionType = "LessThanEqual"
+	NotEquals        ProfileConditionType = "NotEquals"
+)
+
+// Valid indicates whether the value is a known member of the ProfileConditionType enum.
+func (e ProfileConditionType) Valid() bool {
+	switch e {
+	case Equals:
+		return true
+	case EqualsAny:
+		return true
+	case GreaterThanEqual:
+		return true
+	case LessThanEqual:
+		return true
+	case NotEquals:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProfileConditionValue.
+const (
+	AudioBitDepth    ProfileConditionValue = "AudioBitDepth"
+	AudioBitrate     ProfileConditionValue = "AudioBitrate"
+	AudioChannels    ProfileConditionValue = "AudioChannels"
+	AudioProfile     ProfileConditionValue = "AudioProfile"
+	AudioSampleRate  ProfileConditionValue = "AudioSampleRate"
+	Has64BitOffsets  ProfileConditionValue = "Has64BitOffsets"
+	Height           ProfileConditionValue = "Height"
+	IsAnamorphic     ProfileConditionValue = "IsAnamorphic"
+	IsAvc            ProfileConditionValue = "IsAvc"
+	IsInterlaced     ProfileConditionValue = "IsInterlaced"
+	IsSecondaryAudio ProfileConditionValue = "IsSecondaryAudio"
+	NumAudioStreams  ProfileConditionValue = "NumAudioStreams"
+	NumStreams       ProfileConditionValue = "NumStreams"
+	NumVideoStreams  ProfileConditionValue = "NumVideoStreams"
+	PacketLength     ProfileConditionValue = "PacketLength"
+	RefFrames        ProfileConditionValue = "RefFrames"
+	VideoBitDepth    ProfileConditionValue = "VideoBitDepth"
+	VideoBitrate     ProfileConditionValue = "VideoBitrate"
+	VideoCodecTag    ProfileConditionValue = "VideoCodecTag"
+	VideoFramerate   ProfileConditionValue = "VideoFramerate"
+	VideoLevel       ProfileConditionValue = "VideoLevel"
+	VideoProfile     ProfileConditionValue = "VideoProfile"
+	VideoRangeType   ProfileConditionValue = "VideoRangeType"
+	VideoRotation    ProfileConditionValue = "VideoRotation"
+	VideoTimestamp   ProfileConditionValue = "VideoTimestamp"
+	Width            ProfileConditionValue = "Width"
+)
+
+// Valid indicates whether the value is a known member of the ProfileConditionValue enum.
+func (e ProfileConditionValue) Valid() bool {
+	switch e {
+	case AudioBitDepth:
+		return true
+	case AudioBitrate:
+		return true
+	case AudioChannels:
+		return true
+	case AudioProfile:
+		return true
+	case AudioSampleRate:
+		return true
+	case Has64BitOffsets:
+		return true
+	case Height:
+		return true
+	case IsAnamorphic:
+		return true
+	case IsAvc:
+		return true
+	case IsInterlaced:
+		return true
+	case IsSecondaryAudio:
+		return true
+	case NumAudioStreams:
+		return true
+	case NumStreams:
+		return true
+	case NumVideoStreams:
+		return true
+	case PacketLength:
+		return true
+	case RefFrames:
+		return true
+	case VideoBitDepth:
+		return true
+	case VideoBitrate:
+		return true
+	case VideoCodecTag:
+		return true
+	case VideoFramerate:
+		return true
+	case VideoLevel:
+		return true
+	case VideoProfile:
+		return true
+	case VideoRangeType:
+		return true
+	case VideoRotation:
+		return true
+	case VideoTimestamp:
+		return true
+	case Width:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProgramAudio.
 const (
 	Atmos        ProgramAudio = "Atmos"
@@ -843,6 +1242,27 @@ func (e ProgramAudio) Valid() bool {
 	case Stereo:
 		return true
 	case Thx:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RepeatMode.
+const (
+	RepeatAll  RepeatMode = "RepeatAll"
+	RepeatNone RepeatMode = "RepeatNone"
+	RepeatOne  RepeatMode = "RepeatOne"
+)
+
+// Valid indicates whether the value is a known member of the RepeatMode enum.
+func (e RepeatMode) Valid() bool {
+	switch e {
+	case RepeatAll:
+		return true
+	case RepeatNone:
+		return true
+	case RepeatOne:
 		return true
 	default:
 		return false
@@ -918,6 +1338,120 @@ func (e SyncPlayUserAccessType) Valid() bool {
 	case SyncPlayUserAccessTypeJoinGroups:
 		return true
 	case SyncPlayUserAccessTypeNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TranscodeReason.
+const (
+	AnamorphicVideoNotSupported  TranscodeReason = "AnamorphicVideoNotSupported"
+	AudioBitDepthNotSupported    TranscodeReason = "AudioBitDepthNotSupported"
+	AudioBitrateNotSupported     TranscodeReason = "AudioBitrateNotSupported"
+	AudioChannelsNotSupported    TranscodeReason = "AudioChannelsNotSupported"
+	AudioCodecNotSupported       TranscodeReason = "AudioCodecNotSupported"
+	AudioIsExternal              TranscodeReason = "AudioIsExternal"
+	AudioProfileNotSupported     TranscodeReason = "AudioProfileNotSupported"
+	AudioSampleRateNotSupported  TranscodeReason = "AudioSampleRateNotSupported"
+	ContainerBitrateExceedsLimit TranscodeReason = "ContainerBitrateExceedsLimit"
+	ContainerNotSupported        TranscodeReason = "ContainerNotSupported"
+	DirectPlayError              TranscodeReason = "DirectPlayError"
+	InterlacedVideoNotSupported  TranscodeReason = "InterlacedVideoNotSupported"
+	RefFramesNotSupported        TranscodeReason = "RefFramesNotSupported"
+	SecondaryAudioNotSupported   TranscodeReason = "SecondaryAudioNotSupported"
+	StreamCountExceedsLimit      TranscodeReason = "StreamCountExceedsLimit"
+	SubtitleCodecNotSupported    TranscodeReason = "SubtitleCodecNotSupported"
+	UnknownAudioStreamInfo       TranscodeReason = "UnknownAudioStreamInfo"
+	UnknownVideoStreamInfo       TranscodeReason = "UnknownVideoStreamInfo"
+	VideoBitDepthNotSupported    TranscodeReason = "VideoBitDepthNotSupported"
+	VideoBitrateNotSupported     TranscodeReason = "VideoBitrateNotSupported"
+	VideoCodecNotSupported       TranscodeReason = "VideoCodecNotSupported"
+	VideoCodecTagNotSupported    TranscodeReason = "VideoCodecTagNotSupported"
+	VideoFramerateNotSupported   TranscodeReason = "VideoFramerateNotSupported"
+	VideoLevelNotSupported       TranscodeReason = "VideoLevelNotSupported"
+	VideoProfileNotSupported     TranscodeReason = "VideoProfileNotSupported"
+	VideoRangeTypeNotSupported   TranscodeReason = "VideoRangeTypeNotSupported"
+	VideoResolutionNotSupported  TranscodeReason = "VideoResolutionNotSupported"
+	VideoRotationNotSupported    TranscodeReason = "VideoRotationNotSupported"
+)
+
+// Valid indicates whether the value is a known member of the TranscodeReason enum.
+func (e TranscodeReason) Valid() bool {
+	switch e {
+	case AnamorphicVideoNotSupported:
+		return true
+	case AudioBitDepthNotSupported:
+		return true
+	case AudioBitrateNotSupported:
+		return true
+	case AudioChannelsNotSupported:
+		return true
+	case AudioCodecNotSupported:
+		return true
+	case AudioIsExternal:
+		return true
+	case AudioProfileNotSupported:
+		return true
+	case AudioSampleRateNotSupported:
+		return true
+	case ContainerBitrateExceedsLimit:
+		return true
+	case ContainerNotSupported:
+		return true
+	case DirectPlayError:
+		return true
+	case InterlacedVideoNotSupported:
+		return true
+	case RefFramesNotSupported:
+		return true
+	case SecondaryAudioNotSupported:
+		return true
+	case StreamCountExceedsLimit:
+		return true
+	case SubtitleCodecNotSupported:
+		return true
+	case UnknownAudioStreamInfo:
+		return true
+	case UnknownVideoStreamInfo:
+		return true
+	case VideoBitDepthNotSupported:
+		return true
+	case VideoBitrateNotSupported:
+		return true
+	case VideoCodecNotSupported:
+		return true
+	case VideoCodecTagNotSupported:
+		return true
+	case VideoFramerateNotSupported:
+		return true
+	case VideoLevelNotSupported:
+		return true
+	case VideoProfileNotSupported:
+		return true
+	case VideoRangeTypeNotSupported:
+		return true
+	case VideoResolutionNotSupported:
+		return true
+	case VideoRotationNotSupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TranscodeSeekInfo.
+const (
+	Auto  TranscodeSeekInfo = "Auto"
+	Bytes TranscodeSeekInfo = "Bytes"
+)
+
+// Valid indicates whether the value is a known member of the TranscodeSeekInfo enum.
+func (e TranscodeSeekInfo) Valid() bool {
+	switch e {
+	case Auto:
+		return true
+	case Bytes:
 		return true
 	default:
 		return false
@@ -1032,51 +1566,51 @@ func (e VideoRange) Valid() bool {
 	}
 }
 
-// Defines values for VideoRangeType.
+// Defines values for JellyfinVideoRangeType.
 const (
-	VideoRangeTypeDOVI                VideoRangeType = "DOVI"
-	VideoRangeTypeDOVIInvalid         VideoRangeType = "DOVIInvalid"
-	VideoRangeTypeDOVIWithEL          VideoRangeType = "DOVIWithEL"
-	VideoRangeTypeDOVIWithELHDR10Plus VideoRangeType = "DOVIWithELHDR10Plus"
-	VideoRangeTypeDOVIWithHDR10       VideoRangeType = "DOVIWithHDR10"
-	VideoRangeTypeDOVIWithHDR10Plus   VideoRangeType = "DOVIWithHDR10Plus"
-	VideoRangeTypeDOVIWithHLG         VideoRangeType = "DOVIWithHLG"
-	VideoRangeTypeDOVIWithSDR         VideoRangeType = "DOVIWithSDR"
-	VideoRangeTypeHDR10               VideoRangeType = "HDR10"
-	VideoRangeTypeHDR10Plus           VideoRangeType = "HDR10Plus"
-	VideoRangeTypeHLG                 VideoRangeType = "HLG"
-	VideoRangeTypeSDR                 VideoRangeType = "SDR"
-	VideoRangeTypeUnknown             VideoRangeType = "Unknown"
+	JellyfinVideoRangeTypeDOVI                JellyfinVideoRangeType = "DOVI"
+	JellyfinVideoRangeTypeDOVIInvalid         JellyfinVideoRangeType = "DOVIInvalid"
+	JellyfinVideoRangeTypeDOVIWithEL          JellyfinVideoRangeType = "DOVIWithEL"
+	JellyfinVideoRangeTypeDOVIWithELHDR10Plus JellyfinVideoRangeType = "DOVIWithELHDR10Plus"
+	JellyfinVideoRangeTypeDOVIWithHDR10       JellyfinVideoRangeType = "DOVIWithHDR10"
+	JellyfinVideoRangeTypeDOVIWithHDR10Plus   JellyfinVideoRangeType = "DOVIWithHDR10Plus"
+	JellyfinVideoRangeTypeDOVIWithHLG         JellyfinVideoRangeType = "DOVIWithHLG"
+	JellyfinVideoRangeTypeDOVIWithSDR         JellyfinVideoRangeType = "DOVIWithSDR"
+	JellyfinVideoRangeTypeHDR10               JellyfinVideoRangeType = "HDR10"
+	JellyfinVideoRangeTypeHDR10Plus           JellyfinVideoRangeType = "HDR10Plus"
+	JellyfinVideoRangeTypeHLG                 JellyfinVideoRangeType = "HLG"
+	JellyfinVideoRangeTypeSDR                 JellyfinVideoRangeType = "SDR"
+	JellyfinVideoRangeTypeUnknown             JellyfinVideoRangeType = "Unknown"
 )
 
-// Valid indicates whether the value is a known member of the VideoRangeType enum.
-func (e VideoRangeType) Valid() bool {
+// Valid indicates whether the value is a known member of the JellyfinVideoRangeType enum.
+func (e JellyfinVideoRangeType) Valid() bool {
 	switch e {
-	case VideoRangeTypeDOVI:
+	case JellyfinVideoRangeTypeDOVI:
 		return true
-	case VideoRangeTypeDOVIInvalid:
+	case JellyfinVideoRangeTypeDOVIInvalid:
 		return true
-	case VideoRangeTypeDOVIWithEL:
+	case JellyfinVideoRangeTypeDOVIWithEL:
 		return true
-	case VideoRangeTypeDOVIWithELHDR10Plus:
+	case JellyfinVideoRangeTypeDOVIWithELHDR10Plus:
 		return true
-	case VideoRangeTypeDOVIWithHDR10:
+	case JellyfinVideoRangeTypeDOVIWithHDR10:
 		return true
-	case VideoRangeTypeDOVIWithHDR10Plus:
+	case JellyfinVideoRangeTypeDOVIWithHDR10Plus:
 		return true
-	case VideoRangeTypeDOVIWithHLG:
+	case JellyfinVideoRangeTypeDOVIWithHLG:
 		return true
-	case VideoRangeTypeDOVIWithSDR:
+	case JellyfinVideoRangeTypeDOVIWithSDR:
 		return true
-	case VideoRangeTypeHDR10:
+	case JellyfinVideoRangeTypeHDR10:
 		return true
-	case VideoRangeTypeHDR10Plus:
+	case JellyfinVideoRangeTypeHDR10Plus:
 		return true
-	case VideoRangeTypeHLG:
+	case JellyfinVideoRangeTypeHLG:
 		return true
-	case VideoRangeTypeSDR:
+	case JellyfinVideoRangeTypeSDR:
 		return true
-	case VideoRangeTypeUnknown:
+	case JellyfinVideoRangeTypeUnknown:
 		return true
 	default:
 		return false
@@ -1603,11 +2137,74 @@ type ChapterInfo struct {
 	StartPositionTicks *int64 `json:"StartPositionTicks,omitempty"`
 }
 
+// ClientCapabilitiesDto Client capabilities dto.
+type ClientCapabilitiesDto struct {
+	// AppStoreUrl Gets or sets the app store url.
+	AppStoreUrl *string `json:"AppStoreUrl,omitempty"`
+
+	// DeviceProfile Gets or sets the device profile.
+	DeviceProfile *DeviceProfile `json:"DeviceProfile,omitempty"`
+
+	// IconUrl Gets or sets the icon url.
+	IconUrl *string `json:"IconUrl,omitempty"`
+
+	// PlayableMediaTypes Gets or sets the list of playable media types.
+	PlayableMediaTypes *[]MediaType `json:"PlayableMediaTypes,omitempty"`
+
+	// SupportedCommands Gets or sets the list of supported commands.
+	SupportedCommands *[]GeneralCommandType `json:"SupportedCommands,omitempty"`
+
+	// SupportsMediaControl Gets or sets a value indicating whether session supports media control.
+	SupportsMediaControl *bool `json:"SupportsMediaControl,omitempty"`
+
+	// SupportsPersistentIdentifier Gets or sets a value indicating whether session supports a persistent identifier.
+	SupportsPersistentIdentifier *bool `json:"SupportsPersistentIdentifier,omitempty"`
+}
+
+// CodecProfile Defines the MediaBrowser.Model.Dlna.CodecProfile.
+type CodecProfile struct {
+	// ApplyConditions Gets or sets the list of MediaBrowser.Model.Dlna.ProfileCondition to apply if this profile is met.
+	ApplyConditions *[]ProfileCondition `json:"ApplyConditions,omitempty"`
+
+	// Codec Gets or sets the codec(s) that this profile applies to.
+	Codec *string `json:"Codec,omitempty"`
+
+	// Conditions Gets or sets the list of MediaBrowser.Model.Dlna.ProfileCondition which this profile must meet.
+	Conditions *[]ProfileCondition `json:"Conditions,omitempty"`
+
+	// Container Gets or sets the container(s) which this profile will be applied to.
+	Container *string `json:"Container,omitempty"`
+
+	// SubContainer Gets or sets the sub-container(s) which this profile will be applied to.
+	SubContainer *string `json:"SubContainer,omitempty"`
+
+	// Type Gets or sets the MediaBrowser.Model.Dlna.CodecType which this container must meet.
+	Type *CodecType `json:"Type,omitempty"`
+}
+
+// CodecType The codec type of a codec profile.
+type CodecType string
+
 // CollectionType Collection type.
 type CollectionType string
 
 // CollectionTypeOptions The collection type options.
 type CollectionTypeOptions string
+
+// ContainerProfile Defines the MediaBrowser.Model.Dlna.ContainerProfile.
+type ContainerProfile struct {
+	// Conditions Gets or sets the list of MediaBrowser.Model.Dlna.ProfileCondition which this container will be applied to.
+	Conditions *[]ProfileCondition `json:"Conditions,omitempty"`
+
+	// Container Gets or sets the container(s) which this container must meet.
+	Container *string `json:"Container,omitempty"`
+
+	// SubContainer Gets or sets the sub container(s) which this container must meet.
+	SubContainer *string `json:"SubContainer,omitempty"`
+
+	// Type Gets or sets the MediaBrowser.Model.Dlna.DlnaProfileType which this container must meet.
+	Type *DlnaProfileType `json:"Type,omitempty"`
+}
 
 // CreateUserByName The create user by name request body.
 type CreateUserByName struct {
@@ -1621,11 +2218,73 @@ type CreateUserByName struct {
 // DayOfWeek defines model for DayOfWeek.
 type DayOfWeek string
 
+// DeviceProfile A MediaBrowser.Model.Dlna.DeviceProfile represents a set of metadata which determines which content a certain device is able to play.
+//
+// Specifically, it defines the supported <see cref="P:MediaBrowser.Model.Dlna.DeviceProfile.ContainerProfiles">containers</see> and
+// <see cref="P:MediaBrowser.Model.Dlna.DeviceProfile.CodecProfiles">codecs</see> (video and/or audio, including codec profiles and levels)
+// the device is able to direct play (without transcoding or remuxing),
+// as well as which <see cref="P:MediaBrowser.Model.Dlna.DeviceProfile.TranscodingProfiles">containers/codecs to transcode to</see> in case it isn't.
+type DeviceProfile struct {
+	// CodecProfiles Gets or sets the codec profiles.
+	CodecProfiles *[]CodecProfile `json:"CodecProfiles,omitempty"`
+
+	// ContainerProfiles Gets or sets the container profiles. Failing to meet these optional conditions causes transcoding to occur.
+	ContainerProfiles *[]ContainerProfile `json:"ContainerProfiles,omitempty"`
+
+	// DirectPlayProfiles Gets or sets the direct play profiles.
+	DirectPlayProfiles *[]DirectPlayProfile `json:"DirectPlayProfiles,omitempty"`
+
+	// Id Gets or sets the unique internal identifier.
+	Id *openapi_types.UUID `json:"Id,omitempty"`
+
+	// MaxStaticBitrate Gets or sets the maximum allowed bitrate for statically streamed content (= direct played files).
+	MaxStaticBitrate *int32 `json:"MaxStaticBitrate,omitempty"`
+
+	// MaxStaticMusicBitrate Gets or sets the maximum allowed bitrate for statically streamed (= direct played) music files.
+	MaxStaticMusicBitrate *int32 `json:"MaxStaticMusicBitrate,omitempty"`
+
+	// MaxStreamingBitrate Gets or sets the maximum allowed bitrate for all streamed content.
+	MaxStreamingBitrate *int32 `json:"MaxStreamingBitrate,omitempty"`
+
+	// MusicStreamingTranscodingBitrate Gets or sets the maximum allowed bitrate for transcoded music streams.
+	MusicStreamingTranscodingBitrate *int32 `json:"MusicStreamingTranscodingBitrate,omitempty"`
+
+	// Name Gets or sets the name of this device profile. User profiles must have a unique name.
+	Name *string `json:"Name,omitempty"`
+
+	// SubtitleProfiles Gets or sets the subtitle profiles.
+	SubtitleProfiles *[]SubtitleProfile `json:"SubtitleProfiles,omitempty"`
+
+	// TranscodingProfiles Gets or sets the transcoding profiles.
+	TranscodingProfiles *[]TranscodingProfile `json:"TranscodingProfiles,omitempty"`
+}
+
+// DirectPlayProfile Defines the MediaBrowser.Model.Dlna.DirectPlayProfile.
+type DirectPlayProfile struct {
+	// AudioCodec Gets or sets the audio codec.
+	AudioCodec *string `json:"AudioCodec,omitempty"`
+
+	// Container Gets or sets the container.
+	Container *string `json:"Container,omitempty"`
+
+	// Type Gets or sets the Dlna profile type.
+	Type *DlnaProfileType `json:"Type,omitempty"`
+
+	// VideoCodec Gets or sets the video codec.
+	VideoCodec *string `json:"VideoCodec,omitempty"`
+}
+
+// DlnaProfileType defines model for DlnaProfileType.
+type DlnaProfileType string
+
 // DynamicDayOfWeek An enum that represents a day of the week, weekdays, weekends, or all days.
 type DynamicDayOfWeek string
 
 // EmbeddedSubtitleOptions An enum representing the options to disable embedded subs.
 type EmbeddedSubtitleOptions string
+
+// EncodingContext The encoding context.
+type EncodingContext string
 
 // ExternalUrl defines model for ExternalUrl.
 type ExternalUrl struct {
@@ -1638,6 +2297,12 @@ type ExternalUrl struct {
 
 // ExtraType defines model for ExtraType.
 type ExtraType string
+
+// GeneralCommandType This exists simply to identify a set of known commands.
+type GeneralCommandType string
+
+// HardwareAccelerationType Enum containing hardware acceleration types.
+type HardwareAccelerationType string
 
 // ImageOption defines model for ImageOption.
 type ImageOption struct {
@@ -2007,7 +2672,7 @@ type MediaStream struct {
 	VideoRange *VideoRange `json:"VideoRange,omitempty"`
 
 	// VideoRangeType An enum representing types of video ranges.
-	VideoRangeType *VideoRangeType `json:"VideoRangeType,omitempty"`
+	VideoRangeType *JellyfinVideoRangeType `json:"VideoRangeType,omitempty"`
 
 	// Width Gets or sets the width.
 	Width *int32 `json:"Width,omitempty"`
@@ -2072,6 +2737,51 @@ type PersonKind string
 // PlayAccess The play access of an item.
 type PlayAccess string
 
+// PlayMethod The play method.
+type PlayMethod string
+
+// PlaybackOrder Enum PlaybackOrder.
+type PlaybackOrder string
+
+// PlayerStateInfo defines model for PlayerStateInfo.
+type PlayerStateInfo struct {
+	// AudioStreamIndex Gets or sets the index of the now playing audio stream.
+	AudioStreamIndex *int32 `json:"AudioStreamIndex,omitempty"`
+
+	// CanSeek Gets or sets a value indicating whether this instance can seek.
+	CanSeek *bool `json:"CanSeek,omitempty"`
+
+	// IsMuted Gets or sets a value indicating whether this instance is muted.
+	IsMuted *bool `json:"IsMuted,omitempty"`
+
+	// IsPaused Gets or sets a value indicating whether this instance is paused.
+	IsPaused *bool `json:"IsPaused,omitempty"`
+
+	// LiveStreamId Gets or sets the now playing live stream identifier.
+	LiveStreamId *string `json:"LiveStreamId,omitempty"`
+
+	// MediaSourceId Gets or sets the now playing media version identifier.
+	MediaSourceId *string `json:"MediaSourceId,omitempty"`
+
+	// PlayMethod Gets or sets the play method.
+	PlayMethod *PlayMethod `json:"PlayMethod,omitempty"`
+
+	// PlaybackOrder Gets or sets the playback order.
+	PlaybackOrder *PlaybackOrder `json:"PlaybackOrder,omitempty"`
+
+	// PositionTicks Gets or sets the now playing position ticks.
+	PositionTicks *int64 `json:"PositionTicks,omitempty"`
+
+	// RepeatMode Gets or sets the repeat mode.
+	RepeatMode *RepeatMode `json:"RepeatMode,omitempty"`
+
+	// SubtitleStreamIndex Gets or sets the index of the now playing subtitle stream.
+	SubtitleStreamIndex *int32 `json:"SubtitleStreamIndex,omitempty"`
+
+	// VolumeLevel Gets or sets the volume level.
+	VolumeLevel *int32 `json:"VolumeLevel,omitempty"`
+}
+
 // ProblemDetails defines model for ProblemDetails.
 type ProblemDetails struct {
 	Detail               *string                `json:"detail,omitempty"`
@@ -2082,8 +2792,31 @@ type ProblemDetails struct {
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
+// ProfileCondition defines model for ProfileCondition.
+type ProfileCondition struct {
+	Condition  *ProfileConditionType  `json:"Condition,omitempty"`
+	IsRequired *bool                  `json:"IsRequired,omitempty"`
+	Property   *ProfileConditionValue `json:"Property,omitempty"`
+	Value      *string                `json:"Value,omitempty"`
+}
+
+// ProfileConditionType defines model for ProfileConditionType.
+type ProfileConditionType string
+
+// ProfileConditionValue defines model for ProfileConditionValue.
+type ProfileConditionValue string
+
 // ProgramAudio defines model for ProgramAudio.
 type ProgramAudio string
+
+// QueueItem An item in a play queue.
+type QueueItem struct {
+	// Id Gets or sets the item id.
+	Id *openapi_types.UUID `json:"Id,omitempty"`
+
+	// PlaylistItemId Gets or sets the playlist item id.
+	PlaylistItemId *string `json:"PlaylistItemId,omitempty"`
+}
 
 // RemoteSearchResult defines model for RemoteSearchResult.
 type RemoteSearchResult struct {
@@ -2107,11 +2840,128 @@ type RemoteSearchResult struct {
 	SearchProviderName *string            `json:"SearchProviderName,omitempty"`
 }
 
+// RepeatMode The repeat mode of a play queue.
+type RepeatMode string
+
+// SessionInfoDto Session info DTO.
+type SessionInfoDto struct {
+	// AdditionalUsers Gets or sets the additional users.
+	AdditionalUsers *[]SessionUserInfo `json:"AdditionalUsers,omitempty"`
+
+	// ApplicationVersion Gets or sets the application version.
+	ApplicationVersion *string `json:"ApplicationVersion,omitempty"`
+
+	// Capabilities Gets or sets the client capabilities.
+	Capabilities *ClientCapabilitiesDto `json:"Capabilities,omitempty"`
+
+	// Client Gets or sets the type of the client.
+	Client *string `json:"Client,omitempty"`
+
+	// DeviceId Gets or sets the device id.
+	DeviceId *string `json:"DeviceId,omitempty"`
+
+	// DeviceName Gets or sets the name of the device.
+	DeviceName *string `json:"DeviceName,omitempty"`
+
+	// DeviceType Gets or sets the type of the device.
+	DeviceType *string `json:"DeviceType,omitempty"`
+
+	// HasCustomDeviceName Gets or sets a value indicating whether this session has a custom device name.
+	HasCustomDeviceName *bool `json:"HasCustomDeviceName,omitempty"`
+
+	// Id Gets or sets the id.
+	Id *string `json:"Id,omitempty"`
+
+	// IsActive Gets or sets a value indicating whether this session is active.
+	IsActive *bool `json:"IsActive,omitempty"`
+
+	// LastActivityDate Gets or sets the last activity date.
+	LastActivityDate *time.Time `json:"LastActivityDate,omitempty"`
+
+	// LastPausedDate Gets or sets the last paused date.
+	LastPausedDate *time.Time `json:"LastPausedDate,omitempty"`
+
+	// LastPlaybackCheckIn Gets or sets the last playback check in.
+	LastPlaybackCheckIn *time.Time `json:"LastPlaybackCheckIn,omitempty"`
+
+	// NowPlayingItem Gets or sets the now playing item.
+	NowPlayingItem *BaseItemDto `json:"NowPlayingItem,omitempty"`
+
+	// NowPlayingQueue Gets or sets the now playing queue.
+	NowPlayingQueue *[]QueueItem `json:"NowPlayingQueue,omitempty"`
+
+	// NowViewingItem Gets or sets the now viewing item.
+	NowViewingItem *BaseItemDto `json:"NowViewingItem,omitempty"`
+
+	// PlayState Gets or sets the play state.
+	PlayState *PlayerStateInfo `json:"PlayState,omitempty"`
+
+	// PlayableMediaTypes Gets or sets the playable media types.
+	PlayableMediaTypes *[]MediaType `json:"PlayableMediaTypes,omitempty"`
+
+	// PlaylistItemId Gets or sets the playlist item id.
+	PlaylistItemId *string `json:"PlaylistItemId,omitempty"`
+
+	// RemoteEndPoint Gets or sets the remote end point.
+	RemoteEndPoint *string `json:"RemoteEndPoint,omitempty"`
+
+	// ServerId Gets or sets the server id.
+	ServerId *string `json:"ServerId,omitempty"`
+
+	// SupportedCommands Gets or sets the supported commands.
+	SupportedCommands *[]GeneralCommandType `json:"SupportedCommands,omitempty"`
+
+	// SupportsMediaControl Gets or sets a value indicating whether the session supports media control.
+	SupportsMediaControl *bool `json:"SupportsMediaControl,omitempty"`
+
+	// SupportsRemoteControl Gets or sets a value indicating whether the session supports remote control.
+	SupportsRemoteControl *bool `json:"SupportsRemoteControl,omitempty"`
+
+	// TranscodingInfo Gets or sets the transcoding info.
+	TranscodingInfo *TranscodingInfo `json:"TranscodingInfo,omitempty"`
+
+	// UserId Gets or sets the user id.
+	UserId *openapi_types.UUID `json:"UserId,omitempty"`
+
+	// UserName Gets or sets the username.
+	UserName *string `json:"UserName,omitempty"`
+
+	// UserPrimaryImageTag Gets or sets the user primary image tag.
+	UserPrimaryImageTag *string `json:"UserPrimaryImageTag,omitempty"`
+}
+
+// SessionUserInfo Class SessionUserInfo.
+type SessionUserInfo struct {
+	// UserId Gets or sets the user identifier.
+	UserId *openapi_types.UUID `json:"UserId,omitempty"`
+
+	// UserName Gets or sets the name of the user.
+	UserName *string `json:"UserName,omitempty"`
+}
+
 // SubtitleDeliveryMethod Delivery method to use during playback of a specific subtitle format.
 type SubtitleDeliveryMethod string
 
 // SubtitlePlaybackMode An enum representing a subtitle playback mode.
 type SubtitlePlaybackMode string
+
+// SubtitleProfile A class for subtitle profile information.
+type SubtitleProfile struct {
+	// Container Gets or sets the container.
+	Container *string `json:"Container,omitempty"`
+
+	// DidlMode Gets or sets the DIDL mode.
+	DidlMode *string `json:"DidlMode,omitempty"`
+
+	// Format Gets or sets the format.
+	Format *string `json:"Format,omitempty"`
+
+	// Language Gets or sets the language.
+	Language *string `json:"Language,omitempty"`
+
+	// Method Gets or sets the delivery method.
+	Method *SubtitleDeliveryMethod `json:"Method,omitempty"`
+}
 
 // SyncPlayUserAccessType Enum SyncPlayUserAccessType.
 type SyncPlayUserAccessType string
@@ -2204,6 +3054,111 @@ type SystemInfo struct {
 
 	// WebSocketPortNumber Gets or sets the web socket port number.
 	WebSocketPortNumber *int32 `json:"WebSocketPortNumber,omitempty"`
+}
+
+// TranscodeReason defines model for TranscodeReason.
+type TranscodeReason string
+
+// TranscodeSeekInfo The transcode seek info.
+type TranscodeSeekInfo string
+
+// TranscodingInfo Class holding information on a running transcode.
+type TranscodingInfo struct {
+	// AudioChannels Gets or sets the audio channels.
+	AudioChannels *int32 `json:"AudioChannels,omitempty"`
+
+	// AudioCodec Gets or sets the thread count used for encoding.
+	AudioCodec *string `json:"AudioCodec,omitempty"`
+
+	// Bitrate Gets or sets the bitrate.
+	Bitrate *int32 `json:"Bitrate,omitempty"`
+
+	// CompletionPercentage Gets or sets the completion percentage.
+	CompletionPercentage *float64 `json:"CompletionPercentage,omitempty"`
+
+	// Container Gets or sets the thread count used for encoding.
+	Container *string `json:"Container,omitempty"`
+
+	// Framerate Gets or sets the framerate.
+	Framerate *float32 `json:"Framerate,omitempty"`
+
+	// HardwareAccelerationType Gets or sets the hardware acceleration type.
+	HardwareAccelerationType *HardwareAccelerationType `json:"HardwareAccelerationType,omitempty"`
+
+	// Height Gets or sets the video height.
+	Height *int32 `json:"Height,omitempty"`
+
+	// IsAudioDirect Gets or sets a value indicating whether the audio is passed through.
+	IsAudioDirect *bool `json:"IsAudioDirect,omitempty"`
+
+	// IsVideoDirect Gets or sets a value indicating whether the video is passed through.
+	IsVideoDirect *bool `json:"IsVideoDirect,omitempty"`
+
+	// TranscodeReasons Gets or sets the transcode reasons.
+	TranscodeReasons *[]TranscodeReason `json:"TranscodeReasons,omitempty"`
+
+	// VideoCodec Gets or sets the thread count used for encoding.
+	VideoCodec *string `json:"VideoCodec,omitempty"`
+
+	// Width Gets or sets the video width.
+	Width *int32 `json:"Width,omitempty"`
+}
+
+// TranscodingProfile A class for transcoding profile information.
+// Note for client developers: Conditions defined in MediaBrowser.Model.Dlna.CodecProfile has higher priority and can override values defined here.
+type TranscodingProfile struct {
+	// AudioCodec Gets or sets the audio codec.
+	AudioCodec *string `json:"AudioCodec,omitempty"`
+
+	// BreakOnNonKeyFrames Gets or sets a value indicating whether breaking the video stream on non-keyframes is supported.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	BreakOnNonKeyFrames *bool `json:"BreakOnNonKeyFrames,omitempty"`
+
+	// Conditions Gets or sets the profile conditions.
+	Conditions *[]ProfileCondition `json:"Conditions,omitempty"`
+
+	// Container Gets or sets the container.
+	Container *string `json:"Container,omitempty"`
+
+	// Context Gets or sets the encoding context.
+	Context *EncodingContext `json:"Context,omitempty"`
+
+	// CopyTimestamps Gets or sets a value indicating whether timestamps should be copied.
+	CopyTimestamps *bool `json:"CopyTimestamps,omitempty"`
+
+	// EnableAudioVbrEncoding Gets or sets a value indicating whether variable bitrate encoding is supported.
+	EnableAudioVbrEncoding *bool `json:"EnableAudioVbrEncoding,omitempty"`
+
+	// EnableMpegtsM2TsMode Gets or sets a value indicating whether M2TS mode is enabled.
+	EnableMpegtsM2TsMode *bool `json:"EnableMpegtsM2TsMode,omitempty"`
+
+	// EnableSubtitlesInManifest Gets or sets a value indicating whether subtitles are allowed in the manifest.
+	EnableSubtitlesInManifest *bool `json:"EnableSubtitlesInManifest,omitempty"`
+
+	// EstimateContentLength Gets or sets a value indicating whether the content length should be estimated.
+	EstimateContentLength *bool `json:"EstimateContentLength,omitempty"`
+
+	// MaxAudioChannels Gets or sets the maximum audio channels.
+	MaxAudioChannels *string `json:"MaxAudioChannels,omitempty"`
+
+	// MinSegments Gets or sets the minimum amount of segments.
+	MinSegments *int32 `json:"MinSegments,omitempty"`
+
+	// Protocol Media streaming protocol.
+	// Lowercase for backwards compatibility.
+	Protocol *MediaStreamProtocol `json:"Protocol,omitempty"`
+
+	// SegmentLength Gets or sets the segment length.
+	SegmentLength *int32 `json:"SegmentLength,omitempty"`
+
+	// TranscodeSeekInfo Gets or sets the transcoding seek info mode.
+	TranscodeSeekInfo *TranscodeSeekInfo `json:"TranscodeSeekInfo,omitempty"`
+
+	// Type Gets or sets the DLNA profile type.
+	Type *DlnaProfileType `json:"Type,omitempty"`
+
+	// VideoCodec Gets or sets the video codec.
+	VideoCodec *string `json:"VideoCodec,omitempty"`
 }
 
 // TransportStreamTimestamp The type of timestamps used in a transport stream.
@@ -2464,8 +3419,8 @@ type Video3DFormat string
 // VideoRange An enum representing video ranges.
 type VideoRange string
 
-// VideoRangeType An enum representing types of video ranges.
-type VideoRangeType string
+// JellyfinVideoRangeType An enum representing types of video ranges.
+type JellyfinVideoRangeType string
 
 // VideoType Enum VideoType.
 type VideoType string
@@ -2489,6 +3444,18 @@ type VirtualFolderInfo struct {
 	PrimaryImageItemId *string  `json:"PrimaryImageItemId,omitempty"`
 	RefreshProgress    *float64 `json:"RefreshProgress,omitempty"`
 	RefreshStatus      *string  `json:"RefreshStatus,omitempty"`
+}
+
+// GetSessionsParams defines parameters for GetSessions.
+type GetSessionsParams struct {
+	// ControllableByUserId Filter by sessions that a given user is allowed to remote control.
+	ControllableByUserId *openapi_types.UUID `form:"controllableByUserId,omitempty" json:"controllableByUserId,omitempty"`
+
+	// DeviceId Filter by device Id.
+	DeviceId *string `form:"deviceId,omitempty" json:"deviceId,omitempty"`
+
+	// ActiveWithinSeconds Optional. Filter by sessions that were active in the last n seconds.
+	ActiveWithinSeconds *int32 `form:"activeWithinSeconds,omitempty" json:"activeWithinSeconds,omitempty"`
 }
 
 // GetUsersParams defines parameters for GetUsers.
@@ -2731,6 +3698,11 @@ type ClientInterface interface {
 	// Corresponds with GET /Library/VirtualFolders (the `GetVirtualFolders` operationId).
 	GetVirtualFolders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetSessions Gets a list of sessions.
+	//
+	// Corresponds with GET /Sessions (the `GetSessions` operationId).
+	GetSessions(ctx context.Context, params *GetSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetSystemInfo Gets information about the server.
 	//
 	// Corresponds with GET /System/Info (the `GetSystemInfo` operationId).
@@ -2799,6 +3771,21 @@ type ClientInterface interface {
 // Corresponds with GET /Library/VirtualFolders (the `GetVirtualFolders` operationId).
 func (c *Client) GetVirtualFolders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVirtualFoldersRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSessions Gets a list of sessions.
+//
+// Corresponds with GET /Sessions (the `GetSessions` operationId).
+func (c *Client) GetSessions(ctx context.Context, params *GetSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSessionsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2988,6 +3975,84 @@ func NewGetVirtualFoldersRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetSessionsRequest constructs an http.Request for the GetSessions method
+func NewGetSessionsRequest(server string, params *GetSessionsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Sessions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.ControllableByUserId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "controllableByUserId", *params.ControllableByUserId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.DeviceId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "deviceId", *params.DeviceId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ActiveWithinSeconds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "activeWithinSeconds", *params.ActiveWithinSeconds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -3319,6 +4384,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /Library/VirtualFolders (the `GetVirtualFolders` operationId).
 	GetVirtualFoldersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetVirtualFoldersResponse, error)
 
+	// GetSessionsWithResponse Gets a list of sessions.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /Sessions (the `GetSessions` operationId).
+	GetSessionsWithResponse(ctx context.Context, params *GetSessionsParams, reqEditors ...RequestEditorFn) (*GetSessionsResponse, error)
+
 	// GetSystemInfoWithResponse Gets information about the server.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -3447,6 +4519,69 @@ func (r GetVirtualFoldersResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetVirtualFoldersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetSessionsResponse503Headers the declared response headers of an HTTP 503 response for GetSessions
+type GetSessionsResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type GetSessionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]SessionInfoDto
+	// ApplicationjsonProfileCamelCase200 the response for an HTTP 200 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase200 *[]SessionInfoDto
+	// ApplicationjsonProfilePascalCase200 the response for an HTTP 200 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase200 *[]SessionInfoDto
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *GetSessionsResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSessionsResponse) GetJSON200() *[]SessionInfoDto {
+	return r.JSON200
+}
+
+// GetApplicationjsonProfileCamelCase200 returns the response for an HTTP 200 `application/json; profile="CamelCase"` response
+func (r GetSessionsResponse) GetApplicationjsonProfileCamelCase200() *[]SessionInfoDto {
+	return r.ApplicationjsonProfileCamelCase200
+}
+
+// GetApplicationjsonProfilePascalCase200 returns the response for an HTTP 200 `application/json; profile="PascalCase"` response
+func (r GetSessionsResponse) GetApplicationjsonProfilePascalCase200() *[]SessionInfoDto {
+	return r.ApplicationjsonProfilePascalCase200
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSessionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSessionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSessionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSessionsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3907,6 +5042,19 @@ func (c *ClientWithResponses) GetVirtualFoldersWithResponse(ctx context.Context,
 	return ParseGetVirtualFoldersResponse(rsp)
 }
 
+// GetSessionsWithResponse Gets a list of sessions.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /Sessions (the `GetSessions` operationId).
+func (c *ClientWithResponses) GetSessionsWithResponse(ctx context.Context, params *GetSessionsParams, reqEditors ...RequestEditorFn) (*GetSessionsResponse, error) {
+	rsp, err := c.GetSessions(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSessionsResponse(rsp)
+}
+
 // GetSystemInfoWithResponse Gets information about the server.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4083,6 +5231,72 @@ func ParseGetVirtualFoldersResponse(rsp *http.Response) (*GetVirtualFoldersRespo
 	switch {
 	case rsp.StatusCode == 503:
 		var headers GetVirtualFoldersResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetSessionsResponse parses an HTTP response from a GetSessionsWithResponse call
+func ParseGetSessionsResponse(rsp *http.Response) (*GetSessionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSessionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 200:
+		var dest []SessionInfoDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 200:
+		var dest []SessionInfoDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 200:
+		var dest []SessionInfoDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers GetSessionsResponse503Headers
 		if values := rsp.Header.Values("Message"); len(values) > 0 {
 			var value string
 			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {

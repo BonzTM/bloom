@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -38,6 +39,12 @@ type PromMetrics struct {
 	oidcDependencySeconds  *prometheus.HistogramVec
 	inviteCreations        *prometheus.CounterVec
 	inviteAcceptances      *prometheus.CounterVec
+	playbackPolls          *prometheus.CounterVec
+	playbackPollSeconds    *prometheus.HistogramVec
+	playbackOpenWatches    *prometheus.GaugeVec
+	playbackWatchesClosed  *prometheus.CounterVec
+	playbackMu             sync.Mutex
+	playbackOpenByServer   map[string]int
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -51,6 +58,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	oidcCollectors := newOIDCCollectors(namespace)
 	inviteCreations := newOutcomeCounter(namespace, "invite_creations_total", "Total invite creation attempts by finite outcome.")
 	inviteAcceptances := newOutcomeCounter(namespace, "invite_acceptances_total", "Total invite acceptance attempts by finite outcome.")
+	playbackCollectors := newPlaybackCollectors(namespace)
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -67,9 +75,41 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		oidcDependencySeconds: oidcCollectors.seconds,
 		inviteCreations:       inviteCreations,
 		inviteAcceptances:     inviteAcceptances,
+		playbackPolls:         playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
+		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
+		playbackOpenByServer: make(map[string]int),
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
+}
+
+type playbackCollectors struct {
+	polls   *prometheus.CounterVec
+	seconds *prometheus.HistogramVec
+	open    *prometheus.GaugeVec
+	closed  *prometheus.CounterVec
+}
+
+func newPlaybackCollectors(namespace string) playbackCollectors {
+	return playbackCollectors{
+		polls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "playback_polls_total",
+			Help: "Playback session polls by media-server kind and finite outcome.",
+		}, []string{"kind", "outcome"}),
+		seconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace, Name: "playback_poll_duration_seconds",
+			Help:    "Playback session poll latency by media-server kind and finite outcome.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"kind", "outcome"}),
+		open: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: namespace, Name: "playback_open_watches",
+			Help: "Current persisted open watches by media-server kind.",
+		}, []string{"kind"}),
+		closed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "playback_watches_closed_total",
+			Help: "Playback watches closed by media-server kind and bounded reason.",
+		}, []string{"kind", "reason"}),
+	}
 }
 
 type httpCollectors struct {
@@ -199,6 +239,10 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.oidcDependencySeconds,
 		m.inviteCreations,
 		m.inviteAcceptances,
+		m.playbackPolls,
+		m.playbackPollSeconds,
+		m.playbackOpenWatches,
+		m.playbackWatchesClosed,
 	)
 }
 
@@ -210,6 +254,56 @@ func (m *PromMetrics) IncInviteCreation(outcome string) {
 // IncInviteAcceptance records one invite acceptance outcome.
 func (m *PromMetrics) IncInviteAcceptance(outcome string) {
 	m.inviteAcceptances.WithLabelValues(outcome).Inc()
+}
+
+// ObservePlaybackPoll records one completed collector poll.
+func (m *PromMetrics) ObservePlaybackPoll(kind, outcome string, seconds float64) {
+	kind, outcome = boundedMediaKind(kind), boundedPollOutcome(outcome)
+	m.playbackPolls.WithLabelValues(kind, outcome).Inc()
+	m.playbackPollSeconds.WithLabelValues(kind, outcome).Observe(seconds)
+}
+
+// SetOpenWatches updates one server and publishes the aggregate by kind.
+func (m *PromMetrics) SetOpenWatches(kind, serverID string, count int) {
+	kind = boundedMediaKind(kind)
+	m.playbackMu.Lock()
+	key := kind + "\x00" + serverID
+	if count <= 0 {
+		delete(m.playbackOpenByServer, key)
+	} else {
+		m.playbackOpenByServer[key] = count
+	}
+	total := 0
+	for key, open := range m.playbackOpenByServer {
+		if len(key) > len(kind) && key[:len(kind)] == kind && key[len(kind)] == 0 {
+			total += open
+		}
+	}
+	m.playbackOpenWatches.WithLabelValues(kind).Set(float64(total))
+	m.playbackMu.Unlock()
+}
+
+// IncWatchesClosed records one timeout or startup closure.
+func (m *PromMetrics) IncWatchesClosed(kind, reason string) {
+	kind = boundedMediaKind(kind)
+	if reason != "timeout" && reason != "startup" && reason != "overflow" {
+		reason = "invalid"
+	}
+	m.playbackWatchesClosed.WithLabelValues(kind, reason).Inc()
+}
+
+func boundedMediaKind(kind string) string {
+	if kind == string(core.MediaServerKindJellyfin) {
+		return kind
+	}
+	return "invalid"
+}
+
+func boundedPollOutcome(outcome string) string {
+	if outcome == "success" || outcome == "failure" {
+		return outcome
+	}
+	return "invalid"
 }
 
 // ObserveMediaServerRetry records one bounded retry decision.

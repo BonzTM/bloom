@@ -87,6 +87,12 @@ func TestLoadDefaults(t *testing.T) {
 	assertDatabaseDefaults(t, cfg)
 	assertAuthDefaults(t, cfg)
 	assertOIDCDefaults(t, cfg)
+	if cfg.Playback.PollActive != defaultPlaybackPollActive || cfg.Playback.PollIdle != defaultPlaybackPollIdle ||
+		cfg.Playback.MissedPolls != defaultPlaybackMissedPolls ||
+		cfg.Playback.ResumeWindow != defaultPlaybackResumeWindow ||
+		cfg.Playback.StoreTimeout != defaultPlaybackStoreTimeout {
+		t.Errorf("Playback defaults = %+v", cfg.Playback)
+	}
 	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
 		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
 	}
@@ -475,6 +481,51 @@ func TestLoadAuthConfigFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadPlaybackConfigFromEnvironment(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_PLAYBACK_POLL_ACTIVE", "7s")
+	t.Setenv("BLOOM_PLAYBACK_POLL_IDLE", "45s")
+	t.Setenv("BLOOM_PLAYBACK_MISSED_POLLS", "4")
+	t.Setenv("BLOOM_PLAYBACK_RESUME_WINDOW", "8m")
+	t.Setenv("BLOOM_PLAYBACK_STORE_TIMEOUT", "3s")
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := PlaybackConfig{
+		PollActive: 7 * time.Second, PollIdle: 45 * time.Second,
+		MissedPolls: 4, ResumeWindow: 8 * time.Minute, StoreTimeout: 3 * time.Second,
+	}
+	if cfg.Playback != want {
+		t.Fatalf("Playback = %+v, want %+v", cfg.Playback, want)
+	}
+}
+
+func TestLoadRejectsPlaybackBounds(t *testing.T) {
+	tests := []struct{ key, value string }{
+		{key: "BLOOM_PLAYBACK_POLL_ACTIVE", value: "999ms"},
+		{key: "BLOOM_PLAYBACK_POLL_ACTIVE", value: "61s"},
+		{key: "BLOOM_PLAYBACK_POLL_IDLE", value: "4s"},
+		{key: "BLOOM_PLAYBACK_POLL_IDLE", value: "11m"},
+		{key: "BLOOM_PLAYBACK_MISSED_POLLS", value: "0"},
+		{key: "BLOOM_PLAYBACK_MISSED_POLLS", value: "101"},
+		{key: "BLOOM_PLAYBACK_RESUME_WINDOW", value: "999ms"},
+		{key: "BLOOM_PLAYBACK_RESUME_WINDOW", value: "25h"},
+		{key: "BLOOM_PLAYBACK_STORE_TIMEOUT", value: "99ms"},
+		{key: "BLOOM_PLAYBACK_STORE_TIMEOUT", value: "31s"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.key+"="+testCase.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(testCase.key, testCase.value)
+			_, err := Load(nil)
+			if err == nil || !strings.Contains(err.Error(), testCase.key) {
+				t.Fatalf("Load error = %v, want %s validation", err, testCase.key)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsInvalidTrustedProxyCIDR(t *testing.T) {
 	setRequired(t)
 	t.Setenv("BLOOM_TRUSTED_PROXY_CIDRS", "10.0.0.0/8,not-a-cidr")
@@ -518,6 +569,7 @@ func TestLoadMalformedEnvRejected(t *testing.T) {
 		{"malformed auth int", "BLOOM_LOGIN_MAX_CONCURRENT", "many"},
 		{"malformed int64", "BLOOM_HTTP_MAX_BODY_BYTES", "not-a-number"},
 		{"malformed duration", "BLOOM_HTTP_READ_TIMEOUT", "15"}, // no unit
+		{"malformed playback duration", "BLOOM_PLAYBACK_POLL_ACTIVE", "fast"},
 		{"malformed bool", "BLOOM_DB_MIGRATE_ON_STARTUP", "maybe"},
 		{"malformed auth bool", "BLOOM_SESSION_COOKIE_SECURE", "maybe"},
 		{"malformed float", "BLOOM_TRACE_SAMPLE_RATIO", "half"},
@@ -548,6 +600,11 @@ func validConfigForTest() Config {
 			LoginMaxConcurrent: 4,
 		},
 		Bootstrap: BootstrapConfig{Username: defaultBootstrapUsername},
+		Playback: PlaybackConfig{
+			PollActive: defaultPlaybackPollActive, PollIdle: defaultPlaybackPollIdle,
+			MissedPolls: defaultPlaybackMissedPolls, ResumeWindow: defaultPlaybackResumeWindow,
+			StoreTimeout: defaultPlaybackStoreTimeout,
+		},
 		SecretKey: NewSecret([]byte(testSecret)), ShutdownGrace: time.Second,
 	}
 }

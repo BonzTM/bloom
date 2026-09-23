@@ -43,7 +43,11 @@ func baseConfig(t *testing.T, addr string) config.Config {
 			LoginRateRefillInterval: time.Minute, LoginRateBurst: 5, LoginRateMaxKeys: 100,
 			LoginMaxConcurrent: 4,
 		},
-		Bootstrap:     config.BootstrapConfig{Username: "admin"},
+		Bootstrap: config.BootstrapConfig{Username: "admin"},
+		Playback: config.PlaybackConfig{
+			PollActive: 5 * time.Second, PollIdle: 30 * time.Second,
+			MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+		},
 		SecretKey:     config.NewSecret([]byte(testSecret)),
 		ShutdownGrace: 5 * time.Second,
 	}

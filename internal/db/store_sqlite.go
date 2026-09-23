@@ -148,6 +148,13 @@ func formatSQLiteTime(t time.Time) string {
 	return core.NormalizeTime(t).Format(sqliteTimeLayout)
 }
 
+func sqliteNullableTime(value *time.Time) sql.NullString {
+	if value == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: formatSQLiteTime(*value), Valid: true}
+}
+
 // parseSQLiteTime is the inverse of formatSQLiteTime. It accepts only the exact
 // layout: any other shape means a foreign writer touched the column.
 func parseSQLiteTime(s string) (time.Time, error) {

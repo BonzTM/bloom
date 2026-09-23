@@ -26,6 +26,16 @@ type adapterFactory interface {
 	Capabilities(kind core.MediaServerKind) (core.Capabilities, error)
 }
 
+type playbackSessionLister interface {
+	ListSessions(ctx context.Context) ([]core.PlaybackSession, error)
+}
+
+// PlaybackLifecycle coordinates collector shutdown around server deletion.
+type PlaybackLifecycle interface {
+	StopServer(ctx context.Context, id string) error
+	FinishServerDelete(id string, deleted bool)
+}
+
 // Service coordinates probe-before-save and secret-safe adapter construction.
 type Service struct {
 	reader            core.MediaServerReader
@@ -35,6 +45,12 @@ type Service struct {
 	clock             core.Clock
 	adapters          *adapterCache
 	registrationSlots chan struct{}
+	playback          PlaybackLifecycle
+}
+
+// SetPlaybackLifecycle wires the optional collector lifecycle after construction.
+func (s *Service) SetPlaybackLifecycle(lifecycle PlaybackLifecycle) {
+	s.playback = lifecycle
 }
 
 // NewService returns a media-server application service.
@@ -243,6 +259,26 @@ func (s *Service) AcquireUserProvisioner(
 	return provisioner, call.release, nil
 }
 
+// ListSessions returns active playback through the configured adapter.
+func (s *Service) ListSessions(ctx context.Context, id string) ([]core.PlaybackSession, error) {
+	call, err := s.adapter(ctx, id, "list_sessions")
+	if err != nil {
+		return nil, err
+	}
+	defer call.release()
+	source, ok := call.entry.adapter.(playbackSessionLister)
+	if !ok {
+		return nil, fmt.Errorf("list media server sessions: %w", core.ErrInvalidArgument)
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	sessions, err := source.ListSessions(callCtx)
+	if err != nil {
+		return nil, fmt.Errorf("list media server sessions: %w", err)
+	}
+	return sessions, nil
+}
+
 func (s *Service) adapter(ctx context.Context, id, operation string) (*adapterCall, error) {
 	build := s.adapters.begin(id, operation)
 	callCtx, cancel := dependencyContext(ctx)
@@ -276,12 +312,22 @@ func (s *Service) Delete(ctx context.Context, id string) (core.MediaServer, erro
 	if err != nil {
 		return core.MediaServer{}, fmt.Errorf("get media server before delete: %w", err)
 	}
+	if s.playback != nil {
+		if stopErr := s.playback.StopServer(ctx, id); stopErr != nil {
+			return core.MediaServer{}, fmt.Errorf("stop playback collector before delete: %w", stopErr)
+		}
+	}
+	deleted := false
+	if s.playback != nil {
+		defer func() { s.playback.FinishServerDelete(id, deleted) }()
+	}
 	deleteCtx, deleteCancel := dependencyContext(ctx)
 	err = s.writer.DeleteMediaServer(deleteCtx, id)
 	deleteCancel()
 	if err != nil {
 		return core.MediaServer{}, fmt.Errorf("delete media server: %w", err)
 	}
+	deleted = true
 	s.adapters.remove(id)
 	return record.MediaServer, nil
 }

@@ -63057,6 +63057,7 @@
         "description": "An enum representing video ranges."
       },
       "VideoRangeType": {
+		"x-go-name": "JellyfinVideoRangeType",
         "enum": [
           "Unknown",
           "SDR",

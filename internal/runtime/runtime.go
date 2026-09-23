@@ -28,6 +28,7 @@ import (
 	inviteapp "github.com/BonzTM/bloom/internal/invite"
 	"github.com/BonzTM/bloom/internal/mediaserver"
 	oidcadapter "github.com/BonzTM/bloom/internal/oidc"
+	"github.com/BonzTM/bloom/internal/playback"
 	"github.com/BonzTM/bloom/internal/secrets"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -67,6 +68,12 @@ type oidcLifecycle interface {
 
 type mediaConnectionCloser interface {
 	CloseIdleConnections()
+}
+
+type playbackLifecycle interface {
+	Start(context.Context) error
+	Stop(context.Context) error
+	Errors() <-chan error
 }
 
 // systemClock is the production core.Clock. No core package reads the wall
@@ -127,7 +134,7 @@ func runService(
 	srv, err := assembleHTTPServer(
 		cfg, auditSink, logger, metrics, pool,
 		wiring.accounts, wiring.localIdentities, wiring.authorizer, wiring.roles, wiring.sessions,
-		wiring.mediaServers, wiring.invites, clock,
+		wiring.mediaServers, wiring.invites, wiring.playbackStore, clock,
 		wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows,
 	)
 	if err != nil {
@@ -135,7 +142,8 @@ func runService(
 	}
 
 	serving, err := serve(
-		ctx, srv, wiring.oidcProvider, wiring.mediaServers, pool, tracerProvider, logger, cfg.ShutdownGrace,
+		ctx, srv, wiring.oidcProvider, wiring.playbackManager, wiring.mediaServers,
+		pool, tracerProvider, logger, cfg.ShutdownGrace,
 		deps.ListenerReady, deps.listen,
 	)
 	if serving {
@@ -152,6 +160,8 @@ type serviceWiring struct {
 	sessions        *scs.SessionManager
 	mediaServers    *mediaserver.Service
 	invites         *inviteapp.Service
+	playbackStore   core.PlaybackStore
+	playbackManager *playback.Manager
 	oidcProvider    oidcLifecycle
 	oidcAccounts    core.OIDCAccountStore
 	oidcFlows       core.OIDCFlowStore
@@ -176,6 +186,13 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
+	playbackStore, playbackManager, err := playbackDependencies(
+		pool, cfg, mediaServers, metrics, logger, deps.Clock,
+	)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	ownership.playback = playbackManager
 	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
 		return serviceWiring{}, roleErr
 	}
@@ -187,6 +204,7 @@ func wireServiceDependencies(
 	return serviceWiring{
 		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, invites: invites,
+		playbackStore: playbackStore, playbackManager: playbackManager,
 		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
 	}, nil
 }
@@ -195,6 +213,7 @@ type startupOwnership struct {
 	tracer      tracerLifecycle
 	pool        io.Closer
 	provider    oidcLifecycle
+	playback    playbackLifecycle
 	media       mediaConnectionCloser
 	grace       time.Duration
 	transferred bool
@@ -204,6 +223,7 @@ func (o *startupOwnership) cleanup(retErr *error) {
 	if o.transferred {
 		return
 	}
+	*retErr = errors.Join(*retErr, stopPlayback(o.playback, o.grace))
 	*retErr = errors.Join(*retErr, closeOIDCProvider(o.provider, o.grace))
 	closeMediaConnections(o.media)
 	if o.pool != nil {
@@ -266,6 +286,15 @@ func closeMediaConnections(media mediaConnectionCloser) {
 	}
 }
 
+func stopPlayback(manager playbackLifecycle, grace time.Duration) error {
+	if manager == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownPhaseBudget(grace, 5*time.Second))
+	defer cancel()
+	return wrapShutdownError("stop playback collectors", manager.Stop(ctx))
+}
+
 func bootstrapFirstAdmin(
 	ctx context.Context,
 	cfg config.Config,
@@ -295,6 +324,7 @@ func assembleHTTPServer(
 	sessions *scs.SessionManager,
 	mediaServers *mediaserver.Service,
 	invites *inviteapp.Service,
+	playbackStore core.PlaybackStore,
 	clock core.Clock,
 	oidcProvider core.OIDCProvider,
 	oidcAccounts core.OIDCAccountStore,
@@ -319,6 +349,7 @@ func assembleHTTPServer(
 		MediaServerManager:  mediaServers,
 		InviteReader:        invites,
 		InviteManager:       invites,
+		PlaybackReader:      playbackStore,
 		Sessions:            sessions,
 		Audit:               audit,
 		AuditCorrelationKey: cfg.SecretKey.Bytes(),
@@ -344,6 +375,38 @@ func inviteDependencies(
 		return nil, fmt.Errorf("build invite service: %w", err)
 	}
 	return service, nil
+}
+
+func playbackDependencies(
+	pool *sql.DB,
+	cfg config.Config,
+	mediaServers *mediaserver.Service,
+	metrics *telemetry.PromMetrics,
+	logger *slog.Logger,
+	clock core.Clock,
+) (core.PlaybackStore, *playback.Manager, error) {
+	store, err := db.NewPlaybackStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build playback store: %w", err)
+	}
+	collectorConfig := playback.Config{
+		ActiveInterval: cfg.Playback.PollActive, IdleInterval: cfg.Playback.PollIdle,
+		MissedPolls: cfg.Playback.MissedPolls, ResumeWindow: cfg.Playback.ResumeWindow,
+		StoreTimeout: cfg.Playback.StoreTimeout,
+	}
+	factory := func(server core.MediaServer) playback.Source {
+		return playback.SourceFunc(func(ctx context.Context) ([]core.PlaybackSession, error) {
+			return mediaServers.ListSessions(ctx, server.ID)
+		})
+	}
+	manager, err := playback.NewManager(
+		mediaServers, store, collectorConfig, factory, clock, logger, metrics, playback.ManagerOptions{},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build playback manager: %w", err)
+	}
+	mediaServers.SetPlaybackLifecycle(manager)
+	return store, manager, nil
 }
 
 func mediaServerDependencies(
@@ -497,6 +560,7 @@ func serve(
 	ctx context.Context,
 	srv *httpapi.Server,
 	oidcProvider oidcLifecycle,
+	playbackManager playbackLifecycle,
 	media mediaConnectionCloser,
 	pool *sql.DB,
 	tp tracerLifecycle,
@@ -533,7 +597,11 @@ func serve(
 
 	g.Go(func() error {
 		<-gctx.Done()
-		return shutdown(srv, oidcProvider, media, pool, tp, logger, grace)
+		return shutdown(srv, oidcProvider, playbackManager, media, pool, tp, logger, grace)
+	})
+
+	g.Go(func() error {
+		return supervisePlayback(gctx, serving, playbackManager)
 	})
 
 	<-serving
@@ -544,6 +612,28 @@ func serve(
 	logger.Info("stopped")
 	return true, nil
 }
+
+func supervisePlayback(
+	ctx context.Context,
+	serving <-chan struct{},
+	manager playbackLifecycle,
+) error {
+	<-serving
+	if err := manager.Start(ctx); err != nil {
+		if playbackStartWasCanceled(ctx) {
+			return nil
+		}
+		return fmt.Errorf("start playback manager: %w", err)
+	}
+	select {
+	case err := <-manager.Errors():
+		return err
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+func playbackStartWasCanceled(ctx context.Context) bool { return ctx.Err() != nil }
 
 // Migrate is the one-shot -migrate mode: open the pool, apply all pending
 // embedded goose migrations for the configured engine, close the pool. main
@@ -568,14 +658,15 @@ func Migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 // shutdown drains and releases resources in reverse dependency order under
 // one absolute grace deadline.
 func shutdown(
-	srv *httpapi.Server, oidcProvider oidcLifecycle, media mediaConnectionCloser, pool *sql.DB,
+	srv *httpapi.Server, oidcProvider oidcLifecycle, playbackManager playbackLifecycle,
+	media mediaConnectionCloser, pool *sql.DB,
 	tp tracerLifecycle, logger *slog.Logger, grace time.Duration,
 ) error {
 	logger.Info("shutting down", "grace", grace)
 	plan := newShutdownPlan(time.Now(), grace)
 	ctx, cancel := context.WithDeadline(context.Background(), plan.end())
 	defer cancel()
-	return executeShutdown(ctx, plan, runtimeShutdownPhases(srv, oidcProvider, media, pool, tp))
+	return executeShutdown(ctx, plan, runtimeShutdownPhases(srv, oidcProvider, playbackManager, media, pool, tp))
 }
 
 type shutdownPhases struct {
@@ -583,6 +674,7 @@ type shutdownPhases struct {
 	drainHTTP      func(context.Context) error
 	forceCloseHTTP func(context.Context) error
 	waitHandlers   func(context.Context) error
+	stopPlayback   func(context.Context) error
 	closeProvider  func(context.Context) error
 	closeMedia     func(context.Context) error
 	closeDatabase  func(context.Context) error
@@ -629,7 +721,7 @@ func (p shutdownPlan) deadline(phase shutdownPhase) time.Time {
 }
 
 func runtimeShutdownPhases(
-	srv *httpapi.Server, provider oidcLifecycle, media mediaConnectionCloser,
+	srv *httpapi.Server, provider oidcLifecycle, playbackManager playbackLifecycle, media mediaConnectionCloser,
 	pool *sql.DB, tracer tracerLifecycle,
 ) shutdownPhases {
 	return shutdownPhases{
@@ -637,6 +729,12 @@ func runtimeShutdownPhases(
 		drainHTTP:      srv.Shutdown,
 		forceCloseHTTP: func(context.Context) error { return srv.Close() },
 		waitHandlers:   srv.WaitHandlers,
+		stopPlayback: func(ctx context.Context) error {
+			if playbackManager == nil {
+				return nil
+			}
+			return playbackManager.Stop(ctx)
+		},
 		closeProvider: func(ctx context.Context) error {
 			if provider == nil {
 				return nil
@@ -665,6 +763,10 @@ func executeShutdown(ctx context.Context, plan shutdownPlan, phases shutdownPhas
 	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("wait for HTTP handlers", waitErr))
 	if waitErr != nil {
 		return shutdownErr
+	}
+	if phases.stopPlayback != nil {
+		playbackErr := runShutdownPhase(ctx, plan, shutdownProviderClose, phases.stopPlayback)
+		shutdownErr = errors.Join(shutdownErr, wrapShutdownError("stop playback collectors", playbackErr))
 	}
 	providerErr := runShutdownPhase(ctx, plan, shutdownProviderClose, phases.closeProvider)
 	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("close OpenID Connect provider", providerErr))

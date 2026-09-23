@@ -21,6 +21,7 @@ sql:
       - internal/db/queries/oidc.sql
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_sqlite.sql
+      - internal/db/queries/playback.sql
     gen:
       go:
         package: sqlite
@@ -41,6 +42,7 @@ sql:
       - internal/db/queries/oidc.sql
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_postgres.sql
+      - internal/db/queries/playback.sql
     gen:
       go:
         package: postgres

@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
+	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
 	// by both engines (ADR 0004 item 3): sqlc.yaml compiles it once against the
@@ -24,7 +25,9 @@ type Querier interface {
 	CreateInviteLibrary(ctx context.Context, arg CreateInviteLibraryParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
 	CreateMediaServer(ctx context.Context, arg CreateMediaServerParams) error
+	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
+	FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPlaybackWatchParams) (FindRecentPlaybackWatchRow, error)
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
 	// OIDC identity queries are shared by SQLite and PostgreSQL.
@@ -44,12 +47,20 @@ type Querier interface {
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
+	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
+	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
+	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
+	ListRecentPlaybackWatches(ctx context.Context, arg ListRecentPlaybackWatchesParams) ([]ListRecentPlaybackWatchesRow, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
+	TrimWatchPositions(ctx context.Context, watchID string) error
 	UpdateAccountIdentityLogin(ctx context.Context, arg UpdateAccountIdentityLoginParams) (int64, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
+	// Playback queries are portable across SQLite and PostgreSQL.
+	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
+	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error
 }
 
 var _ Querier = (*Queries)(nil)

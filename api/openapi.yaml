@@ -38,6 +38,8 @@ tags:
     description: Registered media-server connections. Credentials are write-only.
   - name: invites
     description: Administrative invite management and public redemption.
+  - name: playback
+    description: Administrator playback activity and history.
 paths:
   /api/v1/version:
     get:
@@ -808,6 +810,51 @@ paths:
         "502": { $ref: "#/components/responses/PublicMediaServerFailure" }
         "503": { $ref: "#/components/responses/PublicMediaServerBusy" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedPost" }
+  /api/v1/playback/now:
+    get:
+      tags: [playback]
+      operationId: listNowPlaying
+      summary: List open watches across registered media servers, newest first.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200": { $ref: "#/components/responses/PlaybackNowListed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/playback/history:
+    get:
+      tags: [playback]
+      operationId: listPlaybackHistory
+      summary: List closed watches across registered media servers, newest first.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: media_server_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: cursor
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200": { $ref: "#/components/responses/PlaybackHistoryListed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
 components:
   parameters:
     MediaServerID:
@@ -1005,6 +1052,26 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/LibrariesResponse" }
+    PlaybackNowListed:
+      description: A stable cursor page of open watches ordered by start time and identifier, newest first.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlaybackNowResponse" }
+    PlaybackHistoryListed:
+      description: A stable cursor page of closed watches ordered newest first.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlaybackHistoryResponse" }
     Unauthorized:
       description: No live authenticated session.
       headers:
@@ -1381,6 +1448,85 @@ components:
           maxItems: 256
           items: { $ref: "#/components/schemas/Library" }
           description: Bounded unpaginated exception; server-side pagination arrives with the users slice.
+    PlayMethod:
+      type: string
+      enum: [direct_play, direct_stream, transcode, unknown]
+    PlaybackSource:
+      type: string
+      enum: [poll, websocket, webhook, import]
+    PlaybackWatch:
+      type: object
+      required:
+        - id
+        - media_server_id
+        - media_server_name
+        - media_user_id
+        - username
+        - device_id
+        - device_name
+        - client
+        - item_id
+        - item_name
+        - item_type
+        - series_name
+        - season_number
+        - episode_number
+        - position_ms
+        - paused
+        - play_method
+        - source
+        - active_seconds
+        - started_at
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        media_server_id: { type: string, format: uuid }
+        media_server_name: { type: string, minLength: 1 }
+        media_user_id: { type: string, minLength: 1 }
+        username: { type: string }
+        device_id: { type: string, minLength: 1 }
+        device_name: { type: string }
+        client: { type: string }
+        item_id: { type: string, minLength: 1 }
+        item_name: { type: string }
+        item_type: { type: string }
+        series_name: { type: string }
+        season_number: { type: [integer, "null"], format: int32 }
+        episode_number: { type: [integer, "null"], format: int32 }
+        position_ms: { type: integer, format: int64, minimum: 0 }
+        paused: { type: boolean }
+        play_method: { $ref: "#/components/schemas/PlayMethod" }
+        source: { $ref: "#/components/schemas/PlaybackSource" }
+        active_seconds: { type: integer, format: int64, minimum: 0 }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+    PlaybackHistoryWatch:
+      allOf:
+        - $ref: "#/components/schemas/PlaybackWatch"
+        - type: object
+          required: [ended_at]
+          properties:
+            ended_at: { type: string, format: date-time }
+    PlaybackNowResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/PlaybackWatch" }
+        next_cursor: { type: string, maxLength: 256 }
+    PlaybackHistoryResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/PlaybackHistoryWatch" }
+        next_cursor: { type: string, maxLength: 256 }
     LoginRequest:
       type: object
       required: [username, password]

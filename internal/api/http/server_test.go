@@ -254,6 +254,8 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodDelete, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/invite/{code}", access: routePublic},
 		{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic},
+		{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 	}
 	if len(apiRouteInventory) != len(want) {
 		t.Fatalf("route inventory length = %d, want %d", len(apiRouteInventory), len(want))
