@@ -61,6 +61,9 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- SQLite database startup now supplies the foreign-key pragma when the
+  configured DSN omits it. Explicitly disabled foreign keys still fail
+  startup, and shipped container DSNs now declare the enabled pragma.
 - Image publishing skips the artifact attestation steps, with a notice, when
   attestations are unavailable for the repository's plan, and keeps every other
   proof step; a public repository gets signed provenance automatically.

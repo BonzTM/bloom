@@ -256,7 +256,7 @@ jobs:
             --publish 127.0.0.1::8080 \
             --tmpfs /data:rw,noexec,nosuid,size=64m,uid=65532,gid=65532,mode=0700 \
             --env "BLOOM_SECRET_KEY=$(openssl rand -base64 48)" \
-            --env "BLOOM_DB_DSN=file:/data/smoke.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" \
+            --env "BLOOM_DB_DSN=file:/data/smoke.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" \
             --env BLOOM_DB_MIGRATE_ON_STARTUP=true \
             "${IMAGE}"
 

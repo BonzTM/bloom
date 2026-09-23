@@ -192,7 +192,7 @@ func TestExecuteGrantRoleRejectsControlCharacters(t *testing.T) {
 
 func createRolelessAccount(t *testing.T, dsn, username string) core.Account {
 	t.Helper()
-	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn))
+	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -213,7 +213,7 @@ func createRolelessAccount(t *testing.T, dsn, username string) core.Account {
 
 func assertAccountRoles(t *testing.T, dsn, accountID string, want []string) {
 	t.Helper()
-	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn))
+	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

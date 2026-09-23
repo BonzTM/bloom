@@ -18,7 +18,7 @@ services:
       # Dev-only placeholder; generate a real one: openssl rand -base64 48
       BLOOM_SECRET_KEY: "dev-only-secret-key-change-me-0123456789abcdef"
       BLOOM_DB_DRIVER: sqlite
-      BLOOM_DB_DSN: "file:/data/bloom.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+      BLOOM_DB_DSN: "file:/data/bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
     ports:
       - "8080:8080"
     volumes:

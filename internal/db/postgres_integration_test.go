@@ -35,7 +35,7 @@ func TestPostgresEngineSuite(t *testing.T) {
 		MaxIdleConns:    5,
 		ConnMaxLifetime: time.Minute,
 		ConnMaxIdleTime: time.Minute,
-	})
+	}, discardLogger())
 	if err != nil {
 		t.Fatalf("Open postgres: %v", err)
 	}
