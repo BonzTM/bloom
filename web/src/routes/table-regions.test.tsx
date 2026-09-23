@@ -14,6 +14,12 @@ it.each([
     "Media servers, ordered by name",
   ],
   ["/admin/invites", "Invites table", "Invites, newest first"],
+  ["/admin/playback", "Playing now table", "Playing now, newest first"],
+  [
+    "/admin/playback",
+    "Finished watches table",
+    "Finished watches, newest first",
+  ],
 ])(
   "%s wraps its table in a focusable named region",
   async (path, region, caption) => {

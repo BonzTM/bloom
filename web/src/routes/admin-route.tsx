@@ -27,6 +27,12 @@ export default function AdminRoute(): ReactNode {
               <p>Create links that let people join a media server.</p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.statsReadAll]}>
+            <li>
+              <Link to="/admin/playback">Playback</Link>
+              <p>See what is playing now and what finished recently.</p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.adminRoles]}>
             <li className="card">
               <h2>

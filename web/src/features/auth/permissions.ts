@@ -7,12 +7,14 @@ export const permissions = {
   adminSettings: "admin.settings",
   adminRoles: "admin.roles",
   usersInvite: "users.invite",
+  statsReadAll: "stats.read.all",
 } as const satisfies Record<string, KnownPermission>;
 
 export const ADMIN_PERMISSIONS: readonly KnownPermission[] = [
   permissions.adminSettings,
   permissions.adminRoles,
   permissions.usersInvite,
+  permissions.statsReadAll,
 ];
 
 export function hasPermission(

@@ -19,6 +19,10 @@ import {
   type Invite,
   type CreateInviteRequest,
 } from "../features/invites/api/invites-schemas.js";
+import type {
+  HistoryWatch,
+  Watch,
+} from "../features/playback/api/playback-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -637,7 +641,141 @@ async function acceptInvite(
   );
 }
 
+// Watches the mock server reports: two playing now and a short history.
+const MAX_PLAYBACK_CURSOR_LENGTH = 256;
+const CABIN = "3d7f1a2b-0000-4000-8000-000000000001";
+const LIVING_ROOM = "3d7f1a2b-0000-4000-8000-000000000002";
+
+function watch(patch: Partial<Watch> & Pick<Watch, "id">): Watch {
+  return {
+    media_server_id: CABIN,
+    media_server_name: "Cabin",
+    media_user_id: "u-alice",
+    username: "alice",
+    device_id: "d-tv",
+    device_name: "Living room TV",
+    client: "Jellyfin Web",
+    item_id: "i-1",
+    item_name: "Pilot",
+    item_type: "Episode",
+    series_name: "Fringe",
+    season_number: 1,
+    episode_number: 1,
+    position_ms: 754_000,
+    paused: false,
+    play_method: "direct_play",
+    active_seconds: 754,
+    started_at: "2026-09-24T19:00:00Z",
+    ...patch,
+  };
+}
+
+export const mockNowPlaying: readonly Watch[] = [
+  watch({ id: "7b2c3d4e-0000-4000-8000-000000000001" }),
+  watch({
+    id: "7b2c3d4e-0000-4000-8000-000000000002",
+    media_server_id: LIVING_ROOM,
+    media_server_name: "Living room",
+    media_user_id: "u-bob",
+    username: "bob",
+    device_id: "d-phone",
+    device_name: "Pixel",
+    client: "Findroid",
+    item_id: "i-2",
+    item_name: "Heat",
+    item_type: "Movie",
+    series_name: "",
+    season_number: null,
+    episode_number: null,
+    position_ms: 5_400_000,
+    paused: true,
+    play_method: "transcode",
+    active_seconds: 3_610,
+    started_at: "2026-09-24T18:00:00Z",
+  }),
+];
+
+export const mockPlaybackHistory: readonly HistoryWatch[] = [
+  {
+    ...watch({
+      id: "7b2c3d4e-0000-4000-8000-000000000011",
+      item_id: "i-3",
+      item_name: "The Arrival",
+      season_number: 1,
+      episode_number: 4,
+      position_ms: 2_640_000,
+      active_seconds: 2_580,
+      started_at: "2026-09-23T21:00:00Z",
+    }),
+    ended_at: "2026-09-23T21:44:00Z",
+  },
+  {
+    ...watch({
+      id: "7b2c3d4e-0000-4000-8000-000000000012",
+      media_server_id: LIVING_ROOM,
+      media_server_name: "Living room",
+      media_user_id: "u-bob",
+      username: "bob",
+      device_id: "d-phone",
+      device_name: "Pixel",
+      client: "Findroid",
+      item_id: "i-4",
+      item_name: "Ronin",
+      item_type: "Movie",
+      series_name: "",
+      season_number: null,
+      episode_number: null,
+      position_ms: 7_300_000,
+      play_method: "direct_stream",
+      active_seconds: 7_250,
+      started_at: "2026-09-22T20:00:00Z",
+    }),
+    ended_at: "2026-09-22T22:02:00Z",
+  },
+];
+
+const playbackHistoryQuerySchema = pageQuerySchema(MAX_PLAYBACK_CURSOR_LENGTH);
+
+function playbackDenial() {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("stats.read.all")) {
+    return envelope(403, "forbidden", "missing permission stats.read.all");
+  }
+  return undefined;
+}
+
+function playbackHistory(url: URL) {
+  const serverIds = url.searchParams.getAll("media_server_id");
+  if (serverIds.length > 1) {
+    return envelope(422, "validation_failed", "repeated media_server_id");
+  }
+  const serverId = serverIds[0];
+  if (serverId !== undefined && !z.uuid().safeParse(serverId).success) {
+    return envelope(422, "validation_failed", "invalid media_server_id");
+  }
+  const items =
+    serverId === undefined
+      ? mockPlaybackHistory
+      : mockPlaybackHistory.filter((w) => w.media_server_id === serverId);
+  return pagedItems(url, playbackHistoryQuerySchema, items);
+}
+
 export const handlers = [
+  http.get(
+    "*/api/v1/playback/now",
+    jsonApi(
+      () => playbackDenial() ?? HttpResponse.json({ items: mockNowPlaying }),
+    ),
+  ),
+  http.get(
+    "*/api/v1/playback/history",
+    jsonApi(
+      ({ request }) =>
+        playbackDenial() ?? playbackHistory(new URL(request.url)),
+    ),
+  ),
   http.get(
     "*/api/v1/invites",
     jsonApi(
