@@ -23,6 +23,8 @@ import (
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
+	"github.com/BonzTM/bloom/internal/mediaserver"
+	"github.com/BonzTM/bloom/internal/secrets"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
@@ -76,37 +78,57 @@ type tracerShutdowner interface {
 	Shutdown(context.Context) error
 }
 
+type shutdownServer interface {
+	SetReady(bool)
+	Shutdown(context.Context) error
+}
+
+type mediaConnectionCloser interface {
+	CloseIdleConnections()
+}
+
 func runInitialized(
 	ctx context.Context, cfg config.Config, streams Streams, logger *slog.Logger,
 	metrics *telemetry.PromMetrics, tracerProvider tracerShutdowner,
 ) error {
 	pool, err := openStore(ctx, cfg, logger, metrics)
 	if err != nil {
-		return cleanupStartupFailure(err, nil, tracerProvider, cfg.ShutdownGrace)
+		return cleanupStartupFailure(err, nil, nil, tracerProvider, cfg.ShutdownGrace)
 	}
 	clock := systemClock{}
 	if bootstrapErr := bootstrapFirstAdmin(ctx, cfg, streams.Audit, pool, logger, clock); bootstrapErr != nil {
-		return cleanupStartupFailure(bootstrapErr, pool, tracerProvider, cfg.ShutdownGrace)
+		return cleanupStartupFailure(bootstrapErr, nil, pool, tracerProvider, cfg.ShutdownGrace)
 	}
 	accounts, localIdentities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
 	if err != nil {
-		return cleanupStartupFailure(err, pool, tracerProvider, cfg.ShutdownGrace)
+		return cleanupStartupFailure(err, nil, pool, tracerProvider, cfg.ShutdownGrace)
+	}
+	mediaServers, err := mediaServerDependencies(pool, cfg, metrics, clock)
+	if err != nil {
+		return cleanupStartupFailure(err, nil, pool, tracerProvider, cfg.ShutdownGrace)
 	}
 	srv, err := assembleHTTPServer(
 		cfg, streams.Audit, logger, metrics, pool,
-		accounts, localIdentities, authorizer, roles, sessions, clock,
+		accounts, localIdentities, authorizer, roles, sessions, mediaServers, clock,
 	)
 	if err != nil {
-		return cleanupStartupFailure(err, pool, tracerProvider, cfg.ShutdownGrace)
+		return cleanupStartupFailure(err, mediaServers, pool, tracerProvider, cfg.ShutdownGrace)
 	}
 
-	return serve(ctx, srv, pool, tracerProvider, logger, cfg.ShutdownGrace)
+	return serve(ctx, srv, mediaServers, pool, tracerProvider, logger, cfg.ShutdownGrace)
 }
 
 func cleanupStartupFailure(
-	startupErr error, pool io.Closer, tracerProvider tracerShutdowner, grace time.Duration,
+	startupErr error,
+	media mediaConnectionCloser,
+	pool io.Closer,
+	tracerProvider tracerShutdowner,
+	grace time.Duration,
 ) error {
 	var cleanupErr error
+	if media != nil {
+		media.CloseIdleConnections()
+	}
 	if pool != nil {
 		cleanupErr = pool.Close()
 	}
@@ -143,6 +165,7 @@ func assembleHTTPServer(
 	authorizer core.Authorizer,
 	roles core.RoleReader,
 	sessions *scs.SessionManager,
+	mediaServers *mediaserver.Service,
 	clock core.Clock,
 ) (*httpapi.Server, error) {
 	dist, err := web.Dist()
@@ -160,12 +183,40 @@ func assembleHTTPServer(
 		Accounts:            accounts,
 		Authorizer:          authorizer,
 		Roles:               roles,
+		MediaServerReader:   mediaServers,
+		MediaServerManager:  mediaServers,
 		Sessions:            sessions,
 		Audit:               audit,
 		AuditCorrelationKey: cfg.SecretKey.Bytes(),
 		Clock:               clock,
 		Auth:                cfg.Auth,
 	}), nil
+}
+
+func mediaServerDependencies(
+	pool *sql.DB,
+	cfg config.Config,
+	metrics *telemetry.PromMetrics,
+	clock core.Clock,
+) (*mediaserver.Service, error) {
+	reader, writer, err := db.NewMediaServerStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build media server stores: %w", err)
+	}
+	cipher, err := secrets.New(cfg.SecretKey.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("build credential cipher: %w", err)
+	}
+	deviceID, err := secrets.DeviceID(cfg.SecretKey.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("derive Jellyfin device id: %w", err)
+	}
+	registry := mediaserver.NewRegistry(buildinfo.Version, deviceID, metrics)
+	service, err := mediaserver.NewService(reader, writer, cipher, registry, clock)
+	if err != nil {
+		return nil, fmt.Errorf("build media server service: %w", err)
+	}
+	return service, nil
 }
 
 func authDependencies(
@@ -236,7 +287,15 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metr
 
 // serve runs the listener and the shutdown supervisor under one errgroup bound
 // to the root context: if either returns, the other observes the cancellation.
-func serve(ctx context.Context, srv *httpapi.Server, pool *sql.DB, tp tracerShutdowner, logger *slog.Logger, grace time.Duration) error {
+func serve(
+	ctx context.Context,
+	srv *httpapi.Server,
+	media mediaConnectionCloser,
+	pool *sql.DB,
+	tp tracerShutdowner,
+	logger *slog.Logger,
+	grace time.Duration,
+) error {
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
@@ -251,7 +310,7 @@ func serve(ctx context.Context, srv *httpapi.Server, pool *sql.DB, tp tracerShut
 
 	g.Go(func() error {
 		<-gctx.Done()
-		return shutdown(srv, pool, tp, logger, grace)
+		return shutdown(srv, media, pool, tp, logger, grace)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -283,8 +342,15 @@ func Migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 
 // shutdown drains and releases resources in reverse dependency order under a
 // bounded grace budget: flip readiness, drain HTTP with a FRESH deadline,
-// close the pool, then flush telemetry last.
-func shutdown(srv *httpapi.Server, pool *sql.DB, tp tracerShutdowner, logger *slog.Logger, grace time.Duration) error {
+// close media connections and the pool, then flush telemetry last.
+func shutdown(
+	srv shutdownServer,
+	media mediaConnectionCloser,
+	pool io.Closer,
+	tp tracerShutdowner,
+	logger *slog.Logger,
+	grace time.Duration,
+) error {
 	logger.Info("shutting down", "grace", grace)
 
 	// Detach from the cancelled root context: shutdown gets its own deadline.
@@ -296,18 +362,23 @@ func shutdown(srv *httpapi.Server, pool *sql.DB, tp tracerShutdowner, logger *sl
 	srv.SetReady(false)
 
 	// 2. Stop accepting connections and wait for in-flight requests to finish.
-	if err := srv.Shutdown(ctx); err != nil {
-		return fmt.Errorf("http shutdown: %w", err)
-	}
+	var cleanupErr error
+	cleanupErr = errors.Join(cleanupErr, wrapCleanupError("http shutdown", srv.Shutdown(ctx)))
 
-	// 3. Close the pool now that no request can still be using it.
-	if err := pool.Close(); err != nil {
-		return fmt.Errorf("close database: %w", err)
-	}
+	// 3. Close media-server connections after their callers have drained.
+	media.CloseIdleConnections()
 
-	// 4. Flush telemetry last so the steps above are recorded.
-	if err := tp.Shutdown(ctx); err != nil {
-		return fmt.Errorf("telemetry flush: %w", err)
+	// 4. Close the pool now that no request can still be using it.
+	cleanupErr = errors.Join(cleanupErr, wrapCleanupError("close database", pool.Close()))
+
+	// 5. Flush telemetry last so the steps above are recorded.
+	cleanupErr = errors.Join(cleanupErr, wrapCleanupError("telemetry flush", tp.Shutdown(ctx)))
+	return cleanupErr
+}
+
+func wrapCleanupError(operation string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("%s: %w", operation, err)
 }

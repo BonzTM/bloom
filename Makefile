@@ -23,7 +23,7 @@ SHELL := bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help tidy tidy-check fmt fmt-check lint vet test race cover vuln build run verify verify-go web-ci web-verify web-build
+.PHONY: help generate generate-check tidy tidy-check fmt fmt-check lint vet test race cover vuln build run verify verify-go web-ci web-verify web-build
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -37,6 +37,16 @@ tidy: ## Sync go.mod/go.sum in place and verify the module graph.
 tidy-check: ## Fail if go mod tidy would change go.mod/go.sum (CI-safe, no writes).
 	go mod tidy -diff
 	go mod verify
+
+generate: ## Regenerate pinned API clients and sqlc database code.
+	go generate ./internal/mediaserver/jellyfin
+	go tool sqlc generate
+
+generate-check: ## Fail when committed generated code is stale.
+	@before="$$(sha256sum internal/mediaserver/jellyfin/api/zz_generated.openapi.go internal/db/sqlite/*.go internal/db/postgres/*.go)"; \
+	$(MAKE) --no-print-directory generate; \
+	after="$$(sha256sum internal/mediaserver/jellyfin/api/zz_generated.openapi.go internal/db/sqlite/*.go internal/db/postgres/*.go)"; \
+	if [ "$$before" != "$$after" ]; then echo "generated code is stale; run: make generate"; exit 1; fi
 
 fmt: ## Format all Go source in place (gofumpt + gci, per .golangci.yml).
 	go tool golangci-lint fmt
@@ -87,7 +97,7 @@ web-verify: ## Run the frontend gate (format, lint, typecheck, tests, audit, bui
 web-build: ## Build the SPA into internal/api/web/dist for embedding.
 	cd web && npm run build
 
-verify-go: tidy-check fmt-check lint vet test race vuln build ## Backend gate only.
+verify-go: generate-check tidy-check fmt-check lint vet test race vuln build ## Backend gate only.
 	@echo "verify-go: OK"
 
 verify: verify-go web-verify ## Full ordered safety gate for both halves (run before every push and in CI).

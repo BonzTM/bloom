@@ -257,6 +257,7 @@ const (
 	auditResourceAuthMe          = "route:auth.me"
 	auditResourceAuthPermissions = "route:auth.permissions"
 	auditResourceRoles           = "route:roles"
+	auditResourceMediaServers    = "route:media_servers"
 )
 
 func routeResource(r *http.Request) string {
@@ -271,6 +272,9 @@ func routeResource(r *http.Request) string {
 		return auditResourceAuthPermissions
 	case "/api/v1/roles":
 		return auditResourceRoles
+	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
+		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
+		return auditResourceMediaServers
 	default:
 		return auditResourceRouteUnmatched
 	}

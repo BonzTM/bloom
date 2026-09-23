@@ -31,6 +31,9 @@ type PromMetrics struct {
 	auditWriteFailures     prometheus.Counter
 	sessionCleanupFailures prometheus.Counter
 	authorizationDenials   *prometheus.CounterVec
+	mediaServerRequests    *prometheus.CounterVec
+	mediaServerSeconds     *prometheus.HistogramVec
+	mediaServerRetries     *prometheus.CounterVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -38,60 +41,96 @@ type PromMetrics struct {
 // namespace prefixes every metric name, e.g. "bloom_http_requests_total".
 func NewPromMetrics(namespace string) *PromMetrics {
 	reg := prometheus.NewRegistry()
-
-	requests := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: namespace,
-		Name:      "http_requests_total",
-		Help:      "Total handled HTTP requests by route pattern and status class.",
-	}, []string{"route", "status_class"})
-
-	requestSeconds := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace: namespace,
-		Name:      "http_request_duration_seconds",
-		Help:      "HTTP request latency in seconds by route pattern and status class.",
-		Buckets:   prometheus.DefBuckets,
-	}, []string{"route", "status_class"})
-	loginAttempts := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: namespace,
-		Name:      "login_attempts_total",
-		Help:      "Total local login attempts by finite outcome.",
-	}, []string{"outcome"})
-	csrfRejections := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: namespace,
-		Name:      "csrf_rejections_total",
-		Help:      "Total cross-origin state-changing requests rejected.",
-	})
-	auditWriteFailures := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: namespace,
-		Name:      "audit_write_failures_total",
-		Help:      "Total failed writes to the dedicated audit sink.",
-	})
-	sessionCleanupFailures := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: namespace,
-		Name:      "session_cleanup_failures_total",
-		Help:      "Total failed expired-session cleanup attempts.",
-	})
-	authorizationDenials := newAuthorizationDenialCounter(namespace)
-
-	// Register on the private registry alongside the standard process and Go
-	// runtime collectors so /metrics also exposes runtime gauges.
+	httpCollectors := newHTTPCollectors(namespace)
+	authCollectors := newAuthenticationCollectors(namespace)
+	mediaCollectors := newMediaServerCollectors(namespace)
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
 	)
-
 	metrics := &PromMetrics{
-		registry:               reg,
-		requests:               requests,
-		requestSeconds:         requestSeconds,
-		loginAttempts:          loginAttempts,
-		csrfRejections:         csrfRejections,
-		auditWriteFailures:     auditWriteFailures,
-		sessionCleanupFailures: sessionCleanupFailures,
-		authorizationDenials:   authorizationDenials,
+		registry: reg, requests: httpCollectors.requests, requestSeconds: httpCollectors.seconds,
+		loginAttempts: authCollectors.loginAttempts, csrfRejections: authCollectors.csrfRejections,
+		auditWriteFailures:     authCollectors.auditWriteFailures,
+		sessionCleanupFailures: authCollectors.sessionCleanupFailures,
+		authorizationDenials:   authCollectors.authorizationDenials,
+		mediaServerRequests:    mediaCollectors.requests, mediaServerSeconds: mediaCollectors.seconds,
+		mediaServerRetries: mediaCollectors.retries,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
+}
+
+type httpCollectors struct {
+	requests *prometheus.CounterVec
+	seconds  *prometheus.HistogramVec
+}
+
+func newHTTPCollectors(namespace string) httpCollectors {
+	return httpCollectors{
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "http_requests_total",
+			Help: "Total handled HTTP requests by route pattern and status class.",
+		}, []string{"route", "status_class"}),
+		seconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace, Name: "http_request_duration_seconds",
+			Help:    "HTTP request latency in seconds by route pattern and status class.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"route", "status_class"}),
+	}
+}
+
+type authenticationCollectors struct {
+	loginAttempts          *prometheus.CounterVec
+	csrfRejections         prometheus.Counter
+	auditWriteFailures     prometheus.Counter
+	sessionCleanupFailures prometheus.Counter
+	authorizationDenials   *prometheus.CounterVec
+}
+
+func newAuthenticationCollectors(namespace string) authenticationCollectors {
+	return authenticationCollectors{
+		loginAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "login_attempts_total",
+			Help: "Total local login attempts by finite outcome.",
+		}, []string{"outcome"}),
+		csrfRejections: newCounter(namespace, "csrf_rejections_total",
+			"Total cross-origin state-changing requests rejected."),
+		auditWriteFailures: newCounter(namespace, "audit_write_failures_total",
+			"Total failed writes to the dedicated audit sink."),
+		sessionCleanupFailures: newCounter(namespace, "session_cleanup_failures_total",
+			"Total failed expired-session cleanup attempts."),
+		authorizationDenials: newAuthorizationDenialCounter(namespace),
+	}
+}
+
+func newCounter(namespace, name, help string) prometheus.Counter {
+	return prometheus.NewCounter(prometheus.CounterOpts{Namespace: namespace, Name: name, Help: help})
+}
+
+type mediaServerCollectors struct {
+	requests *prometheus.CounterVec
+	seconds  *prometheus.HistogramVec
+	retries  *prometheus.CounterVec
+}
+
+func newMediaServerCollectors(namespace string) mediaServerCollectors {
+	labels := []string{"kind", "operation", "outcome"}
+	return mediaServerCollectors{
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "media_server_requests_total",
+			Help: "Total outbound media-server requests by kind, operation, and finite outcome.",
+		}, labels),
+		seconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace, Name: "media_server_request_duration_seconds",
+			Help:    "Outbound media-server request latency by kind, operation, and finite outcome.",
+			Buckets: prometheus.DefBuckets,
+		}, labels),
+		retries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "media_server_retries_total",
+			Help: "Total outbound media-server retry decisions by bounded outcome.",
+		}, labels),
+	}
 }
 
 func newAuthorizationDenialCounter(namespace string) *prometheus.CounterVec {
@@ -111,7 +150,21 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.auditWriteFailures,
 		m.sessionCleanupFailures,
 		m.authorizationDenials,
+		m.mediaServerRequests,
+		m.mediaServerSeconds,
+		m.mediaServerRetries,
 	)
+}
+
+// ObserveMediaServerRetry records one bounded retry decision.
+func (m *PromMetrics) ObserveMediaServerRetry(kind, operation, outcome string) {
+	m.mediaServerRetries.WithLabelValues(kind, operation, outcome).Inc()
+}
+
+// ObserveMediaServerRequest records one outbound request with bounded labels.
+func (m *PromMetrics) ObserveMediaServerRequest(kind, operation, outcome string, seconds float64) {
+	m.mediaServerRequests.WithLabelValues(kind, operation, outcome).Inc()
+	m.mediaServerSeconds.WithLabelValues(kind, operation, outcome).Observe(seconds)
 }
 
 // IncCSRFRejection records one rejected cross-origin write.

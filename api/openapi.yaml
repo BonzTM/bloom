@@ -34,6 +34,8 @@ tags:
     description: Local login and server-side browser sessions.
   - name: roles
     description: Permission-based role information.
+  - name: media-servers
+    description: Registered media-server connections. Credentials are write-only.
 paths:
   /api/v1/version:
     get:
@@ -369,7 +371,133 @@ paths:
           $ref: "#/components/responses/AuthInternalError"
         "405":
           $ref: "#/components/responses/AuthMethodNotAllowedGet"
+  /api/v1/media-servers:
+    post:
+      tags: [media-servers]
+      operationId: createMediaServer
+      summary: Probe and register a media server.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMediaServerRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/MediaServerCreated"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPostGet" }
+    get:
+      tags: [media-servers]
+      operationId: listMediaServers
+      summary: List registered media servers.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 400 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, default: 50 }
+      responses:
+        "200":
+          $ref: "#/components/responses/MediaServersListed"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPostGet" }
+  /api/v1/media-servers/{id}:
+    get:
+      tags: [media-servers]
+      operationId: getMediaServer
+      summary: Return one registered server and its capabilities.
+      parameters:
+        - $ref: "#/components/parameters/MediaServerID"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MediaServerReturned"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGetDelete" }
+    delete:
+      tags: [media-servers]
+      operationId: deleteMediaServer
+      summary: Delete a registered media server.
+      parameters:
+        - $ref: "#/components/parameters/MediaServerID"
+      security:
+        - sessionCookie: []
+      responses:
+        "204": { $ref: "#/components/responses/MediaServerDeleted" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGetDelete" }
+  /api/v1/media-servers/{id}/probe:
+    post:
+      tags: [media-servers]
+      operationId: probeMediaServer
+      summary: Re-probe a registered media server.
+      parameters:
+        - $ref: "#/components/parameters/MediaServerID"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MediaServerProbed"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPost" }
+  /api/v1/media-servers/{id}/libraries:
+    get:
+      tags: [media-servers]
+      operationId: listMediaServerLibraries
+      summary: List libraries visible to a registered media server credential.
+      parameters:
+        - $ref: "#/components/parameters/MediaServerID"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MediaServerLibrariesListed"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
 components:
+  parameters:
+    MediaServerID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   headers:
     CacheControlNoStore:
       description: Prevents storage of a response that touched browser-session state.
@@ -397,11 +525,172 @@ components:
       schema:
         type: string
     RetryAfter:
-      description: Whole seconds until the next login attempt may be admitted.
+      description: Whole seconds until the next attempt may be made. Media-server values are capped at 30 seconds.
       schema:
         type: integer
         minimum: 1
   responses:
+    MediaServerCreated:
+      description: The connection was proved and stored with its credential encrypted.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CreateMediaServerResponse" }
+    MediaServersListed:
+      description: A stable page ordered by the NFC-normalized, case-folded name key.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/MediaServersResponse" }
+    MediaServerReturned:
+      description: Registered server without its credential.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/MediaServer" }
+    MediaServerDeleted:
+      description: Registration deleted.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+    MediaServerProbed:
+      description: Current upstream identity.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ProbeMediaServerResponse" }
+    MediaServerLibrariesListed:
+      description: At most 256 media-server libraries. This bounded unpaginated exception lasts until the users slice adds server-side pagination.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/LibrariesResponse" }
+    Unauthorized:
+      description: No live authenticated session.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Forbidden:
+      description: The account lacks `admin.settings`, or the request was rejected as `csrf_rejected`.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFound:
+      description: The registered media server does not exist.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Conflict:
+      description: A media server already uses the requested unique name.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    UnsupportedMediaType:
+      description: The request is not JSON.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ValidationFailed:
+      description: The request body, path UUID, or pagination values are invalid.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    MediaServerFailure:
+      description: Opaque upstream media-server failure. Transient failures include a bounded `Retry-After` value.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    MediaServerBusy:
+      description: This media server's outbound concurrency limit is full. Retry after the bounded delay.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    AuthMethodNotAllowedGetDelete:
+      description: The route accepts only `GET` or `DELETE`.
+      headers:
+        Allow:
+          description: Allowed methods for this route.
+          schema: { type: string, const: "GET, DELETE" }
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    AuthMethodNotAllowedPostGet:
+      description: The route accepts only `POST` or `GET`.
+      headers:
+        Allow:
+          description: Allowed methods for this route.
+          schema: { type: string, const: "POST, GET" }
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     AuthMethodNotAllowedPost:
       description: The route accepts only `POST`.
       headers:
@@ -452,8 +741,10 @@ components:
     InternalError:
       description: Opaque internal failure.
       headers:
-        X-Request-ID:
-          $ref: "#/components/headers/XRequestID"
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
       content:
         application/json:
           schema:
@@ -464,6 +755,116 @@ components:
       in: cookie
       name: bloom_session
   schemas:
+    MediaServerKind:
+      type: string
+      enum: [jellyfin]
+    CreateMediaServerRequest:
+      type: object
+      required: [kind, name, base_url, api_key]
+      additionalProperties: false
+      properties:
+        kind: { $ref: "#/components/schemas/MediaServerKind" }
+        name:
+          type: string
+          minLength: 1
+          x-max-bytes: 100
+          description: Length is measured in UTF-8 bytes and must not exceed 100.
+        base_url:
+          type: string
+          format: uri
+          pattern: "^https?://"
+          x-max-bytes: 2048
+          description: Length is measured in UTF-8 bytes and must not exceed 2048. HTTPS is required unless allow_insecure is true.
+        api_key:
+          type: string
+          format: password
+          minLength: 1
+          x-max-bytes: 4096
+          description: Length is measured in UTF-8 bytes and must not exceed 4096. Quotes and backslashes are accepted; control characters are not.
+          writeOnly: true
+        allow_insecure:
+          type: boolean
+          default: false
+          description: Explicitly permits plaintext HTTP and its credential-exposure risk. It must remain false for HTTPS.
+    Capabilities:
+      type: object
+      required: [create_user_with_password, set_password, quick_connect_approval, provider_id_lookup]
+      additionalProperties: false
+      properties:
+        create_user_with_password: { type: boolean }
+        set_password: { type: boolean }
+        quick_connect_approval: { type: boolean }
+        provider_id_lookup: { type: boolean }
+    MediaServer:
+      type: object
+      required: [id, kind, name, base_url, allow_insecure, created_at, updated_at, capabilities]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/MediaServerKind" }
+        name:
+          type: string
+          minLength: 1
+          x-max-bytes: 100
+          description: Length is measured in UTF-8 bytes and does not exceed 100.
+        base_url:
+          type: string
+          format: uri
+          x-max-bytes: 2048
+          description: Normalized URL whose length is measured in UTF-8 bytes and does not exceed 2048.
+        allow_insecure: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        capabilities: { $ref: "#/components/schemas/Capabilities" }
+    ServerInfo:
+      type: object
+      required: [name, version, id]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1 }
+        version: { type: string, minLength: 1 }
+        id: { type: string, minLength: 1 }
+    CreateMediaServerResponse:
+      type: object
+      required: [server, info]
+      additionalProperties: false
+      properties:
+        server: { $ref: "#/components/schemas/MediaServer" }
+        info: { $ref: "#/components/schemas/ServerInfo" }
+    MediaServersResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/MediaServer" }
+        next_cursor: { type: string, maxLength: 400 }
+    ProbeMediaServerResponse:
+      type: object
+      required: [info]
+      additionalProperties: false
+      properties:
+        info: { $ref: "#/components/schemas/ServerInfo" }
+    Library:
+      type: object
+      required: [id, name, type]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        type: { type: string }
+    LibrariesResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/Library" }
+          description: Bounded unpaginated exception; server-side pagination arrives with the users slice.
     LoginRequest:
       type: object
       required: [username, password]
@@ -630,6 +1031,7 @@ components:
         - unsupported_media_type
         - method_not_allowed
         - forbidden
+        - media_server_failure
     FieldError:
       type: object
       required: [field, code, message]

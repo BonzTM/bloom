@@ -18,13 +18,18 @@ type Querier interface {
 	// (sqlc.arg) are used because both engines accept them, whereas $1 and ? are
 	// engine-specific. Regenerate with: go tool sqlc generate.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
+	// Media-server queries are portable across SQLite and PostgreSQL.
+	CreateMediaServer(ctx context.Context, arg CreateMediaServerParams) error
+	DeleteMediaServer(ctx context.Context, id string) (int64, error)
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
+	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
 }

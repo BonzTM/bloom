@@ -104,3 +104,9 @@ func (NopMetrics) IncAuthorizationDenial(core.CatalogPermission) {}
 
 // IncSessionCleanupFailure does nothing.
 func (NopMetrics) IncSessionCleanupFailure() {}
+
+// ObserveMediaServerRequest does nothing.
+func (NopMetrics) ObserveMediaServerRequest(string, string, string, float64) {}
+
+// ObserveMediaServerRetry does nothing.
+func (NopMetrics) ObserveMediaServerRetry(string, string, string) {}

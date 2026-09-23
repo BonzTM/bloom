@@ -28,6 +28,18 @@ type AccountUsernameMigrationBackup struct {
 	OriginalUsername string
 }
 
+type MediaServer struct {
+	ID                   string
+	Kind                 string
+	Name                 string
+	NameKey              string
+	BaseUrl              string
+	AllowInsecure        bool
+	CredentialCiphertext []byte
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
 type Role struct {
 	ID          string
 	Name        string

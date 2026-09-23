@@ -245,6 +245,7 @@ type authHarness struct {
 	logs          *strings.Builder
 	sessionStore  *controllableSessionStore
 	authorization *authAuthorization
+	mediaServers  *fakeMediaServerService
 }
 
 type controllableSessionStore struct {
@@ -369,13 +370,15 @@ func newAuthHarnessConfigured(
 		identity = core.NewLocalIdentityProvider(store)
 	}
 	authorization := newAuthAuthorization()
+	mediaServers := newFakeMediaServerService()
 	srv := New(config.HTTPConfig{
-		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 2048,
+		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 8192,
 	}, Deps{
 		Logger: slog.New(slog.NewJSONHandler(logs, nil)), Metrics: metrics,
 		Readiness: telemetry.NewReadiness(true), Pinger: &fakePinger{},
 		Web: web, Identity: identity, Accounts: store,
 		Authorizer: authorization, Roles: authorization,
+		MediaServerReader: mediaServers, MediaServerManager: mediaServers,
 		Sessions: sessions, Audit: audit, Clock: clock, Auth: authCfg,
 		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
@@ -383,6 +386,7 @@ func newAuthHarnessConfigured(
 		server: srv, h: srv.Handler(), store: store, sessions: sessions, audit: audit,
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
 		authorization: authorization,
+		mediaServers:  mediaServers,
 	}
 }
 
@@ -1107,15 +1111,22 @@ func TestCrossOriginProtection(t *testing.T) {
 }
 
 func TestCrossOriginProtectionMapsExactKnownRoutes(t *testing.T) {
-	tests := []struct{ path, resource string }{
+	tests := []struct{ method, path, resource string }{
 		{path: "/api/v1/auth/login", resource: auditResourceAuthLogin},
 		{path: "/api/v1/auth/logout", resource: auditResourceAuthLogout},
 		{path: "/api/v1/auth/me", resource: auditResourceAuthMe},
+		{path: "/api/v1/media-servers", resource: auditResourceMediaServers},
+		{path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", resource: auditResourceMediaServers},
+		{method: http.MethodDelete, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", resource: auditResourceMediaServers},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.path, func(t *testing.T) {
 			h := newAuthHarness(t, nil)
-			req := httptest.NewRequest(http.MethodPost, "https://bloom.test"+testCase.path, nil)
+			method := testCase.method
+			if method == "" {
+				method = http.MethodPost
+			}
+			req := httptest.NewRequest(method, "https://bloom.test"+testCase.path, nil)
 			req.Header.Set("Sec-Fetch-Site", "cross-site")
 			rec := httptest.NewRecorder()
 			h.h.ServeHTTP(rec, req)

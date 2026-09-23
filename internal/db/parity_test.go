@@ -76,6 +76,7 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteRoleColumns, expectedRoleColumns)
 	assertColumns(t, pool, sqliteRolePermissionColumns, expectedRolePermissionColumns)
 	assertColumns(t, pool, sqliteAccountRoleColumns, expectedAccountRoleColumns)
+	assertColumns(t, pool, sqliteMediaServerColumns, expectedMediaServerColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
@@ -86,6 +87,7 @@ var (
 	expectedRoleColumns           = []string{"built_in", "created_at", "description", "id", "name"}
 	expectedRolePermissionColumns = []string{"permission", "role_id"}
 	expectedAccountRoleColumns    = []string{"account_id", "role_id"}
+	expectedMediaServerColumns    = []string{"allow_insecure", "base_url", "created_at", "credential_ciphertext", "id", "kind", "name", "name_key", "updated_at"}
 )
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
@@ -206,6 +208,10 @@ func sqliteAccountRoleColumns(ctx context.Context, pool *sql.DB) ([]string, erro
 	return sqliteTableColumns(ctx, pool, "account_roles")
 }
 
+func sqliteMediaServerColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "media_servers")
+}
+
 func sqliteTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {
 	rows, err := pool.QueryContext(ctx, "SELECT name FROM pragma_table_info($1) ORDER BY name", table)
 	if err != nil {
@@ -251,6 +257,9 @@ func TestOpenRejectsUnknownDriver(t *testing.T) {
 	}
 	if _, _, err := db.NewAccountStores(nil, "mysql"); err == nil {
 		t.Fatal("NewAccountStores(mysql) succeeded, want error")
+	}
+	if _, _, err := db.NewMediaServerStores(nil, "mysql"); err == nil {
+		t.Fatal("NewMediaServerStores(mysql) succeeded, want error")
 	}
 }
 
