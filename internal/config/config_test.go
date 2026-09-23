@@ -61,8 +61,41 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.Auth.TrustedProxyCIDRs) != 0 {
 		t.Errorf("TrustedProxyCIDRs default = %v, want disabled", cfg.Auth.TrustedProxyCIDRs)
 	}
+	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
+		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
+	}
 	if cfg.ShutdownGrace != defaultShutdownGrace {
 		t.Errorf("ShutdownGrace = %s, want %s", cfg.ShutdownGrace, defaultShutdownGrace)
+	}
+}
+
+func TestLoadBootstrapConfigFromEnvironment(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_BOOTSTRAP_USERNAME", "ＯWNER")
+	t.Setenv("BLOOM_BOOTSTRAP_PASSWORD", "bootstrap-secret")
+
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Bootstrap.Username != "owner" {
+		t.Errorf("Bootstrap.Username = %q, want owner", cfg.Bootstrap.Username)
+	}
+	if got := string(cfg.Bootstrap.Password.Bytes()); got != "bootstrap-secret" {
+		t.Fatal("Bootstrap.Password did not round-trip")
+	}
+	if rendered := fmt.Sprintf("%+v", cfg); strings.Contains(rendered, "bootstrap-secret") {
+		t.Fatalf("config rendering leaked bootstrap password: %s", rendered)
+	}
+}
+
+func TestLoadRejectsInvalidBootstrapUsername(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_BOOTSTRAP_USERNAME", "-admin")
+
+	_, err := Load(nil)
+	if err == nil || !strings.Contains(err.Error(), "BLOOM_BOOTSTRAP_USERNAME") {
+		t.Fatalf("Load invalid bootstrap username = %v", err)
 	}
 }
 
@@ -293,6 +326,7 @@ func validConfigForTest() Config {
 			LoginRateRefillInterval: time.Minute, LoginRateBurst: 5, LoginRateMaxKeys: 100,
 			LoginMaxConcurrent: 4,
 		},
+		Bootstrap: BootstrapConfig{Username: defaultBootstrapUsername},
 		SecretKey: NewSecret([]byte(testSecret)), ShutdownGrace: time.Second,
 	}
 }

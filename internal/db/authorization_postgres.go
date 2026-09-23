@@ -16,9 +16,10 @@ type postgresAuthorization struct {
 }
 
 var (
-	_ core.Authorizer        = (*postgresAuthorization)(nil)
-	_ core.RoleReader        = (*postgresAuthorization)(nil)
-	_ core.AdminAccountStore = (*postgresAuthorization)(nil)
+	_ core.Authorizer            = (*postgresAuthorization)(nil)
+	_ core.RoleReader            = (*postgresAuthorization)(nil)
+	_ core.AdminAccountStore     = (*postgresAuthorization)(nil)
+	_ core.BootstrapAccountStore = (*postgresAuthorization)(nil)
 )
 
 func newPostgresAuthorization(pool *sql.DB) *postgresAuthorization {
@@ -81,24 +82,58 @@ func (s *postgresAuthorization) CreateAccountWithRole(ctx context.Context, accou
 		return fmt.Errorf("create account with role: %w", core.ErrInvalidArgument)
 	}
 	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		return createPostgresAccountWithRole(ctx, s.q.WithTx(tx), account, roleName)
+	})
+}
+
+func (s *postgresAuthorization) CreateFirstAccountWithRole(
+	ctx context.Context, account core.Account, roleName string,
+) (bool, error) {
+	if account.ID == "" || roleName == "" {
+		return false, fmt.Errorf("create first account with role: %w", core.ErrInvalidArgument)
+	}
+	created := false
+	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "LOCK TABLE accounts IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return fmt.Errorf("lock accounts for first-account creation: %w", err)
+		}
 		q := s.q.WithTx(tx)
-		roleID, err := q.GetRoleIDByName(ctx, roleName)
+		count, err := q.CountAccounts(ctx)
 		if err != nil {
-			return roleNotFound(roleName, err)
+			return fmt.Errorf("count accounts: %w", err)
 		}
-		createErr := (&postgresAccounts{q: q}).CreateAccount(ctx, account)
-		if createErr != nil {
-			return createErr
+		if count > 0 {
+			return nil
 		}
-		rows, err := q.AssignRoleIDToAccount(ctx, postgres.AssignRoleIDToAccountParams{AccountID: account.ID, RoleID: roleID})
-		if err != nil {
-			return fmt.Errorf("assign initial role %q: %w", roleName, err)
+		if err := createPostgresAccountWithRole(ctx, q, account, roleName); err != nil {
+			return err
 		}
-		if rows != 1 {
-			return fmt.Errorf("assign initial role %q: affected %d rows", roleName, rows)
-		}
+		created = true
 		return nil
 	})
+	return created, err
+}
+
+func createPostgresAccountWithRole(
+	ctx context.Context, q *postgres.Queries, account core.Account, roleName string,
+) error {
+	if err := (&postgresAccounts{q: q}).CreateAccount(ctx, account); err != nil {
+		return err
+	}
+	roleID, err := q.GetRoleIDByName(ctx, roleName)
+	if err != nil {
+		return roleNotFound(roleName, err)
+	}
+	rows, err := q.AssignRoleIDToAccount(ctx, postgres.AssignRoleIDToAccountParams{
+		AccountID: account.ID, RoleID: roleID,
+	})
+	if err != nil {
+		return fmt.Errorf("assign initial role %q: %w", roleName, err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("assign initial role %q: affected %d rows", roleName, rows)
+	}
+	return nil
 }
 
 func (s *postgresAuthorization) GrantRole(ctx context.Context, accountID, roleName string) (bool, error) {

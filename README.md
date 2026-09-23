@@ -32,6 +32,7 @@ make verify                              # Go gate, then the web gate (see web/R
 cp .env.example .env                     # then set BLOOM_SECRET_KEY (openssl rand -base64 48)
 export BLOOM_SECRET_KEY="$(openssl rand -base64 48)"
 go run ./cmd/bloom -migrate              # apply the embedded migrations to bloom.db
+export BLOOM_BOOTSTRAP_PASSWORD='choose-a-long-unique-password'
 go run ./cmd/bloom                       # start the service on :8080
 ```
 
@@ -47,28 +48,48 @@ scripts/smoke.sh                         # the same checks, scripted
 
 ## First run
 
-Apply the database migrations before starting Bloom. Then create the first
-local account with the `create-admin` command. Supply the password through the
-environment for automation:
+Apply the database migrations before starting Bloom. Set a unique bootstrap
+password, then start Bloom. When the accounts table is empty, startup creates
+the first local account as `admin` and assigns the built-in `owner` role:
 
 ```bash
 go run ./cmd/bloom -migrate
 export BLOOM_BOOTSTRAP_PASSWORD='choose-a-long-unique-password'
-go run ./cmd/bloom create-admin --username owner
+go run ./cmd/bloom
+```
+
+Sign in as `admin`. Then remove the bootstrap secret from the service
+environment:
+
+```bash
 unset BLOOM_BOOTSTRAP_PASSWORD
 ```
 
-When `BLOOM_BOOTSTRAP_PASSWORD` is unset and the command runs in a terminal,
-Bloom prompts for the password without echoing it. The password is never
-accepted as a command-line flag. Run the command only once for each bootstrap
-account; an existing username is refused. The command assigns the built-in
-`owner` role atomically with account creation. Usernames are canonicalized with
-the PRECIS UsernameCaseMapped profile. They must contain 3 through 64 letters,
+Set `BLOOM_BOOTSTRAP_USERNAME` before startup to use a username other than
+`admin`. When any account already exists, startup does not create an account,
+reset a password, or grant a role. It logs a reminder to remove
+`BLOOM_BOOTSTRAP_PASSWORD`. The `-migrate` invocation never bootstraps an
+account.
+
+Use `create-admin` only as a recovery path when no suitable administrator can
+sign in:
+
+```bash
+export BLOOM_BOOTSTRAP_PASSWORD='choose-a-long-unique-password'
+go run ./cmd/bloom create-admin --username recovery-admin
+unset BLOOM_BOOTSTRAP_PASSWORD
+```
+
+When the password variable is unset and the recovery command runs in a
+terminal, Bloom prompts without echoing the password. A password is never
+accepted as a command-line flag. Both automatic bootstrap and the recovery
+command assign the `owner` role atomically with account creation and enforce
+the same username and password policy. Usernames are canonicalized with the
+PRECIS UsernameCaseMapped profile. They must contain 3 through 64 letters,
 digits, `.`, `_`, or `-`, and cannot start or end with a separator. New local
 passwords must contain 15 through 1024 Unicode characters and must not exceed
-4096 UTF-8 bytes. Bloom
-rejects malformed UTF-8 and passwords in its embedded offline common-password
-denylist. It applies no character-composition rules.
+4096 UTF-8 bytes. Bloom rejects malformed UTF-8 and passwords in its embedded
+offline common-password denylist. It applies no character-composition rules.
 
 `make verify` is the single gate; it must pass before any change is considered done.
 See [AGENTS.md](AGENTS.md) for the full contributor contract and verification bar.
@@ -126,7 +147,8 @@ this table.
 | `BLOOM_DB_CONN_MAX_IDLE_TIME` | duration | no | `5m` | no | Reap idle connections after this long. |
 | `BLOOM_DB_MIGRATE_ON_STARTUP` | bool | no | `false` | no | Apply embedded migrations before serving. Single-writer convenience; production uses `-migrate`. |
 | `BLOOM_SECRET_KEY` | string | **yes** | — | **yes** | Master secret (at least 32 bytes) that derives the at-rest encryption key for stored credentials ([ADR 0006](decisions/0006-auth-and-authorization-model.md)). Never logged. |
-| `BLOOM_BOOTSTRAP_PASSWORD` | string | create-admin: conditional | — | **yes** | Password read only by `create-admin`. When unset, an interactive terminal prompt is required. |
+| `BLOOM_BOOTSTRAP_USERNAME` | string | no | `admin` | no | Username for automatic first-administrator bootstrap. Uses the normal username policy. |
+| `BLOOM_BOOTSTRAP_PASSWORD` | string | startup: optional; create-admin: conditional | — | **yes** | Enables automatic first-administrator bootstrap when set. The recovery command reads it non-interactively; when unset, that command requires a terminal prompt. Remove it after the first account exists. |
 | `BLOOM_SESSION_COOKIE_SECURE` | bool | no | `true` | no | Set the `Secure` session-cookie flag. Disable only for plaintext local development. |
 | `BLOOM_SESSION_LIFETIME` | duration | no | `24h` | no | Absolute lifetime of a browser session. |
 | `BLOOM_SESSION_IDLE_TIMEOUT` | duration | no | `30m` | no | Invalidate a browser session after this period of inactivity. Must not exceed the lifetime. |

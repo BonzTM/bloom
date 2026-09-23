@@ -40,6 +40,18 @@ func NewAdminAccountStore(pool *sql.DB, driver config.Driver) (core.AdminAccount
 	}
 }
 
+// NewBootstrapAccountStore returns the automatic first-administrator seam.
+func NewBootstrapAccountStore(pool *sql.DB, driver config.Driver) (core.BootstrapAccountStore, error) {
+	switch driver {
+	case config.DriverSQLite:
+		return newSQLiteAuthorization(pool), nil
+	case config.DriverPostgres:
+		return newPostgresAuthorization(pool), nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", driver)
+	}
+}
+
 func permissionsFromStrings(values []string) ([]core.Permission, error) {
 	permissions := make([]core.Permission, 0, len(values))
 	for _, value := range values {

@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const countAccounts = `-- name: CountAccounts :one
+SELECT COUNT(*) FROM accounts
+`
+
+func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAccounts)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAccount = `-- name: CreateAccount :exec
 
 INSERT INTO accounts (id, username, username_key, password_hash, disabled, created_at)

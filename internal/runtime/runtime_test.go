@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/BonzTM/bloom/internal/config"
+	"github.com/BonzTM/bloom/internal/core"
+	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/runtime"
 )
 
@@ -37,6 +40,7 @@ func baseConfig(t *testing.T, addr string) config.Config {
 			LoginRateRefillInterval: time.Minute, LoginRateBurst: 5, LoginRateMaxKeys: 100,
 			LoginMaxConcurrent: 4,
 		},
+		Bootstrap:     config.BootstrapConfig{Username: "admin"},
 		SecretKey:     config.NewSecret([]byte(testSecret)),
 		ShutdownGrace: 5 * time.Second,
 	}
@@ -77,6 +81,7 @@ func freeAddr(t *testing.T) string {
 func TestRunMigrateModeAppliesSchemaAndExits(t *testing.T) {
 	cfg := baseConfig(t, ":0")
 	cfg.Migrate = true
+	cfg.Bootstrap.Password = config.NewSecret([]byte("bootstrap-secret"))
 	var log strings.Builder
 
 	if err := runtime.Run(context.Background(), cfg, runtime.Streams{Log: &log, Audit: io.Discard}); err != nil {
@@ -88,6 +93,18 @@ func TestRunMigrateModeAppliesSchemaAndExits(t *testing.T) {
 	// Re-running is idempotent: goose applies nothing and still exits clean.
 	if err := runtime.Run(context.Background(), cfg, runtime.Streams{Log: &log, Audit: io.Discard}); err != nil {
 		t.Fatalf("second Run(-migrate): %v", err)
+	}
+	pool, err := db.Open(t.Context(), cfg.Database, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = pool.Close() }()
+	store, _, err := db.NewAccountStores(pool, config.DriverSQLite)
+	if err != nil {
+		t.Fatalf("NewAccountStores: %v", err)
+	}
+	if _, err := store.GetAccountByUsername(t.Context(), "admin"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("-migrate bootstrap account = %v, want ErrNotFound", err)
 	}
 }
 

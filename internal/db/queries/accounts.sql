@@ -9,6 +9,9 @@
 INSERT INTO accounts (id, username, username_key, password_hash, disabled, created_at)
 VALUES (sqlc.arg(id), sqlc.arg(username), sqlc.arg(username_key), sqlc.arg(password_hash), sqlc.arg(disabled), sqlc.arg(created_at));
 
+-- name: CountAccounts :one
+SELECT COUNT(*) FROM accounts;
+
 -- name: GetAccount :one
 SELECT id, username, password_hash, disabled, created_at
 FROM accounts

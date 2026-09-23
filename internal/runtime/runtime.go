@@ -69,27 +69,67 @@ func Run(ctx context.Context, cfg config.Config, streams Streams) error {
 	if err != nil {
 		return fmt.Errorf("init tracing: %w", err)
 	}
+	return runInitialized(ctx, cfg, streams, logger, metrics, tracerProvider)
+}
 
+type tracerShutdowner interface {
+	Shutdown(context.Context) error
+}
+
+func runInitialized(
+	ctx context.Context, cfg config.Config, streams Streams, logger *slog.Logger,
+	metrics *telemetry.PromMetrics, tracerProvider tracerShutdowner,
+) error {
 	pool, err := openStore(ctx, cfg, logger, metrics)
 	if err != nil {
-		return err
+		return cleanupStartupFailure(err, nil, tracerProvider, cfg.ShutdownGrace)
 	}
 	clock := systemClock{}
+	if bootstrapErr := bootstrapFirstAdmin(ctx, cfg, streams.Audit, pool, logger, clock); bootstrapErr != nil {
+		return cleanupStartupFailure(bootstrapErr, pool, tracerProvider, cfg.ShutdownGrace)
+	}
 	accounts, localIdentities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
 	if err != nil {
-		_ = pool.Close()
-		return err
+		return cleanupStartupFailure(err, pool, tracerProvider, cfg.ShutdownGrace)
 	}
 	srv, err := assembleHTTPServer(
 		cfg, streams.Audit, logger, metrics, pool,
 		accounts, localIdentities, authorizer, roles, sessions, clock,
 	)
 	if err != nil {
-		_ = pool.Close()
-		return err
+		return cleanupStartupFailure(err, pool, tracerProvider, cfg.ShutdownGrace)
 	}
 
 	return serve(ctx, srv, pool, tracerProvider, logger, cfg.ShutdownGrace)
+}
+
+func cleanupStartupFailure(
+	startupErr error, pool io.Closer, tracerProvider tracerShutdowner, grace time.Duration,
+) error {
+	var cleanupErr error
+	if pool != nil {
+		cleanupErr = pool.Close()
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	cleanupErr = errors.Join(cleanupErr, tracerProvider.Shutdown(shutdownCtx))
+	return errors.Join(startupErr, cleanupErr)
+}
+
+func bootstrapFirstAdmin(
+	ctx context.Context,
+	cfg config.Config,
+	auditSink io.Writer,
+	pool *sql.DB,
+	logger *slog.Logger,
+	clock core.Clock,
+) error {
+	store, err := db.NewBootstrapAccountStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return fmt.Errorf("build bootstrap account store: %w", err)
+	}
+	audit := telemetry.NewAuditLogger(auditSink, clock)
+	return bootstrapAdmin(ctx, cfg.Bootstrap, store, logger, audit, clock)
 }
 
 func assembleHTTPServer(
@@ -196,7 +236,7 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metr
 
 // serve runs the listener and the shutdown supervisor under one errgroup bound
 // to the root context: if either returns, the other observes the cancellation.
-func serve(ctx context.Context, srv *httpapi.Server, pool *sql.DB, tp *telemetry.TracerProvider, logger *slog.Logger, grace time.Duration) error {
+func serve(ctx context.Context, srv *httpapi.Server, pool *sql.DB, tp tracerShutdowner, logger *slog.Logger, grace time.Duration) error {
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
@@ -244,7 +284,7 @@ func Migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 // shutdown drains and releases resources in reverse dependency order under a
 // bounded grace budget: flip readiness, drain HTTP with a FRESH deadline,
 // close the pool, then flush telemetry last.
-func shutdown(srv *httpapi.Server, pool *sql.DB, tp *telemetry.TracerProvider, logger *slog.Logger, grace time.Duration) error {
+func shutdown(srv *httpapi.Server, pool *sql.DB, tp tracerShutdowner, logger *slog.Logger, grace time.Duration) error {
 	logger.Info("shutting down", "grace", grace)
 
 	// Detach from the cancelled root context: shutdown gets its own deadline.
