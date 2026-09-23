@@ -90,7 +90,7 @@ function InvitesPage({
   return (
     <>
       <h1>Invites</h1>
-      <p>
+      <p className="page-intro">
         An invite link lets someone create their own account on one of your
         media servers. Each link is shown once, can expire, and can be limited
         to a number of uses.
@@ -103,7 +103,7 @@ function InvitesPage({
           servers.isFetchNextPageError ? servers.fetchNextPage : servers.refetch
         }
       />
-      <section aria-labelledby="invites-heading">
+      <section aria-labelledby="invites-heading" className="card">
         <h2 id="invites-heading">Invites</h2>
         {denial === "unauthenticated" ? (
           <SignInNotConfirmed onRetry={invites.refetch} />
@@ -176,7 +176,7 @@ function CreateSection({
   // Remounting the form after a success clears it for the next invite.
   const [formKey, setFormKey] = useState(0);
   return (
-    <section aria-labelledby="create-invite-heading">
+    <section aria-labelledby="create-invite-heading" className="card">
       <h2 id="create-invite-heading">Create an invite</h2>
       {serversState === "loading" ? (
         <AsyncStatus>Loading media servers…</AsyncStatus>

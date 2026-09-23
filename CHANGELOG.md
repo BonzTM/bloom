@@ -16,6 +16,10 @@ contracts) gets an entry here.
 
 ### Changed
 
+- The web UI has a design system: a dark-first palette with a light scheme
+  when the system asks for it, an app shell with a sidebar that becomes a
+  sticky top bar on narrow screens, and shared cards, forms, buttons, badges,
+  and tables. Every page uses it; tables scroll inside their cards.
 - `BLOOM_SECRET_KEY` is read from the environment only and the `-secret-key`
   flag is removed, so usage output and process arguments can never carry a
   secret. `BLOOM_OIDC_CLIENT_SECRET` follows the same rule.

@@ -93,31 +93,38 @@ function Table({
   onRevoke,
 }: TableProps): ReactNode {
   return (
-    <table className="invites-table">
-      <caption>Invites, newest first</caption>
-      <thead>
-        <tr>
-          <th scope="col">Label</th>
-          <th scope="col">Server</th>
-          <th scope="col">Status</th>
-          <th scope="col">Uses</th>
-          <th scope="col">Expires</th>
-          <th scope="col">Created</th>
-          <th scope="col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {invites.map((invite) => (
-          <InviteRow
-            key={invite.id}
-            invite={invite}
-            serverName={serverNames.get(invite.media_server_id)}
-            revoking={revoking === invite.id}
-            onRevoke={onRevoke}
-          />
-        ))}
-      </tbody>
-    </table>
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label="Invites table"
+      tabIndex={0}
+    >
+      <table className="invites-table">
+        <caption>Invites, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Label</th>
+            <th scope="col">Server</th>
+            <th scope="col">Status</th>
+            <th scope="col">Uses</th>
+            <th scope="col">Expires</th>
+            <th scope="col">Created</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invites.map((invite) => (
+            <InviteRow
+              key={invite.id}
+              invite={invite}
+              serverName={serverNames.get(invite.media_server_id)}
+              revoking={revoking === invite.id}
+              onRevoke={onRevoke}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -138,7 +145,11 @@ function InviteRow({
     <tr>
       <th scope="row">{invite.label}</th>
       <td>{serverName ?? "Unknown server"}</td>
-      <td>{STATUS_LABELS[invite.status]}</td>
+      <td>
+        <span className={`badge ${STATUS_BADGES[invite.status]}`}>
+          {STATUS_LABELS[invite.status]}
+        </span>
+      </td>
       <td>{usesLabel(invite)}</td>
       <td>
         {invite.expires_at === undefined ? (
@@ -169,6 +180,13 @@ function InviteRow({
     </tr>
   );
 }
+
+const STATUS_BADGES: Readonly<Record<InviteStatus, string>> = {
+  active: "badge-success",
+  expired: "badge-neutral",
+  exhausted: "badge-neutral",
+  revoked: "badge-danger",
+};
 
 const STATUS_LABELS: Readonly<Record<InviteStatus, string>> = {
   active: "Active",
@@ -233,6 +251,7 @@ function RevokeControls({
       <button
         ref={confirmRef}
         type="button"
+        className="btn-danger"
         onClick={() => {
           setConfirming(false);
           onRevoke(id);
@@ -242,6 +261,7 @@ function RevokeControls({
       </button>
       <button
         type="button"
+        className="btn-ghost"
         onClick={() => {
           returnFocus.current = true;
           setConfirming(false);

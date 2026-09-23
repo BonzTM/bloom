@@ -178,7 +178,7 @@ export function CreateInviteForm({
         />
       </div>
       <p>Every library on the server is granted.</p>
-      <button type="submit" disabled={pending}>
+      <button type="submit" className="btn-primary" disabled={pending}>
         {pending ? "Creating…" : "Create invite"}
       </button>
       <p role="status">{pending ? "Creating the invite." : ""}</p>

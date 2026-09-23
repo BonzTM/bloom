@@ -20,7 +20,9 @@ export function OidcSignIn({
       <h2 id="oidc-sign-in-heading">Single sign-on</h2>
       <form method="post" action={startUrl}>
         <input type="hidden" name="return_to" value={returnTo} />
-        <button type="submit">Continue with {provider.display_name}</button>
+        <button type="submit" className="btn-primary">
+          Continue with {provider.display_name}
+        </button>
       </form>
       <p className="oidc-sign-in-or" aria-hidden="true">
         or sign in with a password

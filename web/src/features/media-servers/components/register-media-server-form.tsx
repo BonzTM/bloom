@@ -101,7 +101,7 @@ export function RegisterMediaServerForm({
         error={errors.allow_insecure}
         inputRef={fieldRefs.allow_insecure}
       />
-      <button type="submit" disabled={pending}>
+      <button type="submit" className="btn-primary" disabled={pending}>
         {pending ? "Checking the server…" : "Register server"}
       </button>
       <p role="status">

@@ -10,22 +10,28 @@ export default function AdminRoute(): ReactNode {
     <>
       <h1>Administration</h1>
       <nav aria-label="Administration sections">
-        <ul>
+        <ul className="card-grid">
           <PermissionGate anyOf={[permissions.adminSettings]}>
-            <li>
-              <Link to="/admin/media-servers">Media servers</Link>
+            <li className="card">
+              <h2>
+                <Link to="/admin/media-servers">Media servers</Link>
+              </h2>
               <p>Connect the Jellyfin servers Bloom manages.</p>
             </li>
           </PermissionGate>
           <PermissionGate anyOf={[permissions.usersInvite]}>
-            <li>
-              <Link to="/admin/invites">Invites</Link>
+            <li className="card">
+              <h2>
+                <Link to="/admin/invites">Invites</Link>
+              </h2>
               <p>Create links that let people join a media server.</p>
             </li>
           </PermissionGate>
           <PermissionGate anyOf={[permissions.adminRoles]}>
-            <li>
-              <Link to="/admin/roles">Roles</Link>
+            <li className="card">
+              <h2>
+                <Link to="/admin/roles">Roles</Link>
+              </h2>
               <p>See which permissions each role grants.</p>
             </li>
           </PermissionGate>

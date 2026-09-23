@@ -39,6 +39,16 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.flat.recommended.rules,
       ...jsxA11y.flatConfigs.recommended.rules,
+      // A horizontally scrollable table region must be reachable by keyboard
+      // (W3C ACT rule 0ssw9k); tabIndex on a named region is the technique.
+      "jsx-a11y/no-noninteractive-tabindex": [
+        "error",
+        {
+          tags: [],
+          roles: ["tabpanel", "region"],
+          allowExpressionValues: true,
+        },
+      ],
     },
   },
   {

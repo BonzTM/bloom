@@ -5,7 +5,7 @@ import { pageTitle, usePageTitle } from "./use-page-title.js";
 export default function AboutRoute(): ReactNode {
   usePageTitle(pageTitle("About"));
   return (
-    <article>
+    <article className="card">
       <h1>About Bloom</h1>
       <p>
         Bloom is a self-hosted companion for Jellyfin. One binary replaces the

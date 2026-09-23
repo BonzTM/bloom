@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import {
   isRouteErrorResponse,
   Link,
@@ -12,17 +12,26 @@ import { ADMIN_PERMISSIONS } from "../features/auth/permissions.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
 import { useRouteFocus } from "./use-route-focus.js";
 
+// The app shell: a sidebar with the brand, the navigation, and the session
+// controls, beside the page. On narrow screens the sidebar becomes a top bar
+// through CSS alone, so there is one navigation and one set of names.
 export function AppLayout(): ReactNode {
   const main = useRef<HTMLElement>(null);
+  const bar = useRef<HTMLElement>(null);
   useRouteFocus(main);
+  useBarHeight(bar);
   return (
-    <>
-      <header>
+    <div className="shell">
+      <header className="sidebar" ref={bar}>
+        <Link to="/" className="brand">
+          <span className="brand-mark" aria-hidden="true" />
+          Bloom
+        </Link>
         <nav aria-label="Main navigation">
           <ul>
             <li>
               <NavLink to="/" end>
-                Bloom
+                Home
               </NavLink>
             </li>
             <li>
@@ -33,19 +42,48 @@ export function AppLayout(): ReactNode {
                 <NavLink to="/admin">Admin</NavLink>
               </li>
             </PermissionGate>
-            <li className="session-controls">
-              <SessionControls />
-            </li>
           </ul>
         </nav>
+        <div className="sidebar-footer session-controls">
+          <SessionControls />
+        </div>
       </header>
-      <main ref={main} tabIndex={-1}>
-        <RouteErrorBoundary>
-          <Outlet />
-        </RouteErrorBoundary>
-      </main>
-    </>
+      <div className="content">
+        <main ref={main} tabIndex={-1}>
+          <RouteErrorBoundary>
+            <Outlet />
+          </RouteErrorBoundary>
+        </main>
+      </div>
+    </div>
   );
+}
+
+// On narrow screens the bar is sticky and its height depends on how the
+// navigation and session controls wrap, so the measured height is written
+// to a custom property that scroll padding reads: focus and anchors then
+// always land below it.
+function useBarHeight(bar: RefObject<HTMLElement | null>): void {
+  useLayoutEffect(() => {
+    const element = bar.current;
+    if (element === null || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const root = document.documentElement;
+    const apply = (): void => {
+      root.style.setProperty(
+        "--bar-height",
+        `${String(Math.ceil(element.getBoundingClientRect().height))}px`,
+      );
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--bar-height");
+    };
+  }, [bar]);
 }
 
 export function RouterErrorPage(): ReactNode {
@@ -59,7 +97,9 @@ export function RouterErrorPage(): ReactNode {
           ? "The requested page does not exist."
           : "The page could not be loaded."}
       </p>
-      <Link to="/">Return to home</Link>
+      <p>
+        <Link to="/">Return to home</Link>
+      </p>
     </main>
   );
 }

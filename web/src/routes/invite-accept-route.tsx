@@ -50,7 +50,7 @@ function InvitePage({ code }: Readonly<{ code: string }>): ReactNode {
     );
   }
   return (
-    <>
+    <div className="narrow">
       <h1>You are invited to {preview.data.media_server_name}</h1>
       <p>
         Choose the username and password you will use to sign in to{" "}
@@ -78,7 +78,7 @@ function InvitePage({ code }: Readonly<{ code: string }>): ReactNode {
           );
         }}
       />
-    </>
+    </div>
   );
 }
 
@@ -93,13 +93,13 @@ function Invalid(): ReactNode {
     heading.current?.focus();
   }, []);
   return (
-    <>
+    <div className="narrow">
       <h1 tabIndex={-1} ref={heading}>
         Invite not available
       </h1>
       <p role="alert">{INVALID}</p>
       <p>Ask the person who invited you for a new link.</p>
-    </>
+    </div>
   );
 }
 
@@ -108,7 +108,7 @@ function PreviewFailed({
   onRetry,
 }: Readonly<{ error: unknown; onRetry: () => Promise<unknown> }>): ReactNode {
   return (
-    <>
+    <div className="narrow">
       <h1>Invite</h1>
       <AsyncStatus kind="alert">{describePreviewError(error)}</AsyncStatus>
       <button
@@ -119,6 +119,6 @@ function PreviewFailed({
       >
         Retry
       </button>
-    </>
+    </div>
   );
 }

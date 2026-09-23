@@ -13,7 +13,7 @@ export default function InviteAcceptedRoute(): ReactNode {
   const location = useLocation();
   const accepted = acceptedFromState(location.state);
   return (
-    <>
+    <div className="narrow">
       <h1>Your account is ready</h1>
       {accepted === undefined ? (
         <p role="status">
@@ -28,7 +28,7 @@ export default function InviteAcceptedRoute(): ReactNode {
       <p>
         <Link to="/">Back to Bloom</Link>
       </p>
-    </>
+    </div>
   );
 }
 

@@ -122,7 +122,7 @@ export function AcceptInviteForm({
           message={errors.password}
         />
       </div>
-      <button type="submit" disabled={pending}>
+      <button type="submit" className="btn-primary" disabled={pending}>
         {pending ? "Creating your account…" : "Create my account"}
       </button>
       <p role="status">

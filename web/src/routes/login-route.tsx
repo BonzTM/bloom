@@ -35,7 +35,7 @@ export default function LoginRoute(): ReactNode {
     return <AsyncStatus>Signed in, taking you back…</AsyncStatus>;
   }
   return (
-    <>
+    <div className="narrow">
       <h1>Sign in</h1>
       <OidcFailure search={location.search} />
       <SingleSignOn returnTo={destination} />
@@ -47,7 +47,7 @@ export default function LoginRoute(): ReactNode {
           login(input, { onError: setServerError, onSettled: reset });
         }}
       />
-    </>
+    </div>
   );
 }
 
