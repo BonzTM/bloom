@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ApiClient } from "./lib/api/http-client.js";
 import { readPublicConfig } from "./lib/config.js";
 import { AuthApi } from "./features/auth/api/auth-api.js";
+import { InvitesApi } from "./features/invites/api/invites-api.js";
 import { MediaServersApi } from "./features/media-servers/api/media-servers-api.js";
 import { RolesApi } from "./features/roles/api/roles-api.js";
 import { SystemApi } from "./features/system/api/system-api.js";
@@ -26,6 +27,7 @@ async function start(): Promise<void> {
   const authApi = new AuthApi(client);
   const rolesApi = new RolesApi(client);
   const mediaServersApi = new MediaServersApi(client);
+  const invitesApi = new InvitesApi(client);
   createRoot(rootElement).render(
     <StrictMode>
       <AppProviders
@@ -33,6 +35,7 @@ async function start(): Promise<void> {
         authApi={authApi}
         rolesApi={rolesApi}
         mediaServersApi={mediaServersApi}
+        invitesApi={invitesApi}
         queryClient={createQueryClient()}
         router={createAppRouter()}
       />

@@ -6,11 +6,13 @@ import type { KnownPermission, Permission } from "./api/auth-schemas.js";
 export const permissions = {
   adminSettings: "admin.settings",
   adminRoles: "admin.roles",
+  usersInvite: "users.invite",
 } as const satisfies Record<string, KnownPermission>;
 
 export const ADMIN_PERMISSIONS: readonly KnownPermission[] = [
   permissions.adminSettings,
   permissions.adminRoles,
+  permissions.usersInvite,
 ];
 
 export function hasPermission(

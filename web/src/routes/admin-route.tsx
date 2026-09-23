@@ -17,6 +17,12 @@ export default function AdminRoute(): ReactNode {
               <p>Connect the Jellyfin servers Bloom manages.</p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.usersInvite]}>
+            <li>
+              <Link to="/admin/invites">Invites</Link>
+              <p>Create links that let people join a media server.</p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.adminRoles]}>
             <li>
               <Link to="/admin/roles">Roles</Link>
