@@ -7,11 +7,13 @@
 package httputil
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"unicode/utf8"
 )
 
 // ErrorResponse is the single structured error envelope returned by EVERY JSON
@@ -72,6 +74,12 @@ func WriteError(w http.ResponseWriter, status int, resp ErrorResponse) error {
 // one JSON value.
 var ErrBodyNotSingleObject = errors.New("request body must contain a single JSON object")
 
+// ErrJSONNestingTooDeep reports JSON that exceeds the application depth limit.
+var ErrJSONNestingTooDeep = errors.New("request JSON nesting is too deep")
+
+// MaxJSONNestingDepth bounds container nesting before typed decoding.
+const MaxJSONNestingDepth = 16
+
 // DecodeJSON bounds the body to maxBytes, strictly decodes a single JSON value
 // of type T, and rejects unknown fields. This is an internal, versioned
 // surface, so the strict policy (DisallowUnknownFields) applies per the
@@ -79,7 +87,17 @@ var ErrBodyNotSingleObject = errors.New("request body must contain a single JSON
 func DecodeJSON[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) (T, error) {
 	var v T
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-	dec := json.NewDecoder(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return v, fmt.Errorf("read request body: %w", err)
+	}
+	if !utf8.Valid(body) {
+		return v, ErrInvalidText
+	}
+	if err := validateJSONDepth(body); err != nil {
+		return v, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
 		return v, fmt.Errorf("decode %T: %w", v, err)
@@ -90,6 +108,36 @@ func DecodeJSON[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) (
 		return v, ErrBodyNotSingleObject
 	}
 	return v, nil
+}
+
+// ErrInvalidText reports a request body that is not valid UTF-8 JSON text.
+var ErrInvalidText = errors.New("request body must be valid UTF-8")
+
+func validateJSONDepth(body []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	depth := 0
+	for {
+		token, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("scan JSON structure: %w", err)
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			continue
+		}
+		switch delim {
+		case '{', '[':
+			depth++
+			if depth > MaxJSONNestingDepth {
+				return ErrJSONNestingTooDeep
+			}
+		case '}', ']':
+			depth--
+		}
+	}
 }
 
 // MaxBytes returns middleware that caps every request body at maxBytes so a

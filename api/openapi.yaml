@@ -18,8 +18,8 @@ info:
     - Every response carries `X-Request-ID`. A client may send its own (up to
       128 characters) and it is echoed; otherwise one is generated.
     - Field names are `snake_case`. Timestamps are RFC 3339 in UTC.
-    - Authentication is not yet exposed; see ADR 0006 for the model that will
-      land (server-side sessions and per-account API keys).
+    - Browser authentication uses a server-side session. The cookie contains
+      only an opaque session token and is never an API credential.
 servers:
   - url: /
     description: Same origin as the SPA.
@@ -28,6 +28,8 @@ tags:
     description: Build metadata.
   - name: probes
     description: Platform health probes and the metrics scrape endpoint.
+  - name: auth
+    description: Local login and server-side browser sessions.
 paths:
   /api/v1/version:
     get:
@@ -37,6 +39,8 @@ paths:
       responses:
         "200":
           description: Version information stamped at build time.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
           content:
             application/json:
               schema:
@@ -56,6 +60,8 @@ paths:
       responses:
         "200":
           description: The process is alive.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
           content:
             text/plain:
               schema:
@@ -73,6 +79,8 @@ paths:
       responses:
         "200":
           description: Ready to serve traffic.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
           content:
             text/plain:
               schema:
@@ -80,6 +88,8 @@ paths:
                 const: ready
         "503":
           description: Not ready. The `code` is `unavailable`.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
           content:
             application/json:
               schema:
@@ -96,12 +106,301 @@ paths:
       responses:
         "200":
           description: Prometheus text exposition format.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
           content:
             text/plain:
               schema:
                 type: string
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Start a local browser session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated. Sets the `bloom_session` cookie.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials, or a malformed inbound session. Credential failures are indistinguishable. A rejected session expires the cookie with `Set-Cookie` before credential authentication runs.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Cross-origin request rejected by CSRF protection.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Missing or unsupported request media type. The `code` is `unsupported_media_type`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Malformed JSON or invalid fields.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Login rate limit exceeded. `Retry-After` is seconds.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/AuthInternalError"
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedPost"
+        "503":
+          description: Password-verification capacity is exhausted. `Retry-After` is seconds.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Destroy the current browser session.
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: Session destroyed.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+        "401":
+          description: No live session.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Cross-origin request rejected by CSRF protection.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/AuthInternalError"
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedPost"
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: getCurrentAccount
+      summary: Return the account for the current browser session.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current account.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: No live session, or the account was deleted or disabled.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/AuthInternalError"
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedGet"
 components:
+  headers:
+    CacheControlNoStore:
+      description: Prevents storage of a response that touched browser-session state.
+      schema:
+        type: string
+        enum: [no-store]
+    VaryCookie:
+      description: Marks the response as varying on the inbound Cookie header.
+      schema:
+        type: string
+        enum: [Cookie]
+    XRequestID:
+      description: Correlation identifier generated or echoed by Bloom.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    SetCookie:
+      description: Creates, refreshes, or expires the `bloom_session` cookie when applicable.
+      schema:
+        type: string
+    RetryAfter:
+      description: Whole seconds until the next login attempt may be admitted.
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    AuthMethodNotAllowedPost:
+      description: The route accepts only `POST`.
+      headers:
+        Allow:
+          description: Allowed method for this route.
+          schema:
+            type: string
+            const: POST
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AuthMethodNotAllowedGet:
+      description: The route accepts only `GET`.
+      headers:
+        Allow:
+          description: Allowed method for this route.
+          schema:
+            type: string
+            const: GET
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AuthInternalError:
+      description: Opaque authentication or session failure. `Set-Cookie` may refresh or expire the session.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+        Set-Cookie:
+          $ref: "#/components/headers/SetCookie"
+        Vary:
+          $ref: "#/components/headers/VaryCookie"
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Opaque internal failure.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: bloom_session
   schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Raw submitted username, bounded before canonicalization. The server canonicalizes it with the PRECIS UsernameCaseMapped profile, then validates the canonical comparison key's length and syntax. Equivalent case, width, and normalized forms are accepted.
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+          description: Length is measured in Unicode code points.
+    AccountSummary:
+      type: object
+      required: [id, username]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: "^[\\p{L}\\p{Nd}](?:[\\p{L}\\p{Nd}._-]*[\\p{L}\\p{Nd}])?$"
+          description: Canonical PRECIS UsernameCaseMapped display username.
+    AuthResponse:
+      type: object
+      required: [account]
+      additionalProperties: false
+      properties:
+        account:
+          $ref: "#/components/schemas/AccountSummary"
     Version:
       type: object
       required: [name, version, commit]
@@ -119,7 +418,8 @@ components:
     ErrorResponse:
       type: object
       description: The single structured error envelope returned by every endpoint.
-      required: [code, message]
+      required: [code, message, request_id]
+      additionalProperties: false
       properties:
         code:
           $ref: "#/components/schemas/ErrorCode"
@@ -144,9 +444,17 @@ components:
         - invalid_argument
         - unavailable
         - internal
+        - invalid_credentials
+        - unauthorized
+        - validation_failed
+        - rate_limited
+        - csrf_rejected
+        - unsupported_media_type
+        - method_not_allowed
     FieldError:
       type: object
       required: [field, code, message]
+      additionalProperties: false
       properties:
         field:
           type: string

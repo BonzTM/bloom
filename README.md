@@ -45,6 +45,30 @@ curl -s localhost:8080/metrics | head    # Prometheus exposition
 scripts/smoke.sh                         # the same checks, scripted
 ```
 
+## First run
+
+Apply the database migrations before starting Bloom. Then create the first
+local account with the `create-admin` command. Supply the password through the
+environment for automation:
+
+```bash
+go run ./cmd/bloom -migrate
+export BLOOM_BOOTSTRAP_PASSWORD='choose-a-long-unique-password'
+go run ./cmd/bloom create-admin --username owner
+unset BLOOM_BOOTSTRAP_PASSWORD
+```
+
+When `BLOOM_BOOTSTRAP_PASSWORD` is unset and the command runs in a terminal,
+Bloom prompts for the password without echoing it. The password is never
+accepted as a command-line flag. Run the command only once for each bootstrap
+account; an existing username is refused. Usernames are canonicalized with the
+PRECIS UsernameCaseMapped profile. They must contain 3 through 64 letters,
+digits, `.`, `_`, or `-`, and cannot start or end with a separator. New local
+passwords must contain 15 through 1024 Unicode characters and must not exceed
+4096 UTF-8 bytes. Bloom
+rejects malformed UTF-8 and passwords in its embedded offline common-password
+denylist. It applies no character-composition rules.
+
 `make verify` is the single gate; it must pass before any change is considered done.
 See [AGENTS.md](AGENTS.md) for the full contributor contract and verification bar.
 
@@ -80,6 +104,15 @@ this table.
 | `BLOOM_DB_CONN_MAX_IDLE_TIME` | duration | no | `5m` | no | Reap idle connections after this long. |
 | `BLOOM_DB_MIGRATE_ON_STARTUP` | bool | no | `false` | no | Apply embedded migrations before serving. Single-writer convenience; production uses `-migrate`. |
 | `BLOOM_SECRET_KEY` | string | **yes** | — | **yes** | Master secret (at least 32 bytes) that derives the at-rest encryption key for stored credentials ([ADR 0006](decisions/0006-auth-and-authorization-model.md)). Never logged. |
+| `BLOOM_BOOTSTRAP_PASSWORD` | string | create-admin: conditional | — | **yes** | Password read only by `create-admin`. When unset, an interactive terminal prompt is required. |
+| `BLOOM_SESSION_COOKIE_SECURE` | bool | no | `true` | no | Set the `Secure` session-cookie flag. Disable only for plaintext local development. |
+| `BLOOM_SESSION_LIFETIME` | duration | no | `24h` | no | Absolute lifetime of a browser session. |
+| `BLOOM_SESSION_IDLE_TIMEOUT` | duration | no | `30m` | no | Invalidate a browser session after this period of inactivity. Must not exceed the lifetime. |
+| `BLOOM_LOGIN_RATE_REFILL_INTERVAL` | duration | no | `1m` | no | Per-IP and per-username login buckets regain one attempt per interval. |
+| `BLOOM_LOGIN_RATE_BURST` | int | no | `5` | no | Maximum immediately available login attempts in each IP or username bucket. |
+| `BLOOM_LOGIN_RATE_MAX_KEYS` | int | no | `10000` | no | Bound on combined IP and username rate-limit entries held in memory. Valid range: 2-100000. |
+| `BLOOM_LOGIN_MAX_CONCURRENT` | int | no | `4` | no | Maximum concurrent Argon2id password verifications. Excess attempts fail fast with `503`. Valid range: 1-64. |
+| `BLOOM_TRUSTED_PROXY_CIDRS` | comma-separated CIDRs | no | — | no | Trust `X-Forwarded-For` only when the direct peer is in this allowlist. Empty disables forwarded addresses. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
 | `BLOOM_LOG_FORMAT` | `json` \| `text` | no | `json` | no | Log record format. |
 | `BLOOM_OTLP_ENDPOINT` | string | no | — | no | OTLP/HTTP trace collector `host:port`. Empty disables span export. |
@@ -89,7 +122,12 @@ this table.
 
 The `-migrate` flag (no env key) applies the embedded goose migrations for the
 configured engine and exits; it is how a deployment's migration Job invokes the
-same image ahead of a rollout.
+same image ahead of a rollout. Canonical usernames migrate in three ordered
+steps: per-engine SQL migration 00003 adds nullable key and backup storage,
+engine-neutral Go migration 00004 backfills PRECIS UsernameCaseMapped keys in
+Goose's transaction, and per-engine SQL migration 00005 makes the key `NOT NULL`
+and exactly unique. A collision aborts 00004 without changing its version or
+account data.
 
 ## Architecture
 

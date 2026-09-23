@@ -19,11 +19,18 @@ import (
 // foundations/contracts-and-compatibility.md: add codes, never repurpose or
 // silently drop one. They are deliberately NOT the HTTP status.
 const (
-	codeNotFound        = "not_found"
-	codeAlreadyExists   = "already_exists"
-	codeInvalidArgument = "invalid_argument"
-	codeUnavailable     = "unavailable"
-	codeInternal        = "internal"
+	codeNotFound             = "not_found"
+	codeAlreadyExists        = "already_exists"
+	codeInvalidArgument      = "invalid_argument"
+	codeUnavailable          = "unavailable"
+	codeInternal             = "internal"
+	codeLoginRejected        = "invalid_credentials"
+	codeUnauthorized         = "unauthorized"
+	codeValidationFailed     = "validation_failed"
+	codeRateLimited          = "rate_limited"
+	codeCSRFRejected         = "csrf_rejected"
+	codeUnsupportedMediaType = "unsupported_media_type"
+	codeMethodNotAllowed     = "method_not_allowed"
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -38,8 +45,20 @@ func errorClass(err error) (status int, code string) {
 		return http.StatusConflict, codeAlreadyExists
 	case errors.Is(err, core.ErrInvalidArgument):
 		return http.StatusBadRequest, codeInvalidArgument
+	case errors.Is(err, core.ErrInvalidCredentials):
+		return http.StatusUnauthorized, codeLoginRejected
+	case errors.Is(err, errAuthenticationRequired):
+		return http.StatusUnauthorized, codeUnauthorized
+	case errors.Is(err, errRateLimited):
+		return http.StatusTooManyRequests, codeRateLimited
+	case errors.Is(err, errAuthenticationBusy):
+		return http.StatusServiceUnavailable, codeUnavailable
 	case errors.Is(err, errNotReady):
 		return http.StatusServiceUnavailable, codeUnavailable
+	case errors.Is(err, errUnsupportedMediaType):
+		return http.StatusUnsupportedMediaType, codeUnsupportedMediaType
+	case errors.Is(err, errMethodNotAllowed):
+		return http.StatusMethodNotAllowed, codeMethodNotAllowed
 	default:
 		return http.StatusInternalServerError, codeInternal
 	}

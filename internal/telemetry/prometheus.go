@@ -21,9 +21,13 @@ import (
 // class): request IDs, user IDs, and raw paths are NEVER used as labels because
 // they would blow up the time-series cardinality.
 type PromMetrics struct {
-	registry       *prometheus.Registry
-	requests       *prometheus.CounterVec
-	requestSeconds *prometheus.HistogramVec
+	registry               *prometheus.Registry
+	requests               *prometheus.CounterVec
+	requestSeconds         *prometheus.HistogramVec
+	loginAttempts          *prometheus.CounterVec
+	csrfRejections         prometheus.Counter
+	auditWriteFailures     prometheus.Counter
+	sessionCleanupFailures prometheus.Counter
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -44,21 +48,70 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		Help:      "HTTP request latency in seconds by route pattern and status class.",
 		Buckets:   prometheus.DefBuckets,
 	}, []string{"route", "status_class"})
+	loginAttempts := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "login_attempts_total",
+		Help:      "Total local login attempts by finite outcome.",
+	}, []string{"outcome"})
+	csrfRejections := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "csrf_rejections_total",
+		Help:      "Total cross-origin state-changing requests rejected.",
+	})
+	auditWriteFailures := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "audit_write_failures_total",
+		Help:      "Total failed writes to the dedicated audit sink.",
+	})
+	sessionCleanupFailures := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "session_cleanup_failures_total",
+		Help:      "Total failed expired-session cleanup attempts.",
+	})
 
 	// Register on the private registry alongside the standard process and Go
 	// runtime collectors so /metrics also exposes runtime gauges.
 	reg.MustRegister(
-		requests,
-		requestSeconds,
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
 	)
 
-	return &PromMetrics{
-		registry:       reg,
-		requests:       requests,
-		requestSeconds: requestSeconds,
+	metrics := &PromMetrics{
+		registry:               reg,
+		requests:               requests,
+		requestSeconds:         requestSeconds,
+		loginAttempts:          loginAttempts,
+		csrfRejections:         csrfRejections,
+		auditWriteFailures:     auditWriteFailures,
+		sessionCleanupFailures: sessionCleanupFailures,
 	}
+	metrics.registerApplicationCollectors()
+	return metrics
+}
+
+func (m *PromMetrics) registerApplicationCollectors() {
+	m.registry.MustRegister(
+		m.requests,
+		m.requestSeconds,
+		m.loginAttempts,
+		m.csrfRejections,
+		m.auditWriteFailures,
+		m.sessionCleanupFailures,
+	)
+}
+
+// IncCSRFRejection records one rejected cross-origin write.
+func (m *PromMetrics) IncCSRFRejection() { m.csrfRejections.Inc() }
+
+// IncAuditWriteFailure records one failed write to the dedicated audit sink.
+func (m *PromMetrics) IncAuditWriteFailure() { m.auditWriteFailures.Inc() }
+
+// IncSessionCleanupFailure records one failed expired-session cleanup attempt.
+func (m *PromMetrics) IncSessionCleanupFailure() { m.sessionCleanupFailures.Inc() }
+
+// IncLoginAttempt records one local login attempt with a finite outcome.
+func (m *PromMetrics) IncLoginAttempt(outcome string) {
+	m.loginAttempts.WithLabelValues(outcome).Inc()
 }
 
 // IncRequest records one handled request. Both labels must be low-cardinality

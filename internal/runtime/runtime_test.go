@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,9 +31,33 @@ func baseConfig(t *testing.T, addr string) config.Config {
 			Driver: config.DriverSQLite, DSN: "file:" + filepath.Join(t.TempDir(), "bloom.db"),
 			MaxOpenConns: 2, MaxIdleConns: 2, ConnMaxLifetime: time.Minute, ConnMaxIdleTime: time.Minute,
 		},
-		Telemetry:     config.TelemetryConfig{LogFormat: config.LogFormatJSON, TraceSampleRatio: 1},
+		Telemetry: config.TelemetryConfig{LogFormat: config.LogFormatJSON, TraceSampleRatio: 1},
+		Auth: config.AuthConfig{
+			SessionCookieSecure: true, SessionLifetime: time.Hour, SessionIdleTimeout: 15 * time.Minute,
+			LoginRateRefillInterval: time.Minute, LoginRateBurst: 5, LoginRateMaxKeys: 100,
+			LoginMaxConcurrent: 4,
+		},
 		SecretKey:     config.NewSecret([]byte(testSecret)),
 		ShutdownGrace: 5 * time.Second,
+	}
+}
+
+func TestRunWarnsOnceWhenTrustedProxyModeIsEnabled(t *testing.T) {
+	cfg := baseConfig(t, ":0")
+	cfg.Migrate = true
+	cfg.Auth.TrustedProxyCIDRs = []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("2001:db8::/32"),
+	}
+	var log strings.Builder
+	if err := runtime.Run(context.Background(), cfg, runtime.Streams{Log: &log, Audit: io.Discard}); err != nil {
+		t.Fatalf("Run(-migrate): %v", err)
+	}
+	if got := strings.Count(log.String(), "trusted proxy mode enabled"); got != 1 {
+		t.Fatalf("trusted proxy warnings = %d, want 1: %s", got, log.String())
+	}
+	if !strings.Contains(log.String(), `"trusted_proxy_cidr_count":2`) {
+		t.Errorf("warning lacks non-secret CIDR count: %s", log.String())
 	}
 }
 

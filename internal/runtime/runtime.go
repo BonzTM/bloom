@@ -14,12 +14,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alexedwards/scs/v2"
 	"golang.org/x/sync/errgroup"
 
 	httpapi "github.com/BonzTM/bloom/internal/api/http"
 	"github.com/BonzTM/bloom/internal/api/web"
 	"github.com/BonzTM/bloom/internal/buildinfo"
 	"github.com/BonzTM/bloom/internal/config"
+	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -31,6 +33,8 @@ type Streams struct {
 	Log io.Writer
 	// Audit receives the dedicated audit stream (ADR 0006 item 8).
 	Audit io.Writer
+	// Console receives interactive prompts and command diagnostics.
+	Console io.Writer
 }
 
 // systemClock is the production core.Clock. No core package reads the wall
@@ -51,6 +55,7 @@ func Run(ctx context.Context, cfg config.Config, streams Streams) error {
 		"commit", buildinfo.Commit,
 		"db_driver", cfg.Database.Driver,
 	)
+	warnTrustedProxyMode(logger, cfg.Auth)
 
 	// One-shot migration mode: apply the embedded goose migrations and exit.
 	// This is the production path for schema changes; a deployment runs the
@@ -69,25 +74,95 @@ func Run(ctx context.Context, cfg config.Config, streams Streams) error {
 	if err != nil {
 		return err
 	}
-
-	// Audit logger: a SEPARATE slog handler routed to its own sink. It is
-	// constructed here so the seam exists for auth.go; nothing emits yet.
-	_ = telemetry.NewAuditLogger(streams.Audit, systemClock{})
-
-	readiness := telemetry.NewReadiness(false)
-	dist, err := web.Dist()
+	clock := systemClock{}
+	accounts, localIdentities, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
 	if err != nil {
-		return fmt.Errorf("runtime: web assets: %w", err)
+		_ = pool.Close()
+		return err
 	}
-	srv := httpapi.New(cfg.HTTP, httpapi.Deps{
-		Logger:    logger,
-		Metrics:   metrics,
-		Readiness: readiness,
-		Pinger:    pool,
-		Web:       web.Handler(dist, logger),
-	})
+	srv, err := assembleHTTPServer(
+		cfg, streams.Audit, logger, metrics, pool,
+		accounts, localIdentities, sessions, clock,
+	)
+	if err != nil {
+		_ = pool.Close()
+		return err
+	}
 
 	return serve(ctx, srv, pool, tracerProvider, logger, cfg.ShutdownGrace)
+}
+
+func assembleHTTPServer(
+	cfg config.Config,
+	auditSink io.Writer,
+	logger *slog.Logger,
+	metrics *telemetry.PromMetrics,
+	pool *sql.DB,
+	accounts core.AccountStore,
+	localIdentities core.LocalIdentityStore,
+	sessions *scs.SessionManager,
+	clock core.Clock,
+) (*httpapi.Server, error) {
+	dist, err := web.Dist()
+	if err != nil {
+		return nil, fmt.Errorf("runtime: web assets: %w", err)
+	}
+	audit := telemetry.NewAuditLogger(auditSink, clock)
+	return httpapi.New(cfg.HTTP, httpapi.Deps{
+		Logger:              logger,
+		Metrics:             metrics,
+		Readiness:           telemetry.NewReadiness(false),
+		Pinger:              pool,
+		Web:                 web.Handler(dist, logger),
+		Identity:            core.NewLocalIdentityProvider(localIdentities),
+		Accounts:            accounts,
+		Sessions:            sessions,
+		Audit:               audit,
+		AuditCorrelationKey: cfg.SecretKey.Bytes(),
+		Clock:               clock,
+		Auth:                cfg.Auth,
+	}), nil
+}
+
+func authDependencies(
+	pool *sql.DB,
+	cfg config.Config,
+	metrics db.SessionCleanupMetrics,
+	logger *slog.Logger,
+	clock core.Clock,
+) (core.AccountStore, core.LocalIdentityStore, *scs.SessionManager, error) {
+	accounts, localIdentities, err := db.NewAccountStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build account stores: %w", err)
+	}
+	sessionStore, err := db.NewSessionStore(pool, cfg.Database.Driver, metrics, logger, clock)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build session store: %w", err)
+	}
+	return accounts, localIdentities, configureSessions(cfg.Auth, sessionStore), nil
+}
+
+func warnTrustedProxyMode(logger *slog.Logger, cfg config.AuthConfig) {
+	if len(cfg.TrustedProxyCIDRs) == 0 {
+		return
+	}
+	logger.Warn("trusted proxy mode enabled",
+		"trusted_proxy_cidr_count", len(cfg.TrustedProxyCIDRs),
+	)
+}
+
+func configureSessions(cfg config.AuthConfig, store scs.Store) *scs.SessionManager {
+	manager := scs.New()
+	manager.Store = store
+	manager.Lifetime = cfg.SessionLifetime
+	manager.IdleTimeout = cfg.SessionIdleTimeout
+	manager.HashTokenInStore = true
+	manager.Cookie.Name = "bloom_session"
+	manager.Cookie.Path = "/"
+	manager.Cookie.HttpOnly = true
+	manager.Cookie.SameSite = http.SameSiteLaxMode
+	manager.Cookie.Secure = cfg.SessionCookieSecure
+	return manager
 }
 
 // openStore opens the configured engine's pool, optionally self-migrates, and

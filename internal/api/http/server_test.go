@@ -39,8 +39,17 @@ func (p *fakePinger) fail(err error) {
 // countingMetrics records how many times IncRequest fires so a test can prove
 // which routes flow through the logging+metrics middleware.
 type countingMetrics struct {
-	mu       sync.Mutex
-	requests int
+	mu            sync.Mutex
+	requests      int
+	logins        []string
+	csrf          int
+	auditFailures int
+}
+
+func (m *countingMetrics) IncLoginAttempt(outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logins = append(m.logins, outcome)
 }
 
 func (m *countingMetrics) IncRequest(string, string) {
@@ -49,10 +58,28 @@ func (m *countingMetrics) IncRequest(string, string) {
 	m.requests++
 }
 
+func (m *countingMetrics) IncCSRFRejection() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.csrf++
+}
+
+func (m *countingMetrics) IncAuditWriteFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.auditFailures++
+}
+
 func (m *countingMetrics) count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.requests
+}
+
+func (m *countingMetrics) auditFailureCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.auditFailures
 }
 
 type harness struct {

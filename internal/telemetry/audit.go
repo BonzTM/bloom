@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -20,7 +21,16 @@ import (
 // The schema is fixed and low-cardinality. Records carry the full who/what/
 // when/where on every entry and NEVER carry secrets or PII payloads: the fact
 // and identity of an action (actor, action, resource id, result), not its
-// sensitive contents.
+// sensitive contents. Failed-login correlation uses a purpose-separated HMAC
+// key derived from BLOOM_SECRET_KEY over the submitted username after Bloom's
+// PRECIS UsernameCaseMapped comparison key. The digest is truncated to 128
+// bits and rendered as a username-prefixed hexadecimal identifier; the
+// username itself is never recorded.
+//
+// Emit returns sink failures to its caller. The HTTP caller logs one
+// operational error, increments bloom_audit_write_failures_total, and lets the
+// request continue. A failed stderr write must not block an otherwise valid
+// sign-in; the error and counter make the lost audit evidence observable.
 
 // AuditResult is the low-cardinality outcome of an audited action. A denial or
 // failure is as important to record as a success, so the set is closed and
@@ -41,11 +51,14 @@ const (
 // AuditEvent is one audit record. Every field is non-sensitive identity or
 // metadata: Actor identifies WHO, Action/Resource identify WHAT, Result is the
 // outcome, Time is WHEN (UTC), and RequestID is WHERE (the correlation id). No
-// token, header, body, or other payload is ever placed on this struct.
+// token, header, body, raw username, or other payload is ever placed here.
 type AuditEvent struct {
-	// Actor is the acting account id. Empty for an authentication failure where
-	// no principal was established.
+	// Actor is the acting account id, or "anonymous" when authentication did not
+	// establish a principal.
 	Actor string
+	// SubjectID is an optional non-reversible identifier used to correlate
+	// anonymous attempts without recording the submitted username.
+	SubjectID string
 	// Action is the audited operation, e.g. "auth.login", "apikey.create".
 	// Low-cardinality and stable.
 	Action string
@@ -54,6 +67,10 @@ type AuditEvent struct {
 	Resource string
 	// Result is the outcome: success, failure, or denied.
 	Result AuditResult
+	// Reason is a finite audit-safe outcome detail such as "bad_password".
+	Reason string
+	// Source is the validated client address or service identity such as "cli".
+	Source string
 	// RequestID is the correlation id tying the audit record to the access log and
 	// trace for the same request.
 	RequestID string
@@ -91,15 +108,22 @@ func NewAuditLogger(w io.Writer, clock AuditClock) *AuditLogger {
 // schema; the timestamp is forced to UTC. Emit is safe for concurrent use (the
 // slog handler serializes writes). It deliberately accepts only an AuditEvent so
 // no caller can attach arbitrary (possibly sensitive) attributes to the stream.
-func (a *AuditLogger) Emit(ctx context.Context, e AuditEvent) {
-	a.logger.LogAttrs(ctx, slog.LevelInfo, "audit",
+func (a *AuditLogger) Emit(ctx context.Context, e AuditEvent) error {
+	record := slog.NewRecord(a.now().UTC(), slog.LevelInfo, "audit", 0)
+	record.AddAttrs(
 		slog.String("actor", e.Actor),
+		slog.String("subject_id", e.SubjectID),
 		slog.String("action", e.Action),
 		slog.String("resource", e.Resource),
 		slog.String("result", string(e.Result)),
-		slog.Time("time", a.now().UTC()),
+		slog.String("reason", e.Reason),
+		slog.String("source", e.Source),
 		slog.String("request_id", e.RequestID),
 	)
+	if err := a.logger.Handler().Handle(ctx, record); err != nil {
+		return fmt.Errorf("write audit record: %w", err)
+	}
+	return nil
 }
 
 // NopAuditLogger returns an AuditLogger that discards records. It is the default

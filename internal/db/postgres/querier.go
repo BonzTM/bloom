@@ -16,8 +16,9 @@ type Querier interface {
 	// (sqlc.arg) are used because both engines accept them, whereas $1 and ? are
 	// engine-specific. Regenerate with: go tool sqlc generate.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
-	GetAccount(ctx context.Context, id string) (Account, error)
-	GetAccountByUsername(ctx context.Context, username string) (Account, error)
+	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
+	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
+	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

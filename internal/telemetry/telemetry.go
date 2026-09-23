@@ -3,7 +3,9 @@
 // handbook reference service and trimmed to what Bloom wires today.
 //
 // No global logger lives here; the constructed *slog.Logger is returned and
-// threaded explicitly into reusable packages.
+// threaded explicitly into reusable packages. Audit Emit failures return to
+// the HTTP caller, which logs once, increments
+// bloom_audit_write_failures_total, and continues the request.
 package telemetry
 
 import (
@@ -61,6 +63,18 @@ func (r *Readiness) Ready() bool { return r.ready.Load() }
 type Metrics interface {
 	// IncRequest records one handled HTTP request by route pattern and status.
 	IncRequest(routePattern, statusClass string)
+	// IncLoginAttempt records one local-login attempt by its finite outcome:
+	// success, unknown_user, bad_password, disabled, rate_limited, overloaded,
+	// or internal_error.
+	IncLoginAttempt(outcome string)
+	// IncCSRFRejection records one cross-origin write rejection.
+	IncCSRFRejection()
+}
+
+// AuditFailureMetrics records failures from the dedicated audit sink. It is a
+// separate one-method seam so the request Metrics contract stays focused.
+type AuditFailureMetrics interface {
+	IncAuditWriteFailure()
 }
 
 // NopMetrics is the default no-op metrics implementation.
@@ -68,3 +82,15 @@ type NopMetrics struct{}
 
 // IncRequest does nothing.
 func (NopMetrics) IncRequest(string, string) {}
+
+// IncLoginAttempt does nothing.
+func (NopMetrics) IncLoginAttempt(string) {}
+
+// IncCSRFRejection does nothing.
+func (NopMetrics) IncCSRFRejection() {}
+
+// IncAuditWriteFailure does nothing.
+func (NopMetrics) IncAuditWriteFailure() {}
+
+// IncSessionCleanupFailure does nothing.
+func (NopMetrics) IncSessionCleanupFailure() {}

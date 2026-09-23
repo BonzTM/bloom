@@ -23,11 +23,40 @@ contracts) gets an entry here.
   storage at parity; container image and CI.
 - Repository hygiene: Dependabot, pull request template, code owners, security
   policy, and this changelog.
+- Local authentication with `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`,
+  and `GET /api/v1/auth/me`; server-side `bloom_session` cookies; and the
+  `create-admin` bootstrap command.
+- Migration `00002_local_auth_sessions` for local Argon2id credentials,
+  account-disable state, and database-backed sessions on SQLite and PostgreSQL.
+- Migrations `00003_canonical_usernames`, Go migration `00004`, and
+  `00005_require_canonical_usernames` stage the nullable schema expansion,
+  PRECIS UsernameCaseMapped backfill, and exact `NOT NULL` uniqueness contract
+  on SQLite and PostgreSQL. Key collisions leave version and account data
+  unchanged. Rolling back all three restores the original display usernames.
+- Authentication settings `BLOOM_SESSION_COOKIE_SECURE`,
+  `BLOOM_SESSION_LIFETIME`, `BLOOM_SESSION_IDLE_TIMEOUT`,
+  `BLOOM_LOGIN_RATE_REFILL_INTERVAL`, `BLOOM_LOGIN_RATE_BURST`, and
+  `BLOOM_LOGIN_RATE_MAX_KEYS`, plus `BLOOM_LOGIN_MAX_CONCURRENT` for bounded
+  Argon2id admission.
+- `BLOOM_BOOTSTRAP_PASSWORD` as non-interactive secret input for
+  `create-admin`, and `BLOOM_TRUSTED_PROXY_CIDRS` as an off-by-default
+  forwarded-client-address allowlist.
+- A new-password policy for `create-admin`: 15 through 1024 Unicode characters,
+  subject to the existing 4096-byte input bound and an embedded offline
+  common-password denylist, with no character-composition rules.
 
 ### Fixed
 
 - Image publishing skips the artifact attestation steps, with a notice, when
   attestations are unavailable for the repository's plan, and keeps every other
   proof step; a public repository gets signed provenance automatically.
+- Authentication hardening now isolates session middleware from SPA assets,
+  bounds password and account-store work, parses complete trusted-proxy chains,
+  prevents stale session resurrection, and keeps expired-session cleanup ahead
+  of creation throughput with failure telemetry.
+- Login rate-limit admission now rejects from existing exhausted buckets before
+  allocating new keys, uses bounded expiry bookkeeping, and reports the earliest
+  capacity availability. Session expiry and cleanup use the injected clock, and
+  cleanup failures log their wrapped cause once per failure streak.
 - CI now builds and scans with the same Go toolchain as local and container
   builds (`toolchain go1.27.1` in go.mod).

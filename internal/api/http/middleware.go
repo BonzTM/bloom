@@ -17,7 +17,11 @@ import (
 // from other packages (revive: context-keys-type).
 type ctxKey int
 
-const requestIDKey ctxKey = iota
+const (
+	requestIDKey ctxKey = iota
+	accountKey
+	sessionStateKey
+)
 
 // requestIDFrom returns the request ID stored in ctx, or "" if absent.
 func requestIDFrom(ctx context.Context) string {
