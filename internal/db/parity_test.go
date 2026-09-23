@@ -1,9 +1,11 @@
 package db_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"io/fs"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -90,12 +92,12 @@ func openSQLiteMemory(t *testing.T) *sql.DB {
 	t.Helper()
 	pool, err := db.Open(context.Background(), config.DatabaseConfig{
 		Driver:          config.DriverSQLite,
-		DSN:             "file::memory:?_pragma=foreign_keys(1)",
+		DSN:             "file::memory:",
 		MaxOpenConns:    1,
 		MaxIdleConns:    1,
 		ConnMaxLifetime: time.Hour,
 		ConnMaxIdleTime: time.Hour,
-	})
+	}, discardLogger())
 	if err != nil {
 		t.Fatalf("Open sqlite: %v", err)
 	}
@@ -103,27 +105,53 @@ func openSQLiteMemory(t *testing.T) *sql.DB {
 	return pool
 }
 
-func TestOpenSQLiteRejectsDisabledForeignKeys(t *testing.T) {
-	_, err := db.Open(context.Background(), config.DatabaseConfig{
+func TestOpenSQLiteAddsForeignKeysWithoutLoggingDSN(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	const sensitiveDSN = "file:sqlite-sensitive-marker?mode=memory&cache=shared"
+	pool, err := db.Open(context.Background(), config.DatabaseConfig{
 		Driver:          config.DriverSQLite,
-		DSN:             "file::memory:",
+		DSN:             sensitiveDSN,
 		MaxOpenConns:    1,
 		MaxIdleConns:    1,
 		ConnMaxLifetime: time.Hour,
 		ConnMaxIdleTime: time.Hour,
-	})
-	if err == nil || !strings.Contains(err.Error(), "_pragma=foreign_keys(1)") {
-		t.Fatalf("Open without SQLite foreign keys = %v, want actionable error", err)
+	}, logger)
+	if err != nil {
+		t.Fatalf("Open sqlite without foreign-key pragma: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	if !strings.Contains(logs.String(), `"level":"INFO"`) ||
+		!strings.Contains(logs.String(), `"msg":"added SQLite foreign key pragma"`) {
+		t.Fatalf("normalization log = %q, want info message", logs.String())
+	}
+	if strings.Contains(logs.String(), sensitiveDSN) || strings.Contains(logs.String(), "sqlite-sensitive-marker") {
+		t.Fatalf("normalization log exposed DSN: %q", logs.String())
+	}
+}
+
+func TestOpenSQLiteRejectsExplicitlyDisabledForeignKeys(t *testing.T) {
+	_, err := db.Open(context.Background(), config.DatabaseConfig{
+		Driver:          config.DriverSQLite,
+		DSN:             "file::memory:?_pragma=foreign_keys(0)",
+		MaxOpenConns:    1,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: time.Hour,
+		ConnMaxIdleTime: time.Hour,
+	}, discardLogger())
+	const want = "verify SQLite foreign keys: disabled; BLOOM_DB_DSN contains a foreign-key directive that disables foreign keys and must be enabled or removed"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Open with explicitly disabled SQLite foreign keys error = %v, want %q", err, want)
 	}
 }
 
 func TestSQLiteForeignKeysEnabledOnEveryConnection(t *testing.T) {
 	pool, err := db.Open(context.Background(), config.DatabaseConfig{
 		Driver:       config.DriverSQLite,
-		DSN:          "file:foreign-key-pool?mode=memory&cache=shared&_pragma=foreign_keys(1)",
+		DSN:          "file:foreign-key-pool?mode=memory&cache=shared",
 		MaxOpenConns: 4, MaxIdleConns: 4,
 		ConnMaxLifetime: time.Hour, ConnMaxIdleTime: time.Hour,
-	})
+	}, discardLogger())
 	if err != nil {
 		t.Fatalf("Open sqlite: %v", err)
 	}
@@ -213,11 +241,19 @@ func assertColumns(t *testing.T, pool *sql.DB, list columnLister, want []string)
 }
 
 func TestOpenRejectsUnknownDriver(t *testing.T) {
-	_, err := db.Open(context.Background(), config.DatabaseConfig{Driver: "mysql", DSN: "x", MaxOpenConns: 1})
+	_, err := db.Open(
+		context.Background(),
+		config.DatabaseConfig{Driver: "mysql", DSN: "x", MaxOpenConns: 1},
+		discardLogger(),
+	)
 	if err == nil {
 		t.Fatal("Open(mysql) succeeded, want error")
 	}
 	if _, _, err := db.NewAccountStores(nil, "mysql"); err == nil {
 		t.Fatal("NewAccountStores(mysql) succeeded, want error")
 	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }

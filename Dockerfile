@@ -52,7 +52,7 @@ COPY --from=build /out/bloom /bloom
 
 # SQLite default lives here; mount a volume. PostgreSQL users set BLOOM_DB_DRIVER=postgres.
 VOLUME ["/data"]
-ENV BLOOM_DB_DSN="file:/data/bloom.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+ENV BLOOM_DB_DSN="file:/data/bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 
 USER nonroot:nonroot
 EXPOSE 8080

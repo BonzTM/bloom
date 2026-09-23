@@ -185,7 +185,7 @@ func TestExecuteCreateAdminValidatesPasswordBeforeOpeningDatabase(t *testing.T) 
 
 func assertAdminAccountAbsent(t *testing.T, dsn, username string) {
 	t.Helper()
-	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn))
+	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

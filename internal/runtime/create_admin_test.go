@@ -38,7 +38,7 @@ func TestExecuteCreateAdminFromInjectedPassword(t *testing.T) {
 		t.Fatalf("Execute(create-admin): %v", err)
 	}
 
-	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn))
+	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestExecuteCreateAdminCanonicalizesUsername(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn))
+	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

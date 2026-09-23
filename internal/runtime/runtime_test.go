@@ -91,6 +91,17 @@ func TestRunMigrateModeAppliesSchemaAndExits(t *testing.T) {
 	}
 }
 
+func TestRunRejectsEncodedExplicitlyDisabledForeignKeys(t *testing.T) {
+	cfg := baseConfig(t, ":0")
+	cfg.Migrate = true
+	cfg.Database.DSN = "file::memory:?%5Fpragma=FoReIgN_KeYs%280%29"
+
+	err := runtime.Run(t.Context(), cfg, runtime.Streams{Log: io.Discard, Audit: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "verify SQLite foreign keys: disabled") {
+		t.Fatalf("Run with explicitly disabled SQLite foreign keys = %v, want startup failure", err)
+	}
+}
+
 func TestRunServesProbesAndStopsOnCancel(t *testing.T) {
 	addr := freeAddr(t)
 	cfg := baseConfig(t, addr)

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
 func prepareAdminDatabase(t *testing.T) string {
 	t.Helper()
 	dsn := "file:" + filepath.Join(t.TempDir(), "bloom.db") + "?_pragma=foreign_keys(1)"
-	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn))
+	pool, err := db.Open(context.Background(), adminDatabaseConfig(dsn), discardLogger())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -30,6 +31,10 @@ func prepareAdminDatabase(t *testing.T) string {
 		t.Fatalf("Close: %v", err)
 	}
 	return dsn
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }
 
 func adminDatabaseConfig(dsn string) config.DatabaseConfig {

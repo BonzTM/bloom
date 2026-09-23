@@ -176,7 +176,7 @@ func configureSessions(cfg config.AuthConfig, store scs.Store) *scs.SessionManag
 // openStore opens the configured engine's pool, optionally self-migrates, and
 // registers the pool statistics collector.
 func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metrics *telemetry.PromMetrics) (*sql.DB, error) {
-	pool, err := db.Open(ctx, cfg.Database)
+	pool, err := db.Open(ctx, cfg.Database, logger)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -226,7 +226,7 @@ func serve(ctx context.Context, srv *httpapi.Server, pool *sql.DB, tp *telemetry
 // maps a nil return to exit 0 and any error to a logged failure with exit 1,
 // which is exactly the contract a migration Job needs.
 func Migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	pool, err := db.Open(ctx, cfg.Database)
+	pool, err := db.Open(ctx, cfg.Database, logger)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

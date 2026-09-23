@@ -73,7 +73,7 @@ func grantRole(
 	logger *slog.Logger,
 ) (result grantRoleResult, retErr error) {
 	result.role = role
-	pool, err := db.Open(ctx, cfg.Database)
+	pool, err := db.Open(ctx, cfg.Database, logger)
 	if err != nil {
 		return result, fmt.Errorf("grant-role: open database: %w", err)
 	}

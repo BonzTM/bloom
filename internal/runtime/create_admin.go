@@ -81,7 +81,7 @@ func createAdmin(
 	logger *slog.Logger,
 	clock core.Clock,
 ) (account core.Account, retErr error) {
-	pool, err := db.Open(ctx, cfg.Database)
+	pool, err := db.Open(ctx, cfg.Database, logger)
 	if err != nil {
 		return core.Account{}, fmt.Errorf("create-admin: open database: %w", err)
 	}
