@@ -46,6 +46,9 @@ func TestHandlerServesIndexForRootAndDeepLinks(t *testing.T) {
 		if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
 			t.Fatalf("%s: csp %q lacks default-src 'self'", target, got)
 		}
+		if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "img-src 'self' data: https://image.tmdb.org;") {
+			t.Fatalf("%s: csp %q does not allow TMDB posters and nothing else", target, got)
+		}
 	}
 }
 
