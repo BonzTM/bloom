@@ -93,6 +93,54 @@ func TestFailedQuotaDeletionIsAudited(t *testing.T) {
 	}
 }
 
+func TestSetQuotaRejectsOmittedFields(t *testing.T) {
+	full := map[string]string{
+		"movie_limit": "2", "movie_period_days": "7", "season_limit": "4", "season_period_days": "30",
+	}
+	bodies := map[string]string{"empty": "{}"}
+	for omitted := range full {
+		var parts []string
+		for name, value := range full {
+			if name != omitted {
+				parts = append(parts, `"`+name+`":`+value)
+			}
+		}
+		bodies["without "+omitted] = "{" + strings.Join(parts, ",") + "}"
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			store := &requestHandlerStore{}
+			server := newRequestHandlerServer(newQuotaHandlerService(t, store), &recordingAudit{})
+			request := requestWithAccount(t, http.MethodPut, "/api/v1/roles/"+testRequestAccountID+"/request-quota", body, core.PermissionAdminSettings)
+			request.SetPathValue("id", testRequestAccountID)
+			recorder := httptest.NewRecorder()
+			server.handleSetRoleRequestQuota(recorder, request)
+			if recorder.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			if store.setRole != nil {
+				t.Fatalf("quota was stored from %s: %+v", body, *store.setRole)
+			}
+		})
+	}
+}
+
+func TestSetQuotaAcceptsCompleteBody(t *testing.T) {
+	store := &requestHandlerStore{}
+	server := newRequestHandlerServer(newQuotaHandlerService(t, store), &recordingAudit{})
+	body := `{"movie_limit":2,"movie_period_days":7,"season_limit":0,"season_period_days":0}`
+	request := requestWithAccount(t, http.MethodPut, "/api/v1/roles/"+testRequestAccountID+"/request-quota", body, core.PermissionAdminSettings)
+	request.SetPathValue("id", testRequestAccountID)
+	recorder := httptest.NewRecorder()
+	server.handleSetRoleRequestQuota(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if store.setRole == nil || store.setRole.Quota.MovieLimit != 2 || store.setRole.Quota.MoviePeriod != 7*24*time.Hour {
+		t.Fatalf("stored quota = %+v", store.setRole)
+	}
+}
+
 func newQuotaHandlerService(t *testing.T, store *requestHandlerStore) *requestapp.Service {
 	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
@@ -219,6 +267,8 @@ type requestHandlerStore struct {
 	created core.MediaRequest
 	// quotaErr is what every quota delete answers with; nil means success.
 	quotaErr error
+	// setRole is the last role quota stored, if any.
+	setRole *core.RoleRequestQuota
 }
 
 func (s *requestHandlerStore) GetRequestProfile(context.Context, string) (core.RequestProfile, error) {
@@ -269,7 +319,8 @@ func (*requestHandlerStore) GetAccountRequestQuota(context.Context, string) (cor
 	return core.AccountRequestQuota{}, core.ErrNotFound
 }
 
-func (*requestHandlerStore) SetRoleRequestQuota(context.Context, core.RoleRequestQuota) error {
+func (s *requestHandlerStore) SetRoleRequestQuota(_ context.Context, quota core.RoleRequestQuota) error {
+	s.setRole = &quota
 	return nil
 }
 

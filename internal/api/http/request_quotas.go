@@ -18,6 +18,26 @@ type requestQuotaBody struct {
 	SeasonPeriodDays int `json:"season_period_days"`
 }
 
+// requestQuotaInput decodes the contract's RequestQuotaInput, where every
+// field is required: a pointer left nil is a field the client omitted, and
+// an omitted limit must never silently become "no limit".
+type requestQuotaInput struct {
+	MovieLimit       *int `json:"movie_limit"`
+	MoviePeriodDays  *int `json:"movie_period_days"`
+	SeasonLimit      *int `json:"season_limit"`
+	SeasonPeriodDays *int `json:"season_period_days"`
+}
+
+func (in requestQuotaInput) complete() (requestQuotaBody, bool) {
+	if in.MovieLimit == nil || in.MoviePeriodDays == nil || in.SeasonLimit == nil || in.SeasonPeriodDays == nil {
+		return requestQuotaBody{}, false
+	}
+	return requestQuotaBody{
+		MovieLimit: *in.MovieLimit, MoviePeriodDays: *in.MoviePeriodDays,
+		SeasonLimit: *in.SeasonLimit, SeasonPeriodDays: *in.SeasonPeriodDays,
+	}, true
+}
+
 type requestQuotaResponse struct {
 	requestQuotaBody
 	ScopeID string `json:"scope_id"`
@@ -129,8 +149,13 @@ func (s *Server) decodeQuota(w http.ResponseWriter, r *http.Request) (core.Reque
 		writeError(w, r, s.logger, errUnsupportedMediaType)
 		return core.RequestQuota{}, false
 	}
-	body, err := httputil.DecodeJSON[requestQuotaBody](w, r, s.maxBodyBytes)
+	input, err := httputil.DecodeJSON[requestQuotaInput](w, r, s.maxBodyBytes)
 	if err != nil {
+		s.writeRequestError(w, r, core.ErrInvalidArgument)
+		return core.RequestQuota{}, false
+	}
+	body, ok := input.complete()
+	if !ok {
 		s.writeRequestError(w, r, core.ErrInvalidArgument)
 		return core.RequestQuota{}, false
 	}
