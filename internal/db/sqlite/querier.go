@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
@@ -18,11 +19,14 @@ type Querier interface {
 	// (sqlc.arg) are used because both engines accept them, whereas $1 and ? are
 	// engine-specific. Regenerate with: go tool sqlc generate.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
+	CreateAccountIdentity(ctx context.Context, arg CreateAccountIdentityParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
 	CreateMediaServer(ctx context.Context, arg CreateMediaServerParams) error
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
+	// OIDC identity queries are shared by SQLite and PostgreSQL.
+	GetAccountIdentity(ctx context.Context, arg GetAccountIdentityParams) (GetAccountIdentityRow, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
@@ -31,6 +35,8 @@ type Querier interface {
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
+	UpdateAccountIdentityLogin(ctx context.Context, arg UpdateAccountIdentityLoginParams) (int64, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
 }
 

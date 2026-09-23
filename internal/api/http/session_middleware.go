@@ -21,7 +21,7 @@ type sessionRequestState struct {
 	replacementReady bool
 	afterCommit      func()
 	onCommitFailed   func(error)
-	loginDeadline    time.Time
+	authDeadline     time.Time
 }
 
 type bufferedResponse struct {
@@ -82,7 +82,8 @@ func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (context.Co
 		token = cookie.Value
 	}
 	loadCtx := core.WithSessionLoadTracking(r.Context())
-	ctx, err := s.sessions.Load(loadCtx, token)
+	loader := s.sessionLoader(r)
+	ctx, err := loader.Load(loadCtx, token)
 	if err != nil {
 		s.writeSessionLoadFailure(w, r, inbound, err)
 		return nil, nil, false
@@ -92,6 +93,17 @@ func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (context.Co
 	return ctx, state, true
 }
 
+func (s *Server) sessionLoader(r *http.Request) *scs.SessionManager {
+	if r.URL.Path != "/api/v1/auth/oidc/callback" {
+		return s.sessions
+	}
+	// A callback may lose the atomic flow claim. Suppress the normal idle-expiry
+	// touch so that loser stays unmodified and cannot emit a stale cookie.
+	loader := *s.sessions
+	loader.IdleTimeout = 0
+	return &loader
+}
+
 func (s *Server) writeSessionLoadFailure(w http.ResponseWriter, r *http.Request, inbound bool, err error) {
 	reason := "internal_error"
 	if inbound && !errors.Is(err, core.ErrSessionStore) {
@@ -99,7 +111,15 @@ func (s *Server) writeSessionLoadFailure(w http.ResponseWriter, r *http.Request,
 		s.sessions.WriteSessionCookie(r.Context(), w, "", time.Time{})
 		w.Header().Set("Cache-Control", "no-store")
 	}
-	s.emitAuthAudit(r, "anonymous", "", "auth.session", routeResource(r), telemetry.AuditFailure, reason, clientIP(r, s.trustedProxyCIDRs))
+	if r.URL.Path == "/api/v1/auth/oidc/callback" && acceptsHTML(r.Header.Get("Accept")) {
+		if reason == "malformed_session" {
+			s.writeOIDCCallbackFailure(w, r, oidcErrorStateInvalid, "state_invalid", core.ErrOIDCRejected)
+			return
+		}
+		s.writeOIDCCallbackFailure(w, r, oidcErrorInternal, "internal_error", err)
+		return
+	}
+	s.emitAuthAudit(r, "anonymous", "auth.session", routeResource(r), telemetry.AuditFailure, reason, clientIP(r, s.trustedProxyCIDRs))
 	if reason == "malformed_session" {
 		writeError(w, r, s.logger, errAuthenticationRequired)
 		return
@@ -125,6 +145,10 @@ func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, 
 			if state.onCommitFailed != nil {
 				state.onCommitFailed(err)
 			}
+			if r.URL.Path == "/api/v1/auth/oidc/callback" && acceptsHTML(r.Header.Get("Accept")) {
+				s.writeOIDCBrowserRedirect(w, oidcErrorInternal)
+				return false
+			}
 			writeError(w, r, s.logger, err)
 			return false
 		}
@@ -141,8 +165,8 @@ func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, 
 }
 
 func (s *sessionRequestState) contextForCommit(fallback context.Context) (context.Context, context.CancelFunc) {
-	if !s.loginDeadline.IsZero() {
-		return context.WithDeadline(fallback, s.loginDeadline)
+	if !s.authDeadline.IsZero() {
+		return context.WithDeadline(fallback, s.authDeadline)
 	}
 	return fallback, func() {}
 }

@@ -17,9 +17,21 @@ type Account struct {
 	UsernameKey  string
 }
 
+type AccountIdentity struct {
+	AccountID     string
+	Provider      string
+	Issuer        string
+	Subject       string
+	UsernameClaim string
+	MappedRoles   string
+	CreatedAt     string
+	LastLoginAt   string
+}
+
 type AccountRole struct {
 	AccountID string
 	RoleID    string
+	Source    string
 }
 
 type AccountUsernameMigrationBackup struct {

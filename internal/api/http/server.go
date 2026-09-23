@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -43,6 +45,7 @@ type mediaServerManager interface {
 // flips. It never stores a request context.
 type Server struct {
 	httpServer            *http.Server
+	handlers              handlerTracker
 	logger                *slog.Logger
 	metrics               telemetry.Metrics
 	metricsHandler        http.Handler
@@ -59,6 +62,7 @@ type Server struct {
 	usernameAuditKey      [32]byte
 	loginLimiter          *loginLimiter
 	passwordVerifications chan struct{}
+	oidcExchanges         chan struct{}
 	authOperationTimeout  time.Duration
 	mediaOperationTimeout time.Duration
 	trustedProxyCIDRs     []netip.Prefix
@@ -66,6 +70,12 @@ type Server struct {
 	roles                 core.RoleReader
 	mediaServerReader     mediaServerReader
 	mediaServerManager    mediaServerManager
+	clock                 core.Clock
+	oidcProvider          core.OIDCProvider
+	oidcAccounts          core.OIDCAccountStore
+	oidcFlows             core.OIDCFlowStore
+	oidcConfig            config.OIDCConfig
+	publicURL             string
 }
 
 // Deps bundles the dependencies the server wires on top of config. Grouping
@@ -107,6 +117,16 @@ type Deps struct {
 	Clock core.Clock
 	// Auth contains validated session and rate-limit settings.
 	Auth config.AuthConfig
+	// OIDC is the optional generic OpenID Connect protocol adapter.
+	OIDC core.OIDCProvider
+	// OIDCAccounts resolves and provisions linked Bloom accounts atomically.
+	OIDCAccounts core.OIDCAccountStore
+	// OIDCFlows atomically claims persistent single-use callback state.
+	OIDCFlows core.OIDCFlowStore
+	// OIDCConfig holds validated provider mapping and display settings.
+	OIDCConfig config.OIDCConfig
+	// PublicURL is Bloom's validated externally visible origin.
+	PublicURL string
 }
 
 // metricsExposer is the optional seam a Metrics implementation can satisfy to
@@ -120,6 +140,75 @@ type metricsExposer interface {
 // chain. The readiness flag is shared with the shutdown sequence so it can flip
 // the server to unready before draining.
 func New(cfg config.HTTPConfig, deps Deps) *Server {
+	s := newServerState(cfg, deps)
+	s.configureAuthentication(cfg.WriteTimeout, deps)
+	s.configureMetrics(deps.Metrics)
+	s.httpServer = newHTTPServer(cfg, s.handlers.track(s.routes()))
+	return s
+}
+
+type handlerTracker struct {
+	mu     sync.Mutex
+	active int
+	idle   chan struct{}
+	sealed bool
+}
+
+func (t *handlerTracker) track(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !t.start() {
+			return
+		}
+		defer t.stop()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (t *handlerTracker) start() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.sealed {
+		return false
+	}
+	if t.active == 0 {
+		t.idle = make(chan struct{})
+	}
+	t.active++
+	return true
+}
+
+func (t *handlerTracker) stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active--
+	if t.active == 0 {
+		close(t.idle)
+	}
+}
+
+func (t *handlerTracker) wait(ctx context.Context) error {
+	t.mu.Lock()
+	if t.active == 0 {
+		t.mu.Unlock()
+		return nil
+	}
+	idle := t.idle
+	t.mu.Unlock()
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (t *handlerTracker) seal() {
+	t.mu.Lock()
+	t.sealed = true
+	t.mu.Unlock()
+}
+
+func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 	s := &Server{
 		logger:                deps.Logger,
 		metrics:               deps.Metrics,
@@ -139,10 +228,20 @@ func New(cfg config.HTTPConfig, deps Deps) *Server {
 		mediaServerReader:     deps.MediaServerReader,
 		mediaServerManager:    deps.MediaServerManager,
 		mediaOperationTimeout: derivedAuthOperationTimeout(cfg.WriteTimeout),
+		clock:                 deps.Clock,
+		oidcProvider:          deps.OIDC,
+		oidcAccounts:          deps.OIDCAccounts,
+		oidcFlows:             deps.OIDCFlows,
+		oidcConfig:            deps.OIDCConfig,
+		publicURL:             deps.PublicURL,
 	}
 	if s.audit == nil {
 		s.audit = telemetry.NopAuditLogger()
 	}
+	return s
+}
+
+func (s *Server) configureAuthentication(writeTimeout time.Duration, deps Deps) {
 	if authDependenciesPresent(deps) {
 		s.usernameAuditKey = deriveUsernameAuditKey(deps.AuditCorrelationKey)
 		s.loginLimiter = newLoginLimiter(
@@ -150,28 +249,33 @@ func New(cfg config.HTTPConfig, deps Deps) *Server {
 			deps.Auth.LoginRateBurst, deps.Auth.LoginRateMaxKeys,
 		)
 		s.passwordVerifications = make(chan struct{}, deps.Auth.LoginMaxConcurrent)
-		s.authOperationTimeout = derivedAuthOperationTimeout(cfg.WriteTimeout)
+		s.oidcExchanges = make(chan struct{}, oidcMaxConcurrentExchanges)
+		s.authOperationTimeout = derivedAuthOperationTimeout(writeTimeout)
 	}
-	if metrics, ok := deps.Metrics.(telemetry.AuditFailureMetrics); ok {
+}
+
+func (s *Server) configureMetrics(metrics telemetry.Metrics) {
+	if metrics, ok := metrics.(telemetry.AuditFailureMetrics); ok {
 		s.auditFailureMetrics = metrics
 	}
-	if metrics, ok := deps.Metrics.(telemetry.AuthorizationMetrics); ok {
+	if metrics, ok := metrics.(telemetry.AuthorizationMetrics); ok {
 		s.authorizationMetrics = metrics
 	}
-	if exposer, ok := deps.Metrics.(metricsExposer); ok {
+	if exposer, ok := metrics.(metricsExposer); ok {
 		s.metricsHandler = exposer.Handler()
 	}
+}
 
-	s.httpServer = &http.Server{
+func newHTTPServer(cfg config.HTTPConfig, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:    cfg.Addr,
-		Handler: s.routes(),
+		Handler: handler,
 		// Server-hardening defaults, per the handbook's services/http-services.md.
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
 	}
-	return s
 }
 
 func authDependenciesPresent(deps Deps) bool {
@@ -261,7 +365,7 @@ func (s *Server) sessionHandler(handler http.Handler, accountRequired bool) http
 
 func (s *Server) handleCSRFRejected(w http.ResponseWriter, r *http.Request) {
 	s.metrics.IncCSRFRejection()
-	s.emitAuthAudit(r, "anonymous", "", "auth.csrf", csrfAuditResource(r.URL.Path), telemetry.AuditFailure, "cross_origin", clientIP(r, s.trustedProxyCIDRs))
+	s.emitAuthAudit(r, "anonymous", "auth.csrf", csrfAuditResource(r.URL.Path), telemetry.AuditFailure, "cross_origin", clientIP(r, s.trustedProxyCIDRs))
 	writeJSON(w, r, s.logger, http.StatusForbidden, httputil.ErrorResponse{
 		Code: codeCSRFRejected, Message: "cross-origin request rejected",
 		RequestID: requestIDFrom(r.Context()),
@@ -278,6 +382,8 @@ func csrfAuditResource(path string) string {
 		return auditResourceAuthMe
 	case "/api/v1/auth/permissions":
 		return auditResourceAuthPermissions
+	case "/api/v1/auth/oidc/start":
+		return auditResourceAuthOIDCStart
 	case "/api/v1/roles":
 		return auditResourceRoles
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
@@ -317,6 +423,12 @@ func (s *Server) ListenAndServe() error {
 	return s.httpServer.ListenAndServe()
 }
 
+// Serve accepts HTTP connections from an already-bound listener. Runtime uses
+// this form so readiness is signaled only after binding succeeds.
+func (s *Server) Serve(listener net.Listener) error {
+	return s.httpServer.Serve(listener)
+}
+
 // Addr returns the configured listen address.
 func (s *Server) Addr() string { return s.httpServer.Addr }
 
@@ -330,6 +442,15 @@ func (s *Server) SetReady(ready bool) { s.readiness.Set(ready) }
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
+
+// Close prevents new handlers and force-closes active HTTP connections.
+func (s *Server) Close() error {
+	s.handlers.seal()
+	return s.httpServer.Close()
+}
+
+// WaitHandlers waits until every handler has returned.
+func (s *Server) WaitHandlers(ctx context.Context) error { return s.handlers.wait(ctx) }
 
 // Handler exposes the composed handler for in-process tests (httptest).
 func (s *Server) Handler() http.Handler { return s.httpServer.Handler }

@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -48,6 +50,40 @@ type nopSessionCleanupMetrics struct{}
 func (nopSessionCleanupMetrics) IncSessionCleanupFailure() {}
 
 var _ scs.CtxStore = (*sessionStore)(nil)
+
+type oidcFlowStore struct{ pool *sql.DB }
+
+var _ core.OIDCFlowStore = (*oidcFlowStore)(nil)
+
+// NewOIDCFlowStore returns the atomic persistent claim boundary for OIDC flows.
+func NewOIDCFlowStore(pool *sql.DB) (core.OIDCFlowStore, error) {
+	if pool == nil {
+		return nil, errors.New("OIDC flow store: nil database pool")
+	}
+	return &oidcFlowStore{pool: pool}, nil
+}
+
+func (s *oidcFlowStore) ClaimOIDCFlow(ctx context.Context, token string) (bool, error) {
+	if token == "" {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, sessionOperationLimit)
+	defer cancel()
+	digest := sha256.Sum256([]byte(token))
+	storedToken := base64.RawURLEncoding.EncodeToString(digest[:])
+	result, err := s.pool.ExecContext(ctx, "DELETE FROM sessions WHERE token = $1", storedToken)
+	if err != nil {
+		return false, fmt.Errorf("claim OIDC flow: %w", errors.Join(core.ErrSessionStore, err))
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read OIDC flow claim result: %w", errors.Join(core.ErrSessionStore, err))
+	}
+	if rows > 1 {
+		return false, fmt.Errorf("claim OIDC flow removed %d sessions: %w", rows, core.ErrSessionStore)
+	}
+	return rows == 1, nil
+}
 
 // NewSessionStore returns Bloom's context-aware SCS database adapter.
 func NewSessionStore(

@@ -56,10 +56,41 @@ func TestReadiness(t *testing.T) {
 }
 
 func TestPromMetricsRecordsAndExposes(t *testing.T) {
+	m := populatedPromMetrics(t)
+	assertPromMetricNames(t, m)
+	assertPromMetricLabels(t, m)
+	if m.Handler() == nil {
+		t.Error("Handler() = nil")
+	}
+}
+
+func TestPromMetricsBoundsLoginAttemptLabels(t *testing.T) {
+	t.Parallel()
+	metrics := NewPromMetrics("bounded")
+	metrics.IncLoginAttempt("arbitrary-provider", "arbitrary-outcome")
+	families, err := metrics.Registry().Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "bounded_login_attempts_total" {
+			continue
+		}
+		labels := family.GetMetric()[0].GetLabel()
+		if len(labels) != 2 || labels[0].GetValue() != "invalid" || labels[1].GetValue() != "invalid" {
+			t.Fatalf("login attempt labels = %+v, want invalid provider and outcome", labels)
+		}
+		return
+	}
+	t.Fatal("login attempt metric was not gathered")
+}
+
+func populatedPromMetrics(t *testing.T) *PromMetrics {
+	t.Helper()
 	m := NewPromMetrics("bloomtest")
 	m.IncRequest("GET /api/v1/version", "2xx")
 	m.ObserveRequest("GET /api/v1/version", "2xx", 0.01)
-	m.IncLoginAttempt("success")
+	m.IncLoginAttempt("local", "success")
 	m.IncCSRFRejection()
 	m.IncAuditWriteFailure()
 	m.IncSessionCleanupFailure()
@@ -72,8 +103,14 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 	for _, outcome := range []string{"scheduled", "exhausted", "budget_exhausted"} {
 		m.ObserveMediaServerRetry("jellyfin", "probe", outcome)
 	}
+	m.ObserveOIDCDependency("discovery", "request_success", 0.02)
+	m.ObserveOIDCDependency("jwks", "retry", 0)
+	return m
+}
 
-	families, err := m.Registry().Gather()
+func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
+	t.Helper()
+	families, err := metrics.Registry().Gather()
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -89,25 +126,39 @@ func TestPromMetricsRecordsAndExposes(t *testing.T) {
 		"bloomtest_authorization_denials_total",
 		"bloomtest_media_server_requests_total", "bloomtest_media_server_request_duration_seconds",
 		"bloomtest_media_server_retries_total",
+		"bloomtest_oidc_dependency_events_total", "bloomtest_oidc_dependency_duration_seconds",
 	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)
 		}
 	}
+}
+
+func assertPromMetricLabels(t *testing.T, metrics *PromMetrics) {
+	t.Helper()
+	families, err := metrics.Registry().Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	loginLabels := make(map[string]string)
 	for _, family := range families {
-		if family.GetName() != "bloomtest_authorization_denials_total" {
-			continue
+		if family.GetName() == "bloomtest_login_attempts_total" {
+			for _, label := range family.GetMetric()[0].GetLabel() {
+				loginLabels[label.GetName()] = label.GetValue()
+			}
 		}
-		metrics := family.GetMetric()
-		if len(metrics) != 1 || metrics[0].GetCounter().GetValue() != 1 ||
-			len(metrics[0].GetLabel()) != 1 || metrics[0].GetLabel()[0].GetName() != "permission" ||
-			metrics[0].GetLabel()[0].GetValue() != "admin.roles" {
-			t.Errorf("authorization denial metric = %+v", metrics)
+		if family.GetName() == "bloomtest_authorization_denials_total" {
+			values := family.GetMetric()
+			if len(values) != 1 || values[0].GetCounter().GetValue() != 1 ||
+				len(values[0].GetLabel()) != 1 || values[0].GetLabel()[0].GetName() != "permission" ||
+				values[0].GetLabel()[0].GetValue() != "admin.roles" {
+				t.Errorf("authorization denial metric = %+v", values)
+			}
 		}
 	}
-	assertRetryMetricOutcomes(t, m.Registry())
-	if m.Handler() == nil {
-		t.Error("Handler() = nil")
+	assertRetryMetricOutcomes(t, metrics.Registry())
+	if loginLabels["provider"] != "local" || loginLabels["outcome"] != "success" {
+		t.Errorf("login metric labels = %v", loginLabels)
 	}
 }
 
@@ -172,14 +223,14 @@ func TestAuditLoggerSchema(t *testing.T) {
 		"log_type": "audit", "actor": "acct-1", "action": "auth.login", "resource": "account:acct-1",
 		"result": "success", "request_id": "req-1", "time": "2026-09-22T11:00:00Z",
 		"reason": "authenticated", "source": "192.0.2.1", "subject_id": "username:opaque",
-		"permission": "admin.roles", "role": "owner", "kind": "",
+		"permission": "admin.roles", "role": "owner", "kind": "", "provider": "",
 	} {
 		if rec[k] != want {
 			t.Errorf("%s = %v, want %q", k, rec[k], want)
 		}
 	}
-	if len(rec) != 16 {
-		t.Fatalf("audit field count = %d, want 16: %v", len(rec), rec)
+	if len(rec) != 17 {
+		t.Fatalf("audit field count = %d, want 17: %v", len(rec), rec)
 	}
 }
 

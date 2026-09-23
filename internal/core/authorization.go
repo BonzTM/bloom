@@ -133,6 +133,7 @@ type Authorizer interface {
 // RoleReader supplies role data to administrative API responses.
 type RoleReader interface {
 	ListRoles(ctx context.Context, afterName string, pageSize int) ([]Role, error)
+	RoleExists(ctx context.Context, name string) (bool, error)
 }
 
 // AdminAccountStore applies operator-driven account-role changes atomically.

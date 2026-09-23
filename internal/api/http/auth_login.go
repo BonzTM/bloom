@@ -48,7 +48,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cancel context.CancelFunc
-	r, cancel = s.withLoginDeadline(r)
+	r, cancel = s.withAuthenticationDeadline(r)
 	defer cancel()
 	account, err := s.verifyCredentials(r.Context(), request.Username, request.Password)
 	if err != nil {
@@ -107,12 +107,12 @@ func (s *Server) createAuthenticatedSession(ctx context.Context, accountID strin
 
 func (s *Server) setLoginCommitTelemetry(state *sessionRequestState, r *http.Request, accountID, ip string) {
 	state.afterCommit = func() {
-		s.metrics.IncLoginAttempt("success")
-		s.emitAuthAudit(r, accountID, "", "auth.login", accountResource(accountID), telemetry.AuditSuccess, "authenticated", ip)
+		s.metrics.IncLoginAttempt("local", "success")
+		s.emitLocalLoginAudit(r, accountID, "", accountResource(accountID), telemetry.AuditSuccess, "authenticated", ip)
 	}
 	state.onCommitFailed = func(error) {
-		s.metrics.IncLoginAttempt("internal_error")
-		s.emitAuthAudit(r, accountID, "", "auth.login", accountResource(accountID), telemetry.AuditFailure, "internal_error", ip)
+		s.metrics.IncLoginAttempt("local", "internal_error")
+		s.emitLocalLoginAudit(r, accountID, "", accountResource(accountID), telemetry.AuditFailure, "internal_error", ip)
 	}
 }
 
@@ -143,10 +143,10 @@ func (s *Server) authenticateWithSlot(ctx context.Context, username, password st
 	return s.identity.Authenticate(ctx, username, password)
 }
 
-func (s *Server) withLoginDeadline(r *http.Request) (*http.Request, context.CancelFunc) {
+func (s *Server) withAuthenticationDeadline(r *http.Request) (*http.Request, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.authOperationTimeout)
 	state := sessionState(ctx)
-	state.loginDeadline, _ = ctx.Deadline()
+	state.authDeadline, _ = ctx.Deadline()
 	return r.WithContext(ctx), cancel
 }
 
@@ -203,13 +203,13 @@ func (s *Server) writeLoginFailure(w http.ResponseWriter, r *http.Request, usern
 		return
 	}
 	reason := string(failure.Reason)
-	s.metrics.IncLoginAttempt(reason)
+	s.metrics.IncLoginAttempt("local", reason)
 	s.emitFailedLoginAudit(r, username, reason, ip)
 	writeError(w, r, s.logger, core.ErrInvalidCredentials)
 }
 
 func (s *Server) writeLoginInternalError(w http.ResponseWriter, r *http.Request, username, ip string, err error) {
-	s.metrics.IncLoginAttempt("internal_error")
+	s.metrics.IncLoginAttempt("local", "internal_error")
 	s.emitFailedLoginAudit(r, username, "internal_error", ip)
 	writeError(w, r, s.logger, err)
 }
@@ -217,26 +217,26 @@ func (s *Server) writeLoginInternalError(w http.ResponseWriter, r *http.Request,
 func (s *Server) writeRateLimited(w http.ResponseWriter, r *http.Request, username, ip string, retry time.Duration) {
 	seconds := max(1, int((retry+time.Second-1)/time.Second))
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	s.metrics.IncLoginAttempt("rate_limited")
+	s.metrics.IncLoginAttempt("local", "rate_limited")
 	s.emitFailedLoginAudit(r, username, "rate_limited", ip)
 	writeError(w, r, s.logger, errRateLimited)
 }
 
 func (s *Server) writeAuthenticationBusy(w http.ResponseWriter, r *http.Request, username, ip string) {
 	w.Header().Set("Retry-After", "1")
-	s.metrics.IncLoginAttempt("overloaded")
+	s.metrics.IncLoginAttempt("local", "overloaded")
 	s.emitFailedLoginAudit(r, username, "overloaded", ip)
 	writeError(w, r, s.logger, errAuthenticationBusy)
 }
 
 func (s *Server) emitAuthAudit(
 	r *http.Request,
-	actor, subjectID, action, resource string,
+	actor, action, resource string,
 	result telemetry.AuditResult,
 	reason, ip string,
 ) {
 	err := s.audit.Emit(r.Context(), telemetry.AuditEvent{
-		Actor: actor, SubjectID: subjectID, Action: action, Resource: resource, Result: result,
+		Actor: actor, Action: action, Resource: resource, Result: result,
 		Reason: reason, Source: ip, RequestID: requestIDFrom(r.Context()),
 	})
 	if err == nil {
@@ -247,17 +247,39 @@ func (s *Server) emitAuthAudit(
 }
 
 func (s *Server) emitFailedLoginAudit(r *http.Request, username, reason, ip string) {
-	s.emitAuthAudit(r, "anonymous", s.usernameSubjectID(username), "auth.login", routeResource(r), telemetry.AuditFailure, reason, ip)
+	s.emitLocalLoginAudit(
+		r, "anonymous", s.usernameSubjectID(username), routeResource(r), telemetry.AuditFailure, reason, ip,
+	)
+}
+
+func (s *Server) emitLocalLoginAudit(
+	r *http.Request,
+	actor, subjectID, resource string,
+	result telemetry.AuditResult,
+	reason, ip string,
+) {
+	err := s.audit.Emit(r.Context(), telemetry.AuditEvent{
+		Actor: actor, SubjectID: subjectID, Action: "auth.login", Resource: resource, Result: result,
+		Reason: reason, Source: ip, Provider: telemetry.AuditProviderLocal, RequestID: requestIDFrom(r.Context()),
+	})
+	if err == nil {
+		return
+	}
+	s.auditFailureMetrics.IncAuditWriteFailure()
+	s.logger.ErrorContext(r.Context(), "write audit event", "error", err, "action", "auth.login")
 }
 
 const (
-	auditResourceRouteUnmatched  = "route:unmatched"
-	auditResourceAuthLogin       = "route:auth.login"
-	auditResourceAuthLogout      = "route:auth.logout"
-	auditResourceAuthMe          = "route:auth.me"
-	auditResourceAuthPermissions = "route:auth.permissions"
-	auditResourceRoles           = "route:roles"
-	auditResourceMediaServers    = "route:media_servers"
+	auditResourceRouteUnmatched   = "route:unmatched"
+	auditResourceAuthLogin        = "route:auth.login"
+	auditResourceAuthLogout       = "route:auth.logout"
+	auditResourceAuthMe           = "route:auth.me"
+	auditResourceAuthPermissions  = "route:auth.permissions"
+	auditResourceAuthProviders    = "route:auth.providers"
+	auditResourceAuthOIDCStart    = "route:auth.oidc.start"
+	auditResourceAuthOIDCCallback = "route:auth.oidc.callback"
+	auditResourceRoles            = "route:roles"
+	auditResourceMediaServers     = "route:media_servers"
 )
 
 func routeResource(r *http.Request) string {
@@ -270,6 +292,12 @@ func routeResource(r *http.Request) string {
 		return auditResourceAuthMe
 	case "/api/v1/auth/permissions":
 		return auditResourceAuthPermissions
+	case "/api/v1/auth/providers":
+		return auditResourceAuthProviders
+	case "/api/v1/auth/oidc/start":
+		return auditResourceAuthOIDCStart
+	case "/api/v1/auth/oidc/callback":
+		return auditResourceAuthOIDCCallback
 	case "/api/v1/roles":
 		return auditResourceRoles
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",

@@ -12,8 +12,8 @@ import (
 )
 
 const assignRoleIDToAccount = `-- name: AssignRoleIDToAccount :execrows
-INSERT INTO account_roles (account_id, role_id)
-VALUES ($1, $2)
+INSERT INTO account_roles (account_id, role_id, source)
+VALUES ($1, $2, 'manual')
 ON CONFLICT DO NOTHING
 `
 
@@ -31,7 +31,7 @@ func (q *Queries) AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToA
 }
 
 const getAuthorizationSnapshot = `-- name: GetAuthorizationSnapshot :many
-SELECT r.name AS role_name, rp.permission
+SELECT DISTINCT r.name AS role_name, rp.permission
 FROM account_roles ar
 JOIN roles r ON r.id = ar.role_id
 LEFT JOIN role_permissions rp ON rp.role_id = r.id

@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -24,6 +26,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/mediaserver"
+	oidcadapter "github.com/BonzTM/bloom/internal/oidc"
 	"github.com/BonzTM/bloom/internal/secrets"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -39,17 +42,46 @@ type Streams struct {
 	Console io.Writer
 }
 
+// Dependencies are process facilities injected for deterministic startup and
+// retry tests. Production Run supplies their system implementations.
+type Dependencies struct {
+	Clock             core.Clock
+	OIDCRandom        func(time.Duration) (time.Duration, error)
+	OIDCWait          func(context.Context, time.Duration) error
+	ListenerReady     func(net.Addr)
+	newTracerProvider func(context.Context, config.TelemetryConfig, string, string) (tracerLifecycle, error)
+	openStore         func(context.Context, config.Config, *slog.Logger, *telemetry.PromMetrics) (*sql.DB, error)
+	listen            func(context.Context, string, string) (net.Listener, error)
+	newOIDCProvider   func(context.Context, config.OIDCConfig, oidcadapter.Dependencies) (oidcLifecycle, error)
+}
+
+type tracerLifecycle interface {
+	Shutdown(context.Context) error
+}
+
+type oidcLifecycle interface {
+	core.OIDCProvider
+	Close(context.Context) error
+}
+
+type mediaConnectionCloser interface {
+	CloseIdleConnections()
+}
+
 // systemClock is the production core.Clock. No core package reads the wall
 // clock directly.
 type systemClock struct{}
 
 func (systemClock) Now() time.Time { return time.Now() }
 
+const oidcRoleValidationTimeout = 5 * time.Second
+
 // Run wires the service and blocks until ctx is cancelled (a signal) or a
 // component fails, then performs the ordered shutdown. It returns nil on a
 // clean stop. In -migrate mode it applies migrations and returns without
 // serving.
-func Run(ctx context.Context, cfg config.Config, streams Streams) error {
+func Run(ctx context.Context, cfg config.Config, streams Streams, supplied ...Dependencies) error {
+	deps := runtimeDependencies(supplied)
 	logger := telemetry.NewLogger(streams.Log, cfg.Telemetry)
 	logger.Info("starting",
 		"service", buildinfo.Name,
@@ -65,77 +97,137 @@ func Run(ctx context.Context, cfg config.Config, streams Streams) error {
 	if cfg.Migrate {
 		return Migrate(ctx, cfg, logger)
 	}
+	return runService(ctx, cfg, streams.Audit, logger, deps)
+}
 
+func runService(
+	ctx context.Context, cfg config.Config, auditSink io.Writer, logger *slog.Logger, deps Dependencies,
+) (retErr error) {
 	metrics := telemetry.NewPromMetrics(buildinfo.Name)
-	tracerProvider, err := telemetry.NewTracerProvider(ctx, cfg.Telemetry, buildinfo.Name, buildinfo.Version)
+	tracerProvider, err := deps.newTracerProvider(ctx, cfg.Telemetry, buildinfo.Name, buildinfo.Version)
 	if err != nil {
 		return fmt.Errorf("init tracing: %w", err)
 	}
-	return runInitialized(ctx, cfg, streams, logger, metrics, tracerProvider)
-}
-
-type tracerShutdowner interface {
-	Shutdown(context.Context) error
-}
-
-type shutdownServer interface {
-	SetReady(bool)
-	Shutdown(context.Context) error
-}
-
-type mediaConnectionCloser interface {
-	CloseIdleConnections()
-}
-
-func runInitialized(
-	ctx context.Context, cfg config.Config, streams Streams, logger *slog.Logger,
-	metrics *telemetry.PromMetrics, tracerProvider tracerShutdowner,
-) error {
-	pool, err := openStore(ctx, cfg, logger, metrics)
+	ownership := startupOwnership{tracer: tracerProvider, grace: cfg.ShutdownGrace}
+	defer ownership.cleanup(&retErr)
+	pool, err := deps.openStore(ctx, cfg, logger, metrics)
 	if err != nil {
-		return cleanupStartupFailure(err, nil, nil, tracerProvider, cfg.ShutdownGrace)
+		return err
 	}
-	clock := systemClock{}
-	if bootstrapErr := bootstrapFirstAdmin(ctx, cfg, streams.Audit, pool, logger, clock); bootstrapErr != nil {
-		return cleanupStartupFailure(bootstrapErr, nil, pool, tracerProvider, cfg.ShutdownGrace)
+	ownership.pool = pool
+	clock := deps.Clock
+	if bootstrapErr := bootstrapFirstAdmin(ctx, cfg, auditSink, pool, logger, clock); bootstrapErr != nil {
+		return bootstrapErr
 	}
 	accounts, localIdentities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, clock)
 	if err != nil {
-		return cleanupStartupFailure(err, nil, pool, tracerProvider, cfg.ShutdownGrace)
+		return err
 	}
 	mediaServers, err := mediaServerDependencies(pool, cfg, metrics, clock)
 	if err != nil {
-		return cleanupStartupFailure(err, nil, pool, tracerProvider, cfg.ShutdownGrace)
+		return err
 	}
+	ownership.media = mediaServers
+	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
+		return roleErr
+	}
+	oidcProvider, oidcAccounts, oidcFlows, err := oidcDependencies(ctx, pool, cfg, metrics, deps)
+	if err != nil {
+		return err
+	}
+	ownership.provider = oidcProvider
 	srv, err := assembleHTTPServer(
-		cfg, streams.Audit, logger, metrics, pool,
+		cfg, auditSink, logger, metrics, pool,
 		accounts, localIdentities, authorizer, roles, sessions, mediaServers, clock,
+		oidcProvider, oidcAccounts, oidcFlows,
 	)
 	if err != nil {
-		return cleanupStartupFailure(err, mediaServers, pool, tracerProvider, cfg.ShutdownGrace)
+		return err
 	}
 
-	return serve(ctx, srv, mediaServers, pool, tracerProvider, logger, cfg.ShutdownGrace)
+	serving, err := serve(
+		ctx, srv, oidcProvider, mediaServers, pool, tracerProvider, logger, cfg.ShutdownGrace,
+		deps.ListenerReady, deps.listen,
+	)
+	if serving {
+		ownership.transferred = true
+	}
+	return err
 }
 
-func cleanupStartupFailure(
-	startupErr error,
-	media mediaConnectionCloser,
-	pool io.Closer,
-	tracerProvider tracerShutdowner,
-	grace time.Duration,
-) error {
-	var cleanupErr error
+type startupOwnership struct {
+	tracer      tracerLifecycle
+	pool        io.Closer
+	provider    oidcLifecycle
+	media       mediaConnectionCloser
+	grace       time.Duration
+	transferred bool
+}
+
+func (o *startupOwnership) cleanup(retErr *error) {
+	if o.transferred {
+		return
+	}
+	*retErr = errors.Join(*retErr, closeOIDCProvider(o.provider, o.grace))
+	closeMediaConnections(o.media)
+	if o.pool != nil {
+		*retErr = errors.Join(*retErr, o.pool.Close())
+	}
+	*retErr = errors.Join(*retErr, shutdownTracer(o.tracer, o.grace))
+}
+
+func runtimeDependencies(supplied []Dependencies) Dependencies {
+	deps := Dependencies{Clock: systemClock{}}
+	if len(supplied) > 0 {
+		deps = supplied[0]
+	}
+	if deps.Clock == nil {
+		deps.Clock = systemClock{}
+	}
+	if deps.newTracerProvider == nil {
+		deps.newTracerProvider = func(
+			ctx context.Context, cfg config.TelemetryConfig, name, version string,
+		) (tracerLifecycle, error) {
+			return telemetry.NewTracerProvider(ctx, cfg, name, version)
+		}
+	}
+	if deps.openStore == nil {
+		deps.openStore = openStore
+	}
+	if deps.listen == nil {
+		deps.listen = func(ctx context.Context, network, address string) (net.Listener, error) {
+			return (&net.ListenConfig{}).Listen(ctx, network, address)
+		}
+	}
+	if deps.newOIDCProvider == nil {
+		deps.newOIDCProvider = func(
+			ctx context.Context, cfg config.OIDCConfig, adapterDeps oidcadapter.Dependencies,
+		) (oidcLifecycle, error) {
+			return oidcadapter.New(ctx, cfg, adapterDeps)
+		}
+	}
+	return deps
+}
+
+func shutdownTracer(provider tracerLifecycle, grace time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	return provider.Shutdown(ctx)
+}
+
+func closeOIDCProvider(provider oidcLifecycle, grace time.Duration) error {
+	if provider == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownPhaseBudget(grace, 5*time.Second))
+	defer cancel()
+	return wrapShutdownError("close OpenID Connect provider", provider.Close(ctx))
+}
+
+func closeMediaConnections(media mediaConnectionCloser) {
 	if media != nil {
 		media.CloseIdleConnections()
 	}
-	if pool != nil {
-		cleanupErr = pool.Close()
-	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), grace)
-	defer cancel()
-	cleanupErr = errors.Join(cleanupErr, tracerProvider.Shutdown(shutdownCtx))
-	return errors.Join(startupErr, cleanupErr)
 }
 
 func bootstrapFirstAdmin(
@@ -167,6 +259,9 @@ func assembleHTTPServer(
 	sessions *scs.SessionManager,
 	mediaServers *mediaserver.Service,
 	clock core.Clock,
+	oidcProvider core.OIDCProvider,
+	oidcAccounts core.OIDCAccountStore,
+	oidcFlows core.OIDCFlowStore,
 ) (*httpapi.Server, error) {
 	dist, err := web.Dist()
 	if err != nil {
@@ -190,6 +285,11 @@ func assembleHTTPServer(
 		AuditCorrelationKey: cfg.SecretKey.Bytes(),
 		Clock:               clock,
 		Auth:                cfg.Auth,
+		OIDC:                oidcProvider,
+		OIDCAccounts:        oidcAccounts,
+		OIDCFlows:           oidcFlows,
+		OIDCConfig:          cfg.OIDC,
+		PublicURL:           cfg.PublicURL,
 	}), nil
 }
 
@@ -217,6 +317,59 @@ func mediaServerDependencies(
 		return nil, fmt.Errorf("build media server service: %w", err)
 	}
 	return service, nil
+}
+
+func oidcDependencies(
+	ctx context.Context,
+	pool *sql.DB,
+	cfg config.Config,
+	metrics oidcadapter.Metrics,
+	deps Dependencies,
+) (oidcLifecycle, core.OIDCAccountStore, core.OIDCFlowStore, error) {
+	if !cfg.OIDC.Enabled {
+		return nil, nil, nil, nil
+	}
+	accounts, err := db.NewOIDCAccountStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build OIDC account store: %w", err)
+	}
+	flows, err := db.NewOIDCFlowStore(pool)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build OIDC flow store: %w", err)
+	}
+	provider, err := deps.newOIDCProvider(ctx, cfg.OIDC, oidcadapter.Dependencies{
+		Metrics: metrics, Clock: deps.Clock, Random: deps.OIDCRandom, Wait: deps.OIDCWait,
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("initialize OIDC provider: %w", err)
+	}
+	return provider, accounts, flows, nil
+}
+
+func validateOIDCRoles(ctx context.Context, roles core.RoleReader, cfg config.OIDCConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	validationCtx, cancel := context.WithTimeout(ctx, oidcRoleValidationTimeout)
+	defer cancel()
+	targets := make([]string, 0, len(cfg.RoleMap)+1)
+	if cfg.DefaultRole != "" {
+		targets = append(targets, cfg.DefaultRole)
+	}
+	for _, role := range cfg.RoleMap {
+		targets = append(targets, role)
+	}
+	slices.Sort(targets)
+	for _, role := range slices.Compact(targets) {
+		exists, err := roles.RoleExists(validationCtx, role)
+		if err != nil {
+			return fmt.Errorf("validate configured OIDC role %q: %w", role, err)
+		}
+		if !exists {
+			return fmt.Errorf("validate configured OIDC role %q: role does not exist", role)
+		}
+	}
+	return nil
 }
 
 func authDependencies(
@@ -290,19 +443,36 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metr
 func serve(
 	ctx context.Context,
 	srv *httpapi.Server,
+	oidcProvider oidcLifecycle,
 	media mediaConnectionCloser,
 	pool *sql.DB,
-	tp tracerShutdowner,
+	tp tracerLifecycle,
 	logger *slog.Logger,
 	grace time.Duration,
-) error {
+	listenerReady func(net.Addr),
+	listen func(context.Context, string, string) (net.Listener, error),
+) (bool, error) {
+	listener, err := listen(ctx, "tcp", srv.Addr())
+	if err != nil {
+		return false, fmt.Errorf("listen HTTP: %w", err)
+	}
+	listenerOwned := true
+	defer func() {
+		if listenerOwned {
+			_ = listener.Close()
+		}
+	}()
 	g, gctx := errgroup.WithContext(ctx)
+	serving := make(chan struct{})
 
 	g.Go(func() error {
-		// Dependencies are wired and the listener is about to accept: ready.
 		srv.SetReady(true)
-		logger.Info("http listening", "addr", srv.Addr())
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Info("http listening", "addr", listener.Addr().String())
+		if listenerReady != nil {
+			listenerReady(listener.Addr())
+		}
+		close(serving)
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http serve: %w", err)
 		}
 		return nil
@@ -310,14 +480,16 @@ func serve(
 
 	g.Go(func() error {
 		<-gctx.Done()
-		return shutdown(srv, media, pool, tp, logger, grace)
+		return shutdown(srv, oidcProvider, media, pool, tp, logger, grace)
 	})
 
+	<-serving
+	listenerOwned = false
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("run: %w", err)
+		return true, fmt.Errorf("run: %w", err)
 	}
 	logger.Info("stopped")
-	return nil
+	return true, nil
 }
 
 // Migrate is the one-shot -migrate mode: open the pool, apply all pending
@@ -340,43 +512,148 @@ func Migrate(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	return nil
 }
 
-// shutdown drains and releases resources in reverse dependency order under a
-// bounded grace budget: flip readiness, drain HTTP with a FRESH deadline,
-// close media connections and the pool, then flush telemetry last.
+// shutdown drains and releases resources in reverse dependency order under
+// one absolute grace deadline.
 func shutdown(
-	srv shutdownServer,
-	media mediaConnectionCloser,
-	pool io.Closer,
-	tp tracerShutdowner,
-	logger *slog.Logger,
-	grace time.Duration,
+	srv *httpapi.Server, oidcProvider oidcLifecycle, media mediaConnectionCloser, pool *sql.DB,
+	tp tracerLifecycle, logger *slog.Logger, grace time.Duration,
 ) error {
 	logger.Info("shutting down", "grace", grace)
-
-	// Detach from the cancelled root context: shutdown gets its own deadline.
-	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	plan := newShutdownPlan(time.Now(), grace)
+	ctx, cancel := context.WithDeadline(context.Background(), plan.end())
 	defer cancel()
-
-	// 1. Unready so load balancers stop routing new traffic while existing
-	//    requests drain. Liveness stays green.
-	srv.SetReady(false)
-
-	// 2. Stop accepting connections and wait for in-flight requests to finish.
-	var cleanupErr error
-	cleanupErr = errors.Join(cleanupErr, wrapCleanupError("http shutdown", srv.Shutdown(ctx)))
-
-	// 3. Close media-server connections after their callers have drained.
-	media.CloseIdleConnections()
-
-	// 4. Close the pool now that no request can still be using it.
-	cleanupErr = errors.Join(cleanupErr, wrapCleanupError("close database", pool.Close()))
-
-	// 5. Flush telemetry last so the steps above are recorded.
-	cleanupErr = errors.Join(cleanupErr, wrapCleanupError("telemetry flush", tp.Shutdown(ctx)))
-	return cleanupErr
+	return executeShutdown(ctx, plan, runtimeShutdownPhases(srv, oidcProvider, media, pool, tp))
 }
 
-func wrapCleanupError(operation string, err error) error {
+type shutdownPhases struct {
+	setReady       func(bool)
+	drainHTTP      func(context.Context) error
+	forceCloseHTTP func(context.Context) error
+	waitHandlers   func(context.Context) error
+	closeProvider  func(context.Context) error
+	closeMedia     func(context.Context) error
+	closeDatabase  func(context.Context) error
+	flushTelemetry func(context.Context) error
+}
+
+type shutdownPhase uint8
+
+const (
+	shutdownDrain shutdownPhase = iota
+	shutdownHandlerWait
+	shutdownProviderClose
+	shutdownDatabaseClose
+	shutdownTelemetryFlush
+)
+
+type shutdownPlan struct {
+	start time.Time
+	grace time.Duration
+}
+
+func newShutdownPlan(start time.Time, grace time.Duration) shutdownPlan {
+	return shutdownPlan{start: start, grace: grace}
+}
+
+func (p shutdownPlan) end() time.Time { return p.deadline(shutdownTelemetryFlush) }
+
+func (p shutdownPlan) deadline(phase shutdownPhase) time.Time {
+	units := int64(10)
+	switch phase {
+	case shutdownDrain:
+		units = 5
+	case shutdownHandlerWait:
+		units = 7
+	case shutdownProviderClose:
+		units = 8
+	case shutdownDatabaseClose:
+		units = 9
+	case shutdownTelemetryFlush:
+		units = 10
+	}
+	offset := p.grace/10*time.Duration(units) + p.grace%10*time.Duration(units)/10
+	return p.start.Add(offset)
+}
+
+func runtimeShutdownPhases(
+	srv *httpapi.Server, provider oidcLifecycle, media mediaConnectionCloser,
+	pool *sql.DB, tracer tracerLifecycle,
+) shutdownPhases {
+	return shutdownPhases{
+		setReady:       srv.SetReady,
+		drainHTTP:      srv.Shutdown,
+		forceCloseHTTP: func(context.Context) error { return srv.Close() },
+		waitHandlers:   srv.WaitHandlers,
+		closeProvider: func(ctx context.Context) error {
+			if provider == nil {
+				return nil
+			}
+			return provider.Close(ctx)
+		},
+		closeMedia: func(context.Context) error {
+			closeMediaConnections(media)
+			return nil
+		},
+		closeDatabase:  func(context.Context) error { return pool.Close() },
+		flushTelemetry: tracer.Shutdown,
+	}
+}
+
+func executeShutdown(ctx context.Context, plan shutdownPlan, phases shutdownPhases) error {
+	phases.setReady(false)
+	var shutdownErr error
+	drainErr := runShutdownPhase(ctx, plan, shutdownDrain, phases.drainHTTP)
+	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("http shutdown", drainErr))
+	if drainErr != nil {
+		forceErr := runShutdownPhase(ctx, plan, shutdownHandlerWait, phases.forceCloseHTTP)
+		shutdownErr = errors.Join(shutdownErr, wrapShutdownError("force close HTTP", forceErr))
+	}
+	waitErr := runShutdownPhase(ctx, plan, shutdownHandlerWait, phases.waitHandlers)
+	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("wait for HTTP handlers", waitErr))
+	if waitErr != nil {
+		return shutdownErr
+	}
+	providerErr := runShutdownPhase(ctx, plan, shutdownProviderClose, phases.closeProvider)
+	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("close OpenID Connect provider", providerErr))
+	mediaErr := runShutdownPhase(ctx, plan, shutdownProviderClose, phases.closeMedia)
+	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("close media-server connections", mediaErr))
+	databaseErr := runShutdownPhase(ctx, plan, shutdownDatabaseClose, phases.closeDatabase)
+	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("close database", databaseErr))
+	telemetryErr := runShutdownPhase(ctx, plan, shutdownTelemetryFlush, phases.flushTelemetry)
+	shutdownErr = errors.Join(shutdownErr, wrapShutdownError("telemetry flush", telemetryErr))
+	return shutdownErr
+}
+
+func runShutdownPhase(
+	ctx context.Context, plan shutdownPlan, phase shutdownPhase, operation func(context.Context) error,
+) error {
+	phaseCtx, cancel := context.WithDeadline(ctx, plan.deadline(phase))
+	defer cancel()
+	return runBoundedShutdownOperation(phaseCtx, operation)
+}
+
+func runBoundedShutdownOperation(ctx context.Context, operation func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- operation(ctx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func shutdownPhaseBudget(grace, maximum time.Duration) time.Duration {
+	if grace < maximum {
+		return grace
+	}
+	return maximum
+}
+
+func wrapShutdownError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}

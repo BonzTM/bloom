@@ -34,6 +34,8 @@ type PromMetrics struct {
 	mediaServerRequests    *prometheus.CounterVec
 	mediaServerSeconds     *prometheus.HistogramVec
 	mediaServerRetries     *prometheus.CounterVec
+	oidcDependencyEvents   *prometheus.CounterVec
+	oidcDependencySeconds  *prometheus.HistogramVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -44,6 +46,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	httpCollectors := newHTTPCollectors(namespace)
 	authCollectors := newAuthenticationCollectors(namespace)
 	mediaCollectors := newMediaServerCollectors(namespace)
+	oidcCollectors := newOIDCCollectors(namespace)
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -55,7 +58,9 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		sessionCleanupFailures: authCollectors.sessionCleanupFailures,
 		authorizationDenials:   authCollectors.authorizationDenials,
 		mediaServerRequests:    mediaCollectors.requests, mediaServerSeconds: mediaCollectors.seconds,
-		mediaServerRetries: mediaCollectors.retries,
+		mediaServerRetries:    mediaCollectors.retries,
+		oidcDependencyEvents:  oidcCollectors.events,
+		oidcDependencySeconds: oidcCollectors.seconds,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -92,8 +97,8 @@ func newAuthenticationCollectors(namespace string) authenticationCollectors {
 	return authenticationCollectors{
 		loginAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace, Name: "login_attempts_total",
-			Help: "Total local login attempts by finite outcome.",
-		}, []string{"outcome"}),
+			Help: "Total login attempts by provider and finite outcome.",
+		}, []string{"provider", "outcome"}),
 		csrfRejections: newCounter(namespace, "csrf_rejections_total",
 			"Total cross-origin state-changing requests rejected."),
 		auditWriteFailures: newCounter(namespace, "audit_write_failures_total",
@@ -133,6 +138,33 @@ func newMediaServerCollectors(namespace string) mediaServerCollectors {
 	}
 }
 
+type oidcCollectors struct {
+	events  *prometheus.CounterVec
+	seconds *prometheus.HistogramVec
+}
+
+func newOIDCCollectors(namespace string) oidcCollectors {
+	return oidcCollectors{
+		events:  newOIDCDependencyCounter(namespace),
+		seconds: newOIDCDependencyHistogram(namespace),
+	}
+}
+
+func newOIDCDependencyCounter(namespace string) *prometheus.CounterVec {
+	return prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "oidc_dependency_events_total",
+		Help: "OIDC dependency events by finite operation and outcome.",
+	}, []string{"dependency", "operation", "outcome"})
+}
+
+func newOIDCDependencyHistogram(namespace string) *prometheus.HistogramVec {
+	return prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Name: "oidc_dependency_duration_seconds",
+		Help:    "OIDC dependency request latency by finite operation and outcome.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"dependency", "operation", "outcome"})
+}
+
 func newAuthorizationDenialCounter(namespace string) *prometheus.CounterVec {
 	return prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
@@ -153,6 +185,8 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.mediaServerRequests,
 		m.mediaServerSeconds,
 		m.mediaServerRetries,
+		m.oidcDependencyEvents,
+		m.oidcDependencySeconds,
 	)
 }
 
@@ -165,6 +199,34 @@ func (m *PromMetrics) ObserveMediaServerRetry(kind, operation, outcome string) {
 func (m *PromMetrics) ObserveMediaServerRequest(kind, operation, outcome string, seconds float64) {
 	m.mediaServerRequests.WithLabelValues(kind, operation, outcome).Inc()
 	m.mediaServerSeconds.WithLabelValues(kind, operation, outcome).Observe(seconds)
+}
+
+// ObserveOIDCDependency records a bounded OIDC dependency event and request latency.
+func (m *PromMetrics) ObserveOIDCDependency(operation, outcome string, seconds float64) {
+	operation = boundedOIDCOperation(operation)
+	outcome = boundedOIDCOutcome(outcome)
+	m.oidcDependencyEvents.WithLabelValues("oidc", operation, outcome).Inc()
+	if outcome == "request_success" || outcome == "request_failure" || outcome == "timeout" {
+		m.oidcDependencySeconds.WithLabelValues("oidc", operation, outcome).Observe(seconds)
+	}
+}
+
+func boundedOIDCOperation(value string) string {
+	switch value {
+	case "discovery", "token_exchange", "jwks":
+		return value
+	default:
+		return "invalid"
+	}
+}
+
+func boundedOIDCOutcome(value string) string {
+	switch value {
+	case "request_success", "request_failure", "retry", "timeout", "exhausted":
+		return value
+	default:
+		return "invalid"
+	}
 }
 
 // IncCSRFRejection records one rejected cross-origin write.
@@ -185,9 +247,29 @@ func (m *PromMetrics) IncAuthorizationDenial(permission core.CatalogPermission) 
 	m.authorizationDenials.WithLabelValues(string(label)).Inc()
 }
 
-// IncLoginAttempt records one local login attempt with a finite outcome.
-func (m *PromMetrics) IncLoginAttempt(outcome string) {
-	m.loginAttempts.WithLabelValues(outcome).Inc()
+// IncLoginAttempt records one login attempt with finite provider and outcome labels.
+func (m *PromMetrics) IncLoginAttempt(provider, outcome string) {
+	m.loginAttempts.WithLabelValues(boundedLoginProvider(provider), boundedLoginOutcome(outcome)).Inc()
+}
+
+func boundedLoginProvider(value string) string {
+	switch value {
+	case "local", "oidc":
+		return value
+	default:
+		return "invalid"
+	}
+}
+
+func boundedLoginOutcome(value string) string {
+	switch value {
+	case "success", "unknown_user", "bad_password", "disabled", "rate_limited", "overloaded",
+		"internal_error", "state_invalid", "token_invalid", "provider_unavailable",
+		"provisioning_disabled", "unknown_identity":
+		return value
+	default:
+		return "invalid"
+	}
 }
 
 // IncRequest records one handled request. Both labels must be low-cardinality

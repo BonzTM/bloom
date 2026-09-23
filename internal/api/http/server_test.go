@@ -40,18 +40,20 @@ func (p *fakePinger) fail(err error) {
 // countingMetrics records how many times IncRequest fires so a test can prove
 // which routes flow through the logging+metrics middleware.
 type countingMetrics struct {
-	mu            sync.Mutex
-	requests      int
-	logins        []string
-	csrf          int
-	auditFailures int
-	authzDenials  int
+	mu             sync.Mutex
+	requests       int
+	logins         []string
+	loginProviders []string
+	csrf           int
+	auditFailures  int
+	authzDenials   int
 }
 
-func (m *countingMetrics) IncLoginAttempt(outcome string) {
+func (m *countingMetrics) IncLoginAttempt(provider, outcome string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.logins = append(m.logins, outcome)
+	m.loginProviders = append(m.loginProviders, provider)
 }
 
 func (m *countingMetrics) IncRequest(string, string) {
@@ -162,6 +164,9 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 	want := []apiRoute{
 		{method: http.MethodGet, path: "/api/v1/version", access: routePublic},
 		{method: http.MethodGet, path: "/api/v1/auth/permissions", access: routePublic},
+		{method: http.MethodGet, path: "/api/v1/auth/providers", access: routePublic},
+		{method: http.MethodPost, path: "/api/v1/auth/oidc/start", access: routePublic, sessions: true, authRequired: true, oidc: true},
+		{method: http.MethodGet, path: "/api/v1/auth/oidc/callback", access: routePublic, sessions: true, authRequired: true, oidc: true},
 		{method: http.MethodPost, path: "/api/v1/auth/login", access: routePublic, sessions: true, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true},
@@ -180,7 +185,7 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		got := apiRouteInventory[index]
 		if got.method != expected.method || got.path != expected.path || got.access != expected.access ||
 			got.permission != expected.permission || got.sessions != expected.sessions ||
-			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot {
+			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot || got.oidc != expected.oidc {
 			t.Errorf("route %d = %+v, want %+v", index, got, expected)
 		}
 		if got.access != routePublic && !got.usesSessionAccount() {
