@@ -24,6 +24,12 @@ import type {
   Watch,
 } from "../features/playback/api/playback-schemas.js";
 import {
+  createMediaRequestSchema,
+  type MetadataSeries,
+  type MetadataTitle,
+} from "../features/requests/api/metadata-schemas.js";
+import {
+  mediaKindSchema,
   metadataKeyRequestSchema,
   requestDecisionSchema,
   requestProfileInputSchema,
@@ -175,6 +181,11 @@ export const errorCodeSchema = z.enum([
   "forbidden",
   "media_server_failure",
   "username_unavailable",
+  "metadata_not_configured",
+  "metadata_provider_failure",
+  "request_quota_exceeded",
+  "request_profile_in_use",
+  "invalid_request_transition",
 ]);
 
 export type ErrorCode = z.output<typeof errorCodeSchema>;
@@ -854,6 +865,7 @@ export const mockRequests: readonly MediaRequest[] = [
     title: "The Prestige",
     year: 2006,
     poster_path: "",
+    requester_account_id: mockAccount.id,
     status: "declined",
     decision_reason: "Already on the shelf.",
     decided_by_account_id: mockAccount.id,
@@ -866,6 +878,7 @@ export const mockRequests: readonly MediaRequest[] = [
     provider_id: "27205",
     title: "Inception",
     year: 2010,
+    requester_account_id: mockAccount.id,
     status: "available",
     decided_by_account_id: mockAccount.id,
     decided_at: "2026-09-19T12:00:00Z",
@@ -884,6 +897,7 @@ export function resetMockRequests(): void {
   requests = [...mockRequests];
   tmdbKeyConfigured = false;
   createdProfiles = 0;
+  createdRequests = 0;
 }
 
 export function setMockTmdbKeyConfigured(configured: boolean): void {
@@ -899,6 +913,20 @@ function permissionDenial(permission: KnownPermission) {
   }
   if (!granted.includes(permission)) {
     return envelope(403, "forbidden", `missing permission ${permission}`);
+  }
+  return undefined;
+}
+
+function anyPermissionDenial(needed: readonly KnownPermission[]) {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!needed.some((permission) => granted.includes(permission))) {
+    return envelope(
+      403,
+      "forbidden",
+      `missing permission ${needed.join(" or ")}`,
+    );
   }
   return undefined;
 }
@@ -959,6 +987,10 @@ function removeProfile(id: string | readonly string[] | undefined) {
 }
 
 function listRequests(url: URL) {
+  if (!granted.includes("requests.approve")) {
+    // A reader without requests.approve only ever sees their own.
+    url.searchParams.set("requester_id", mockAccount.id);
+  }
   const statuses = url.searchParams.getAll("status");
   const requesters = url.searchParams.getAll("requester_id");
   if (statuses.length > 1 || requesters.length > 1) {
@@ -1041,12 +1073,195 @@ function removeTmdbKey() {
   return new HttpResponse(null, { status: 204 });
 }
 
+// The metadata provider's catalogue as the mock knows it. Searching matches
+// on the title; "unconfigured" and "broken" exercise the two failure modes.
+export const UNCONFIGURED_QUERY = "unconfigured";
+export const BROKEN_QUERY = "broken";
+export const QUOTA_MOVIE_ID = "550";
+export const MISSING_TITLE_ID = "99999";
+const MOCK_MOVIE_ID = "438631";
+
+export const mockCatalogue: readonly MetadataTitle[] = [
+  {
+    kind: "movie",
+    provider: "tmdb",
+    provider_id: "949",
+    title: "Heat",
+    year: 1995,
+    overview: "A group of professional bank robbers start to feel the heat.",
+    poster_path: "/heat.jpg",
+  },
+  {
+    kind: "movie",
+    provider: "tmdb",
+    provider_id: MOCK_MOVIE_ID,
+    title: "Dune",
+    year: 2021,
+    overview:
+      "Paul Atreides travels to the most dangerous planet in the universe.",
+    poster_path: "",
+  },
+  {
+    kind: "movie",
+    provider: "tmdb",
+    provider_id: QUOTA_MOVIE_ID,
+    title: "Fight Club",
+    year: 1999,
+    overview: "An insomniac office worker forms an underground fight club.",
+    poster_path: "/fight.jpg",
+  },
+  {
+    kind: "series",
+    provider: "tmdb",
+    provider_id: "1396",
+    title: "The Arrival",
+    year: 2021,
+    overview: "Strangers land in a small town and nothing is the same again.",
+    poster_path: "/arrival.jpg",
+  },
+];
+
+const mockSeasons: readonly MetadataSeries["seasons"][number][] = [
+  { number: 0, name: "Specials", episode_count: 2 },
+  {
+    number: 1,
+    name: "Season 1",
+    episode_count: 8,
+    air_date: "2021-03-01T00:00:00Z",
+  },
+  {
+    number: 2,
+    name: "Season 2",
+    episode_count: 8,
+    air_date: "2022-03-01T00:00:00Z",
+  },
+  {
+    number: 3,
+    name: "Season 3",
+    episode_count: 10,
+    air_date: "2023-03-01T00:00:00Z",
+  },
+];
+
+function searchTitles(url: URL) {
+  const q = url.searchParams.get("q") ?? "";
+  const kind = url.searchParams.get("kind");
+  if (
+    q.trim() === "" ||
+    q.length > 200 ||
+    url.searchParams.getAll("q").length > 1
+  ) {
+    return envelope(422, "validation_failed", "invalid query");
+  }
+  if (kind !== null && !mediaKindSchema.safeParse(kind).success) {
+    return envelope(422, "validation_failed", "invalid kind");
+  }
+  if (q === UNCONFIGURED_QUERY) {
+    return envelope(503, "metadata_not_configured", "no TMDB key");
+  }
+  if (q === BROKEN_QUERY) {
+    return envelope(502, "metadata_provider_failure", "provider failed");
+  }
+  const needle = q.toLowerCase();
+  return HttpResponse.json({
+    items: mockCatalogue.filter(
+      (title) =>
+        title.title.toLowerCase().includes(needle) &&
+        (kind === null || title.kind === kind),
+    ),
+  });
+}
+
+function titleDetail(
+  kind: "movie" | "series",
+  id: string | readonly string[] | undefined,
+) {
+  if (typeof id !== "string" || !/^[1-9][0-9]{0,19}$/.test(id)) {
+    return envelope(422, "validation_failed", "invalid id");
+  }
+  const title = mockCatalogue.find(
+    (candidate) => candidate.kind === kind && candidate.provider_id === id,
+  );
+  if (title === undefined) {
+    return envelope(404, "not_found", "title not found");
+  }
+  return HttpResponse.json(
+    kind === "series" ? { ...title, seasons: mockSeasons } : title,
+  );
+}
+
+let createdRequests = 0;
+
+async function createRequest(request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = createMediaRequestSchema.safeParse(await request.json());
+  if (!input.success) {
+    return envelope(422, "validation_failed", "invalid request");
+  }
+  const title = mockCatalogue.find(
+    (candidate) =>
+      candidate.kind === input.data.kind &&
+      candidate.provider_id === input.data.provider_id,
+  );
+  const profile = requestProfiles.find((p) => p.id === input.data.profile_id);
+  if (title === undefined || profile === undefined) {
+    return envelope(404, "not_found", "title or profile not found");
+  }
+  if (!profile.kinds.includes(input.data.kind)) {
+    return envelope(422, "validation_failed", "profile does not accept kind");
+  }
+  if (input.data.provider_id === QUOTA_MOVIE_ID) {
+    return envelope(422, "request_quota_exceeded", "quota exceeded");
+  }
+  const active = requests.filter(
+    (existing) =>
+      existing.provider_id === input.data.provider_id &&
+      existing.kind === input.data.kind &&
+      existing.status !== "declined" &&
+      existing.status !== "failed",
+  );
+  const overlap = active.some(
+    (existing) =>
+      existing.kind === "movie" ||
+      existing.seasons.some((season) =>
+        input.data.seasons.includes(season.number),
+      ),
+  );
+  if (overlap) {
+    return envelope(409, "already_exists", "already requested");
+  }
+  createdRequests += 1;
+  const status = granted.includes("requests.approve") ? "approved" : "pending";
+  const created: MediaRequest = {
+    id: `5e4d3c2b-0000-4000-8000-0000000002${String(createdRequests).padStart(2, "0")}`,
+    kind: title.kind,
+    provider: "tmdb",
+    provider_id: title.provider_id,
+    title: title.title,
+    year: title.year,
+    poster_path: title.poster_path,
+    requester_account_id: mockAccount.id,
+    profile_id: profile.id,
+    status,
+    seasons: input.data.seasons.map((number) => ({ number, status })),
+    decision_reason: "",
+    decided_by_account_id: status === "approved" ? mockAccount.id : "",
+    ...(status === "approved" ? { decided_at: "2026-09-23T12:00:00Z" } : {}),
+    created_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  };
+  requests = [created, ...requests];
+  return HttpResponse.json(created, { status: 201 });
+}
+
 const requestHandlers = [
   http.get(
     "*/api/v1/request-profiles",
     jsonApi(
       ({ request }) =>
-        permissionDenial("admin.settings") ??
+        anyPermissionDenial(["requests.create", "admin.settings"]) ??
         pagedItems(new URL(request.url), profilesQuerySchema, requestProfiles),
     ),
   ),
@@ -1085,8 +1300,37 @@ const requestHandlers = [
     "*/api/v1/requests",
     jsonApi(
       ({ request }) =>
-        permissionDenial("requests.approve") ??
+        anyPermissionDenial(["requests.read.own", "requests.approve"]) ??
         listRequests(new URL(request.url)),
+    ),
+  ),
+  http.post(
+    "*/api/v1/requests",
+    jsonApi(
+      async ({ request }) =>
+        permissionDenial("requests.create") ?? (await createRequest(request)),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/search",
+    jsonApi(
+      ({ request }) =>
+        permissionDenial("requests.create") ??
+        searchTitles(new URL(request.url)),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/movies/:id",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("requests.create") ?? titleDetail("movie", params.id),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/series/:id",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("requests.create") ?? titleDetail("series", params.id),
     ),
   ),
   http.post(

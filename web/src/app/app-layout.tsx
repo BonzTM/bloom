@@ -8,7 +8,10 @@ import {
 } from "react-router-dom";
 import { PermissionGate } from "../features/auth/components/permission-gate.js";
 import { SessionControls } from "../features/auth/components/session-controls.js";
-import { ADMIN_PERMISSIONS } from "../features/auth/permissions.js";
+import {
+  ADMIN_PERMISSIONS,
+  REQUESTS_PERMISSIONS,
+} from "../features/auth/permissions.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
 import { useRouteFocus } from "./use-route-focus.js";
 
@@ -37,6 +40,11 @@ export function AppLayout(): ReactNode {
             <li>
               <NavLink to="/about">About</NavLink>
             </li>
+            <PermissionGate anyOf={REQUESTS_PERMISSIONS}>
+              <li>
+                <NavLink to="/requests">Requests</NavLink>
+              </li>
+            </PermissionGate>
             <PermissionGate anyOf={ADMIN_PERMISSIONS}>
               <li>
                 <NavLink to="/admin">Admin</NavLink>

@@ -28,6 +28,8 @@ const LazyPlaybackRoute = lazy(() => import("../routes/playback-route.js"));
 const LazyRequestsAdminRoute = lazy(
   () => import("../routes/requests-admin-route.js"),
 );
+const LazyDiscoverRoute = lazy(() => import("../routes/discover-route.js"));
+const LazyTitleRoute = lazy(() => import("../routes/title-route.js"));
 const LazyRequestProfilesRoute = lazy(
   () => import("../routes/request-profiles-route.js"),
 );
@@ -85,6 +87,28 @@ const routes: RouteObject[] = [
           <LazyPage loading="Loading your invite…">
             <LazyInviteAcceptRoute />
           </LazyPage>
+        ),
+      },
+      {
+        path: "requests",
+        element: (
+          <RequirePermission
+            anyOf={[permissions.requestsCreate, permissions.requestsReadOwn]}
+          >
+            <LazyPage loading="Loading requests…">
+              <LazyDiscoverRoute />
+            </LazyPage>
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "requests/:kind/:id",
+        element: (
+          <RequirePermission anyOf={[permissions.requestsCreate]}>
+            <LazyPage loading="Loading the title…">
+              <LazyTitleRoute />
+            </LazyPage>
+          </RequirePermission>
         ),
       },
       {

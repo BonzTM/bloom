@@ -32,6 +32,45 @@ const keyMessages: Messages = {
   422: "Enter a TMDB API key without control characters.",
 };
 
+const searchMessages: Messages = {
+  401: SIGN_IN_AGAIN,
+  403: "You no longer have permission to search for titles.",
+  404: "That title was not found.",
+  422: "Enter something to search for, up to 200 characters.",
+  502: "The metadata provider answered with something Bloom could not use.",
+  503: "Searching is not available right now. Try again in a moment.",
+};
+
+const createMessages: Messages = {
+  401: SIGN_IN_AGAIN,
+  403: "You no longer have permission to request titles.",
+  404: "That title or profile no longer exists.",
+  409: "This title is already requested.",
+  422: "Check the request and try again.",
+  502: "The metadata provider answered with something Bloom could not use.",
+  503: "Requests are not available right now. Try again in a moment.",
+};
+
+const QUOTA_EXCEEDED = "request_quota_exceeded";
+const METADATA_NOT_CONFIGURED = "metadata_not_configured";
+
+export function describeSearchError(error: unknown): string | undefined {
+  if (error instanceof ApiError && error.code === METADATA_NOT_CONFIGURED) {
+    return "Searching needs a TMDB key, which no administrator has set yet.";
+  }
+  return describe(error, searchMessages, "The search could not be completed.");
+}
+
+export function describeCreateError(error: unknown): string | undefined {
+  if (error instanceof ApiError && error.code === QUOTA_EXCEEDED) {
+    return "You have reached your request limit for now.";
+  }
+  if (error instanceof ApiError && error.code === METADATA_NOT_CONFIGURED) {
+    return "Requesting needs a TMDB key, which no administrator has set yet.";
+  }
+  return describe(error, createMessages, "The request could not be created.");
+}
+
 export function describeProfileError(error: unknown): string | undefined {
   return describe(error, profileMessages, "The profile could not be saved.");
 }

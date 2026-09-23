@@ -4,7 +4,7 @@ import {
   useSession,
   useSessionRecheck,
 } from "../features/auth/hooks/auth-queries.js";
-import { permissions, hasPermission } from "../features/auth/permissions.js";
+import { hasAnyPermission, permissions } from "../features/auth/permissions.js";
 import {
   requestStatusSchema,
   type RequestStatus,
@@ -28,7 +28,10 @@ export default function RequestsAdminRoute(): ReactNode {
   const canReadProfiles =
     session.data !== undefined &&
     session.data !== null &&
-    hasPermission(session.data.permissions, permissions.adminSettings);
+    hasAnyPermission(session.data.permissions, [
+      permissions.adminSettings,
+      permissions.requestsCreate,
+    ]);
   // The route guard only renders this page for a signed-in account. Keying
   // the page on the account remounts it when the principal changes, so a
   // late answer to one account's action can never show under another's.

@@ -281,6 +281,13 @@ Accounts with `requests.read.own` see their own requests. Approvers see all
 requests and can filter by status or requester. Lists are cursor-paged newest
 first.
 
+The web UI covers the same flow. Administrators store the TMDB key and manage
+profiles under Request settings, and decide pending requests under Requests in
+the administration area. Anyone who may request media searches, browses
+posters, picks seasons, and follows their own requests under Requests in the
+main navigation. Posters load from `image.tmdb.org`, the only third-party
+origin the page allows for images.
+
 ### Back up the master secret
 
 Back up `BLOOM_SECRET_KEY` with the database and keep it stable across restarts,

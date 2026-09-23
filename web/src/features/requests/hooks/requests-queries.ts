@@ -5,7 +5,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
+import type { CreateMediaRequest } from "../api/metadata-schemas.js";
 import type { RequestsFilter } from "../api/requests-api.js";
+import type { MediaKind } from "../api/requests-schemas.js";
 import type {
   MediaRequestsPage,
   MetadataKeyRequest,
@@ -30,6 +32,10 @@ export const requestsKeys = {
       filter.requesterId ?? "",
     ] as const,
   key: (accountId: string) => ["requests", "tmdb-key", accountId] as const,
+  search: (accountId: string, query: string, kind: MediaKind | undefined) =>
+    ["requests", "search", accountId, query, kind ?? ""] as const,
+  title: (accountId: string, kind: MediaKind, providerId: string) =>
+    ["requests", "title", accountId, kind, providerId] as const,
 };
 
 const firstPage: string | undefined = undefined;
@@ -71,7 +77,11 @@ export function useRemoveProfile(accountId: string) {
   });
 }
 
-export function useRequests(accountId: string, filter: RequestsFilter) {
+export function useRequests(
+  accountId: string,
+  filter: RequestsFilter,
+  enabled = true,
+) {
   const api = useRequestsApi();
   return useInfiniteQuery({
     queryKey: requestsKeys.list(accountId, filter),
@@ -79,6 +89,7 @@ export function useRequests(accountId: string, filter: RequestsFilter) {
       api.listRequests(filter, pageParam, signal),
     initialPageParam: firstPage,
     getNextPageParam: (page: MediaRequestsPage) => nextCursor(page),
+    enabled,
     staleTime: 15_000,
     meta: { sessionScoped: true },
   });
@@ -181,6 +192,66 @@ export function useRemoveMetadataKey(accountId: string) {
         configured: false,
       });
     },
+  });
+}
+
+// Titles matching a query. Nothing is sent for an empty query.
+export function useSearchTitles(
+  accountId: string,
+  query: string,
+  kind: MediaKind | undefined,
+) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.search(accountId, query, kind),
+    queryFn: ({ signal }) => api.search(query, kind, signal),
+    enabled: query !== "",
+    staleTime: 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useMovie(
+  accountId: string,
+  providerId: string,
+  enabled = true,
+) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.title(accountId, "movie", providerId),
+    queryFn: ({ signal }) => api.movie(providerId, signal),
+    enabled,
+    staleTime: 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useSeries(
+  accountId: string,
+  providerId: string,
+  enabled = true,
+) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.title(accountId, "series", providerId),
+    queryFn: ({ signal }) => api.series(providerId, signal),
+    enabled,
+    staleTime: 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+// Create a request. The input is not secret, so it may be a mutation
+// variable; a success makes every request list stale.
+export function useCreateRequest(accountId: string) {
+  const api = useRequestsApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateMediaRequest) => api.create(input),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["requests", "list", accountId],
+      }),
   });
 }
 
