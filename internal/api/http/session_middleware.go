@@ -15,11 +15,13 @@ import (
 )
 
 type sessionRequestState struct {
-	inbound        bool
-	resolved       bool
-	clearCookie    bool
-	afterCommit    func()
-	onCommitFailed func(error)
+	inbound          bool
+	resolved         bool
+	clearCookie      bool
+	replacementReady bool
+	afterCommit      func()
+	onCommitFailed   func(error)
+	loginDeadline    time.Time
 }
 
 type bufferedResponse struct {
@@ -60,7 +62,10 @@ func (s *Server) loadAndSaveSessions(next http.Handler) http.Handler {
 		buffer := newBufferedResponse()
 		setSessionResponseHeaders(buffer.Header())
 		next.ServeHTTP(buffer, r.WithContext(ctx))
-		if !s.commitSession(w, buffer, r.WithContext(ctx), state) {
+		commitContext, cancel := state.contextForCommit(ctx)
+		defer cancel()
+		commitRequest := r.WithContext(commitContext)
+		if !s.commitSession(w, buffer, commitRequest, state) {
 			return
 		}
 		if err := flushBufferedResponse(w, buffer); err != nil {
@@ -108,6 +113,11 @@ func setSessionResponseHeaders(header http.Header) {
 }
 
 func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, r *http.Request, state *sessionRequestState) bool {
+	if state.clearCookie && !state.replacementReady {
+		s.sessions.WriteSessionCookie(r.Context(), buffer, "", time.Time{})
+		buffer.Header().Set("Cache-Control", "no-store")
+		return true
+	}
 	switch s.sessions.Status(r.Context()) {
 	case scs.Modified:
 		token, expiry, err := s.sessions.Commit(r.Context())
@@ -121,16 +131,20 @@ func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, 
 		s.sessions.WriteSessionCookie(r.Context(), buffer, token, expiry)
 	case scs.Destroyed:
 		s.sessions.WriteSessionCookie(r.Context(), buffer, "", time.Time{})
-	default:
-		if state.clearCookie {
-			s.sessions.WriteSessionCookie(r.Context(), buffer, "", time.Time{})
-		}
+	case scs.Unmodified:
 	}
 	buffer.Header().Set("Cache-Control", "no-store")
 	if state.afterCommit != nil {
 		state.afterCommit()
 	}
 	return true
+}
+
+func (s *sessionRequestState) contextForCommit(fallback context.Context) (context.Context, context.CancelFunc) {
+	if !s.loginDeadline.IsZero() {
+		return context.WithDeadline(fallback, s.loginDeadline)
+	}
+	return fallback, func() {}
 }
 
 func flushBufferedResponse(w http.ResponseWriter, buffer *bufferedResponse) error {

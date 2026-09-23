@@ -31,10 +31,6 @@ type accountResponse struct {
 	Username string `json:"username"`
 }
 
-type authResponse struct {
-	Account accountResponse `json:"account"`
-}
-
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	request, ok := s.decodeLogin(w, r)
 	if !ok {
@@ -45,32 +41,79 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthenticationBusy(w, r, request.Username, ip)
 		return
 	}
-	defer s.releasePasswordVerification()
 	allowed, retry := s.loginLimiter.allow("ip:"+ip, "username:"+request.Username)
 	if !allowed {
+		s.releasePasswordVerification()
 		s.writeRateLimited(w, r, request.Username, ip, retry)
 		return
 	}
-	account, err := s.authenticate(r.Context(), request.Username, request.Password)
+	var cancel context.CancelFunc
+	r, cancel = s.withLoginDeadline(r)
+	defer cancel()
+	account, err := s.verifyCredentials(r.Context(), request.Username, request.Password)
 	if err != nil {
 		s.writeLoginFailure(w, r, request.Username, ip, err)
 		return
 	}
-	if err := s.sessions.RenewToken(r.Context()); err != nil {
-		s.writeLoginInternalError(w, r, request.Username, ip, err)
+	s.completeLogin(w, r, account, request.Username, ip)
+}
+
+func (s *Server) completeLogin(
+	w http.ResponseWriter,
+	r *http.Request,
+	account core.Account,
+	username, ip string,
+) {
+	if err := s.revokeInboundSession(r.Context()); err != nil {
+		s.writeLoginInternalError(w, r, username, ip, err)
 		return
 	}
-	s.sessions.Put(r.Context(), sessionAccountIDKey, account.ID)
-	state := sessionState(r.Context())
+	snapshot, err := s.loadAuthorizationSnapshot(r.Context(), account.ID)
+	if err != nil {
+		s.writeLoginInternalError(w, r, username, ip, err)
+		return
+	}
+	if err := s.createAuthenticatedSession(r.Context(), account.ID); err != nil {
+		s.writeLoginInternalError(w, r, username, ip, err)
+		return
+	}
+	s.setLoginCommitTelemetry(sessionState(r.Context()), r, account.ID, ip)
+	writeJSON(w, r, s.logger, http.StatusOK, currentAccountDTO(account, snapshot))
+}
+
+func (s *Server) revokeInboundSession(ctx context.Context) error {
+	state := sessionState(ctx)
+	if state == nil || !state.inbound {
+		return nil
+	}
+	state.clearCookie = true
+	if !state.resolved {
+		return nil
+	}
+	if err := s.sessions.Destroy(ctx); err != nil {
+		return fmt.Errorf("destroy inbound session: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) createAuthenticatedSession(ctx context.Context, accountID string) error {
+	if err := s.sessions.RenewToken(ctx); err != nil {
+		return err
+	}
+	s.sessions.Put(ctx, sessionAccountIDKey, accountID)
+	sessionState(ctx).replacementReady = true
+	return nil
+}
+
+func (s *Server) setLoginCommitTelemetry(state *sessionRequestState, r *http.Request, accountID, ip string) {
 	state.afterCommit = func() {
 		s.metrics.IncLoginAttempt("success")
-		s.emitAuthAudit(r, account.ID, "", "auth.login", accountResource(account.ID), telemetry.AuditSuccess, "authenticated", ip)
+		s.emitAuthAudit(r, accountID, "", "auth.login", accountResource(accountID), telemetry.AuditSuccess, "authenticated", ip)
 	}
 	state.onCommitFailed = func(error) {
 		s.metrics.IncLoginAttempt("internal_error")
-		s.emitAuthAudit(r, account.ID, "", "auth.login", accountResource(account.ID), telemetry.AuditFailure, "internal_error", ip)
+		s.emitAuthAudit(r, accountID, "", "auth.login", accountResource(accountID), telemetry.AuditFailure, "internal_error", ip)
 	}
-	writeJSON(w, r, s.logger, http.StatusOK, authResponse{Account: accountDTO(account)})
 }
 
 func (s *Server) acquirePasswordVerification() bool {
@@ -84,17 +127,27 @@ func (s *Server) acquirePasswordVerification() bool {
 
 func (s *Server) releasePasswordVerification() { <-s.passwordVerifications }
 
-func (s *Server) authenticate(ctx context.Context, username, password string) (core.Account, error) {
-	authCtx, cancel := context.WithTimeout(ctx, s.authOperationTimeout)
-	defer cancel()
-	account, err := s.identity.Authenticate(authCtx, username, password)
+func (s *Server) verifyCredentials(ctx context.Context, username, password string) (core.Account, error) {
+	account, err := s.authenticateWithSlot(ctx, username, password)
 	if err != nil {
 		return core.Account{}, err
 	}
-	if err := authCtx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return core.Account{}, fmt.Errorf("authentication deadline: %w", err)
 	}
 	return account, nil
+}
+
+func (s *Server) authenticateWithSlot(ctx context.Context, username, password string) (core.Account, error) {
+	defer s.releasePasswordVerification()
+	return s.identity.Authenticate(ctx, username, password)
+}
+
+func (s *Server) withLoginDeadline(r *http.Request) (*http.Request, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(r.Context(), s.authOperationTimeout)
+	state := sessionState(ctx)
+	state.loginDeadline, _ = ctx.Deadline()
+	return r.WithContext(ctx), cancel
 }
 
 func (s *Server) decodeLogin(w http.ResponseWriter, r *http.Request) (loginRequest, bool) {

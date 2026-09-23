@@ -9,6 +9,11 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
+### Changed
+
+- Successful login responses now include the account's sorted role names and
+  effective permissions, matching `GET /api/v1/auth/me`.
+
 ### Added
 
 - Main-branch and tagged-release image publishing with candidate-first smoke

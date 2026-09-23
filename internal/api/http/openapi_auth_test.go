@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	authSchema        = "#/components/schemas/AuthResponse"
 	currentSchema     = "#/components/schemas/CurrentAccountResponse"
 	permissionsSchema = "#/components/schemas/PermissionCatalogResponse"
 	rolesSchema       = "#/components/schemas/RolesResponse"
@@ -60,7 +59,7 @@ func authContractCases() []authContractCase {
 	sessionCookie := []string{"Cache-Control", "Set-Cookie", "Vary", "X-Request-ID"}
 	csrf := []string{"Cache-Control", "X-Request-ID"}
 	return []authContractCase{
-		{name: "login 200", path: "/api/v1/auth/login", method: "post", status: 200, schema: authSchema, headers: sessionCookie, run: loginSuccess},
+		{name: "login 200", path: "/api/v1/auth/login", method: "post", status: 200, schema: currentSchema, headers: sessionCookie, run: loginSuccess},
 		{name: "login 401 credentials", path: "/api/v1/auth/login", method: "post", status: 401, schema: errorSchema, headers: session, run: loginRejected},
 		{name: "login 401 malformed session", path: "/api/v1/auth/login", method: "post", status: 401, schema: errorSchema, headers: sessionCookie, run: loginMalformedSession},
 		{name: "login 403", path: "/api/v1/auth/login", method: "post", status: 403, schema: errorSchema, headers: csrf, run: loginCSRFRejected},
@@ -454,7 +453,7 @@ func assertResponseSchema(
 		if recorder.Body.Len() != 0 {
 			t.Errorf("response body = %q, want empty", recorder.Body.String())
 		}
-	case authSchema, currentSchema, permissionsSchema, rolesSchema, errorSchema:
+	case currentSchema, permissionsSchema, rolesSchema, errorSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)
@@ -503,16 +502,17 @@ func TestOpenAPIResponseSchemaValidationRejectsWireDrift(t *testing.T) {
 	document := loadOpenAPI(t)
 	tests := []string{
 		`{}`,
-		`{"account":{"id":"11111111-1111-4111-8111-111111111111","username":"alice"},"extra":true}`,
-		`{"account":{"id":"11111111-1111-4111-8111-111111111111","username":"alice","extra":true}}`,
-		`{"account":{"id":"not-a-uuid","username":"alice"}}`,
+		`{"account":{"id":"11111111-1111-4111-8111-111111111111","username":"alice"}}`,
+		`{"account":{"id":"11111111-1111-4111-8111-111111111111","username":"alice"},"roles":[],"permissions":[],"extra":true}`,
+		`{"account":{"id":"11111111-1111-4111-8111-111111111111","username":"alice","extra":true},"roles":[],"permissions":[]}`,
+		`{"account":{"id":"not-a-uuid","username":"alice"},"roles":[],"permissions":[]}`,
 	}
 	for _, body := range tests {
 		value, err := decodeContractJSON([]byte(body))
 		if err != nil {
 			t.Fatalf("decode fixture: %v", err)
 		}
-		if err := validateOpenAPIValue(document, authSchema, value); err == nil {
+		if err := validateOpenAPIValue(document, currentSchema, value); err == nil {
 			t.Errorf("schema validation accepted drifted body %s", body)
 		}
 	}

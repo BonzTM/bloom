@@ -4,11 +4,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/alexedwards/scs/v2/memstore"
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
@@ -69,6 +72,81 @@ type blockingIdentity struct {
 	release  chan struct{}
 	inFlight atomic.Int32
 	maximum  atomic.Int32
+}
+
+type observedIdentity struct {
+	entered       chan string
+	releaseSecond chan struct{}
+}
+
+func (i *observedIdentity) Authenticate(_ context.Context, username, _ string) (core.Account, error) {
+	i.entered <- username
+	if username != "alice" {
+		<-i.releaseSecond
+		return core.Account{}, &core.CredentialFailure{Reason: core.CredentialBadPassword}
+	}
+	return core.Account{ID: "11111111-1111-4111-8111-111111111111", Username: username}, nil
+}
+
+func TestLoginReleasesPasswordVerificationBeforeAuthorization(t *testing.T) {
+	identity := &observedIdentity{entered: make(chan string, 2), releaseSecond: make(chan struct{})}
+	h := newAuthHarnessConfigured(t, func(cfg *config.AuthConfig) {
+		cfg.LoginMaxConcurrent = 1
+	}, nil, nil, identity)
+	snapshotStarted := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	h.authorization.beforeSnapshot = blockingSnapshot(snapshotStarted, releaseSnapshot)
+
+	responses := make(chan int, 2)
+	go requestLoginStatus(t, h, "alice", responses)
+	if got := <-identity.entered; got != "alice" {
+		t.Fatalf("first verification = %q, want alice", got)
+	}
+	<-snapshotStarted
+	go requestLoginStatus(t, h, "bob", responses)
+	username, status, verified := observeVerification(identity.entered, responses)
+	close(identity.releaseSecond)
+	close(releaseSnapshot)
+	if !verified || username != "bob" {
+		t.Fatalf("second verification = %q, status %d; want bob to enter", username, status)
+	}
+	assertLoginStatuses(t, responses, http.StatusOK, http.StatusUnauthorized)
+}
+
+func blockingSnapshot(started chan<- struct{}, release <-chan struct{}) func(context.Context, string) {
+	return func(ctx context.Context, _ string) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+}
+
+func requestLoginStatus(t *testing.T, h authHarness, username string, responses chan<- int) {
+	t.Helper()
+	recorder := h.request(t, http.MethodPost, "/api/v1/auth/login",
+		`{"username":"`+username+`","password":"password"}`, nil)
+	responses <- recorder.Code
+}
+
+func observeVerification(entered <-chan string, responses <-chan int) (string, int, bool) {
+	select {
+	case got := <-entered:
+		return got, 0, true
+	case status := <-responses:
+		return "", status, false
+	}
+}
+
+func assertLoginStatuses(t *testing.T, responses <-chan int, want ...int) {
+	t.Helper()
+	got := []int{<-responses, <-responses}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("login statuses = %v, want %v", got, want)
+	}
 }
 
 func (i *blockingIdentity) Authenticate(ctx context.Context, _, _ string) (core.Account, error) {
@@ -183,6 +261,82 @@ func startTwoBlockedLogins(t *testing.T, h authHarness, identity *blockingIdenti
 
 type deadlineIdentity struct {
 	remaining chan time.Duration
+}
+
+type sequentialIdentity struct {
+	delay     time.Duration
+	remaining chan<- time.Duration
+}
+
+func (i *sequentialIdentity) Authenticate(ctx context.Context, username, _ string) (core.Account, error) {
+	i.remaining <- remainingDeadline(ctx)
+	time.Sleep(i.delay)
+	return core.Account{ID: "11111111-1111-4111-8111-111111111111", Username: username}, nil
+}
+
+func TestLoginUsesOneDeadlineAcrossSequentialOperations(t *testing.T) {
+	remaining := make(chan time.Duration, 3)
+	store := &controllableSessionStore{base: memstore.NewWithCleanupInterval(0)}
+	store.beforeCommit = recordDeadlineUntilCanceled(remaining)
+	identity := &sequentialIdentity{delay: 200 * time.Millisecond, remaining: remaining}
+	h := newAuthHarnessConfigured(t, nil, store, nil, identity)
+	h.authorization.beforeSnapshot = recordDeadlineAfterDelay(remaining, 200*time.Millisecond)
+
+	synctest.Test(t, func(t *testing.T) {
+		recorder := h.login(t, "alice", "password")
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", recorder.Code)
+		}
+		want := []time.Duration{500 * time.Millisecond, 300 * time.Millisecond, 100 * time.Millisecond}
+		for index, duration := range want {
+			if got := <-remaining; got != duration {
+				t.Fatalf("operation %d deadline = %s, want %s", index, got, duration)
+			}
+		}
+	})
+}
+
+func TestLoginAuthorizationDeadlineRevokesInboundSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	oldCookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.authorization.beforeSnapshot = func(ctx context.Context, _ string) {
+		<-ctx.Done()
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		recorder := h.request(t, http.MethodPost, "/api/v1/auth/login",
+			`{"username":"alice","password":"secret-password"}`, oldCookie)
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("deadline status = %d, want 500", recorder.Code)
+		}
+	})
+	h.authorization.beforeSnapshot = nil
+	if got := h.request(t, http.MethodGet, "/api/v1/auth/me", "", oldCookie).Code; got != http.StatusUnauthorized {
+		t.Fatalf("old session status = %d, want 401", got)
+	}
+}
+
+func remainingDeadline(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	return time.Until(deadline)
+}
+
+func recordDeadlineAfterDelay(remaining chan<- time.Duration, delay time.Duration) func(context.Context, string) {
+	return func(ctx context.Context, _ string) {
+		remaining <- remainingDeadline(ctx)
+		time.Sleep(delay)
+	}
+}
+
+func recordDeadlineUntilCanceled(remaining chan<- time.Duration) func(context.Context) error {
+	return func(ctx context.Context) error {
+		remaining <- remainingDeadline(ctx)
+		<-ctx.Done()
+		return ctx.Err()
+	}
 }
 
 func (i *deadlineIdentity) Authenticate(ctx context.Context, _, _ string) (core.Account, error) {
