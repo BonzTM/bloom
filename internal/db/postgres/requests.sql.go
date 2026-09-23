@@ -11,6 +11,37 @@ import (
 	"time"
 )
 
+const countActiveRequestSeason = `-- name: CountActiveRequestSeason :one
+SELECT COUNT(*)
+FROM request_seasons
+JOIN requests ON requests.id = request_seasons.request_id
+WHERE requests.kind = 'series'
+  AND requests.provider = $1
+  AND requests.provider_id = $2
+  AND requests.profile_id = $3
+  AND requests.status IN ('pending', 'approved', 'processing')
+  AND request_seasons.season_number = $4
+`
+
+type CountActiveRequestSeasonParams struct {
+	Provider     string
+	ProviderID   string
+	ProfileID    string
+	SeasonNumber int32
+}
+
+func (q *Queries) CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveRequestSeason,
+		arg.Provider,
+		arg.ProviderID,
+		arg.ProfileID,
+		arg.SeasonNumber,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRequestedMoviesSince = `-- name: CountRequestedMoviesSince :one
 SELECT COUNT(*) FROM requests
 WHERE requester_account_id = $1

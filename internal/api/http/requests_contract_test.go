@@ -97,6 +97,7 @@ func TestRequestSliceErrorCodes(t *testing.T) {
 		{err: core.ErrInvalidTransition, status: http.StatusConflict, code: codeInvalidTransition},
 		{err: core.ErrQuotaExceeded, status: http.StatusUnprocessableEntity, code: codeQuotaExceeded},
 		{err: core.ErrMetadataNotConfigured, status: http.StatusServiceUnavailable, code: codeMetadataNotConfigured},
+		{err: core.ErrMetadataMalformed, status: http.StatusBadGateway, code: codeMetadataProviderFailure},
 		{err: core.ErrMetadataUnavailable, status: http.StatusServiceUnavailable, code: codeMetadataProviderFailure},
 	}
 	for _, testCase := range tests {

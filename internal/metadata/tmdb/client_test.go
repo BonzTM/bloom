@@ -86,6 +86,81 @@ func TestClientClassifiesProviderFailures(t *testing.T) {
 	}
 }
 
+func TestClientRejectsCrossOriginRedirectWithoutLeakingKey(t *testing.T) {
+	const apiKey = "redirect-secret"
+	var destinationCalls atomic.Int32
+	destination := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		destinationCalls.Add(1)
+	}))
+	defer destination.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL, http.StatusFound)
+	}))
+	defer source.Close()
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	client, err := New(apiKey, Dependencies{BaseURL: source.URL, Clock: clock})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(client.CloseIdleConnections)
+	_, err = client.Movie(t.Context(), "11")
+	if err == nil || strings.Contains(err.Error(), apiKey) {
+		t.Fatalf("redirect error = %v", err)
+	}
+	if destinationCalls.Load() != 0 {
+		t.Fatalf("redirect destination calls = %d, want 0", destinationCalls.Load())
+	}
+}
+
+func TestAPIKeyTransportSkipsCrossOriginRequest(t *testing.T) {
+	wantErr := errors.New("transport stopped")
+	capture := &captureTransport{err: wantErr}
+	base := httptest.NewRequest(http.MethodGet, "https://api.example.test/3/movie/11", nil).URL
+	request := httptest.NewRequest(http.MethodGet, "https://redirect.example.test/target", nil)
+	transport := &apiKeyTransport{next: capture, apiKey: "transport-secret", baseURL: base}
+	_, err := transport.RoundTrip(request)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RoundTrip error = %v", err)
+	}
+	if capture.request == nil {
+		t.Fatal("cross-origin request did not reach transport")
+	}
+	if capture.request.URL.Query().Has("api_key") {
+		t.Fatalf("cross-origin request query = %q", capture.request.URL.RawQuery)
+	}
+}
+
+type captureTransport struct {
+	request *http.Request
+	err     error
+}
+
+func (t *captureTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	t.request = request
+	return nil, t.err
+}
+
+func TestClientClassifiesInvalidProviderTitleAsMalformed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(request.URL.Path, "/3/tv/") {
+			writeTestResponse(t, w, `{"id":12,"name":" ","seasons":[{"season_number":1,"name":"Season 1","episode_count":8}]}`)
+			return
+		}
+		writeTestResponse(t, w, `{"id":11,"title":" "}`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	_, movieErr := client.Movie(t.Context(), "11")
+	if !errors.Is(movieErr, core.ErrMetadataMalformed) || !errors.Is(movieErr, core.ErrInvalidArgument) {
+		t.Fatalf("invalid movie title error = %v", movieErr)
+	}
+	_, seriesErr := client.Series(t.Context(), "12", false)
+	if !errors.Is(seriesErr, core.ErrMetadataMalformed) || !errors.Is(seriesErr, core.ErrInvalidArgument) {
+		t.Fatalf("invalid series title error = %v", seriesErr)
+	}
+}
+
 func TestClientRetries429UsingRetryAfter(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

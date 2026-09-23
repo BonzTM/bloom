@@ -29,8 +29,14 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("profile round trip", func(t *testing.T) {
 		testRequestProfileRoundTrip(t, profileReader, profileWriter, profile)
 	})
-	t.Run("request transition and active uniqueness", func(t *testing.T) {
+	t.Run("movie transition and active uniqueness", func(t *testing.T) {
 		testRequestTransitionAndUniqueness(t, requestReader, requestWriter, profileWriter, account.ID, profile.ID, now)
+	})
+	t.Run("series season overlap", func(t *testing.T) {
+		testSeriesSeasonOverlap(t, requestWriter, account.ID, profile.ID, now)
+	})
+	t.Run("concurrent series season overlap", func(t *testing.T) {
+		testConcurrentSeriesSeasonOverlap(t, requestWriter, account.ID, profile.ID, now)
 	})
 	t.Run("concurrent quota boundary", func(t *testing.T) {
 		testConcurrentRequestQuota(t, accounts, requestWriter, quotaWriter, profile.ID, now)
@@ -108,6 +114,103 @@ func testRequestTransitionAndUniqueness(
 	}
 }
 
+func testSeriesSeasonOverlap(t *testing.T, writer core.RequestWriter, accountID, profileID string, now time.Time) {
+	t.Helper()
+	seasonOne := seriesRequestFixture(t, accountID, profileID, "301", []int{1}, now)
+	if err := writer.CreateRequest(t.Context(), seasonOne, now, true); err != nil {
+		t.Fatalf("create season 1 request: %v", err)
+	}
+	seasonTwo := seriesRequestFixture(t, accountID, profileID, "301", []int{2}, now.Add(time.Second))
+	if err := writer.CreateRequest(t.Context(), seasonTwo, now, true); err != nil {
+		t.Fatalf("create disjoint season 2 request: %v", err)
+	}
+	overlap := seriesRequestFixture(t, accountID, profileID, "301", []int{2, 3}, now.Add(2*time.Second))
+	if err := writer.CreateRequest(t.Context(), overlap, now, true); !errors.Is(err, core.ErrAlreadyExists) {
+		t.Fatalf("overlapping season request error = %v, want ErrAlreadyExists", err)
+	}
+	assertTerminalSeriesDoesNotBlock(t, writer, accountID, profileID, core.RequestDeclined, "302", now)
+	assertTerminalSeriesDoesNotBlock(t, writer, accountID, profileID, core.RequestFailed, "303", now)
+	assertTerminalSeriesDoesNotBlock(t, writer, accountID, profileID, core.RequestAvailable, "305", now)
+}
+
+func assertTerminalSeriesDoesNotBlock(
+	t *testing.T, writer core.RequestWriter, accountID, profileID string, status core.RequestStatus, providerID string, now time.Time,
+) {
+	t.Helper()
+	first := seriesRequestFixture(t, accountID, profileID, providerID, []int{1}, now)
+	if err := writer.CreateRequest(t.Context(), first, now, true); err != nil {
+		t.Fatalf("create request before %s: %v", status, err)
+	}
+	if err := transitionSeriesToTerminal(t, writer, first.ID, accountID, status, now); err != nil {
+		t.Fatalf("transition request to %s: %v", status, err)
+	}
+	second := seriesRequestFixture(t, accountID, profileID, providerID, []int{1}, now.Add(time.Second))
+	if err := writer.CreateRequest(t.Context(), second, now, true); err != nil {
+		t.Fatalf("request after %s: %v", status, err)
+	}
+}
+
+func transitionSeriesToTerminal(
+	t *testing.T, writer core.RequestWriter, requestID, accountID string, status core.RequestStatus, now time.Time,
+) error {
+	t.Helper()
+	from := core.RequestPending
+	if status == core.RequestDeclined {
+		_, err := writer.TransitionRequest(t.Context(), requestID, from, status, accountID, "", now)
+		return err
+	}
+	if _, err := writer.TransitionRequest(t.Context(), requestID, from, core.RequestApproved, accountID, "", now); err != nil {
+		return err
+	}
+	from = core.RequestApproved
+	if status == core.RequestAvailable {
+		if _, err := writer.TransitionRequest(t.Context(), requestID, from, core.RequestProcessing, accountID, "", now); err != nil {
+			return err
+		}
+		from = core.RequestProcessing
+	}
+	_, err := writer.TransitionRequest(t.Context(), requestID, from, status, accountID, "", now)
+	return err
+}
+
+func testConcurrentSeriesSeasonOverlap(
+	t *testing.T, writer core.RequestWriter, accountID, profileID string, now time.Time,
+) {
+	t.Helper()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	requests := []core.MediaRequest{
+		seriesRequestFixture(t, accountID, profileID, "304", []int{1}, now),
+		seriesRequestFixture(t, accountID, profileID, "304", []int{1}, now),
+	}
+	var ready sync.WaitGroup
+	ready.Add(len(requests))
+	for _, request := range requests {
+		go func() {
+			ready.Done()
+			<-start
+			results <- writer.CreateRequest(t.Context(), request, now, true)
+		}()
+	}
+	ready.Wait()
+	close(start)
+	successes, conflicts := 0, 0
+	for range requests {
+		err := <-results
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, core.ErrAlreadyExists):
+			conflicts++
+		default:
+			t.Fatalf("concurrent series request: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("season race successes = %d, conflicts = %d", successes, conflicts)
+	}
+}
+
 func testConcurrentRequestQuota(
 	t *testing.T,
 	accounts core.AccountStore,
@@ -162,5 +265,20 @@ func requestFixture(t *testing.T, accountID, profileID, providerID string, now t
 		ID: mustID(t), Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: providerID,
 		Title: "Request " + providerID, Year: 2026, PosterPath: "/poster.jpg", RequesterID: accountID,
 		ProfileID: profileID, Status: core.RequestPending, CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+func seriesRequestFixture(
+	t *testing.T, accountID, profileID, providerID string, seasonNumbers []int, now time.Time,
+) core.MediaRequest {
+	t.Helper()
+	seasons := make([]core.RequestSeason, 0, len(seasonNumbers))
+	for _, number := range seasonNumbers {
+		seasons = append(seasons, core.RequestSeason{Number: number, Status: core.SeasonPending})
+	}
+	return core.MediaRequest{
+		ID: mustID(t), Kind: core.MediaKindSeries, Provider: core.MetadataProviderTMDB, ProviderID: providerID,
+		Title: "Series " + providerID, Year: 2026, PosterPath: "/series.jpg", RequesterID: accountID,
+		ProfileID: profileID, Status: core.RequestPending, Seasons: seasons, CreatedAt: now, UpdatedAt: now,
 	}
 }

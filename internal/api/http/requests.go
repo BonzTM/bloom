@@ -76,6 +76,9 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.emitRequestAudit(r, "request.create", "request:"+created.ID, created.Kind, created.Title, telemetry.AuditSuccess)
+	if created.Status == core.RequestApproved {
+		s.emitRequestAudit(r, "request.approve", "request:"+created.ID, created.Kind, created.Title, telemetry.AuditSuccess)
+	}
 	writeJSON(w, r, s.logger, http.StatusCreated, requestDTO(created))
 }
 
@@ -238,7 +241,7 @@ func (s *Server) emitRequestAudit(r *http.Request, action, resource string, kind
 }
 
 func (s *Server) writeRequestError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, core.ErrInvalidArgument) {
+	if errors.Is(err, core.ErrInvalidArgument) && !errors.Is(err, core.ErrMetadataMalformed) {
 		s.writeValidation(w, r, []httputil.FieldError{{Field: "request", Code: "invalid", Message: "contains an invalid value"}})
 		return
 	}

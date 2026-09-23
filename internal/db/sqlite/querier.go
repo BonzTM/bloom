@@ -13,6 +13,7 @@ type Querier interface {
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
+	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
 	CountRequestedMoviesSince(ctx context.Context, arg CountRequestedMoviesSinceParams) (int64, error)
 	CountRequestedSeasonsSince(ctx context.Context, arg CountRequestedSeasonsSinceParams) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
@@ -76,6 +77,7 @@ type Querier interface {
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
+	LockRequestTitle(ctx context.Context, lockKey interface{}) error
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)

@@ -17,3 +17,12 @@ func (q *Queries) LockAccountRequestQuota(ctx context.Context, accountID string)
 	_, err := q.db.ExecContext(ctx, lockAccountRequestQuota, accountID)
 	return err
 }
+
+const lockRequestTitle = `-- name: LockRequestTitle :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+`
+
+func (q *Queries) LockRequestTitle(ctx context.Context, lockKey string) error {
+	_, err := q.db.ExecContext(ctx, lockRequestTitle, lockKey)
+	return err
+}

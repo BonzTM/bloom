@@ -77,6 +77,17 @@ INSERT INTO requests (
 INSERT INTO request_seasons (request_id, season_number, status)
 VALUES (sqlc.arg(request_id), sqlc.arg(season_number), sqlc.arg(status));
 
+-- name: CountActiveRequestSeason :one
+SELECT COUNT(*)
+FROM request_seasons
+JOIN requests ON requests.id = request_seasons.request_id
+WHERE requests.kind = 'series'
+  AND requests.provider = sqlc.arg(provider)
+  AND requests.provider_id = sqlc.arg(provider_id)
+  AND requests.profile_id = sqlc.arg(profile_id)
+  AND requests.status IN ('pending', 'approved', 'processing')
+  AND request_seasons.season_number = sqlc.arg(season_number);
+
 -- name: GetRequest :one
 SELECT id, kind, provider, provider_id, title, release_year, poster_path,
        requester_account_id, profile_id, status, decision_reason,

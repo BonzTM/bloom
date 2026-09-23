@@ -49,35 +49,92 @@ func (s *requests) CreateRequest(ctx context.Context, request core.MediaRequest,
 	if err := core.ValidateMediaRequest(request); err != nil {
 		return err
 	}
-	if quotaExempt {
-		return s.createWithoutQuota(ctx, request)
-	}
 	if s.sqlite != nil {
-		return withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
-			q := sqlite.New(conn)
+		return s.createSQLiteRequest(ctx, request, now, quotaExempt)
+	}
+	return s.createPostgresRequest(ctx, request, now, quotaExempt)
+}
+
+func (s *requests) createSQLiteRequest(ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool) error {
+	return withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+		q := sqlite.New(conn)
+		if !quotaExempt {
 			if err := checkSQLiteQuota(ctx, q, request, now); err != nil {
 				return err
 			}
-			return insertSQLiteRequest(ctx, q, request)
-		})
-	}
+		}
+		if err := checkSQLiteSeasonOverlap(ctx, q, request); err != nil {
+			return err
+		}
+		return insertSQLiteRequest(ctx, q, request)
+	})
+}
+
+func (s *requests) createPostgresRequest(ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool) error {
 	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
 		q := s.postgres.WithTx(tx)
-		if err := q.LockAccountRequestQuota(ctx, request.RequesterID); err != nil {
-			return fmt.Errorf("lock request quota: %w", err)
+		if err := q.LockRequestTitle(ctx, requestTitleLockKey(request)); err != nil {
+			return fmt.Errorf("lock request title: %w", err)
 		}
-		if err := checkPostgresQuota(ctx, q, request, now); err != nil {
+		if !quotaExempt {
+			if err := q.LockAccountRequestQuota(ctx, request.RequesterID); err != nil {
+				return fmt.Errorf("lock request quota: %w", err)
+			}
+			if err := checkPostgresQuota(ctx, q, request, now); err != nil {
+				return err
+			}
+		}
+		if err := checkPostgresSeasonOverlap(ctx, q, request); err != nil {
 			return err
 		}
 		return insertPostgresRequest(ctx, q, request)
 	})
 }
 
-func (s *requests) createWithoutQuota(ctx context.Context, request core.MediaRequest) error {
-	if s.sqlite != nil {
-		return withTransaction(ctx, s.pool, func(tx *sql.Tx) error { return insertSQLiteRequest(ctx, s.sqlite.WithTx(tx), request) })
+func requestTitleLockKey(request core.MediaRequest) string {
+	return string(request.Provider) + ":" + request.ProviderID + ":" + request.ProfileID
+}
+
+func checkSQLiteSeasonOverlap(ctx context.Context, q *sqlite.Queries, request core.MediaRequest) error {
+	if request.Kind != core.MediaKindSeries {
+		return nil
 	}
-	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error { return insertPostgresRequest(ctx, s.postgres.WithTx(tx), request) })
+	for _, season := range request.Seasons {
+		count, err := q.CountActiveRequestSeason(ctx, sqlite.CountActiveRequestSeasonParams{
+			Provider: string(request.Provider), ProviderID: request.ProviderID,
+			ProfileID: request.ProfileID, SeasonNumber: int64(season.Number),
+		})
+		if err != nil {
+			return fmt.Errorf("check active request season: %w", err)
+		}
+		if count != 0 {
+			return fmt.Errorf("active request season overlaps: %w", core.ErrAlreadyExists)
+		}
+	}
+	return nil
+}
+
+func checkPostgresSeasonOverlap(ctx context.Context, q *postgres.Queries, request core.MediaRequest) error {
+	if request.Kind != core.MediaKindSeries {
+		return nil
+	}
+	for _, season := range request.Seasons {
+		seasonNumber, err := checkedInt32(season.Number)
+		if err != nil {
+			return fmt.Errorf("convert request season number: %w", err)
+		}
+		count, err := q.CountActiveRequestSeason(ctx, postgres.CountActiveRequestSeasonParams{
+			Provider: string(request.Provider), ProviderID: request.ProviderID,
+			ProfileID: request.ProfileID, SeasonNumber: seasonNumber,
+		})
+		if err != nil {
+			return fmt.Errorf("check active request season: %w", err)
+		}
+		if count != 0 {
+			return fmt.Errorf("active request season overlaps: %w", core.ErrAlreadyExists)
+		}
+	}
+	return nil
 }
 
 func insertSQLiteRequest(ctx context.Context, q *sqlite.Queries, request core.MediaRequest) error {

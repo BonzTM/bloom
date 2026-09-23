@@ -1,6 +1,7 @@
 package tmdb
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -75,7 +76,7 @@ func mapSeriesResponse(response *tmdbapi.TvSeriesDetailsResponse, includeSpecial
 		Overview: value(data.Overview), PosterPath: value(data.PosterPath),
 	}
 	if err := core.ValidateMetadataTitle(title); err != nil {
-		return core.MetadataSeries{}, classifyError("series", response.StatusCode(), err)
+		return core.MetadataSeries{}, classifyError("series", response.StatusCode(), errors.Join(core.ErrMetadataMalformed, err))
 	}
 	seasons := make([]core.MetadataSeason, 0, len(*data.Seasons))
 	for _, raw := range *data.Seasons {
@@ -87,7 +88,7 @@ func mapSeriesResponse(response *tmdbapi.TvSeriesDetailsResponse, includeSpecial
 		seasons = append(seasons, season)
 	}
 	if err := core.ValidateMetadataSeasons(seasons, includeSpecials); err != nil {
-		return core.MetadataSeries{}, fmt.Errorf("tmdb series seasons: %w", core.ErrMetadataMalformed)
+		return core.MetadataSeries{}, fmt.Errorf("tmdb series seasons: %w", errors.Join(core.ErrMetadataMalformed, err))
 	}
 	return core.MetadataSeries{MetadataTitle: title, Seasons: seasons}, nil
 }

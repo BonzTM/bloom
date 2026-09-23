@@ -19,3 +19,12 @@ func (q *Queries) LockAccountRequestQuota(ctx context.Context, accountID string)
 	_, err := q.db.ExecContext(ctx, lockAccountRequestQuota, accountID)
 	return err
 }
+
+const lockRequestTitle = `-- name: LockRequestTitle :exec
+SELECT length(?1)
+`
+
+func (q *Queries) LockRequestTitle(ctx context.Context, lockKey interface{}) error {
+	_, err := q.db.ExecContext(ctx, lockRequestTitle, lockKey)
+	return err
+}

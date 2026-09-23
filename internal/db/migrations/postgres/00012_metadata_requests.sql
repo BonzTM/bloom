@@ -49,9 +49,12 @@ CREATE TABLE requests (
     updated_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE UNIQUE INDEX requests_one_active_title_profile_idx
-    ON requests(provider, provider_id, kind, profile_id)
-    WHERE status NOT IN ('declined', 'failed');
+CREATE UNIQUE INDEX requests_one_active_movie_profile_idx
+    ON requests(provider, provider_id, profile_id)
+    WHERE kind = 'movie' AND status IN ('pending', 'approved', 'processing');
+CREATE INDEX requests_active_series_profile_idx
+    ON requests(provider, provider_id, profile_id, id)
+    WHERE kind = 'series' AND status IN ('pending', 'approved', 'processing');
 CREATE INDEX requests_newest_idx ON requests(created_at DESC, id DESC);
 CREATE INDEX requests_requester_newest_idx ON requests(requester_account_id, created_at DESC, id DESC);
 

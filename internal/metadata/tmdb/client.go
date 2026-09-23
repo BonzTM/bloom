@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -65,15 +66,19 @@ func New(apiKey string, deps Dependencies) (*Client, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return nil, fmt.Errorf("parse TMDB base URL: %w", core.ErrInvalidArgument)
+	}
 	metrics := deps.Metrics
 	if metrics == nil {
 		metrics = nopMetrics{}
 	}
 	httpClient := deps.HTTPClient
 	if httpClient == nil {
-		httpClient = newHTTPClient(apiKey, metrics, deps.Clock, deps.Wait, deps.RandomInt64N)
+		httpClient = newHTTPClient(apiKey, base, metrics, deps.Clock, deps.Wait, deps.RandomInt64N)
 	} else {
-		httpClient = withAPIKey(httpClient, apiKey)
+		httpClient = withAPIKey(httpClient, apiKey, base)
 	}
 	generated, err := tmdbapi.NewClientWithResponses(baseURL, tmdbapi.WithHTTPClient(httpClient))
 	if err != nil {
@@ -84,6 +89,7 @@ func New(apiKey string, deps Dependencies) (*Client, error) {
 
 func newHTTPClient(
 	apiKey string,
+	baseURL *url.URL,
 	metrics Metrics,
 	clock core.Clock,
 	wait func(context.Context, time.Duration) error,
@@ -103,16 +109,22 @@ func newHTTPClient(
 	}
 	limiter := newTokenBucket(clock, ratePerSecond, rateBurst)
 	retrying := &retryTransport{next: transport, metrics: metrics, clock: clock, wait: wait, randomInt64N: randomInt64N, limiter: limiter}
-	authenticated := &apiKeyTransport{next: retrying, apiKey: apiKey}
-	return &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: requestTimeout}
+	authenticated := &apiKeyTransport{next: retrying, apiKey: apiKey, baseURL: baseURL}
+	client := &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: requestTimeout}
+	client.CheckRedirect = redirectPolicy(baseURL, nil)
+	return client
 }
 
 type apiKeyTransport struct {
-	next   http.RoundTripper
-	apiKey string
+	next    http.RoundTripper
+	apiKey  string
+	baseURL *url.URL
 }
 
 func (t *apiKeyTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if !sameOrigin(request.URL, t.baseURL) {
+		return t.next.RoundTrip(request)
+	}
 	clone := request.Clone(request.Context())
 	urlCopy := *request.URL
 	clone.URL = &urlCopy
@@ -122,14 +134,35 @@ func (t *apiKeyTransport) RoundTrip(request *http.Request) (*http.Response, erro
 	return t.next.RoundTrip(clone)
 }
 
-func withAPIKey(client *http.Client, apiKey string) *http.Client {
+func withAPIKey(client *http.Client, apiKey string, baseURL *url.URL) *http.Client {
 	clone := *client
 	transport := clone.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	clone.Transport = &apiKeyTransport{next: transport, apiKey: apiKey}
+	clone.Transport = &apiKeyTransport{next: transport, apiKey: apiKey, baseURL: baseURL}
+	clone.CheckRedirect = redirectPolicy(baseURL, client.CheckRedirect)
 	return &clone
+}
+
+func redirectPolicy(baseURL *url.URL, previous func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+	return func(request *http.Request, via []*http.Request) error {
+		if !sameOrigin(request.URL, baseURL) {
+			return errors.New("TMDB redirect target origin rejected")
+		}
+		if previous != nil {
+			return previous(request, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+}
+
+func sameOrigin(candidate, base *url.URL) bool {
+	return candidate != nil && base != nil && strings.EqualFold(candidate.Scheme, base.Scheme) &&
+		strings.EqualFold(candidate.Host, base.Host)
 }
 
 // Search searches TMDB movies and series.
@@ -185,7 +218,7 @@ func (c *Client) Movie(ctx context.Context, providerID string) (core.MetadataTit
 		PosterPath: value(response.JSON200.PosterPath),
 	}
 	if err := core.ValidateMetadataTitle(title); err != nil {
-		return core.MetadataTitle{}, classifyError("movie", response.StatusCode(), err)
+		return core.MetadataTitle{}, classifyError("movie", response.StatusCode(), errors.Join(core.ErrMetadataMalformed, err))
 	}
 	return title, nil
 }
