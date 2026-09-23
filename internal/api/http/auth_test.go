@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -125,13 +126,75 @@ func (s *authAccountStore) delete(username string) {
 type recordingAudit struct {
 	mu     sync.Mutex
 	events []telemetry.AuditEvent
+	err    error
+}
+
+type authAuthorization struct {
+	mu                      sync.Mutex
+	permissions             map[string][]core.Permission
+	roleNames               map[string][]string
+	roles                   []core.Role
+	permissionsErr          error
+	snapshotErr             error
+	listRolesErr            error
+	permissionsCalls        int
+	snapshotCalls           int
+	listRolesCalls          int
+	advanceAfterPermissions bool
+	lastAfterName           string
+	lastPageSize            int
+}
+
+func (a *authAuthorization) Permissions(_ context.Context, accountID string) ([]core.Permission, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.permissionsCalls++
+	if a.permissionsErr != nil {
+		return nil, a.permissionsErr
+	}
+	permissions := slices.Clone(a.permissions[accountID])
+	if a.advanceAfterPermissions {
+		a.permissions[accountID] = []core.Permission{core.PermissionRequestsCreate}
+		a.roleNames[accountID] = []string{"member"}
+	}
+	return permissions, nil
+}
+
+func (a *authAuthorization) Snapshot(_ context.Context, accountID string) (core.AuthorizationSnapshot, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.snapshotCalls++
+	if a.snapshotErr != nil {
+		return core.AuthorizationSnapshot{}, a.snapshotErr
+	}
+	return core.AuthorizationSnapshot{
+		RoleNames: slices.Clone(a.roleNames[accountID]), Permissions: slices.Clone(a.permissions[accountID]),
+	}, nil
+}
+
+func (a *authAuthorization) ListRoles(_ context.Context, afterName string, pageSize int) ([]core.Role, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.listRolesCalls++
+	if a.listRolesErr != nil {
+		return nil, a.listRolesErr
+	}
+	a.lastAfterName = afterName
+	a.lastPageSize = pageSize
+	roles := make([]core.Role, 0, pageSize)
+	for _, role := range a.roles {
+		if role.Name > afterName && len(roles) < pageSize {
+			roles = append(roles, role)
+		}
+	}
+	return roles, nil
 }
 
 func (a *recordingAudit) Emit(_ context.Context, event telemetry.AuditEvent) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.events = append(a.events, event)
-	return nil
+	return a.err
 }
 
 func (a *recordingAudit) last(t *testing.T) telemetry.AuditEvent {
@@ -145,15 +208,16 @@ func (a *recordingAudit) last(t *testing.T) telemetry.AuditEvent {
 }
 
 type authHarness struct {
-	server       *Server
-	h            http.Handler
-	store        *authAccountStore
-	sessions     *scs.SessionManager
-	audit        *recordingAudit
-	metrics      *countingMetrics
-	clock        *testutil.FakeClock
-	logs         *strings.Builder
-	sessionStore *controllableSessionStore
+	server        *Server
+	h             http.Handler
+	store         *authAccountStore
+	sessions      *scs.SessionManager
+	audit         *recordingAudit
+	metrics       *countingMetrics
+	clock         *testutil.FakeClock
+	logs          *strings.Builder
+	sessionStore  *controllableSessionStore
+	authorization *authAuthorization
 }
 
 type controllableSessionStore struct {
@@ -253,18 +317,36 @@ func newAuthHarnessConfigured(
 	if identity == nil {
 		identity = core.NewLocalIdentityProvider(store)
 	}
+	authorization := newAuthAuthorization()
 	srv := New(config.HTTPConfig{
 		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 2048,
 	}, Deps{
 		Logger: slog.New(slog.NewJSONHandler(logs, nil)), Metrics: metrics,
 		Readiness: telemetry.NewReadiness(true), Pinger: &fakePinger{},
 		Web: web, Identity: identity, Accounts: store,
+		Authorizer: authorization, Roles: authorization,
 		Sessions: sessions, Audit: audit, Clock: clock, Auth: authCfg,
 		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	return authHarness{
 		server: srv, h: srv.Handler(), store: store, sessions: sessions, audit: audit,
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
+		authorization: authorization,
+	}
+}
+
+func newAuthAuthorization() *authAuthorization {
+	allPermissions := make([]core.Permission, 0, len(core.PermissionCatalog()))
+	for _, definition := range core.PermissionCatalog() {
+		allPermissions = append(allPermissions, definition.ID)
+	}
+	return &authAuthorization{
+		permissions: map[string][]core.Permission{"11111111-1111-4111-8111-111111111111": allPermissions},
+		roleNames:   map[string][]string{"11111111-1111-4111-8111-111111111111": {"owner"}},
+		roles: []core.Role{{
+			ID: "00000000-0000-4000-8000-000000000001", Name: "owner", Description: "Full access.",
+			BuiltIn: true, CreatedAt: time.Unix(0, 0).UTC(), Permissions: allPermissions,
+		}},
 	}
 }
 

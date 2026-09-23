@@ -20,6 +20,8 @@ info:
     - Field names are `snake_case`. Timestamps are RFC 3339 in UTC.
     - Browser authentication uses a server-side session. The cookie contains
       only an opaque session token and is never an API credential.
+    - Permission identifiers are stable API contract values. The catalog may
+      grow additively; published identifiers are never renamed or removed.
 servers:
   - url: /
     description: Same origin as the SPA.
@@ -30,6 +32,8 @@ tags:
     description: Platform health probes and the metrics scrape endpoint.
   - name: auth
     description: Local login and server-side browser sessions.
+  - name: roles
+    description: Permission-based role information.
 paths:
   /api/v1/version:
     get:
@@ -258,9 +262,100 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthResponse"
+                $ref: "#/components/schemas/CurrentAccountResponse"
         "401":
           description: No live session, or the account was deleted or disabled.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/AuthInternalError"
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedGet"
+  /api/v1/auth/permissions:
+    get:
+      tags: [auth]
+      operationId: listPermissions
+      summary: Return the public stable permission catalog.
+      description: Permission identifiers only grow additively and are never renamed or removed.
+      responses:
+        "200":
+          description: The complete permission catalog in stable contract order.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlPublic" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionCatalogResponse"
+        "405":
+          $ref: "#/components/responses/AuthMethodNotAllowedGet"
+  /api/v1/roles:
+    get:
+      tags: [roles]
+      operationId: listRoles
+      summary: List roles and their effective permission sets.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor returned as `next_cursor` by the previous page.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 86
+        - name: page_size
+          in: query
+          required: false
+          description: Requested role count. Defaults to 50; values above 100 are clamped to 100.
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: At most 100 roles ordered by name, with each permission set sorted.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RolesResponse"
+        "401":
+          description: No live session. Invalid or revoked session cookies are expired.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The account lacks `admin.roles`. The `code` is `forbidden`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid cursor or page-size query value.
           headers:
             Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
             Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -281,6 +376,11 @@ components:
       schema:
         type: string
         enum: [no-store]
+    CacheControlPublic:
+      description: Allows shared caching of the public additive catalog for one hour.
+      schema:
+        type: string
+        const: public, max-age=3600
     VaryCookie:
       description: Marks the response as varying on the inbound Cookie header.
       schema:
@@ -401,6 +501,91 @@ components:
       properties:
         account:
           $ref: "#/components/schemas/AccountSummary"
+    CurrentAccountResponse:
+      type: object
+      required: [account, roles, permissions]
+      additionalProperties: false
+      properties:
+        account:
+          $ref: "#/components/schemas/AccountSummary"
+        roles:
+          type: array
+          items:
+            type: string
+          description: Assigned role names in sorted order.
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Permission"
+          description: Effective permissions in sorted order.
+    Permission:
+      type: string
+      description: Stable permission identifier. Values may only be added.
+      enum:
+        - users.read
+        - users.invite
+        - users.manage
+        - requests.read.own
+        - requests.create
+        - requests.approve
+        - stats.read.own
+        - stats.read.all
+        - admin.settings
+        - admin.roles
+    PermissionCatalogEntry:
+      type: object
+      required: [id, module]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Permission"
+        module:
+          type: string
+          enum: [users, requests, stats, admin]
+    PermissionCatalogResponse:
+      type: object
+      required: [permissions]
+      additionalProperties: false
+      properties:
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionCatalogEntry"
+    Role:
+      type: object
+      required: [id, name, description, built_in, created_at, permissions]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        built_in:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Permission"
+    RolesResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Role"
+        next_cursor:
+          type: string
+          maxLength: 86
+          description: Opaque cursor for the next page, or an empty string on the final page.
     Version:
       type: object
       required: [name, version, commit]
@@ -451,6 +636,7 @@ components:
         - csrf_rejected
         - unsupported_media_type
         - method_not_allowed
+        - forbidden
     FieldError:
       type: object
       required: [field, code, message]

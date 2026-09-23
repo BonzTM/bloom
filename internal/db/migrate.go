@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 
 	"github.com/pressly/goose/v3"
 
@@ -72,14 +73,77 @@ func newProvider(d config.Driver, pool *sql.DB) (*goose.Provider, error) {
 // (BLOOM_DB_MIGRATE_ON_STARTUP or the one-shot -migrate mode). The driver
 // behind pool must already be registered; Migrate does not open the pool.
 func Migrate(ctx context.Context, pool *sql.DB, d config.Driver) error {
+	return MigrateWithLogger(ctx, pool, d, nil)
+}
+
+// MigrateWithLogger applies pending migrations and reports role-less legacy
+// accounts when the authorization schema is first installed.
+func MigrateWithLogger(ctx context.Context, pool *sql.DB, d config.Driver, logger *slog.Logger) error {
 	p, err := newProvider(d, pool)
+	if err != nil {
+		return err
+	}
+	rolesAlreadyApplied, err := migrationVersionApplied(ctx, pool, d, rolesMigrationVersion)
 	if err != nil {
 		return err
 	}
 	if _, err := p.Up(ctx); err != nil {
 		return fmt.Errorf("apply %s migrations: %w", d, err)
 	}
+	if !rolesAlreadyApplied && logger != nil {
+		logRolelessAccountNotice(ctx, pool, logger)
+	}
 	return nil
+}
+
+const rolesMigrationVersion = 6
+
+func migrationVersionApplied(ctx context.Context, pool *sql.DB, driver config.Driver, version int64) (bool, error) {
+	exists, err := migrationVersionTableExists(ctx, pool, driver)
+	if err != nil {
+		return false, fmt.Errorf("check migration version table: %w", err)
+	}
+	if !exists {
+		return false, nil
+	}
+	var applied int
+	err = pool.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM goose_db_version WHERE version_id = $1 AND is_applied = TRUE", version,
+	).Scan(&applied)
+	if err != nil {
+		return false, fmt.Errorf("check migration version %d: %w", version, err)
+	}
+	return applied > 0, nil
+}
+
+func migrationVersionTableExists(ctx context.Context, pool *sql.DB, driver config.Driver) (bool, error) {
+	var query string
+	switch driver {
+	case config.DriverSQLite:
+		query = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'"
+	case config.DriverPostgres:
+		query = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'goose_db_version'"
+	default:
+		return false, fmt.Errorf("unsupported database driver %q", driver)
+	}
+	var count int
+	if err := pool.QueryRowContext(ctx, query).Scan(&count); err != nil {
+		return false, fmt.Errorf("locate migration version table: %w", err)
+	}
+	return count > 0, nil
+}
+
+func logRolelessAccountNotice(ctx context.Context, pool *sql.DB, logger *slog.Logger) {
+	var count int
+	err := pool.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts a
+WHERE NOT EXISTS (SELECT 1 FROM account_roles ar WHERE ar.account_id = a.id)`).Scan(&count)
+	if err != nil {
+		logger.ErrorContext(ctx, "count accounts without roles after authorization migration", "error", err)
+		return
+	}
+	if count > 0 {
+		logger.WarnContext(ctx, "existing accounts were left without roles after authorization migration", "account_count", count)
+	}
 }
 
 const (

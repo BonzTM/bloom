@@ -21,6 +21,8 @@ const (
 	requestIDKey ctxKey = iota
 	accountKey
 	sessionStateKey
+	permissionsKey
+	authorizationSnapshotKey
 )
 
 // requestIDFrom returns the request ID stored in ctx, or "" if absent.

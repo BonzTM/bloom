@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
 	// by both engines (ADR 0004 item 3): sqlc.yaml compiles it once against the
 	// SQLite schema into internal/db/sqlite and once against the PostgreSQL schema
@@ -18,6 +19,12 @@ type Querier interface {
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
+	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
+	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
+	// Authorization queries are shared by SQLite and PostgreSQL. Effective
+	// permissions are computed from current database state for every request.
+	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
 }
 

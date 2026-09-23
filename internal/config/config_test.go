@@ -37,6 +37,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Database.DSN != DefaultSQLiteDSN {
 		t.Errorf("DSN = %q, want default sqlite DSN", cfg.Database.DSN)
 	}
+	if !strings.Contains(cfg.Database.DSN, "_pragma=foreign_keys(1)") {
+		t.Errorf("DSN = %q, want foreign keys enabled on every connection", cfg.Database.DSN)
+	}
 	if cfg.Telemetry.LogFormat != LogFormatJSON {
 		t.Errorf("LogFormat = %q, want json", cfg.Telemetry.LogFormat)
 	}
@@ -283,7 +286,7 @@ func TestLoadMalformedEnvRejected(t *testing.T) {
 func validConfigForTest() Config {
 	return Config{
 		HTTP:      HTTPConfig{Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 1},
-		Database:  DatabaseConfig{Driver: DriverSQLite, DSN: "file::memory:", MaxOpenConns: 5, MaxIdleConns: 5, ConnMaxLifetime: time.Minute},
+		Database:  DatabaseConfig{Driver: DriverSQLite, DSN: "file::memory:?_pragma=foreign_keys(1)", MaxOpenConns: 5, MaxIdleConns: 5, ConnMaxLifetime: time.Minute},
 		Telemetry: TelemetryConfig{LogFormat: LogFormatJSON, TraceSampleRatio: 1},
 		Auth: AuthConfig{
 			SessionCookieSecure: true, SessionLifetime: time.Hour, SessionIdleTimeout: time.Minute,

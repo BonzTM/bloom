@@ -38,6 +38,8 @@ import (
 type AuditResult string
 
 const (
+	// AuditActionRoleAssign is the stable action for every account role assignment.
+	AuditActionRoleAssign = "role.assign"
 	// AuditSuccess marks an allowed, completed action.
 	AuditSuccess AuditResult = "success"
 	// AuditFailure marks an authentication failure: the caller could not be
@@ -65,6 +67,12 @@ type AuditEvent struct {
 	// Resource is the target resource identifier (an id or route), never its
 	// contents. Empty when the action has no specific target.
 	Resource string
+	// Permission is the finite catalog identifier evaluated by an authorization
+	// decision. It is empty for events that are not permission checks.
+	Permission string
+	// Role is the assigned role name. It is empty for events that are not role
+	// assignments.
+	Role string
 	// Result is the outcome: success, failure, or denied.
 	Result AuditResult
 	// Reason is a finite audit-safe outcome detail such as "bad_password".
@@ -91,6 +99,23 @@ type AuditClock interface {
 	Now() time.Time
 }
 
+// RoleAssignmentAuditEvent builds the shared representation for an account
+// role assignment. An unresolved account never exposes the submitted username.
+func RoleAssignmentAuditEvent(
+	actor, accountID, role string,
+	result AuditResult,
+	reason, source string,
+) AuditEvent {
+	resource := "account:" + accountID
+	if accountID == "" {
+		resource = "account:unresolved"
+	}
+	return AuditEvent{
+		Actor: actor, Action: AuditActionRoleAssign, Resource: resource,
+		Role: role, Result: result, Reason: reason, Source: source,
+	}
+}
+
 // NewAuditLogger builds an AuditLogger writing JSON records to w, which is the
 // audit sink, SEPARATE from the application logger's writer so audit evidence
 // is governed independently. The handler is fixed to JSON at info level: audit
@@ -115,6 +140,8 @@ func (a *AuditLogger) Emit(ctx context.Context, e AuditEvent) error {
 		slog.String("subject_id", e.SubjectID),
 		slog.String("action", e.Action),
 		slog.String("resource", e.Resource),
+		slog.String("permission", e.Permission),
+		slog.String("role", e.Role),
 		slog.String("result", string(e.Result)),
 		slog.String("reason", e.Reason),
 		slog.String("source", e.Source),

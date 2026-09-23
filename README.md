@@ -61,8 +61,9 @@ unset BLOOM_BOOTSTRAP_PASSWORD
 When `BLOOM_BOOTSTRAP_PASSWORD` is unset and the command runs in a terminal,
 Bloom prompts for the password without echoing it. The password is never
 accepted as a command-line flag. Run the command only once for each bootstrap
-account; an existing username is refused. Usernames are canonicalized with the
-PRECIS UsernameCaseMapped profile. They must contain 3 through 64 letters,
+account; an existing username is refused. The command assigns the built-in
+`owner` role atomically with account creation. Usernames are canonicalized with
+the PRECIS UsernameCaseMapped profile. They must contain 3 through 64 letters,
 digits, `.`, `_`, or `-`, and cannot start or end with a separator. New local
 passwords must contain 15 through 1024 Unicode characters and must not exceed
 4096 UTF-8 bytes. Bloom
@@ -71,6 +72,27 @@ denylist. It applies no character-composition rules.
 
 `make verify` is the single gate; it must pass before any change is considered done.
 See [AGENTS.md](AGENTS.md) for the full contributor contract and verification bar.
+
+### Authorization
+
+Bloom uses permission-based roles. Permissions are stable strings grouped by
+module, such as `users.read`, `requests.create`, and `admin.roles`. Published
+permission identifiers are part of the API contract. New identifiers may be
+added, but existing identifiers are never renamed or removed. The public,
+cacheable catalog is available from `GET /api/v1/auth/permissions`.
+
+The built-in `owner` role has every permission and cannot be edited or deleted.
+The built-in `member` role can read its own request and statistics data and can
+create requests. Accounts may hold multiple roles; their effective permission
+set is the union of those roles. Bloom reads that set from the database for each
+authenticated request. It does not cache authorization decisions.
+
+`GET /api/v1/auth/me` returns the current account, its sorted role names, and
+its sorted effective permissions. `GET /api/v1/roles` requires `admin.roles`
+and returns roles with their permissions using cursor pagination. The default
+page size is 50 roles and the enforced maximum is 100. A missing session gets
+`401 unauthorized`; a signed-in account without the required permission gets
+`403 forbidden`. This slice does not expose role-editing endpoints.
 
 ### Running against PostgreSQL
 
@@ -97,7 +119,7 @@ this table.
 | `BLOOM_HTTP_IDLE_TIMEOUT` | duration | no | `60s` | no | Idle keep-alive connection lifetime. |
 | `BLOOM_HTTP_MAX_BODY_BYTES` | int | no | `1048576` | no | Cap on non-streaming request bodies. |
 | `BLOOM_DB_DRIVER` | `sqlite` \| `postgres` | no | `sqlite` | no | Database engine. Anything else fails startup. |
-| `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. |
+| `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. SQLite DSNs must enable foreign keys on every connection with `_pragma=foreign_keys(1)`. |
 | `BLOOM_DB_MAX_OPEN_CONNS` | int | no | `25` | no | Pool cap on open connections. |
 | `BLOOM_DB_MAX_IDLE_CONNS` | int | no | `25` | no | Pool idle floor; must be `<=` max open. |
 | `BLOOM_DB_CONN_MAX_LIFETIME` | duration | no | `30m` | no | Bound on connection age. |
@@ -127,7 +149,29 @@ steps: per-engine SQL migration 00003 adds nullable key and backup storage,
 engine-neutral Go migration 00004 backfills PRECIS UsernameCaseMapped keys in
 Goose's transaction, and per-engine SQL migration 00005 makes the key `NOT NULL`
 and exactly unique. A collision aborts 00004 without changing its version or
-account data.
+account data. Migration `00006_roles` adds roles, role permissions, and account
+role assignments on both engines and seeds the built-in `owner` and `member`
+roles. Existing accounts are deliberately left without roles; the migration
+logs a notice instead of guessing their authority.
+
+### Upgrading existing accounts to roles
+
+Back up the database before applying migration `00006_roles`. After migration,
+grant a built-in role to an existing roleless account:
+
+```bash
+go run ./cmd/bloom grant-role --username <existing-name> --role owner
+```
+
+The command refuses unknown accounts and roles. Repeating the same grant is a
+successful no-op. Start Bloom, sign in as that account, and verify that
+`GET /api/v1/auth/me` lists `owner` under `roles` and includes `admin.roles`
+under `permissions`. Then verify that `GET /api/v1/roles` returns `200`.
+
+To roll back the application, stop Bloom and redeploy the prior binary; the
+additive role tables can remain in place. To roll back the schema itself,
+restore the pre-upgrade database backup because migrating down removes the role
+assignments.
 
 ## Architecture
 
@@ -142,7 +186,7 @@ Layout follows the handbook default (`cmd/` + `internal/`):
 
 - `cmd/bloom` — process wiring, signal handling, shutdown; no business logic.
 - `internal/runtime` — assembly, startup order, bounded shutdown, `-migrate` mode.
-- `internal/core` — domain types and the interfaces consumed from the outside (`AccountStore`, `Clock`).
+- `internal/core` — domain types and the interfaces consumed from the outside (`AccountStore`, `Authorizer`, `RoleReader`, `Clock`).
 - `internal/api/http` — JSON API transport adapter; `auth.go` is the [ADR 0006](decisions/0006-auth-and-authorization-model.md) seam.
 - `internal/db` — pool, embedded per-engine migrations, shared queries, `sqlite/` and `postgres/` generated packages, engine adapters, parity tests.
 - `internal/config` — loading, defaults, validation, fail-fast startup, `Secret`.

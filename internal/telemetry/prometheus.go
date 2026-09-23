@@ -8,6 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/BonzTM/bloom/internal/core"
 )
 
 // PromMetrics is the production Metrics implementation backed by a dedicated
@@ -28,6 +30,7 @@ type PromMetrics struct {
 	csrfRejections         prometheus.Counter
 	auditWriteFailures     prometheus.Counter
 	sessionCleanupFailures prometheus.Counter
+	authorizationDenials   *prometheus.CounterVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -68,6 +71,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		Name:      "session_cleanup_failures_total",
 		Help:      "Total failed expired-session cleanup attempts.",
 	})
+	authorizationDenials := newAuthorizationDenialCounter(namespace)
 
 	// Register on the private registry alongside the standard process and Go
 	// runtime collectors so /metrics also exposes runtime gauges.
@@ -84,9 +88,18 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		csrfRejections:         csrfRejections,
 		auditWriteFailures:     auditWriteFailures,
 		sessionCleanupFailures: sessionCleanupFailures,
+		authorizationDenials:   authorizationDenials,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
+}
+
+func newAuthorizationDenialCounter(namespace string) *prometheus.CounterVec {
+	return prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "authorization_denials_total",
+		Help:      "Total authorization denials by finite permission identifier.",
+	}, []string{"permission"})
 }
 
 func (m *PromMetrics) registerApplicationCollectors() {
@@ -97,6 +110,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.csrfRejections,
 		m.auditWriteFailures,
 		m.sessionCleanupFailures,
+		m.authorizationDenials,
 	)
 }
 
@@ -108,6 +122,15 @@ func (m *PromMetrics) IncAuditWriteFailure() { m.auditWriteFailures.Inc() }
 
 // IncSessionCleanupFailure records one failed expired-session cleanup attempt.
 func (m *PromMetrics) IncSessionCleanupFailure() { m.sessionCleanupFailures.Inc() }
+
+// IncAuthorizationDenial records one denied permission check.
+func (m *PromMetrics) IncAuthorizationDenial(permission core.CatalogPermission) {
+	label := permission.Permission()
+	if !label.Valid() {
+		label = "invalid"
+	}
+	m.authorizationDenials.WithLabelValues(string(label)).Inc()
+}
 
 // IncLoginAttempt records one local login attempt with a finite outcome.
 func (m *PromMetrics) IncLoginAttempt(outcome string) {

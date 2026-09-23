@@ -30,12 +30,18 @@ func accountFrom(ctx context.Context) (core.Account, bool) {
 	return account, ok
 }
 
+func permissionsFrom(ctx context.Context) ([]core.Permission, bool) {
+	permissions, ok := ctx.Value(permissionsKey).([]core.Permission)
+	return permissions, ok
+}
+
+func authorizationSnapshotFrom(ctx context.Context) (core.AuthorizationSnapshot, bool) {
+	snapshot, ok := ctx.Value(authorizationSnapshotKey).(core.AuthorizationSnapshot)
+	return snapshot, ok
+}
+
 func (s *Server) sessionAccountMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !sessionRequired(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
 		account, reason, err := s.loadSessionAccount(r.Context())
 		if reason != "" {
 			actor := account.ID
@@ -53,9 +59,48 @@ func (s *Server) sessionAccountMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func sessionRequired(r *http.Request) bool {
-	return (r.Method == http.MethodGet && r.URL.Path == "/api/v1/auth/me") ||
-		(r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/logout")
+func (s *Server) permissionSetMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		account, ok := accountFrom(r.Context())
+		if !ok {
+			writeError(w, r, s.logger, errAuthenticationRequired)
+			return
+		}
+		permissions, err := s.loadAccountPermissions(r.Context(), account.ID)
+		if err != nil {
+			writeError(w, r, s.logger, err)
+			return
+		}
+		ctx := context.WithValue(r.Context(), permissionsKey, permissions)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) authorizationSnapshotMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		account, ok := accountFrom(r.Context())
+		if !ok {
+			writeError(w, r, s.logger, errAuthenticationRequired)
+			return
+		}
+		snapshot, err := s.loadAuthorizationSnapshot(r.Context(), account.ID)
+		if err != nil {
+			writeError(w, r, s.logger, err)
+			return
+		}
+		ctx := context.WithValue(r.Context(), authorizationSnapshotKey, snapshot)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) loadAccountPermissions(ctx context.Context, accountID string) ([]core.Permission, error) {
+	authCtx, cancel := context.WithTimeout(ctx, s.authOperationTimeout)
+	defer cancel()
+	permissions, err := s.authorizer.Permissions(authCtx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return permissions, authCtx.Err()
 }
 
 func (s *Server) loadSessionAccount(ctx context.Context) (core.Account, string, error) {

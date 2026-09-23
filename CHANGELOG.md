@@ -26,6 +26,20 @@ contracts) gets an entry here.
 - Local authentication with `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`,
   and `GET /api/v1/auth/me`; server-side `bloom_session` cookies; and the
   `create-admin` bootstrap command.
+- Permission-based authorization with a stable public catalog at
+  `GET /api/v1/auth/permissions`, effective roles and permissions in
+  `GET /api/v1/auth/me`, guarded role listing at `GET /api/v1/roles`, denial
+  audit events, and per-permission denial metrics.
+- Migration `00006_roles` for roles, role permissions, and account-role
+  assignments on SQLite and PostgreSQL. It seeds immutable built-in `owner`
+  and `member` roles and leaves existing accounts role-less with an operator
+  notice instead of guessing assignments. `create-admin` now assigns `owner`
+  atomically and audits the assignment.
+- The `grant-role --username <name> --role <role>` recovery command assigns a
+  role to an existing role-less account. Repeating an existing assignment
+  succeeds without duplication. Unknown accounts, unknown roles, and storage
+  failures return an error; audit-sink failures are logged without masking the
+  assignment result.
 - Migration `00002_local_auth_sessions` for local Argon2id credentials,
   account-disable state, and database-backed sessions on SQLite and PostgreSQL.
 - Migrations `00003_canonical_usernames`, Go migration `00004`, and
