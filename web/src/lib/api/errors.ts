@@ -44,9 +44,13 @@ export class ApiError extends Error {
 
 export type AccessDenial = "unauthenticated" | "forbidden";
 
+export const CSRF_REJECTED = "csrf_rejected";
+
 // Whether a failed request means the session is gone (401) or the account may
 // not do this (403). Both are terminal for the caller: retrying the same
 // request cannot succeed until the person signs in again or gains the right.
+// A 403 that rejects the request as cross-site says nothing about the
+// account, so it is not a denial.
 export function accessDenial(error: unknown): AccessDenial | undefined {
   if (!(error instanceof ApiError)) {
     return undefined;
@@ -54,7 +58,10 @@ export function accessDenial(error: unknown): AccessDenial | undefined {
   if (error.status === 401) {
     return "unauthenticated";
   }
-  return error.status === 403 ? "forbidden" : undefined;
+  if (error.status === 403 && error.code !== CSRF_REJECTED) {
+    return "forbidden";
+  }
+  return undefined;
 }
 
 export function mapHttpError(

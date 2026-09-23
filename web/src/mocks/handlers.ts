@@ -7,6 +7,11 @@ import {
   type KnownPermission,
   type Session,
 } from "../features/auth/api/auth-schemas.js";
+import {
+  registerMediaServerRequestSchema,
+  type MediaServer,
+  type RegisterMediaServerRequest,
+} from "../features/media-servers/api/media-servers-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -38,6 +43,7 @@ export const mockSession: Session = {
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const MAX_CURSOR_LENGTH = 86;
+const MAX_MEDIA_SERVER_CURSOR_LENGTH = 400;
 const MAX_INT64 = 9_223_372_036_854_775_807n;
 const CUSTOM_ROLE_COUNT = 49;
 
@@ -148,6 +154,7 @@ export const errorCodeSchema = z.enum([
   "unsupported_media_type",
   "method_not_allowed",
   "forbidden",
+  "media_server_failure",
 ]);
 
 export type ErrorCode = z.output<typeof errorCodeSchema>;
@@ -183,25 +190,32 @@ function sendsJson(request: Request): boolean {
   );
 }
 
-const rolesQuerySchema = z.object({
-  cursor: z
-    .string()
-    .min(1)
-    .max(MAX_CURSOR_LENGTH)
-    .regex(/^offset:\d{1,3}$/)
-    .optional(),
-  // Decimal digits only, as the server's integer parser reads them: no
-  // sign, exponent, radix prefix, fraction, or whitespace; leading zeros are
-  // fine and nothing beyond a signed 64-bit integer. Values above the
-  // maximum page are clamped.
-  page_size: z
-    .string()
-    .regex(/^[0-9]+$/)
-    .refine((digits) => /^[0-9]+$/.test(digits) && BigInt(digits) <= MAX_INT64)
-    .transform((digits) => Math.min(Number(digits), MAX_PAGE_SIZE))
-    .pipe(z.number().int().min(1))
-    .optional(),
-});
+// Cursors are the offset of the next page; page_size is decimal digits only,
+// as the server's integer parser reads them: no sign, exponent, radix prefix,
+// fraction, or whitespace; leading zeros are fine and nothing beyond a signed
+// 64-bit integer. Values above the maximum page are clamped.
+function pageQuerySchema(maxCursorLength: number) {
+  return z.object({
+    cursor: z
+      .string()
+      .min(1)
+      .max(maxCursorLength)
+      .regex(/^offset:\d{1,3}$/)
+      .optional(),
+    page_size: z
+      .string()
+      .regex(/^[0-9]+$/)
+      .refine(
+        (digits) => /^[0-9]+$/.test(digits) && BigInt(digits) <= MAX_INT64,
+      )
+      .transform((digits) => Math.min(Number(digits), MAX_PAGE_SIZE))
+      .pipe(z.number().int().min(1))
+      .optional(),
+  });
+}
+
+const rolesQuerySchema = pageQuerySchema(MAX_CURSOR_LENGTH);
+const mediaServersQuerySchema = pageQuerySchema(MAX_MEDIA_SERVER_CURSOR_LENGTH);
 
 // The parameters the server reads, each at most once as the server requires;
 // unknown parameters are ignored, as the server ignores them.
@@ -221,9 +235,13 @@ function singleValues(
   return values;
 }
 
-function rolesPage(url: URL) {
+function pagedItems(
+  url: URL,
+  schema: ReturnType<typeof pageQuerySchema>,
+  items: readonly unknown[],
+) {
   const raw = singleValues(url.searchParams);
-  const query = rolesQuerySchema.safeParse(raw);
+  const query = schema.safeParse(raw);
   if (raw === undefined || !query.success) {
     return envelope(422, "validation_failed", "invalid cursor or page_size");
   }
@@ -232,15 +250,171 @@ function rolesPage(url: URL) {
       ? 0
       : Number(query.data.cursor.slice("offset:".length));
   const size = query.data.page_size ?? DEFAULT_PAGE_SIZE;
-  const items = mockRoles.slice(offset, offset + size);
   const next = offset + size;
   return HttpResponse.json({
-    items,
-    next_cursor: next < mockRoles.length ? `offset:${String(next)}` : "",
+    items: items.slice(offset, next),
+    next_cursor: next < items.length ? `offset:${String(next)}` : "",
   });
 }
 
+function rolesPage(url: URL) {
+  return pagedItems(url, rolesQuerySchema, mockRoles);
+}
+
+// Media servers the mock server starts with, ordered by name as the server
+// orders them. Registration and removal change the working copy only.
+export const UNREACHABLE_MEDIA_SERVER_HOST = "unreachable.example";
+export const BUSY_MEDIA_SERVER_HOST = "busy.example";
+export const mockServerInfo = {
+  name: "Mock Jellyfin",
+  version: "10.10.7",
+  id: "mock-server-id",
+} as const;
+
+export const mockMediaServers: readonly MediaServer[] = [
+  {
+    id: "3d7f1a2b-0000-4000-8000-000000000001",
+    kind: "jellyfin",
+    name: "Cabin",
+    base_url: "http://10.0.0.5:8096",
+    allow_insecure: true,
+    created_at: "2026-09-12T10:00:00Z",
+    updated_at: "2026-09-12T10:00:00Z",
+    capabilities: {
+      create_user_with_password: true,
+      set_password: true,
+      quick_connect_approval: false,
+      provider_id_lookup: false,
+    },
+  },
+  {
+    id: "3d7f1a2b-0000-4000-8000-000000000002",
+    kind: "jellyfin",
+    name: "Living room",
+    base_url: "https://jellyfin.example",
+    allow_insecure: false,
+    created_at: "2026-09-01T08:00:00Z",
+    updated_at: "2026-09-01T08:00:00Z",
+    capabilities: {
+      create_user_with_password: true,
+      set_password: true,
+      quick_connect_approval: true,
+      provider_id_lookup: true,
+    },
+  },
+];
+
+let mediaServers: MediaServer[] = [...mockMediaServers];
+let registeredCount = 0;
+
+export function resetMockMediaServers(): void {
+  mediaServers = [...mockMediaServers];
+  registeredCount = 0;
+}
+
+function transportMismatch(input: RegisterMediaServerRequest): boolean {
+  return input.base_url.startsWith("http://") !== input.allow_insecure;
+}
+
+function registerMockMediaServer(
+  input: RegisterMediaServerRequest,
+): MediaServer {
+  registeredCount += 1;
+  const ordinal = String(registeredCount).padStart(2, "0");
+  const server: MediaServer = {
+    id: `3d7f1a2b-0000-4000-8000-0000000001${ordinal}`,
+    kind: input.kind,
+    name: input.name,
+    base_url: input.base_url.replace(/\/+$/u, ""),
+    allow_insecure: input.allow_insecure,
+    created_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+    capabilities: {
+      create_user_with_password: true,
+      set_password: true,
+      quick_connect_approval: true,
+      provider_id_lookup: false,
+    },
+  };
+  mediaServers = [...mediaServers, server].sort((a, b) =>
+    a.name.localeCompare(b.name, "en"),
+  );
+  return server;
+}
+
+function mediaServerDenial() {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("admin.settings")) {
+    return envelope(403, "forbidden", "missing permission admin.settings");
+  }
+  return undefined;
+}
+
+async function registerMediaServer(request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = registerMediaServerRequestSchema.safeParse(
+    await request.json(),
+  );
+  if (!input.success || transportMismatch(input.data)) {
+    return envelope(422, "validation_failed", "invalid media server");
+  }
+  const host = new URL(input.data.base_url).hostname;
+  const name = input.data.name.toLowerCase();
+  if (mediaServers.some((server) => server.name.toLowerCase() === name)) {
+    return envelope(409, "already_exists", "a media server uses that name");
+  }
+  if (host === UNREACHABLE_MEDIA_SERVER_HOST) {
+    return envelope(502, "media_server_failure", "media server probe failed", {
+      "Retry-After": "5",
+    });
+  }
+  if (host === BUSY_MEDIA_SERVER_HOST) {
+    return envelope(503, "unavailable", "media server busy", {
+      "Retry-After": "2",
+    });
+  }
+  const server = registerMockMediaServer(input.data);
+  return HttpResponse.json({ server, info: mockServerInfo }, { status: 201 });
+}
+
+function removeMediaServer(id: string | readonly string[] | undefined) {
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return envelope(422, "validation_failed", "invalid id");
+  }
+  const index = mediaServers.findIndex((server) => server.id === id);
+  if (index === -1) {
+    return envelope(404, "not_found", "media server not found");
+  }
+  mediaServers = mediaServers.filter((server) => server.id !== id);
+  return new HttpResponse(null, { status: 204 });
+}
+
 export const handlers = [
+  http.get(
+    "*/api/v1/media-servers",
+    jsonApi(
+      ({ request }) =>
+        mediaServerDenial() ??
+        pagedItems(new URL(request.url), mediaServersQuerySchema, mediaServers),
+    ),
+  ),
+  http.post(
+    "*/api/v1/media-servers",
+    jsonApi(
+      async ({ request }) =>
+        mediaServerDenial() ?? (await registerMediaServer(request)),
+    ),
+  ),
+  http.delete(
+    "*/api/v1/media-servers/:id",
+    jsonApi(
+      ({ params }) => mediaServerDenial() ?? removeMediaServer(params.id),
+    ),
+  ),
   http.get(
     "*/api/v1/roles",
     jsonApi(({ request }) => {

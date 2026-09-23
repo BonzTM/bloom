@@ -20,6 +20,9 @@ const LazyAboutRoute = lazy(() => import("../routes/about-route.js"));
 const LazyLoginRoute = lazy(() => import("../routes/login-route.js"));
 const LazyAdminRoute = lazy(() => import("../routes/admin-route.js"));
 const LazyRolesRoute = lazy(() => import("../routes/roles-route.js"));
+const LazyMediaServersRoute = lazy(
+  () => import("../routes/media-servers-route.js"),
+);
 
 type LazyPageProps = Readonly<{ loading: string; children: ReactNode }>;
 
@@ -76,6 +79,16 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.adminRoles]}>
                 <LazyPage loading="Loading roles…">
                   <LazyRolesRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "media-servers",
+            element: (
+              <RequirePermission anyOf={[permissions.adminSettings]}>
+                <LazyPage loading="Loading media servers…">
+                  <LazyMediaServersRoute />
                 </LazyPage>
               </RequirePermission>
             ),
