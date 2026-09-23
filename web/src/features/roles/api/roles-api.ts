@@ -1,5 +1,12 @@
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
+  requestQuotaInputSchema,
+  requestQuotaSchema,
+  type RequestQuota,
+  type RequestQuotaInput,
+} from "./quota-schemas.js";
+import {
+  roleIdSchema,
   rolesCursorSchema,
   rolesPageSchema,
   type RolesPage,
@@ -19,6 +26,28 @@ export class RolesApi {
       signal,
     });
   }
+
+  // The role's request quota; a 404 means none is set.
+  quota(roleId: string, signal: AbortSignal): Promise<RequestQuota> {
+    return this.#client.requestJson(quotaPath(roleId), requestQuotaSchema, {
+      signal,
+    });
+  }
+
+  setQuota(roleId: string, input: RequestQuotaInput): Promise<RequestQuota> {
+    return this.#client.requestJson(quotaPath(roleId), requestQuotaSchema, {
+      method: "PUT",
+      body: requestQuotaInputSchema.parse(input),
+    });
+  }
+
+  removeQuota(roleId: string): Promise<void> {
+    return this.#client.requestEmpty(quotaPath(roleId), { method: "DELETE" });
+  }
+}
+
+function quotaPath(roleId: string): string {
+  return `api/v1/roles/${encodeURIComponent(roleIdSchema.parse(roleId))}/request-quota`;
 }
 
 function rolesPath(cursor: string | undefined): string {

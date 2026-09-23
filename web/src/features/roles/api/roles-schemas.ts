@@ -27,3 +27,5 @@ export const rolesPageSchema = z.object({
 export type RolesPage = z.output<typeof rolesPageSchema>;
 
 export const rolesCursorSchema = z.string().min(1).max(MAX_CURSOR_LENGTH);
+
+export const roleIdSchema = z.uuid();

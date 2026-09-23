@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AsyncStatus } from "../../../components/async-status.js";
 import type { Role } from "../api/roles-schemas.js";
 import type { useRoles } from "../hooks/roles-queries.js";
+import { RoleQuotaControls } from "./role-quota-controls.js";
 
 type RolesQuery = ReturnType<typeof useRoles>;
 
@@ -10,7 +11,8 @@ type RolesQuery = ReturnType<typeof useRoles>;
 // rows, a failed later page that keeps the rows, and a failed first load.
 export function RolesTable({
   query,
-}: Readonly<{ query: RolesQuery }>): ReactNode {
+  accountId,
+}: Readonly<{ query: RolesQuery; accountId: string }>): ReactNode {
   if (query.status === "pending") {
     return <AsyncStatus>Loading roles…</AsyncStatus>;
   }
@@ -27,7 +29,7 @@ export function RolesTable({
       {items.length === 0 ? (
         <p>There are no roles yet.</p>
       ) : (
-        <Table roles={items} />
+        <Table roles={items} accountId={accountId} />
       )}
       <Pager
         hasMore={query.hasNextPage}
@@ -39,7 +41,10 @@ export function RolesTable({
   );
 }
 
-function Table({ roles }: Readonly<{ roles: readonly Role[] }>): ReactNode {
+function Table({
+  roles,
+  accountId,
+}: Readonly<{ roles: readonly Role[]; accountId: string }>): ReactNode {
   return (
     <div
       className="table-scroll"
@@ -55,11 +60,12 @@ function Table({ roles }: Readonly<{ roles: readonly Role[] }>): ReactNode {
             <th scope="col">Description</th>
             <th scope="col">Kind</th>
             <th scope="col">Permissions</th>
+            <th scope="col">Request quota</th>
           </tr>
         </thead>
         <tbody>
           {roles.map((role) => (
-            <RoleRow key={role.id} role={role} />
+            <RoleRow key={role.id} role={role} accountId={accountId} />
           ))}
         </tbody>
       </table>
@@ -67,7 +73,10 @@ function Table({ roles }: Readonly<{ roles: readonly Role[] }>): ReactNode {
   );
 }
 
-function RoleRow({ role }: Readonly<{ role: Role }>): ReactNode {
+function RoleRow({
+  role,
+  accountId,
+}: Readonly<{ role: Role; accountId: string }>): ReactNode {
   return (
     <tr>
       <th scope="row">{role.name}</th>
@@ -75,6 +84,13 @@ function RoleRow({ role }: Readonly<{ role: Role }>): ReactNode {
       <td>{role.built_in ? "Built-in" : "Custom"}</td>
       <td>
         <PermissionList roleName={role.name} permissions={role.permissions} />
+      </td>
+      <td>
+        <RoleQuotaControls
+          accountId={accountId}
+          roleId={role.id}
+          roleName={role.name}
+        />
       </td>
     </tr>
   );

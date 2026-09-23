@@ -5,6 +5,7 @@ import {
   resetMockInvites,
   resetMockMediaServers,
   resetMockRequests,
+  resetMockRoleQuotas,
   resetMockSession,
 } from "../mocks/handlers.js";
 import { server } from "./server.js";
@@ -20,6 +21,7 @@ afterEach(() => {
   resetMockMediaServers();
   resetMockInvites();
   resetMockRequests();
+  resetMockRoleQuotas();
 });
 
 afterAll(() => {

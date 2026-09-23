@@ -274,7 +274,7 @@ the request's `/approve` or `/decline` route. This slice records approval only;
 it does not send approved requests to a download manager.
 
 Role quotas are managed at `/api/v1/roles/{id}/request-quota` with
-`admin.roles`. Account overrides are managed at
+`admin.roles`, or from the Roles page in the web UI. Account overrides are managed at
 `/api/v1/accounts/{id}/request-quota` with `admin.settings`. Movie and season
 limits each use a rolling period in days. A zero limit and zero period disable
 that limit. Declined requests do not consume quota. When several assigned roles
