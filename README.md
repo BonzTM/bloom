@@ -115,6 +115,11 @@ page size is 50 roles and the enforced maximum is 100. A missing session gets
 `401 unauthorized`; a signed-in account without the required permission gets
 `403 forbidden`. This slice does not expose role-editing endpoints.
 
+Browser sessions and logout revocations are stored in the configured database,
+so they persist across process and container restarts. Persist the database and
+keep `BLOOM_SECRET_KEY` unchanged across deployments; no process-local session
+state needs to be preserved.
+
 When OIDC is enabled, `GET /api/v1/auth/providers` advertises the configured
 display name, `POST /api/v1/auth/oidc/start` with an
 `application/x-www-form-urlencoded` body and optional `return_to` field begins

@@ -27,6 +27,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- Runtime restart coverage on SQLite and PostgreSQL proves that database-backed
+  browser sessions survive process replacement and logout revocations remain
+  effective.
 - Invites in the web UI: `/admin/invites` (guarded by `users.invite`) creates
   an invite for a registered media server with an expiry and a use limit,
   shows the link once, lists invites with their status, and revokes them; the
