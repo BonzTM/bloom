@@ -66,6 +66,8 @@ type Config struct {
 	OIDC OIDCConfig
 	// Playback configures adaptive media-server session polling.
 	Playback PlaybackConfig
+	// Stats configures the bounded dashboard result cache.
+	Stats StatsConfig
 	// Requests configures fulfilment availability polling.
 	Requests RequestFulfilmentConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
@@ -116,6 +118,12 @@ type PlaybackConfig struct {
 	MissedPolls  int
 	ResumeWindow time.Duration
 	StoreTimeout time.Duration
+}
+
+// StatsConfig configures statistics result caching.
+type StatsConfig struct {
+	// CacheTTL bounds dashboard staleness. Zero disables caching.
+	CacheTTL time.Duration
 }
 
 // AvailabilitySource selects the authority for request availability.
@@ -260,6 +268,7 @@ const (
 	defaultPlaybackMissedPolls         = 3
 	defaultPlaybackResumeWindow        = 5 * time.Minute
 	defaultPlaybackStoreTimeout        = 5 * time.Second
+	defaultStatsCacheTTL               = 30 * time.Second
 	minPlaybackPollActive              = time.Second
 	maxPlaybackPollActive              = time.Minute
 	minPlaybackPollIdle                = 5 * time.Second
@@ -321,6 +330,7 @@ type rawFlags struct {
 	auth                                                            authRawFlags
 	oidc                                                            oidcRawFlags
 	playback                                                        playbackRawFlags
+	stats                                                           statsRawFlags
 	requests                                                        requestRawFlags
 }
 
@@ -352,6 +362,8 @@ type requestRawFlags struct {
 	availabilityInterval *time.Duration
 	availabilitySource   *string
 }
+
+type statsRawFlags struct{ cacheTTL *time.Duration }
 
 // bindFlags declares every flag with its env-seeded default.
 func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
@@ -385,6 +397,7 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		auth:             bindAuthFlags(fs, env),
 		oidc:             bindOIDCFlags(fs, env),
 		playback:         bindPlaybackFlags(fs, env),
+		stats:            bindStatsFlags(fs, env),
 		requests:         bindRequestFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
@@ -392,6 +405,11 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
 	}
+}
+
+func bindStatsFlags(fs *flag.FlagSet, env *envReader) statsRawFlags {
+	return statsRawFlags{cacheTTL: fs.Duration("stats-cache-ttl", env.duration(
+		"BLOOM_STATS_CACHE_TTL", defaultStatsCacheTTL), "statistics result cache TTL (0 disables)")}
 }
 
 func bindRequestFlags(fs *flag.FlagSet, env *envReader) requestRawFlags {
@@ -479,6 +497,7 @@ func (r rawFlags) build() (Config, error) {
 		PublicURL:     *r.publicURL,
 		OIDC:          r.oidcConfig(roleMap),
 		Playback:      r.playbackConfig(),
+		Stats:         StatsConfig{CacheTTL: *r.stats.cacheTTL},
 		Requests:      r.requestConfig(),
 		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
@@ -623,6 +642,9 @@ func (c Config) Validate() error {
 	}
 	if err := c.Playback.validate(); err != nil {
 		return err
+	}
+	if c.Stats.CacheTTL < 0 {
+		return fmt.Errorf("config: BLOOM_STATS_CACHE_TTL must be at least 0, got %s", c.Stats.CacheTTL)
 	}
 	if err := c.Requests.validate(); err != nil {
 		return err

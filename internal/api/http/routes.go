@@ -63,6 +63,12 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, handler: (*Server).handleAcceptInvite},
 	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
 	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
+	{method: http.MethodGet, path: "/api/v1/stats/overview", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsOverview},
+	{method: http.MethodGet, path: "/api/v1/stats/daily", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsDaily},
+	{method: http.MethodGet, path: "/api/v1/stats/patterns", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsPatterns},
+	{method: http.MethodGet, path: "/api/v1/stats/titles", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsTitles},
+	{method: http.MethodGet, path: "/api/v1/stats/users", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsUsers},
+	{method: http.MethodGet, path: "/api/v1/stats/users/{media_server_id}/{media_user_id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsUser},
 	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSearch},
 	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataMovie},
 	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSeries},
@@ -157,6 +163,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		if strings.HasPrefix(route.path, "/api/v1/playback") && s.playbackReader == nil {
 			continue
 		}
+		if strings.HasPrefix(route.path, "/api/v1/stats") && s.statsReader == nil {
+			continue
+		}
 		if strings.HasPrefix(route.path, "/api/v1/metadata") && (s.metadataReader == nil || s.metadataManager == nil) {
 			continue
 		}
@@ -233,6 +242,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		handler = sanitizedInviteTrace(route)(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/playback") {
+		handler = s.mediaServerOperationMiddleware(handler)
+	}
+	if strings.HasPrefix(route.path, "/api/v1/stats") {
 		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	return handler, nil

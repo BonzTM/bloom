@@ -118,6 +118,7 @@ type Server struct {
 	inviteAcceptances      chan struct{}
 	inviteMetrics          telemetry.InviteMetrics
 	playbackReader         playbackReader
+	statsReader            core.StatsReader
 	metadataReader         metadataReader
 	metadataManager        metadataManager
 	requestService         *requestapp.Service
@@ -167,6 +168,8 @@ type Deps struct {
 	InviteManager inviteManager
 	// PlaybackReader supplies now-playing and history reads.
 	PlaybackReader playbackReader
+	// StatsReader supplies cached statistics dashboard reports.
+	StatsReader core.StatsReader
 	// MetadataReader supplies provider-backed search and detail reads.
 	MetadataReader metadataReader
 	// MetadataManager supplies write-only provider credential administration.
@@ -299,6 +302,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		inviteManager:          deps.InviteManager,
 		inviteMetrics:          telemetry.NopMetrics{},
 		playbackReader:         deps.PlaybackReader,
+		statsReader:            deps.StatsReader,
 		metadataReader:         deps.MetadataReader,
 		metadataManager:        deps.MetadataManager,
 		requestService:         deps.RequestService,

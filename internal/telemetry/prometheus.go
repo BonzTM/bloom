@@ -44,6 +44,7 @@ type PromMetrics struct {
 	playbackOpenWatches     *prometheus.GaugeVec
 	playbackWatchesClosed   *prometheus.CounterVec
 	playbackRefreshFailures prometheus.Counter
+	statsQuerySeconds       *prometheus.HistogramVec
 	playbackMu              sync.Mutex
 	playbackOpenByServer    map[string]int
 	metadataRequests        *prometheus.CounterVec
@@ -69,6 +70,10 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	playbackCollectors := newPlaybackCollectors(namespace)
 	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
 		"Total failed playback manager refresh attempts.")
+	statsQuerySeconds := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Name: "stats_query_duration_seconds",
+		Help: "Statistics query latency by bounded report and outcome.", Buckets: prometheus.DefBuckets,
+	}, []string{"report", "outcome"})
 	requestCollectors := newRequestCollectors(namespace)
 	downloadCollectors := newDownloadManagerCollectors(namespace)
 	reg.MustRegister(
@@ -90,6 +95,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		playbackPolls:         playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
 		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
 		playbackRefreshFailures: playbackRefreshFailures,
+		statsQuerySeconds:       statsQuerySeconds,
 		playbackOpenByServer:    make(map[string]int),
 		metadataRequests:        requestCollectors.metadataRequests,
 		metadataSeconds:         requestCollectors.metadataSeconds,
@@ -317,6 +323,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.playbackOpenWatches,
 		m.playbackWatchesClosed,
 		m.playbackRefreshFailures,
+		m.statsQuerySeconds,
 		m.metadataRequests,
 		m.metadataSeconds,
 		m.metadataRetries,
@@ -402,6 +409,19 @@ func (m *PromMetrics) IncWatchesClosed(kind, reason string) {
 
 // IncPlaybackRefreshFailure records one failed media-server listing attempt.
 func (m *PromMetrics) IncPlaybackRefreshFailure() { m.playbackRefreshFailures.Inc() }
+
+// ObserveStatsQuery records one statistics report query.
+func (m *PromMetrics) ObserveStatsQuery(report, outcome string, seconds float64) {
+	switch report {
+	case "overview", "daily", "patterns", "titles", "users", "user":
+	default:
+		report = "invalid"
+	}
+	if outcome != "success" && outcome != "error" {
+		outcome = "invalid"
+	}
+	m.statsQuerySeconds.WithLabelValues(report, outcome).Observe(seconds)
+}
 
 func boundedMediaKind(kind string) string {
 	if kind == string(core.MediaServerKindJellyfin) {

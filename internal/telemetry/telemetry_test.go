@@ -111,6 +111,7 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	m.ObserveOIDCDependency("jwks", "retry", 0)
 	m.ObservePlaybackPoll("jellyfin", "success", 0.03)
 	m.IncPlaybackRefreshFailure()
+	m.ObserveStatsQuery("overview", "success", 0.04)
 	m.SetOpenWatches("jellyfin", "server-1", 2)
 	m.SetOpenWatches("jellyfin", "server-2", 3)
 	m.IncWatchesClosed("jellyfin", "timeout")
@@ -140,6 +141,7 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_playback_polls_total", "bloomtest_playback_poll_duration_seconds",
 		"bloomtest_playback_open_watches", "bloomtest_playback_watches_closed_total",
 		"bloomtest_playback_refresh_failures_total",
+		"bloomtest_stats_query_duration_seconds",
 	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)

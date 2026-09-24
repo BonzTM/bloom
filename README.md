@@ -191,7 +191,7 @@ Use `GET /api/v1/media-servers` to list registrations. Use
 `GET /api/v1/media-servers/{id}/libraries` to list its libraries. Deleting a
 registration removes its encrypted credential and its associated playback data.
 
-### Playback statistics
+### Statistics
 
 Bloom polls `GET /Sessions` on every registered Jellyfin server and records
 Bloom-owned watches with source `poll`. Every watch, active segment, and
@@ -217,6 +217,28 @@ An authenticated account with `stats.read.all` can use cursor-paged
 `GET /api/v1/playback/now` and `GET /api/v1/playback/history`. The history route accepts an optional
 `media_server_id` filter. Successful reads emit no playback audit event;
 authorization denials continue to use the shared security audit stream.
+
+An account with `stats.read.all` can also read the statistics dashboards at
+`GET /api/v1/stats/overview`, `/daily`, `/patterns`, `/titles`, `/users`, and
+`/users/{media_server_id}/{media_user_id}`. One recorded watch row is one play.
+Watch time is the row's recorded `active_seconds`. A watch belongs to the
+half-open window when `started_at` is at or after the window start and before
+the response's end time. The `days` parameter defaults to 30 and accepts 1
+through 365 rolling 24-hour days. The optional `media_server_id` limits the SQL
+query to one server.
+
+Every response states its resolved window and time zone. `tz` defaults to UTC
+and accepts an IANA time-zone name of at most 64 bytes. Bloom converts
+`started_at` to that zone in Go for daily, weekday, and hour buckets; totals,
+rankings, and breakdowns remain portable SQL on both database engines. A
+bounded in-process LRU caches complete results for 30 seconds by default.
+`BLOOM_STATS_CACHE_TTL=0` disables it. Cache expiry is the invalidation policy,
+so a dashboard can trail a newly recorded watch by at most the configured TTL.
+
+Per-library dashboards are a later slice because recorded watches do not yet
+carry a library identifier. Own-statistics access for non-administrator
+accounts is also later because Bloom accounts are not yet linked to
+media-server users.
 
 ### Invites
 
@@ -388,6 +410,7 @@ this table.
 | `BLOOM_PLAYBACK_MISSED_POLLS` | int | no | `3` | no | Consecutive successful polls that may omit a session before its watch closes. Valid range: 1-100. |
 | `BLOOM_PLAYBACK_RESUME_WINDOW` | duration | no | `5m` | no | Window in which a matching stopped watch reopens. Valid range: `1s`-`24h`. |
 | `BLOOM_PLAYBACK_STORE_TIMEOUT` | duration | no | `5s` | no | Per-operation deadline for playback database loads, lookups, and saves. Valid range: `100ms`-`30s`. |
+| `BLOOM_STATS_CACHE_TTL` | duration | no | `30s` | no | TTL for the bounded in-process statistics result cache. Must be at least `0`; `0` disables caching. |
 | `BLOOM_REQUEST_AVAILABILITY_SOURCE` | `media_server` \| `download_manager` | no | `media_server` | no | Authority used to mark processing requests available. Queue progress is never the authority. |
 | `BLOOM_REQUEST_AVAILABILITY_INTERVAL` | duration | no | `5m` | no | Poll interval while processing requests exist. Valid range: `1m`-`24h`. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
@@ -423,6 +446,10 @@ Migration `00011_playback_collection` adds watches, active-time segments, and
 bounded position samples on both engines. Apply it before enabling this binary.
 Deleting a media-server registration first stops and awaits its collector, then
 cascades to all three playback tables.
+
+Migration `00014_stats_started_index` adds the unfiltered watch-start index used
+by bounded statistics windows on both engines. Its down migration removes only
+that index.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

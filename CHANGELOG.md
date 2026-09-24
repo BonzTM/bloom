@@ -42,6 +42,15 @@ contracts) gets an entry here.
 
 - Chart primitives for the web UI: bar and line charts drawn in SVG from the
   design tokens, each with its numbers available as a table.
+- Statistics dashboard APIs for overview totals and rankings, daily and local
+  time-pattern charts, title and user rankings, and per-user drill-downs. All
+  reports use bounded portable queries on SQLite and PostgreSQL, support a
+  1-365 day window, optional media-server filtering, IANA time zones, and the
+  `stats.read.all` permission.
+- SQLite/PostgreSQL migration `00014_stats_started_index`, statistics query
+  duration metrics, and the bounded result-cache setting
+  `BLOOM_STATS_CACHE_TTL` (default `30s`, `0` disables caching).
+
 - Administrators register Radarr and Sonarr instances from the web UI and
   build request profiles from what an instance offers: its quality profiles,
   root folders, and tags. The request queue shows why a request failed and

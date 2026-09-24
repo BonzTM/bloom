@@ -93,6 +93,9 @@ func TestLoadDefaults(t *testing.T) {
 		cfg.Playback.StoreTimeout != defaultPlaybackStoreTimeout {
 		t.Errorf("Playback defaults = %+v", cfg.Playback)
 	}
+	if cfg.Stats.CacheTTL != defaultStatsCacheTTL {
+		t.Errorf("Stats cache TTL = %s, want %s", cfg.Stats.CacheTTL, defaultStatsCacheTTL)
+	}
 	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
 		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
 	}
@@ -558,6 +561,19 @@ func TestLoadRejectsPlaybackBounds(t *testing.T) {
 				t.Fatalf("Load error = %v, want %s validation", err, testCase.key)
 			}
 		})
+	}
+}
+
+func TestLoadStatsCacheTTL(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_STATS_CACHE_TTL", "0")
+	cfg, err := Load(nil)
+	if err != nil || cfg.Stats.CacheTTL != 0 {
+		t.Fatalf("Load disabled stats cache = %s, %v", cfg.Stats.CacheTTL, err)
+	}
+	t.Setenv("BLOOM_STATS_CACHE_TTL", "-1s")
+	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "BLOOM_STATS_CACHE_TTL") {
+		t.Fatalf("Load negative stats cache TTL = %v", err)
 	}
 }
 

@@ -35,6 +35,7 @@ import (
 	"github.com/BonzTM/bloom/internal/playback"
 	requestapp "github.com/BonzTM/bloom/internal/request"
 	"github.com/BonzTM/bloom/internal/secrets"
+	statsapp "github.com/BonzTM/bloom/internal/stats"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
@@ -140,7 +141,7 @@ func runService(
 	srv, err := assembleHTTPServer(
 		cfg, auditSink, logger, metrics, pool,
 		wiring.accounts, wiring.localIdentities, wiring.authorizer, wiring.roles, wiring.sessions,
-		wiring.mediaServers, wiring.invites, wiring.playbackStore, clock,
+		wiring.mediaServers, wiring.invites, wiring.playbackStore, wiring.stats, clock,
 		wiring.metadata, wiring.requests,
 		wiring.downloadManagers,
 		wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows,
@@ -175,6 +176,7 @@ type serviceWiring struct {
 	invites          *inviteapp.Service
 	playbackStore    core.PlaybackStore
 	playbackManager  *playback.Manager
+	stats            *statsapp.Service
 	oidcProvider     oidcLifecycle
 	oidcAccounts     core.OIDCAccountStore
 	oidcFlows        core.OIDCFlowStore
@@ -212,6 +214,14 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
+	statsReader, err := db.NewStatsReader(pool, cfg.Database.Driver)
+	if err != nil {
+		return serviceWiring{}, fmt.Errorf("build statistics reader: %w", err)
+	}
+	statsService, err := statsapp.NewService(statsReader, deps.Clock, cfg.Stats.CacheTTL, metrics)
+	if err != nil {
+		return serviceWiring{}, fmt.Errorf("build statistics service: %w", err)
+	}
 	ownership.playback = playbackManager
 	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
 		return serviceWiring{}, roleErr
@@ -225,6 +235,7 @@ func wireServiceDependencies(
 		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, invites: invites,
 		playbackStore: playbackStore, playbackManager: playbackManager,
+		stats:    statsService,
 		metadata: metadataService, requests: requestService,
 		downloadManagers: downloadManagers, fulfilment: fulfilmentManager,
 		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
@@ -355,6 +366,7 @@ func assembleHTTPServer(
 	mediaServers *mediaserver.Service,
 	invites *inviteapp.Service,
 	playbackStore core.PlaybackStore,
+	statsReader core.StatsReader,
 	clock core.Clock,
 	metadataService *metadata.Service,
 	requestService *requestapp.Service,
@@ -383,6 +395,7 @@ func assembleHTTPServer(
 		InviteReader:           invites,
 		InviteManager:          invites,
 		PlaybackReader:         playbackStore,
+		StatsReader:            statsReader,
 		MetadataReader:         metadataService,
 		MetadataManager:        metadataService,
 		RequestService:         requestService,
