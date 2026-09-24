@@ -40,6 +40,8 @@ contracts) gets an entry here.
 
 ### Added
 
+- Chart primitives for the web UI: bar and line charts drawn in SVG from the
+  design tokens, each with its numbers available as a table.
 - Administrators register Radarr and Sonarr instances from the web UI and
   build request profiles from what an instance offers: its quality profiles,
   root folders, and tags. The request queue shows why a request failed and
