@@ -262,6 +262,34 @@ func TestNotificationConfigurationRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestInviteReconcileConfiguration(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load(nil)
+	if err != nil || cfg.Invites.ReconcileInterval != 5*time.Minute || cfg.Invites.StoreTimeout != 5*time.Second {
+		t.Fatalf("invite reconcile defaults = %+v, %v", cfg.Invites, err)
+	}
+	t.Setenv("BLOOM_INVITE_RECONCILE_INTERVAL", "10m")
+	t.Setenv("BLOOM_INVITE_STORE_TIMEOUT", "3s")
+	cfg, err = Load(nil)
+	if err != nil || cfg.Invites.ReconcileInterval != 10*time.Minute || cfg.Invites.StoreTimeout != 3*time.Second {
+		t.Fatalf("invite reconcile config = %+v, %v", cfg.Invites, err)
+	}
+	for _, testCase := range []struct{ key, value string }{
+		{key: "BLOOM_INVITE_RECONCILE_INTERVAL", value: "999ms"},
+		{key: "BLOOM_INVITE_RECONCILE_INTERVAL", value: "61m"},
+		{key: "BLOOM_INVITE_STORE_TIMEOUT", value: "99ms"},
+		{key: "BLOOM_INVITE_STORE_TIMEOUT", value: "31s"},
+	} {
+		t.Setenv(testCase.key, testCase.value)
+		if _, err := Load(nil); err == nil {
+			t.Fatalf("Load accepted %s=%s", testCase.key, testCase.value)
+		}
+		t.Setenv(testCase.key, map[string]string{
+			"BLOOM_INVITE_RECONCILE_INTERVAL": "10m", "BLOOM_INVITE_STORE_TIMEOUT": "3s",
+		}[testCase.key])
+	}
+}
+
 func TestOIDCValidation(t *testing.T) {
 	base := func(t *testing.T) {
 		t.Helper()

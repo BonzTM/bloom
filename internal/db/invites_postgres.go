@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -71,17 +72,26 @@ func (s *postgresInvites) GetInvite(ctx context.Context, id string) (core.Invite
 	return s.withLibraries(ctx, s.q, invite)
 }
 
-func (s *postgresInvites) GetInviteByCodeHash(ctx context.Context, hash [sha256.Size]byte) (core.Invite, error) {
+func (s *postgresInvites) GetInviteByCodeHash(ctx context.Context, hash [sha256.Size]byte) (core.InviteCodeLookup, error) {
 	row, err := s.q.GetInviteByCodeHash(ctx, hash[:])
 	if errors.Is(err, sql.ErrNoRows) {
-		return core.Invite{}, core.ErrInviteUnavailable
+		lookup := dummyInviteLookup()
+		invite, libraryErr := s.withLibraries(ctx, s.q, lookup.Invite)
+		lookup.Invite = invite
+		return lookup, libraryErr
 	}
 	if err != nil {
-		return core.Invite{}, fmt.Errorf("select invite by code: %w", err)
+		return core.InviteCodeLookup{}, fmt.Errorf("select invite by code: %w", err)
 	}
 	invite := postgresInvite(row.ID, row.MediaServerID, row.CreatedByAccountID, row.Label,
 		row.ExpiresAt, row.MaxUses, row.UseCount, row.RevokedAt, row.CreatedAt, row.UpdatedAt)
-	return s.withLibraries(ctx, s.q, invite)
+	invite, err = s.withLibraries(ctx, s.q, invite)
+	if err != nil {
+		return core.InviteCodeLookup{}, err
+	}
+	var stored [sha256.Size]byte
+	copy(stored[:], row.CodeHash)
+	return core.InviteCodeLookup{Invite: invite, CodeHash: stored, Blocked: row.Blocked}, nil
 }
 
 func (s *postgresInvites) ListInvites(ctx context.Context, after *core.InviteCursor, pageSize int) ([]core.Invite, error) {
@@ -131,7 +141,7 @@ func (s *postgresInvites) RedeemInvite(
 	if clock == nil || redeem == nil {
 		return false, core.ErrInvalidArgument
 	}
-	var provisioningErr error
+	var provisioningErr *core.InviteProvisioningError
 	var linkCreated bool
 	txErr := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
 		q := postgres.New(tx)
@@ -141,10 +151,10 @@ func (s *postgresInvites) RedeemInvite(
 		if !ok || pending == nil {
 			return redeemErr
 		}
-		provisioningErr = redeemErr
+		provisioningErr = pending
 		return insertPostgresProvisioningFailure(ctx, q, pending.Failure)
 	})
-	return linkCreated, errors.Join(provisioningErr, txErr)
+	return linkCreated, redeemTransactionError(provisioningErr, txErr)
 }
 
 func (s *postgresInvites) redeemLocked(
@@ -213,9 +223,12 @@ func insertPostgresProvisioningFailure(
 	if err := validateProvisioningFailure(failure); err != nil {
 		return provisioningFailureRecordError(err)
 	}
-	err := q.InsertInviteProvisioningFailure(ctx, postgres.InsertInviteProvisioningFailureParams{
+	err := q.InsertInviteProvisioningFailureIfAbsent(ctx, postgres.InsertInviteProvisioningFailureIfAbsentParams{
 		ID: failure.ID, InviteID: failure.InviteID, MediaServerID: failure.MediaServerID,
-		MediaUserID: nullableInviteMediaUserID(failure.MediaUserID), Username: failure.Username, Reason: string(failure.Reason),
+		MediaUserID: nullableInviteMediaUserID(failure.MediaUserID), MediaUserOwned: failure.MediaUserOwned,
+		AccountID: nullableInviteMediaUserID(failure.AccountID),
+		Username:  failure.Username, Reason: string(failure.Reason), NextAttemptAt: core.NormalizeTime(failure.CreatedAt),
+		LastError: failure.LastError, Terminal: failure.Terminal,
 		CreatedAt: core.NormalizeTime(failure.CreatedAt), UpdatedAt: core.NormalizeTime(failure.UpdatedAt),
 	})
 	if err != nil {
@@ -233,6 +246,9 @@ func (s *postgresInvites) lockedInvite(
 	}
 	if err != nil {
 		return core.Invite{}, fmt.Errorf("lock invite: %w", err)
+	}
+	if subtle.ConstantTimeCompare(row.CodeHash, hash[:]) != 1 {
+		return core.Invite{}, core.ErrInviteUnavailable
 	}
 	hasFailure, err := q.InviteHasProvisioningFailure(ctx, row.ID)
 	if err != nil {

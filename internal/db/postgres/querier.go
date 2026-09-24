@@ -15,9 +15,11 @@ type Querier interface {
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	BackfillWatchLibrary(ctx context.Context, arg BackfillWatchLibraryParams) (int64, error)
+	ClaimInviteProvisioningFailure(ctx context.Context, arg ClaimInviteProvisioningFailureParams) (ClaimInviteProvisioningFailureRow, error)
 	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (NotificationOutbox, error)
 	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
+	CompleteInviteProvisioningCleanup(ctx context.Context, arg CompleteInviteProvisioningCleanupParams) (int64, error)
 	CompleteNotificationOutbox(ctx context.Context, arg CompleteNotificationOutboxParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
@@ -58,6 +60,7 @@ type Querier interface {
 	DeleteRequestProfileTags(ctx context.Context, profileID string) error
 	DeleteRoleRequestQuota(ctx context.Context, roleID string) (int64, error)
 	DeleteTombstonedNotificationChannel(ctx context.Context, arg DeleteTombstonedNotificationChannelParams) (int64, error)
+	DismissInviteProvisioningFailure(ctx context.Context, arg DismissInviteProvisioningFailureParams) (int64, error)
 	FailExpiredExhaustedNotificationOutbox(ctx context.Context, updatedAt time.Time) (int64, error)
 	FailPendingNotificationDeliveriesForChannel(ctx context.Context, arg FailPendingNotificationDeliveriesForChannelParams) (int64, error)
 	FailRequestDispatch(ctx context.Context, arg FailRequestDispatchParams) (int64, error)
@@ -69,6 +72,7 @@ type Querier interface {
 	GetAccountMediaUser(ctx context.Context, arg GetAccountMediaUserParams) (GetAccountMediaUserRow, error)
 	GetAccountRequestQuota(ctx context.Context, accountID string) (AccountRequestQuota, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
+	GetClaimedInviteProvisioningFailure(ctx context.Context, arg GetClaimedInviteProvisioningFailureParams) (GetClaimedInviteProvisioningFailureRow, error)
 	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
 	GetDownloadManagerByName(ctx context.Context, nameKey string) (GetDownloadManagerByNameRow, error)
 	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
@@ -85,15 +89,18 @@ type Querier interface {
 	GetRoleRequestQuota(ctx context.Context, roleID string) (RoleRequestQuota, error)
 	GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error)
 	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
-	InsertInviteProvisioningFailure(ctx context.Context, arg InsertInviteProvisioningFailureParams) error
+	InsertInviteProvisioningFailureIfAbsent(ctx context.Context, arg InsertInviteProvisioningFailureIfAbsentParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
 	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
+	InviteProvisioningFailureDepth(ctx context.Context) (int64, error)
+	InviteProvisioningFailureExists(ctx context.Context, id string) (bool, error)
 	ListAccountMediaUsers(ctx context.Context, arg ListAccountMediaUsersParams) ([]ListAccountMediaUsersRow, error)
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
 	ListDownloadManagers(ctx context.Context, arg ListDownloadManagersParams) ([]ListDownloadManagersRow, error)
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
+	ListInviteProvisioningFailures(ctx context.Context, arg ListInviteProvisioningFailuresParams) ([]ListInviteProvisioningFailuresRow, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
 	ListNotificationChannels(ctx context.Context, arg ListNotificationChannelsParams) ([]ListNotificationChannelsRow, error)
@@ -113,7 +120,9 @@ type Querier interface {
 	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
 	ListWatchPositions(ctx context.Context, watchID string) ([]WatchPosition, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
-	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
+	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (Invite, error)
+	LockInviteByID(ctx context.Context, id string) (LockInviteByIDRow, error)
+	LockInviteProvisioningFailureForClaim(ctx context.Context, dueAt time.Time) (string, error)
 	// PostgreSQL notification row locks. Each lock is followed by a second
 	// statement in the same Read Committed transaction that re-checks eligibility.
 	LockNotificationChannelForClaim(ctx context.Context, dueAt time.Time) (string, error)
@@ -127,6 +136,7 @@ type Querier interface {
 	RecordNotificationChannelTerminalFailure(ctx context.Context, arg RecordNotificationChannelTerminalFailureParams) (int64, error)
 	RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
+	RescheduleInviteProvisioningFailure(ctx context.Context, arg RescheduleInviteProvisioningFailureParams) (int64, error)
 	RescheduleNotificationOutbox(ctx context.Context, arg RescheduleNotificationOutboxParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	SetAccountMediaUser(ctx context.Context, arg SetAccountMediaUserParams) error

@@ -271,6 +271,23 @@ func TestRegistryRejectsUnknownKind(t *testing.T) {
 	}
 }
 
+func TestListInviteServersUsesOnlyNarrowPersistedView(t *testing.T) {
+	capabilityErr := errors.New("capabilities must not be read")
+	store, service := newTestService(t, fakeFactory{adapter: &fakeAdapter{}, capabilityErr: capabilityErr})
+	store.records = []core.MediaServerRecord{{MediaServer: core.MediaServer{
+		ID: "33333333-3333-4333-8333-333333333333", Kind: core.MediaServerKindJellyfin,
+		Name: "Home", BaseURL: "https://media.example.test",
+	}}}
+	servers, err := service.ListInviteServers(t.Context(), "", 51)
+	if err != nil {
+		t.Fatalf("ListInviteServers: %v", err)
+	}
+	want := []core.InviteServer{{ID: store.records[0].ID, Name: "Home"}}
+	if !slices.Equal(servers, want) {
+		t.Fatalf("invite servers = %+v, want %+v", servers, want)
+	}
+}
+
 func TestServiceBoundaryFailuresRemainMatchable(t *testing.T) {
 	sentinel := errors.New("dependency failure")
 	tests := []struct {

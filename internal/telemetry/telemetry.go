@@ -90,6 +90,12 @@ type InviteMetrics interface {
 	IncInviteAcceptance(outcome string)
 }
 
+// InviteReconcileMetrics records bounded worker outcomes and backlog depth.
+type InviteReconcileMetrics interface {
+	ObserveInviteReconciliation(reason, outcome string)
+	SetInviteProvisioningBacklog(int64)
+}
+
 // MediaUserMatchMetrics records bounded username-match outcomes.
 type MediaUserMatchMetrics interface {
 	IncMediaUserMatch(outcome string)
@@ -118,6 +124,12 @@ func (NopMetrics) IncInviteCreation(string) {}
 
 // IncInviteAcceptance does nothing.
 func (NopMetrics) IncInviteAcceptance(string) {}
+
+// ObserveInviteReconciliation does nothing.
+func (NopMetrics) ObserveInviteReconciliation(string, string) {}
+
+// SetInviteProvisioningBacklog does nothing.
+func (NopMetrics) SetInviteProvisioningBacklog(int64) {}
 
 // IncMediaUserMatch does nothing.
 func (NopMetrics) IncMediaUserMatch(string) {}

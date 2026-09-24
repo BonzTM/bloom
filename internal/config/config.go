@@ -72,6 +72,8 @@ type Config struct {
 	Requests RequestFulfilmentConfig
 	// Notifications configures durable notification delivery and retention.
 	Notifications NotificationConfig
+	// Invites configures durable provisioning-failure reconciliation.
+	Invites InviteConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -148,6 +150,12 @@ type RequestFulfilmentConfig struct {
 type NotificationConfig struct {
 	Retention      time.Duration
 	WorkerInterval time.Duration
+}
+
+// InviteConfig bounds the provisioning reconciliation worker.
+type InviteConfig struct {
+	ReconcileInterval time.Duration
+	StoreTimeout      time.Duration
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -299,6 +307,12 @@ const (
 	defaultNotificationWorkerInterval  = 5 * time.Second
 	minNotificationWorkerInterval      = time.Second
 	maxNotificationWorkerInterval      = time.Hour
+	defaultInviteReconcileInterval     = 5 * time.Minute
+	defaultInviteStoreTimeout          = 5 * time.Second
+	minInviteReconcileInterval         = time.Second
+	maxInviteReconcileInterval         = time.Hour
+	minInviteStoreTimeout              = 100 * time.Millisecond
+	maxInviteStoreTimeout              = 30 * time.Second
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -351,6 +365,7 @@ type rawFlags struct {
 	stats                                                           statsRawFlags
 	requests                                                        requestRawFlags
 	notifications                                                   notificationRawFlags
+	invites                                                         inviteRawFlags
 }
 
 type authRawFlags struct {
@@ -388,6 +403,11 @@ type notificationRawFlags struct {
 	retention, workerInterval *time.Duration
 }
 
+type inviteRawFlags struct {
+	reconcileInterval *time.Duration
+	storeTimeout      *time.Duration
+}
+
 // bindFlags declares every flag with its env-seeded default.
 func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 	return rawFlags{
@@ -423,11 +443,21 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		stats:            bindStatsFlags(fs, env),
 		requests:         bindRequestFlags(fs, env),
 		notifications:    bindNotificationFlags(fs, env),
+		invites:          bindInviteFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
+	}
+}
+
+func bindInviteFlags(fs *flag.FlagSet, env *envReader) inviteRawFlags {
+	return inviteRawFlags{
+		reconcileInterval: fs.Duration("invite-reconcile-interval", env.duration(
+			"BLOOM_INVITE_RECONCILE_INTERVAL", defaultInviteReconcileInterval), "invite reconciliation interval"),
+		storeTimeout: fs.Duration("invite-store-timeout", env.duration(
+			"BLOOM_INVITE_STORE_TIMEOUT", defaultInviteStoreTimeout), "invite reconciliation store operation timeout"),
 	}
 }
 
@@ -534,6 +564,9 @@ func (r rawFlags) build() (Config, error) {
 		Requests:  r.requestConfig(),
 		Notifications: NotificationConfig{
 			Retention: *r.notifications.retention, WorkerInterval: *r.notifications.workerInterval,
+		},
+		Invites: InviteConfig{
+			ReconcileInterval: *r.invites.reconcileInterval, StoreTimeout: *r.invites.storeTimeout,
 		},
 		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
@@ -683,6 +716,9 @@ func (c Config) Validate() error {
 	if err := c.Notifications.validate(); err != nil {
 		return err
 	}
+	if err := c.Invites.validate(); err != nil {
+		return err
+	}
 	if err := c.Bootstrap.validate(); err != nil {
 		return err
 	}
@@ -713,6 +749,19 @@ func (n NotificationConfig) validate() error {
 	}
 	if n.WorkerInterval < minNotificationWorkerInterval || n.WorkerInterval > maxNotificationWorkerInterval {
 		return fmt.Errorf("config: BLOOM_NOTIFY_WORKER_INTERVAL must be between %s and %s", minNotificationWorkerInterval, maxNotificationWorkerInterval)
+	}
+	return nil
+}
+
+func (i InviteConfig) validate() error {
+	if i.ReconcileInterval == 0 && i.StoreTimeout == 0 {
+		return nil
+	}
+	if i.ReconcileInterval < minInviteReconcileInterval || i.ReconcileInterval > maxInviteReconcileInterval {
+		return fmt.Errorf("config: BLOOM_INVITE_RECONCILE_INTERVAL must be between %s and %s", minInviteReconcileInterval, maxInviteReconcileInterval)
+	}
+	if i.StoreTimeout < minInviteStoreTimeout || i.StoreTimeout > maxInviteStoreTimeout {
+		return fmt.Errorf("config: BLOOM_INVITE_STORE_TIMEOUT must be between %s and %s", minInviteStoreTimeout, maxInviteStoreTimeout)
 	}
 	return nil
 }

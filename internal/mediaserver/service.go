@@ -195,6 +195,23 @@ func (s *Service) List(ctx context.Context, afterNameKey string, pageSize int) (
 	return connections, nil
 }
 
+// ListInviteServers returns only the identifiers and names needed to create an invite.
+func (s *Service) ListInviteServers(
+	ctx context.Context, afterNameKey string, pageSize int,
+) ([]core.InviteServer, error) {
+	callCtx, cancel := dependencyContext(ctx)
+	servers, err := s.reader.ListMediaServers(callCtx, afterNameKey, pageSize)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("list invite media servers: %w", err)
+	}
+	result := make([]core.InviteServer, 0, len(servers))
+	for _, server := range servers {
+		result = append(result, core.InviteServer{ID: server.ID, Name: server.Name})
+	}
+	return result, nil
+}
+
 // Get returns one server configuration and its adapter capabilities.
 func (s *Service) Get(ctx context.Context, id string) (core.MediaServerConnection, error) {
 	callCtx, cancel := dependencyContext(ctx)

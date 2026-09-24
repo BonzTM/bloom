@@ -104,6 +104,8 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	m.ObserveMediaServerRequest("jellyfin", "probe", "success", 0.02)
 	m.IncInviteCreation("success")
 	m.IncInviteAcceptance("accepted")
+	m.ObserveInviteReconciliation(string(core.InviteProvisioningCleanupFailed), "retry")
+	m.SetInviteProvisioningBacklog(2)
 	m.IncMediaUserMatch("found")
 	for _, outcome := range []string{"scheduled", "exhausted", "budget_exhausted"} {
 		m.ObserveMediaServerRetry("jellyfin", "probe", outcome)
@@ -140,6 +142,7 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_media_server_retries_total",
 		"bloomtest_oidc_dependency_events_total", "bloomtest_oidc_dependency_duration_seconds",
 		"bloomtest_invite_creations_total", "bloomtest_invite_acceptances_total",
+		"bloomtest_invite_provisioning_reconciliations_total", "bloomtest_invite_provisioning_backlog",
 		"bloomtest_media_user_matches_total",
 		"bloomtest_playback_polls_total", "bloomtest_playback_poll_duration_seconds",
 		"bloomtest_playback_open_watches", "bloomtest_playback_watches_closed_total",

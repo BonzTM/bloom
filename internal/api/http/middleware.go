@@ -82,11 +82,10 @@ func recoverMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
-				if rec := recover(); rec != nil {
+				if recover() != nil {
 					logger.ErrorContext(r.Context(), "panic recovered",
 						"method", r.Method,
 						"route", routePattern(r),
-						"panic", rec,
 					)
 					// Opaque 5xx envelope: a machine-readable code and a generic
 					// message, with the request_id so the client can quote it. The

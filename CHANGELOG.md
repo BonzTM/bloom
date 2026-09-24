@@ -16,6 +16,23 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Invite code preview and acceptance now perform the same bounded database
+  lookup and library-read sequence for malformed, non-canonical, unknown,
+  expired, exhausted, and revoked codes, and verify the selected digest with a
+  constant-time Go comparison (#40).
+- Invite acceptance secrecy coverage now includes application logs, the audit
+  stream, Prometheus output, and panic recovery; recovered panic payloads are
+  no longer logged (#45).
+- Invite provisioning now contains adapter panics inside the compensation path,
+  records users found after ambiguous creation as unowned terminal failures for
+  manual resolution, never deletes or changes policy for those users, bounds
+  every reconciliation database operation, and rejects administrator dismissal
+  with `invite_provisioning_failure_leased` while a worker lease is live.
+- Invite provisioning failure transactions now report a durable row only after
+  commit, retry uncertain outcomes idempotently with the original failure ID,
+  and contain reconciliation provisioner panics as generic retry or terminal
+  outcomes after releasing operation resources.
+
 - OIDC configuration now bounds client identifiers, client secrets, scopes,
   claim names, role-map claim keys, and the public URL, and rejects malformed
   text before it reaches protocol or claim-lookup boundaries.
@@ -73,6 +90,12 @@ contracts) gets an entry here.
 - The playback tables show what each watch is streaming (resolution, codecs,
   bitrate) and link to the watch's sample series, where a mid-play change
   from direct play to a transcode appears as its own row with the reasons.
+- `GET /api/v1/invites/servers`, guarded by `users.invite`, returns only
+  cursor-paged media-server identifiers and names for invite creation (#39).
+- Durable leased invite provisioning reconciliation with capped backoff and
+  eight attempts, administrator list and audited dismissal endpoints,
+  `BLOOM_INVITE_RECONCILE_INTERVAL`, backlog and outcome metrics, and
+  SQLite/PostgreSQL migration `00018_invite_provisioning_reconciliation` (#41).
 
 - Account-to-media-user links populated by signed-in invite acceptance, exact
   username matching, or administrator assignment.

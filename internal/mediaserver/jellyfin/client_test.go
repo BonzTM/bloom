@@ -127,7 +127,7 @@ func TestClientUserProvisioningPreservesWholePolicy(t *testing.T) {
 	defer server.Close()
 	client := newTestClient(t, server, nil)
 	user, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
-	if err != nil || user.ID != userID {
+	if err != nil || user.ID != userID || !user.Created {
 		t.Fatalf("CreateUser = %+v, %v", user, err)
 	}
 	if err := client.SetLibraryAccess(context.Background(), user.ID, []string{libraryID}, false); err != nil {
@@ -198,7 +198,7 @@ func TestClientCreateUserFindsAmbiguousMalformedSuccess(t *testing.T) {
 	defer server.Close()
 	client := newTestClient(t, server, nil)
 	user, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
-	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) || user.ID != userID || listCalls != 1 {
+	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) || user.ID != userID || user.Created || listCalls != 1 {
 		t.Fatalf("CreateUser = %+v, %v; list calls = %d", user, err, listCalls)
 	}
 }
@@ -218,7 +218,7 @@ func TestClientCreateUserFindsUserAfterResponseLoss(t *testing.T) {
 	})
 	client := newTransportClient(t, transport)
 	user, err := client.CreateUser(context.Background(), "new-user", "Th1s-is-a-unique-password!")
-	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) || user.ID != userID {
+	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) || user.ID != userID || user.Created {
 		t.Fatalf("CreateUser = %+v, %v", user, err)
 	}
 }

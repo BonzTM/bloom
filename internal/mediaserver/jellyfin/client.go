@@ -178,7 +178,7 @@ func (c *Client) CreateUser(ctx context.Context, name, password string) (core.Me
 		return c.reconcileAmbiguousCreate(ctx, name, malformed)
 	}
 	c.observe("create_user", "success", started)
-	return core.MediaUser{ID: dto.Id.String(), Name: *dto.Name}, nil
+	return core.MediaUser{ID: dto.Id.String(), Name: *dto.Name, Created: true}, nil
 }
 
 func (c *Client) reconcileAmbiguousCreate(ctx context.Context, name string, createErr error) (core.MediaUser, error) {

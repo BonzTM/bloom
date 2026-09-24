@@ -11,6 +11,93 @@ import (
 	"time"
 )
 
+const claimInviteProvisioningFailure = `-- name: ClaimInviteProvisioningFailure :one
+UPDATE invite_provisioning_failures SET
+    lease_token = $1, lease_expires_at = $2,
+    attempts = attempts + 1, terminal = attempts + 1 >= 8, updated_at = $3
+WHERE id = $4 AND terminal = FALSE AND attempts < 8
+  AND next_attempt_at <= $5
+  AND (lease_token = '' OR lease_expires_at <= $5)
+RETURNING id, invite_id, media_server_id, media_user_id, media_user_owned, account_id, username, reason,
+          attempts, next_attempt_at, lease_token, lease_expires_at, last_error, terminal,
+          created_at, updated_at
+`
+
+type ClaimInviteProvisioningFailureParams struct {
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	UpdatedAt      time.Time
+	ID             string
+	DueAt          time.Time
+}
+
+type ClaimInviteProvisioningFailureRow struct {
+	ID             string
+	InviteID       string
+	MediaServerID  string
+	MediaUserID    sql.NullString
+	MediaUserOwned bool
+	AccountID      sql.NullString
+	Username       string
+	Reason         string
+	Attempts       int32
+	NextAttemptAt  time.Time
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	LastError      string
+	Terminal       bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (q *Queries) ClaimInviteProvisioningFailure(ctx context.Context, arg ClaimInviteProvisioningFailureParams) (ClaimInviteProvisioningFailureRow, error) {
+	row := q.db.QueryRowContext(ctx, claimInviteProvisioningFailure,
+		arg.LeaseToken,
+		arg.LeaseExpiresAt,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.DueAt,
+	)
+	var i ClaimInviteProvisioningFailureRow
+	err := row.Scan(
+		&i.ID,
+		&i.InviteID,
+		&i.MediaServerID,
+		&i.MediaUserID,
+		&i.MediaUserOwned,
+		&i.AccountID,
+		&i.Username,
+		&i.Reason,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.Terminal,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completeInviteProvisioningCleanup = `-- name: CompleteInviteProvisioningCleanup :execrows
+DELETE FROM invite_provisioning_failures
+WHERE id = $1 AND lease_token = $2
+`
+
+type CompleteInviteProvisioningCleanupParams struct {
+	ID         string
+	LeaseToken string
+}
+
+func (q *Queries) CompleteInviteProvisioningCleanup(ctx context.Context, arg CompleteInviteProvisioningCleanupParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, completeInviteProvisioningCleanup, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createInvite = `-- name: CreateInvite :exec
 INSERT INTO invites (
     id, media_server_id, created_by_account_id, code_hash, label,
@@ -64,6 +151,81 @@ func (q *Queries) CreateInviteLibrary(ctx context.Context, arg CreateInviteLibra
 	return err
 }
 
+const dismissInviteProvisioningFailure = `-- name: DismissInviteProvisioningFailure :execrows
+DELETE FROM invite_provisioning_failures
+WHERE id = $1
+  AND (lease_token = '' OR (lease_expires_at IS NOT NULL AND lease_expires_at <= $2))
+`
+
+type DismissInviteProvisioningFailureParams struct {
+	ID          string
+	DismissedAt sql.NullTime
+}
+
+func (q *Queries) DismissInviteProvisioningFailure(ctx context.Context, arg DismissInviteProvisioningFailureParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, dismissInviteProvisioningFailure, arg.ID, arg.DismissedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const getClaimedInviteProvisioningFailure = `-- name: GetClaimedInviteProvisioningFailure :one
+SELECT id, invite_id, media_server_id, media_user_id, media_user_owned, account_id, username, reason,
+       attempts, next_attempt_at, lease_token, lease_expires_at, last_error, terminal,
+       created_at, updated_at
+FROM invite_provisioning_failures
+WHERE id = $1 AND lease_token = $2
+`
+
+type GetClaimedInviteProvisioningFailureParams struct {
+	ID         string
+	LeaseToken string
+}
+
+type GetClaimedInviteProvisioningFailureRow struct {
+	ID             string
+	InviteID       string
+	MediaServerID  string
+	MediaUserID    sql.NullString
+	MediaUserOwned bool
+	AccountID      sql.NullString
+	Username       string
+	Reason         string
+	Attempts       int32
+	NextAttemptAt  time.Time
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	LastError      string
+	Terminal       bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (q *Queries) GetClaimedInviteProvisioningFailure(ctx context.Context, arg GetClaimedInviteProvisioningFailureParams) (GetClaimedInviteProvisioningFailureRow, error) {
+	row := q.db.QueryRowContext(ctx, getClaimedInviteProvisioningFailure, arg.ID, arg.LeaseToken)
+	var i GetClaimedInviteProvisioningFailureRow
+	err := row.Scan(
+		&i.ID,
+		&i.InviteID,
+		&i.MediaServerID,
+		&i.MediaUserID,
+		&i.MediaUserOwned,
+		&i.AccountID,
+		&i.Username,
+		&i.Reason,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.Terminal,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getInvite = `-- name: GetInvite :one
 SELECT id, media_server_id, created_by_account_id, label, expires_at,
        max_uses, use_count, revoked_at, created_at, updated_at
@@ -103,20 +265,19 @@ func (q *Queries) GetInvite(ctx context.Context, id string) (GetInviteRow, error
 }
 
 const getInviteByCodeHash = `-- name: GetInviteByCodeHash :one
-SELECT id, media_server_id, created_by_account_id, label, expires_at,
-       max_uses, use_count, revoked_at, created_at, updated_at
+SELECT id, media_server_id, created_by_account_id, code_hash, label, expires_at,
+       max_uses, use_count, revoked_at, created_at, updated_at,
+       EXISTS (SELECT 1 FROM invite_provisioning_failures AS failure
+               WHERE failure.invite_id = invites.id) AS blocked
 FROM invites
 WHERE code_hash = $1
-  AND NOT EXISTS (
-      SELECT 1 FROM invite_provisioning_failures
-      WHERE invite_provisioning_failures.invite_id = invites.id
-  )
 `
 
 type GetInviteByCodeHashRow struct {
 	ID                 string
 	MediaServerID      string
 	CreatedByAccountID string
+	CodeHash           []byte
 	Label              string
 	ExpiresAt          sql.NullTime
 	MaxUses            sql.NullInt32
@@ -124,6 +285,7 @@ type GetInviteByCodeHashRow struct {
 	RevokedAt          sql.NullTime
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	Blocked            bool
 }
 
 func (q *Queries) GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error) {
@@ -133,6 +295,7 @@ func (q *Queries) GetInviteByCodeHash(ctx context.Context, codeHash []byte) (Get
 		&i.ID,
 		&i.MediaServerID,
 		&i.CreatedByAccountID,
+		&i.CodeHash,
 		&i.Label,
 		&i.ExpiresAt,
 		&i.MaxUses,
@@ -140,6 +303,7 @@ func (q *Queries) GetInviteByCodeHash(ctx context.Context, codeHash []byte) (Get
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Blocked,
 	)
 	return i, err
 }
@@ -163,34 +327,49 @@ func (q *Queries) IncrementInviteUse(ctx context.Context, arg IncrementInviteUse
 	return result.RowsAffected()
 }
 
-const insertInviteProvisioningFailure = `-- name: InsertInviteProvisioningFailure :exec
+const insertInviteProvisioningFailureIfAbsent = `-- name: InsertInviteProvisioningFailureIfAbsent :exec
 INSERT INTO invite_provisioning_failures (
-    id, invite_id, media_server_id, media_user_id, username, reason, created_at, updated_at
+    id, invite_id, media_server_id, media_user_id, media_user_owned, account_id, username, reason,
+    attempts, next_attempt_at, lease_token, lease_expires_at, last_error, terminal,
+    created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7, $8
+    $5, $6, $7, $8,
+    0, $9, '', NULL, $10, $11,
+    $12, $13
 )
+ON CONFLICT (id) DO NOTHING
 `
 
-type InsertInviteProvisioningFailureParams struct {
-	ID            string
-	InviteID      string
-	MediaServerID string
-	MediaUserID   sql.NullString
-	Username      string
-	Reason        string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+type InsertInviteProvisioningFailureIfAbsentParams struct {
+	ID             string
+	InviteID       string
+	MediaServerID  string
+	MediaUserID    sql.NullString
+	MediaUserOwned bool
+	AccountID      sql.NullString
+	Username       string
+	Reason         string
+	NextAttemptAt  time.Time
+	LastError      string
+	Terminal       bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
-func (q *Queries) InsertInviteProvisioningFailure(ctx context.Context, arg InsertInviteProvisioningFailureParams) error {
-	_, err := q.db.ExecContext(ctx, insertInviteProvisioningFailure,
+func (q *Queries) InsertInviteProvisioningFailureIfAbsent(ctx context.Context, arg InsertInviteProvisioningFailureIfAbsentParams) error {
+	_, err := q.db.ExecContext(ctx, insertInviteProvisioningFailureIfAbsent,
 		arg.ID,
 		arg.InviteID,
 		arg.MediaServerID,
 		arg.MediaUserID,
+		arg.MediaUserOwned,
+		arg.AccountID,
 		arg.Username,
 		arg.Reason,
+		arg.NextAttemptAt,
+		arg.LastError,
+		arg.Terminal,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -227,6 +406,28 @@ func (q *Queries) InsertInviteRedemption(ctx context.Context, arg InsertInviteRe
 	return err
 }
 
+const inviteProvisioningFailureDepth = `-- name: InviteProvisioningFailureDepth :one
+SELECT COUNT(*) FROM invite_provisioning_failures
+`
+
+func (q *Queries) InviteProvisioningFailureDepth(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, inviteProvisioningFailureDepth)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const inviteProvisioningFailureExists = `-- name: InviteProvisioningFailureExists :one
+SELECT EXISTS (SELECT 1 FROM invite_provisioning_failures WHERE id = $1)
+`
+
+func (q *Queries) InviteProvisioningFailureExists(ctx context.Context, id string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, inviteProvisioningFailureExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listInviteLibraries = `-- name: ListInviteLibraries :many
 SELECT library_id
 FROM invite_libraries
@@ -247,6 +448,84 @@ func (q *Queries) ListInviteLibraries(ctx context.Context, inviteID string) ([]s
 			return nil, err
 		}
 		items = append(items, library_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInviteProvisioningFailures = `-- name: ListInviteProvisioningFailures :many
+SELECT failure.id, failure.invite_id, failure.media_server_id, server.name AS media_server_name,
+       failure.media_user_owned, failure.username, failure.reason, failure.attempts, failure.next_attempt_at,
+       failure.last_error, failure.terminal, failure.created_at, failure.updated_at
+FROM invite_provisioning_failures AS failure
+JOIN media_servers AS server ON server.id = failure.media_server_id
+WHERE CAST($1 AS INTEGER) = 0
+   OR failure.created_at < $2
+   OR (failure.created_at = $2 AND failure.id < $3)
+ORDER BY failure.created_at DESC, failure.id DESC
+LIMIT $4
+`
+
+type ListInviteProvisioningFailuresParams struct {
+	HasCursor      int32
+	AfterCreatedAt time.Time
+	AfterID        string
+	PageSize       int32
+}
+
+type ListInviteProvisioningFailuresRow struct {
+	ID              string
+	InviteID        string
+	MediaServerID   string
+	MediaServerName string
+	MediaUserOwned  bool
+	Username        string
+	Reason          string
+	Attempts        int32
+	NextAttemptAt   time.Time
+	LastError       string
+	Terminal        bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (q *Queries) ListInviteProvisioningFailures(ctx context.Context, arg ListInviteProvisioningFailuresParams) ([]ListInviteProvisioningFailuresRow, error) {
+	rows, err := q.db.QueryContext(ctx, listInviteProvisioningFailures,
+		arg.HasCursor,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInviteProvisioningFailuresRow{}
+	for rows.Next() {
+		var i ListInviteProvisioningFailuresRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.InviteID,
+			&i.MediaServerID,
+			&i.MediaServerName,
+			&i.MediaUserOwned,
+			&i.Username,
+			&i.Reason,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.LastError,
+			&i.Terminal,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -325,6 +604,37 @@ func (q *Queries) ListInvites(ctx context.Context, arg ListInvitesParams) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const rescheduleInviteProvisioningFailure = `-- name: RescheduleInviteProvisioningFailure :execrows
+UPDATE invite_provisioning_failures SET
+    next_attempt_at = $1, lease_token = '', lease_expires_at = NULL,
+    last_error = $2, terminal = $3, updated_at = $4
+WHERE id = $5 AND lease_token = $6
+`
+
+type RescheduleInviteProvisioningFailureParams struct {
+	NextAttemptAt time.Time
+	LastError     string
+	Terminal      bool
+	UpdatedAt     time.Time
+	ID            string
+	LeaseToken    string
+}
+
+func (q *Queries) RescheduleInviteProvisioningFailure(ctx context.Context, arg RescheduleInviteProvisioningFailureParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rescheduleInviteProvisioningFailure,
+		arg.NextAttemptAt,
+		arg.LastError,
+		arg.Terminal,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const revokeInvite = `-- name: RevokeInvite :one

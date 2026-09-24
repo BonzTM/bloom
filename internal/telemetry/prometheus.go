@@ -39,6 +39,8 @@ type PromMetrics struct {
 	oidcDependencySeconds      *prometheus.HistogramVec
 	inviteCreations            *prometheus.CounterVec
 	inviteAcceptances          *prometheus.CounterVec
+	inviteReconciliations      *prometheus.CounterVec
+	inviteProvisioningBacklog  prometheus.Gauge
 	mediaUserMatches           *prometheus.CounterVec
 	playbackPolls              *prometheus.CounterVec
 	playbackPollSeconds        *prometheus.HistogramVec
@@ -71,6 +73,14 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	oidcCollectors := newOIDCCollectors(namespace)
 	inviteCreations := newOutcomeCounter(namespace, "invite_creations_total", "Total invite creation attempts by finite outcome.")
 	inviteAcceptances := newOutcomeCounter(namespace, "invite_acceptances_total", "Total invite acceptance attempts by finite outcome.")
+	inviteReconciliations := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "invite_provisioning_reconciliations_total",
+		Help: "Invite provisioning reconciliation attempts by reason and bounded outcome.",
+	}, []string{"reason", "outcome"})
+	inviteProvisioningBacklog := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "invite_provisioning_backlog",
+		Help: "Current count of unresolved invite provisioning failures.",
+	})
 	mediaUserMatches := newOutcomeCounter(namespace, "media_user_matches_total", "On-demand account media-user match outcomes.")
 	playbackCollectors := newPlaybackCollectors(namespace)
 	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
@@ -104,13 +114,15 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		sessionCleanupFailures: authCollectors.sessionCleanupFailures,
 		authorizationDenials:   authCollectors.authorizationDenials,
 		mediaServerRequests:    mediaCollectors.requests, mediaServerSeconds: mediaCollectors.seconds,
-		mediaServerRetries:    mediaCollectors.retries,
-		oidcDependencyEvents:  oidcCollectors.events,
-		oidcDependencySeconds: oidcCollectors.seconds,
-		inviteCreations:       inviteCreations,
-		inviteAcceptances:     inviteAcceptances,
-		mediaUserMatches:      mediaUserMatches,
-		playbackPolls:         playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
+		mediaServerRetries:        mediaCollectors.retries,
+		oidcDependencyEvents:      oidcCollectors.events,
+		oidcDependencySeconds:     oidcCollectors.seconds,
+		inviteCreations:           inviteCreations,
+		inviteAcceptances:         inviteAcceptances,
+		inviteReconciliations:     inviteReconciliations,
+		inviteProvisioningBacklog: inviteProvisioningBacklog,
+		mediaUserMatches:          mediaUserMatches,
+		playbackPolls:             playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
 		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
 		playbackRefreshFailures:    playbackRefreshFailures,
 		playbackLibraryResolutions: playbackLibraryResolutions,
@@ -339,6 +351,8 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.oidcDependencySeconds,
 		m.inviteCreations,
 		m.inviteAcceptances,
+		m.inviteReconciliations,
+		m.inviteProvisioningBacklog,
 		m.mediaUserMatches,
 		m.playbackPolls,
 		m.playbackPollSeconds,
@@ -412,6 +426,22 @@ func (m *PromMetrics) IncInviteCreation(outcome string) {
 // IncInviteAcceptance records one invite acceptance outcome.
 func (m *PromMetrics) IncInviteAcceptance(outcome string) {
 	m.inviteAcceptances.WithLabelValues(outcome).Inc()
+}
+
+// ObserveInviteReconciliation records one bounded reconciliation outcome.
+func (m *PromMetrics) ObserveInviteReconciliation(reason, outcome string) {
+	if reason != string(core.InviteProvisioningCleanupFailed) && reason != string(core.InviteProvisioningCreateAmbiguous) {
+		reason = "invalid"
+	}
+	if outcome != "completed" && outcome != "retry" && outcome != "terminal" {
+		outcome = "invalid"
+	}
+	m.inviteReconciliations.WithLabelValues(reason, outcome).Inc()
+}
+
+// SetInviteProvisioningBacklog publishes the unresolved failure count.
+func (m *PromMetrics) SetInviteProvisioningBacklog(depth int64) {
+	m.inviteProvisioningBacklog.Set(float64(max(depth, 0)))
 }
 
 // IncMediaUserMatch records one bounded on-demand match outcome.

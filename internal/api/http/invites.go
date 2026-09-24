@@ -57,6 +57,36 @@ type invitesResponse struct {
 	NextCursor string           `json:"next_cursor"`
 }
 
+type inviteServerResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type inviteServersResponse struct {
+	Items      []inviteServerResponse `json:"items"`
+	NextCursor string                 `json:"next_cursor"`
+}
+
+type provisioningFailureResponse struct {
+	ID              string                               `json:"id"`
+	InviteID        string                               `json:"invite_id"`
+	MediaServerID   string                               `json:"media_server_id"`
+	MediaServerName string                               `json:"media_server_name"`
+	MediaUserOwned  bool                                 `json:"media_user_owned"`
+	Username        string                               `json:"username"`
+	Reason          core.InviteProvisioningFailureReason `json:"reason"`
+	Attempts        int                                  `json:"attempts"`
+	NextAttemptAt   time.Time                            `json:"next_attempt_at"`
+	LastError       string                               `json:"last_error"`
+	CreatedAt       time.Time                            `json:"created_at"`
+	UpdatedAt       time.Time                            `json:"updated_at"`
+}
+
+type provisioningFailuresResponse struct {
+	Items      []provisioningFailureResponse `json:"items"`
+	NextCursor string                        `json:"next_cursor"`
+}
+
 type publicInviteResponse struct {
 	MediaServerName string `json:"media_server_name"`
 	UsernameRule    string `json:"username_rule"`
@@ -161,6 +191,62 @@ func (s *Server) handleListInvites(w http.ResponseWriter, r *http.Request) {
 		items = append(items, inviteDTO(value, now))
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, invitesResponse{Items: items, NextCursor: cursor})
+}
+
+func (s *Server) handleListInviteServers(w http.ResponseWriter, r *http.Request) {
+	after, size, fields := mediaServerPageParams(r)
+	if len(fields) > 0 {
+		s.writeValidation(w, r, fields)
+		return
+	}
+	servers, err := s.inviteReader.ListServers(r.Context(), after, size+1)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	servers, cursor := inviteServerPage(servers, size)
+	items := make([]inviteServerResponse, 0, len(servers))
+	for _, server := range servers {
+		items = append(items, inviteServerResponse{ID: server.ID, Name: server.Name})
+	}
+	writeJSON(w, r, s.logger, http.StatusOK, inviteServersResponse{Items: items, NextCursor: cursor})
+}
+
+func (s *Server) handleListProvisioningFailures(w http.ResponseWriter, r *http.Request) {
+	after, size, fields := provisioningFailurePageParams(r)
+	if len(fields) > 0 {
+		s.writeValidation(w, r, fields)
+		return
+	}
+	values, err := s.inviteReader.ListProvisioningFailures(r.Context(), after, size+1)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	values, cursor := provisioningFailurePage(values, size)
+	items := make([]provisioningFailureResponse, 0, len(values))
+	for _, value := range values {
+		items = append(items, provisioningFailureDTO(value))
+	}
+	writeJSON(w, r, s.logger, http.StatusOK, provisioningFailuresResponse{Items: items, NextCursor: cursor})
+}
+
+func (s *Server) handleDismissProvisioningFailure(w http.ResponseWriter, r *http.Request) {
+	id, ok := provisioningFailureID(w, r, s)
+	if !ok {
+		return
+	}
+	err := s.inviteManager.DismissProvisioningFailure(r.Context(), id)
+	result, reason := telemetry.AuditSuccess, "dismissed"
+	if err != nil {
+		result, reason = telemetry.AuditFailure, inviteFailureReason(err)
+	}
+	s.emitInviteAudit(r, "invite.provisioning_failure.dismiss", "invite_provisioning_failure:"+id, result, reason, true)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleGetInvite(w http.ResponseWriter, r *http.Request) {
@@ -344,6 +430,8 @@ func inviteFailureReason(err error) string {
 	switch {
 	case errors.Is(err, core.ErrInviteProvisioningPending):
 		return "provisioning_cleanup_pending"
+	case errors.Is(err, core.ErrInviteProvisioningFailureLeased):
+		return "reconciliation_in_progress"
 	case errors.As(err, &nameErr):
 		return "username_unavailable"
 	case errors.Is(err, core.ErrInviteUnavailable):
@@ -416,6 +504,56 @@ func invitePage(values []core.Invite, pageSize int) ([]core.Invite, string) {
 	last := page[len(page)-1]
 	raw := last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
 	return page, base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func inviteServerPage(values []core.InviteServer, pageSize int) ([]core.InviteServer, string) {
+	if len(values) <= pageSize {
+		return values, ""
+	}
+	page := values[:pageSize]
+	key := core.MediaServerNameKey(page[len(page)-1].Name)
+	return page, base64.RawURLEncoding.EncodeToString([]byte(key))
+}
+
+func provisioningFailurePageParams(
+	r *http.Request,
+) (*core.InviteProvisioningFailureCursor, int, []httputil.FieldError) {
+	cursor, size, fields := invitePageParams(r)
+	if cursor == nil {
+		return nil, size, fields
+	}
+	return &core.InviteProvisioningFailureCursor{CreatedAt: cursor.CreatedAt, ID: cursor.ID}, size, fields
+}
+
+func provisioningFailurePage(
+	values []core.InviteProvisioningFailure, pageSize int,
+) ([]core.InviteProvisioningFailure, string) {
+	if len(values) <= pageSize {
+		return values, ""
+	}
+	page := values[:pageSize]
+	last := page[len(page)-1]
+	raw := last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
+	return page, base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func provisioningFailureDTO(value core.InviteProvisioningFailure) provisioningFailureResponse {
+	return provisioningFailureResponse{
+		ID: value.ID, InviteID: value.InviteID, MediaServerID: value.MediaServerID,
+		MediaServerName: value.MediaServerName, MediaUserOwned: value.MediaUserOwned,
+		Username: value.Username, Reason: value.Reason,
+		Attempts: value.Attempts, NextAttemptAt: value.NextAttemptAt, LastError: value.LastError,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func provisioningFailureID(w http.ResponseWriter, r *http.Request, s *Server) (string, bool) {
+	id := r.PathValue("id")
+	if core.ValidID(id) {
+		return id, true
+	}
+	s.writeValidation(w, r, []httputil.FieldError{{Field: "id", Code: "invalid", Message: "must be a valid UUID"}})
+	return "", false
 }
 
 func inviteResource(id string) string { return "invite:" + id }

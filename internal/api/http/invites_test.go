@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -36,9 +35,16 @@ type fakeInviteService struct {
 	accepted  int
 	deadline  bool
 	accountID string
+	failure   core.InviteProvisioningFailure
+	dismissed string
 }
 
-type serviceBackedInviteStore struct{ invite core.Invite }
+type serviceBackedInviteStore struct {
+	invite     core.Invite
+	lookupHash *[sha256.Size]byte
+	lookups    int
+	redeems    int
+}
 
 func (s *serviceBackedInviteStore) CreateInvite(
 	_ context.Context, value core.Invite, _ [sha256.Size]byte,
@@ -51,10 +57,12 @@ func (s *serviceBackedInviteStore) RevokeInvite(context.Context, string, time.Ti
 	return s.invite, nil
 }
 
-func (*serviceBackedInviteStore) RedeemInvite(
-	context.Context, [sha256.Size]byte, core.Clock, core.InviteRedeemFunc,
+func (s *serviceBackedInviteStore) RedeemInvite(
+	ctx context.Context, _ [sha256.Size]byte, _ core.Clock, redeem core.InviteRedeemFunc,
 ) (bool, error) {
-	return false, nil
+	s.redeems++
+	_, err := redeem(ctx, s.invite)
+	return false, err
 }
 
 func (*serviceBackedInviteStore) RecordInviteProvisioningFailure(
@@ -68,9 +76,42 @@ func (s *serviceBackedInviteStore) GetInvite(context.Context, string) (core.Invi
 }
 
 func (s *serviceBackedInviteStore) GetInviteByCodeHash(
-	context.Context, [sha256.Size]byte,
-) (core.Invite, error) {
-	return s.invite, nil
+	_ context.Context, hash [sha256.Size]byte,
+) (core.InviteCodeLookup, error) {
+	s.lookups++
+	stored := hash
+	if s.lookupHash != nil {
+		stored = *s.lookupHash
+	}
+	return core.InviteCodeLookup{Invite: s.invite, CodeHash: stored}, nil
+}
+
+func (*serviceBackedInviteStore) ClaimInviteProvisioningFailure(context.Context, core.InviteProvisioningLease, time.Time) (core.InviteProvisioningFailure, error) {
+	return core.InviteProvisioningFailure{}, core.ErrNotFound
+}
+
+func (*serviceBackedInviteStore) CompleteInviteProvisioningCleanup(context.Context, string, string) error {
+	return nil
+}
+
+func (*serviceBackedInviteStore) CompleteInviteProvisioningPolicy(context.Context, core.InviteProvisioningFailure, core.InviteRedemption, time.Time) error {
+	return nil
+}
+
+func (*serviceBackedInviteStore) RescheduleInviteProvisioningFailure(context.Context, string, string, string, time.Time, time.Time, bool) error {
+	return nil
+}
+
+func (*serviceBackedInviteStore) ListInviteProvisioningFailures(context.Context, *core.InviteProvisioningFailureCursor, int) ([]core.InviteProvisioningFailure, error) {
+	return nil, nil
+}
+
+func (*serviceBackedInviteStore) DismissInviteProvisioningFailure(context.Context, string, time.Time) error {
+	return nil
+}
+
+func (*serviceBackedInviteStore) InviteProvisioningFailureDepth(context.Context) (int64, error) {
+	return 0, nil
 }
 
 func (s *serviceBackedInviteStore) ListInvites(context.Context, *core.InviteCursor, int) ([]core.Invite, error) {
@@ -87,12 +128,42 @@ func (serviceBackedInviteServers) Libraries(context.Context, string) ([]core.Lib
 	return []core.Library{}, nil
 }
 
+func (serviceBackedInviteServers) ListInviteServers(context.Context, string, int) ([]core.InviteServer, error) {
+	return []core.InviteServer{{ID: "33333333-3333-4333-8333-333333333333", Name: "Home"}}, nil
+}
+
 type unusedInviteProvisioners struct{}
 
 func (unusedInviteProvisioners) AcquireUserProvisioner(
 	context.Context, string,
 ) (core.MediaUserProvisioner, func(), error) {
 	return nil, func() {}, nil
+}
+
+type panicInviteProvisioner struct {
+	code, password   string
+	created, deleted bool
+}
+
+func (p *panicInviteProvisioner) CreateUser(_ context.Context, _, password string) (core.MediaUser, error) {
+	p.created = true
+	p.password = password
+	return core.MediaUser{ID: "55555555-5555-4555-8555-555555555555", Name: "new-user", Created: true}, nil
+}
+
+func (p *panicInviteProvisioner) SetLibraryAccess(context.Context, string, []string, bool) error {
+	panic("provisioning panic " + p.password + " " + p.code)
+}
+
+func (p *panicInviteProvisioner) DeleteUser(context.Context, string) error {
+	p.deleted = true
+	return nil
+}
+
+type panicInviteAcquirer struct{ provisioner *panicInviteProvisioner }
+
+func (a panicInviteAcquirer) AcquireUserProvisioner(context.Context, string) (core.MediaUserProvisioner, func(), error) {
+	return a.provisioner, func() {}, nil
 }
 
 func newFakeInviteService(now time.Time) *fakeInviteService {
@@ -148,6 +219,22 @@ func (f *fakeInviteService) Accept(ctx context.Context, accountID, _, username, 
 	f.accountID = accountID
 	_, f.deadline = ctx.Deadline()
 	return inviteapp.Accepted{InviteID: f.invite.ID, MediaServerName: "Home", Username: username}, f.err
+}
+
+func (f *fakeInviteService) ListServers(context.Context, string, int) ([]core.InviteServer, error) {
+	return []core.InviteServer{{ID: f.invite.MediaServerID, Name: "Home"}}, f.err
+}
+
+func (f *fakeInviteService) ListProvisioningFailures(context.Context, *core.InviteProvisioningFailureCursor, int) ([]core.InviteProvisioningFailure, error) {
+	if f.failure.ID == "" {
+		return []core.InviteProvisioningFailure{}, f.err
+	}
+	return []core.InviteProvisioningFailure{f.failure}, f.err
+}
+
+func (f *fakeInviteService) DismissProvisioningFailure(_ context.Context, id string) error {
+	f.dismissed = id
+	return f.err
 }
 
 func TestSignedInInviteAcceptancePassesAccount(t *testing.T) {
@@ -362,6 +449,70 @@ func TestInvitePermissionAndCSRF(t *testing.T) {
 	}
 }
 
+func TestInviteServerListUsesUsersInviteWithoutAdminSettings(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	accountID := h.store.accounts["alice"].ID
+	h.authorization.mu.Lock()
+	h.authorization.permissions[accountID] = []core.Permission{core.PermissionUsersInvite}
+	h.authorization.mu.Unlock()
+
+	response := h.request(t, http.MethodGet, "/api/v1/invites/servers", "", cookie)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "base_url") ||
+		strings.Contains(response.Body.String(), "capabilities") || strings.Contains(response.Body.String(), "credential") {
+		t.Fatalf("least-privilege servers = %d: %s", response.Code, response.Body.String())
+	}
+	if denied := h.request(t, http.MethodGet, "/api/v1/invites/provisioning-failures", "", cookie); denied.Code != http.StatusForbidden {
+		t.Fatalf("admin failure list with users.invite = %d", denied.Code)
+	}
+	h.authorization.mu.Lock()
+	h.authorization.permissions[accountID] = nil
+	h.authorization.mu.Unlock()
+	if denied := h.request(t, http.MethodGet, "/api/v1/invites/servers", "", cookie); denied.Code != http.StatusForbidden {
+		t.Fatalf("server list without users.invite = %d", denied.Code)
+	}
+}
+
+func TestInviteProvisioningFailureAdministration(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	now := h.clock.Now()
+	h.invites.failure = core.InviteProvisioningFailure{
+		ID: "55555555-5555-4555-8555-555555555555", InviteID: h.invites.invite.ID,
+		MediaServerID: h.invites.invite.MediaServerID, MediaServerName: "Home", MediaUserOwned: true,
+		Username: "new-user",
+		Reason:   core.InviteProvisioningCleanupFailed, Attempts: 2, NextAttemptAt: now.Add(time.Minute),
+		LastError: "media server reconciliation failed", CreatedAt: now, UpdatedAt: now,
+	}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	list := h.request(t, http.MethodGet, "/api/v1/invites/provisioning-failures", "", cookie)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"media_user_owned":true`) ||
+		strings.Contains(list.Body.String(), "media_user_id") ||
+		strings.Contains(list.Body.String(), "account_id") || strings.Contains(list.Body.String(), "lease") {
+		t.Fatalf("failure list = %d: %s", list.Code, list.Body.String())
+	}
+	path := "/api/v1/invites/provisioning-failures/" + h.invites.failure.ID
+	dismiss := h.request(t, http.MethodDelete, path, "", cookie)
+	if dismiss.Code != http.StatusNoContent || h.invites.dismissed != h.invites.failure.ID {
+		t.Fatalf("dismiss = %d id=%q", dismiss.Code, h.invites.dismissed)
+	}
+	if event := h.audit.last(t); event.Action != "invite.provisioning_failure.dismiss" || event.Result != telemetry.AuditSuccess {
+		t.Fatalf("dismiss audit = %+v", event)
+	}
+	h.invites.err = core.ErrInviteProvisioningFailureLeased
+	conflict := h.request(t, http.MethodDelete, path, "", cookie)
+	if envelope := decodeEnvelope(t, conflict); conflict.Code != http.StatusConflict || envelope.Code != codeInviteFailureLeased {
+		t.Fatalf("leased dismissal = %d %+v", conflict.Code, envelope)
+	}
+	assertHandlerContract(t, loadOpenAPI(t), conflict, authContractCase{
+		path: "/api/v1/invites/provisioning-failures/{id}", method: "delete",
+		status: http.StatusConflict, schema: errorSchema,
+		headers: []string{"Cache-Control", "Set-Cookie", "Vary", "X-Request-ID"},
+	})
+	if event := h.audit.last(t); event.Action != "invite.provisioning_failure.dismiss" || event.Result != telemetry.AuditFailure {
+		t.Fatalf("leased dismissal audit = %+v", event)
+	}
+}
+
 func TestInviteValidationAndOpaqueUnavailable(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
@@ -394,6 +545,67 @@ func TestInviteValidationAndOpaqueUnavailable(t *testing.T) {
 		}
 		body = recorder.Body.String()
 	}
+}
+
+type unusableInviteRoute struct {
+	method, path, body, contentType string
+}
+
+func TestUnusableInviteResponsesAndStoreWorkAreIdentical(t *testing.T) {
+	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	routes := []unusableInviteRoute{
+		{method: http.MethodGet, path: "/api/v1/invite/" + testInviteCode},
+		{
+			method: http.MethodPost, path: "/api/v1/invite/" + testInviteCode + "/accept",
+			body: `{"username":"new-user","password":"Th1s-is-a-unique-password!"}`, contentType: "application/json",
+		},
+	}
+	for _, route := range routes {
+		var expectedBody string
+		for name, store := range unusableInviteStores(now) {
+			t.Run(route.method+"/"+name, func(t *testing.T) {
+				body := unusableInviteResponse(t, store, route)
+				if expectedBody == "" {
+					expectedBody = body
+				} else if body != expectedBody {
+					t.Fatalf("body = %q, want %q", body, expectedBody)
+				}
+			})
+		}
+	}
+}
+
+func unusableInviteStores(now time.Time) map[string]*serviceBackedInviteStore {
+	base := newFakeInviteService(now).invite
+	unknown := sha256.Sum256([]byte("unknown invite digest"))
+	expiredAt, revokedAt, one := now.Add(-time.Second), now.Add(-time.Minute), 1
+	expired, exhausted, revoked := base, base, base
+	expired.ExpiresAt = &expiredAt
+	exhausted.MaxUses, exhausted.UseCount = &one, 1
+	revoked.RevokedAt = &revokedAt
+	return map[string]*serviceBackedInviteStore{
+		"unknown": {invite: base, lookupHash: &unknown}, "expired": {invite: expired},
+		"exhausted": {invite: exhausted}, "revoked": {invite: revoked},
+	}
+}
+
+func unusableInviteResponse(
+	t *testing.T, store *serviceBackedInviteStore, route unusableInviteRoute,
+) string {
+	t.Helper()
+	h := newAuthHarness(t, nil)
+	service, err := inviteapp.NewService(
+		store, store, serviceBackedInviteServers{}, unusedInviteProvisioners{}, h.clock, slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.server.inviteReader, h.server.inviteManager = service, service
+	recorder := h.requestWithContentType(t, route.method, route.path, route.body, nil, route.contentType)
+	if recorder.Code != http.StatusNotFound || store.lookups != 1 || store.redeems != 0 {
+		t.Fatalf("response=%d lookups=%d redeems=%d: %s", recorder.Code, store.lookups, store.redeems, recorder.Body.String())
+	}
+	return recorder.Body.String()
 }
 
 func TestInviteAcceptanceErrorMappingAndRateLimit(t *testing.T) {
@@ -539,6 +751,9 @@ func TestInviteOpenAPIContractWithValidFixtures(t *testing.T) {
 	}{
 		{name: "create", method: http.MethodPost, specPath: "/api/v1/invites", requestPath: "/api/v1/invites", body: `{"media_server_id":"33333333-3333-4333-8333-333333333333","label":"Friends","max_uses":1}`, schema: "#/components/schemas/CreateInviteResponse", status: 201},
 		{name: "list", method: http.MethodGet, specPath: "/api/v1/invites", requestPath: "/api/v1/invites", schema: "#/components/schemas/InvitesResponse", status: 200},
+		{name: "servers", method: http.MethodGet, specPath: "/api/v1/invites/servers", requestPath: "/api/v1/invites/servers", schema: "#/components/schemas/InviteServersResponse", status: 200},
+		{name: "failures", method: http.MethodGet, specPath: "/api/v1/invites/provisioning-failures", requestPath: "/api/v1/invites/provisioning-failures", schema: "#/components/schemas/InviteProvisioningFailuresResponse", status: 200},
+		{name: "dismiss failure", method: http.MethodDelete, specPath: "/api/v1/invites/provisioning-failures/{id}", requestPath: "/api/v1/invites/provisioning-failures/55555555-5555-4555-8555-555555555555", status: 204},
 		{name: "get", method: http.MethodGet, specPath: "/api/v1/invites/{id}", requestPath: "/api/v1/invites/44444444-4444-4444-8444-444444444444", schema: "#/components/schemas/Invite", status: 200},
 		{name: "revoke", method: http.MethodDelete, specPath: "/api/v1/invites/{id}", requestPath: "/api/v1/invites/44444444-4444-4444-8444-444444444444", status: 204},
 		{name: "preview", method: http.MethodGet, specPath: "/api/v1/invite/{code}", requestPath: "/api/v1/invite/" + testInviteCode, schema: "#/components/schemas/PublicInviteResponse", status: 200, public: true},
@@ -652,6 +867,13 @@ func inviteErrorContractCases() []inviteErrorContractCase {
 			h.invites.err = &core.MediaUserNameError{}
 			return acceptInviteRequestForTest(t, h)
 		}},
+		{name: "provisioning failure leased", status: http.StatusConflict, run: func(t *testing.T, h authHarness) *httptest.ResponseRecorder {
+			t.Helper()
+			h.invites.err = core.ErrInviteProvisioningFailureLeased
+			cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+			return h.request(t, http.MethodDelete,
+				"/api/v1/invites/provisioning-failures/55555555-5555-4555-8555-555555555555", "", cookie)
+		}},
 		{name: "unsupported media type", status: http.StatusUnsupportedMediaType, run: func(t *testing.T, h authHarness) *httptest.ResponseRecorder {
 			t.Helper()
 			return h.requestWithContentType(t, http.MethodPost, "/api/v1/invite/"+testInviteCode+"/accept", `{}`, nil, "text/plain")
@@ -724,17 +946,49 @@ func assertInviteSuccessDocumented(t *testing.T, document openAPIDocument, testC
 	}
 }
 
-func TestInviteResponsesNeverContainPasswordOrCodeAfterCreation(t *testing.T) {
-	h := newAuthHarness(t, nil)
-	response := acceptInviteRequestForTest(t, h)
-	var value map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
-		t.Fatalf("decode acceptance: %v", err)
+func TestInviteAcceptanceSecretsNeverReachResponseLogsAuditOrMetrics(t *testing.T) {
+	const password = "Th1s-is-a-unique-password!"
+	base := newAuthHarness(t, nil)
+	store := &serviceBackedInviteStore{invite: newFakeInviteService(base.clock.Now()).invite}
+	provisioner := &panicInviteProvisioner{code: testInviteCode}
+	var applicationLog, auditLog strings.Builder
+	applicationLogger := slog.New(slog.NewJSONHandler(&applicationLog, nil))
+	service, err := inviteapp.NewService(
+		store, store, serviceBackedInviteServers{}, panicInviteAcquirer{provisioner},
+		base.clock, applicationLogger,
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, present := value["password"]; present {
-		t.Fatal("acceptance response contains password")
+	metrics := telemetry.NewPromMetrics("secrecytest")
+	audit := telemetry.NewAuditLogger(&auditLog, base.clock)
+	server := New(config.HTTPConfig{
+		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 8192,
+	}, Deps{
+		Logger: applicationLogger, Metrics: metrics,
+		Readiness: telemetry.NewReadiness(true), Pinger: &fakePinger{},
+		Identity: core.NewLocalIdentityProvider(base.store), Accounts: base.store,
+		Authorizer: base.authorization, Roles: base.authorization,
+		InviteReader: service, InviteManager: service, Sessions: base.sessions, Audit: audit,
+		Clock: base.clock, Auth: newAuthHarnessConfig(nil),
+		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/invite/"+testInviteCode+"/accept",
+		strings.NewReader(`{"username":"new-user","password":"`+password+`"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !provisioner.created || !provisioner.deleted {
+		t.Fatalf("panic acceptance = %d created=%v deleted=%v: %s",
+			response.Code, provisioner.created, provisioner.deleted, response.Body.String())
 	}
-	if _, present := value["code"]; present {
-		t.Fatal("acceptance response contains invite code")
+	metricsRecorder := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(metricsRecorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	outputs := []string{response.Body.String(), applicationLog.String(), auditLog.String(), metricsRecorder.Body.String()}
+	for index, output := range outputs {
+		if strings.Contains(output, password) || strings.Contains(output, testInviteCode) {
+			t.Fatalf("secret found in output %d: %s", index, output)
+		}
 	}
 }
