@@ -78,6 +78,7 @@ type Querier interface {
 	GetMetadataProvider(ctx context.Context, kind string) (MetadataProvider, error)
 	GetNotificationChannel(ctx context.Context, id string) (GetNotificationChannelRow, error)
 	GetNotificationSubscriptions(ctx context.Context, channelID string) ([]string, error)
+	GetPlaybackWatchID(ctx context.Context, id string) (string, error)
 	GetRequest(ctx context.Context, id string) (Request, error)
 	GetRequestProfile(ctx context.Context, id string) (RequestProfile, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
@@ -110,6 +111,7 @@ type Querier interface {
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	ListSubscribedNotificationChannels(ctx context.Context, arg ListSubscribedNotificationChannelsParams) ([]ListSubscribedNotificationChannelsRow, error)
 	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
+	ListWatchPositions(ctx context.Context, watchID string) ([]WatchPosition, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
 	// PostgreSQL notification row locks. Each lock is followed by a second

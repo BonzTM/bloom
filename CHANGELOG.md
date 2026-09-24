@@ -59,6 +59,18 @@ contracts) gets an entry here.
 
 ### Added
 
+- Stream details on playback watches and bounded position samples, including
+  containers, codecs, bitrate, dimensions, framerate, audio channels,
+  direct-stream flags, and transcode reasons. Mid-play method and stream
+  changes create new samples. Direct-play details follow the selected audio
+  track, and framerates are rounded to hundredths.
+- `GET /api/v1/playback/watches/{id}/positions`, guarded by `stats.read.all`,
+  returns up to 512 position, play-method, and stream samples, retaining
+  transitions ahead of position-only updates.
+- SQLite/PostgreSQL migration `00019_stream_details` adds the queryable stream
+  columns to watches and watch-position samples, plus the transition-retention
+  marker on position samples.
+
 - Account-to-media-user links populated by signed-in invite acceptance, exact
   username matching, or administrator assignment.
 - `GET /api/v1/stats/me` and `GET /api/v1/me/media-users` for accounts with

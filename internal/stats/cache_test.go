@@ -56,6 +56,31 @@ func TestResultCacheKeySeparatesReportSubtypes(t *testing.T) {
 	}
 }
 
+func TestResultCacheClonesWatchStreamDetails(t *testing.T) {
+	t.Parallel()
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	cache := newResultCache(clock, 1, time.Minute)
+	key := cacheKey{kind: "user"}
+	direct := false
+	cache.put(key, core.StatsResult{Watches: []core.PlaybackWatch{{
+		Stream: &core.StreamDetails{
+			VideoCodec: "h264", IsVideoDirect: &direct,
+			TranscodeReasons: []string{"VideoCodecNotSupported"},
+		},
+	}}})
+	first, ok := cache.get(key)
+	if !ok {
+		t.Fatal("cached result missing")
+	}
+	first.Watches[0].Stream.VideoCodec = "changed"
+	first.Watches[0].Stream.TranscodeReasons[0] = "changed"
+	second, _ := cache.get(key)
+	if second.Watches[0].Stream.VideoCodec != "h264" ||
+		second.Watches[0].Stream.TranscodeReasons[0] != "VideoCodecNotSupported" {
+		t.Fatalf("cached stream was aliased: %+v", second.Watches[0].Stream)
+	}
+}
+
 func TestResultCacheKeyIncludesExactWindowBounds(t *testing.T) {
 	t.Parallel()
 	first, err := core.NewStatsWindow(30, "", "UTC", time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))

@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -41,6 +42,7 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID)
 		writePlaybackPositions(t, store, watch, now)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 512)
+		assertPlaybackPositions(t, store, watch.ID)
 		closePlaybackWatch(t, store, watch, now)
 		assertPlaybackReads(t, store, server.ID, watch.ID)
 		if err := writer.DeleteMediaServer(t.Context(), server.ID); err != nil {
@@ -49,6 +51,15 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watches WHERE id = $1", watch.ID, 0)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_segments WHERE watch_id = $1", watch.ID, 0)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 0)
+		if _, err := store.ListWatchPositions(t.Context(), watch.ID); !errors.Is(err, core.ErrNotFound) {
+			t.Fatalf("ListWatchPositions deleted watch = %v, want not found", err)
+		}
+	})
+	t.Run("transitions outlive position-only samples", func(t *testing.T) {
+		testPlaybackTransitionRetention(t, pool, driver)
+	})
+	t.Run("framerate hundredths round trip", func(t *testing.T) {
+		testPlaybackFramerateRoundTrip(t, pool, driver)
 	})
 	t.Run("restart restores large open and exact recent sets", func(t *testing.T) {
 		testLargePlaybackRestart(t, pool, driver)
@@ -62,6 +73,90 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("library backfill keyset reaches later resolvable items", func(t *testing.T) {
 		testPlaybackLibraryBackfillKeyset(t, pool, driver)
 	})
+}
+
+func testPlaybackFramerateRoundTrip(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Framerate")
+	store := newPlaybackTestStore(t, pool, driver)
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 22, 0, 0, 0, time.UTC))
+	want := []float64{20.06, 29.97, 23.98}
+	for index, framerate := range want {
+		watch := playbackStoreWatch(t, server.ID, now.Add(time.Duration(index)*time.Second))
+		watch.MediaUserID = fmt.Sprintf("framerate-user-%d", index)
+		watch.Stream.Framerate = framerate
+		if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+			t.Fatalf("SaveWatches(%v): %v", framerate, err)
+		}
+	}
+	watches, err := store.LoadOpenWatches(t.Context(), server.ID)
+	if err != nil || len(watches) != len(want) {
+		t.Fatalf("LoadOpenWatches = %d, %v", len(watches), err)
+	}
+	got := make(map[float64]bool, len(watches))
+	for _, watch := range watches {
+		got[watch.Stream.Framerate] = true
+	}
+	for _, framerate := range want {
+		if !got[framerate] {
+			t.Errorf("round trip omitted framerate %v: %v", framerate, got)
+		}
+	}
+}
+
+func testPlaybackTransitionRetention(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Transitions")
+	store := newPlaybackTestStore(t, pool, driver)
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 21, 0, 0, 0, time.UTC))
+	watch := playbackStoreWatch(t, server.ID, now)
+	start := playbackPosition(watch.ID, now, watch.LastPosition)
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch, Position: &start}}); err != nil {
+		t.Fatalf("SaveWatches(start): %v", err)
+	}
+	transitionAt := now.Add(time.Second)
+	transition := playbackPosition(watch.ID, transitionAt, watch.LastPosition+time.Second)
+	transition.IsTransition = true
+	watch.LastSeenAt, watch.UpdatedAt = transitionAt, transitionAt
+	watch.LastPosition = transition.Position
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch, Position: &transition}}); err != nil {
+		t.Fatalf("SaveWatches(transition): %v", err)
+	}
+	writeLaterPlaybackPositions(t, store, watch, transitionAt)
+	positions, err := store.ListWatchPositions(t.Context(), watch.ID)
+	if err != nil || len(positions) != core.MaxWatchPositions {
+		t.Fatalf("retained positions = %d, %v", len(positions), err)
+	}
+	found := false
+	for _, position := range positions {
+		if position.ObservedAt.Equal(transitionAt) {
+			found = position.IsTransition
+		}
+	}
+	if !found {
+		t.Fatal("older transition sample was trimmed before position-only samples")
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, core.MaxWatchPositions)
+}
+
+func writeLaterPlaybackPositions(
+	t *testing.T,
+	store core.PlaybackStore,
+	watch core.PlaybackWatch,
+	start time.Time,
+) {
+	t.Helper()
+	mutations := make([]core.PlaybackMutation, 0, core.MaxWatchPositions)
+	for index := 1; index <= core.MaxWatchPositions; index++ {
+		observedAt := start.Add(time.Duration(index) * time.Second)
+		watch.LastSeenAt, watch.UpdatedAt = observedAt, observedAt
+		watch.LastPosition += time.Second
+		position := playbackPosition(watch.ID, observedAt, watch.LastPosition)
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch, Position: &position})
+	}
+	if err := store.SaveWatches(t.Context(), mutations); err != nil {
+		t.Fatalf("SaveWatches(later positions): %v", err)
+	}
 }
 
 type keysetResolverSource struct {
@@ -453,7 +548,8 @@ func playbackStoreWatch(t *testing.T, serverID string, now time.Time) core.Playb
 		DeviceID: "device-1", DeviceName: "Living Room", Client: "Jellyfin Web",
 		ServerSessionID: "session-1", ItemID: "item-1", ItemName: "Pilot",
 		ItemType: "Episode", SeriesName: "Series", PlayMethod: core.PlayMethodDirectPlay,
-		State: core.WatchPlaying, StartedAt: now, LastSeenAt: now,
+		Stream: playbackStoreStream(),
+		State:  core.WatchPlaying, StartedAt: now, LastSeenAt: now,
 		LastPosition: time.Minute, Source: core.WatchSourcePoll, CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -470,7 +566,8 @@ func assertPlaybackRestart(
 	if err != nil || len(watches) != 1 || watches[0].ID != watchID {
 		t.Fatalf("LoadOpenWatches after restart = %+v, %v", watches, err)
 	}
-	if watches[0].MediaServerName == "" || watches[0].LastPosition != time.Minute {
+	if watches[0].MediaServerName == "" || watches[0].LastPosition != time.Minute ||
+		watches[0].Stream == nil || watches[0].Stream.VideoCodec != "h264" {
 		t.Fatalf("restored watch = %+v", watches[0])
 	}
 }
@@ -537,7 +634,30 @@ func assertPlaybackReads(t *testing.T, store core.PlaybackStore, serverID, watch
 func playbackPosition(watchID string, observedAt time.Time, position time.Duration) core.PlaybackPosition {
 	return core.PlaybackPosition{
 		WatchID: watchID, ObservedAt: observedAt, Position: position,
-		PlayMethod: core.PlayMethodDirectPlay, Source: core.WatchSourceWebhook,
+		PlayMethod: core.PlayMethodDirectPlay, Stream: playbackStoreStream(), Source: core.WatchSourceWebhook,
+	}
+}
+
+func playbackStoreStream() *core.StreamDetails {
+	videoDirect, audioDirect := false, true
+	return &core.StreamDetails{
+		Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Bitrate: 8_000_000,
+		Width: 1920, Height: 1080, Framerate: 23.98, AudioChannels: 6,
+		IsVideoDirect: &videoDirect, IsAudioDirect: &audioDirect,
+		TranscodeReasons: []string{"VideoCodecNotSupported", "FutureReason"},
+	}
+}
+
+func assertPlaybackPositions(t *testing.T, store core.PlaybackStore, watchID string) {
+	t.Helper()
+	positions, err := store.ListWatchPositions(t.Context(), watchID)
+	if err != nil || len(positions) != core.MaxWatchPositions {
+		t.Fatalf("ListWatchPositions = %d, %v", len(positions), err)
+	}
+	first, last := positions[0], positions[len(positions)-1]
+	if !first.ObservedAt.After(last.ObservedAt) || first.Stream == nil ||
+		first.Stream.Framerate != 23.98 || len(first.Stream.TranscodeReasons) != 2 {
+		t.Fatalf("positions = first %+v, last %+v", first, last)
 	}
 }
 

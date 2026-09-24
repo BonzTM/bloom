@@ -26,6 +26,7 @@ import (
 const (
 	maxResponseBytes            = 1 << 20
 	maxUsers                    = 10000
+	maxSessionMediaStreams      = 256
 	defaultTimeout              = 10 * time.Second
 	sessionsActiveWithinSeconds = 60
 )
@@ -454,6 +455,10 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 	if err != nil {
 		return core.PlaybackSession{}, err
 	}
+	stream, err := mapStreamDetails(value)
+	if err != nil {
+		return core.PlaybackSession{}, err
+	}
 	return core.PlaybackSession{
 		ServerSessionID: stringValue(value.Id), MediaUserID: value.UserId.String(),
 		Username: stringValue(value.UserName), DeviceID: *value.DeviceId,
@@ -462,8 +467,163 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 		SeriesName: stringValue(item.SeriesName), SeasonNumber: cloneInt32(item.ParentIndexNumber),
 		EpisodeNumber: cloneInt32(item.IndexNumber), Position: position,
 		Paused: boolValue(value.PlayState.IsPaused), PlayMethod: mapPlayMethod(value.PlayState.PlayMethod),
+		Stream:         stream,
 		LastActivityAt: core.NormalizeTime(*value.LastActivityDate),
 	}, nil
+}
+
+func mapStreamDetails(value jellyfinapi.SessionInfoDto) (*core.StreamDetails, error) {
+	if value.TranscodingInfo != nil {
+		return mapTranscodingDetails(*value.TranscodingInfo)
+	}
+	stream, err := mapDirectStreamDetails(value.NowPlayingItem, value.PlayState)
+	if err != nil {
+		return nil, err
+	}
+	if !stream.Valid() {
+		return nil, errors.New("session direct stream details are out of range")
+	}
+	if streamDetailsEmpty(stream) {
+		return nil, nil
+	}
+	return &stream, nil
+}
+
+func streamDetailsEmpty(stream core.StreamDetails) bool {
+	return stream.Container == "" && stream.VideoCodec == "" && stream.AudioCodec == "" &&
+		stream.Bitrate == 0 && stream.Width == 0 && stream.Height == 0 && stream.Framerate == 0 &&
+		stream.AudioChannels == 0 && stream.IsVideoDirect == nil && stream.IsAudioDirect == nil &&
+		len(stream.TranscodeReasons) == 0
+}
+
+func mapTranscodingDetails(info jellyfinapi.TranscodingInfo) (*core.StreamDetails, error) {
+	reasons, err := transcodeReasons(info.TranscodeReasons)
+	if err != nil {
+		return nil, err
+	}
+	stream := &core.StreamDetails{
+		Container: stringValue(info.Container), VideoCodec: stringValue(info.VideoCodec),
+		AudioCodec: stringValue(info.AudioCodec), Bitrate: int64Value(info.Bitrate),
+		Width: int32Value(info.Width), Height: int32Value(info.Height),
+		Framerate: roundedFramerate(info.Framerate), AudioChannels: int32Value(info.AudioChannels),
+		IsVideoDirect: cloneBool(info.IsVideoDirect), IsAudioDirect: cloneBool(info.IsAudioDirect),
+		TranscodeReasons: reasons,
+	}
+	if !stream.Valid() {
+		return nil, errors.New("session transcoding details are out of range")
+	}
+	return stream, nil
+}
+
+func mapDirectStreamDetails(
+	item *jellyfinapi.BaseItemDto,
+	playState *jellyfinapi.PlayerStateInfo,
+) (core.StreamDetails, error) {
+	if item == nil {
+		return core.StreamDetails{}, nil
+	}
+	stream := core.StreamDetails{Container: stringValue(item.Container)}
+	if item.MediaStreams == nil {
+		return stream, nil
+	}
+	if len(*item.MediaStreams) > maxSessionMediaStreams {
+		return core.StreamDetails{}, errors.New("session media stream count exceeds limit")
+	}
+	var audioIndex *int32
+	if playState != nil {
+		audioIndex = playState.AudioStreamIndex
+	}
+	video, audio := selectDirectStreams(*item.MediaStreams, audioIndex)
+	if video != nil {
+		stream.VideoCodec = stringValue(video.Codec)
+		stream.Bitrate = int64Value(video.BitRate)
+		stream.Width = int32Value(video.Width)
+		stream.Height = int32Value(video.Height)
+		stream.Framerate = roundedFramerate(directVideoFramerate(video))
+	}
+	if audio != nil {
+		stream.AudioCodec = stringValue(audio.Codec)
+		stream.AudioChannels = int32Value(audio.Channels)
+		if video == nil {
+			stream.Bitrate = int64Value(audio.BitRate)
+		}
+	}
+	return stream, nil
+}
+
+func selectDirectStreams(
+	streams []jellyfinapi.MediaStream,
+	audioIndex *int32,
+) (*jellyfinapi.MediaStream, *jellyfinapi.MediaStream) {
+	var video, selectedAudio, defaultAudio *jellyfinapi.MediaStream
+	for index := range streams {
+		media := &streams[index]
+		if media.Type == nil {
+			continue
+		}
+		switch *media.Type {
+		case jellyfinapi.MediaStreamTypeVideo:
+			if video == nil {
+				video = media
+			}
+		case jellyfinapi.MediaStreamTypeAudio:
+			if defaultAudio == nil && boolValue(media.IsDefault) {
+				defaultAudio = media
+			}
+			if selectedAudio == nil && audioIndex != nil && media.Index != nil && *media.Index == *audioIndex {
+				selectedAudio = media
+			}
+		case jellyfinapi.MediaStreamTypeData, jellyfinapi.MediaStreamTypeEmbeddedImage,
+			jellyfinapi.MediaStreamTypeLyric, jellyfinapi.MediaStreamTypeSubtitle:
+			continue
+		default:
+			continue
+		}
+	}
+	if selectedAudio == nil {
+		selectedAudio = defaultAudio
+	}
+	return video, selectedAudio
+}
+
+func directVideoFramerate(stream *jellyfinapi.MediaStream) *float32 {
+	if stream.ReferenceFrameRate != nil {
+		return stream.ReferenceFrameRate
+	}
+	if stream.AverageFrameRate != nil {
+		return stream.AverageFrameRate
+	}
+	return stream.RealFrameRate
+}
+
+func int32Value(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func int64Value(value *int32) int64 { return int64(int32Value(value)) }
+
+func roundedFramerate(value *float32) float64 {
+	if value == nil {
+		return 0
+	}
+	return math.Round(float64(*value)*100) / 100
+}
+
+func transcodeReasons(values *[]jellyfinapi.TranscodeReason) ([]string, error) {
+	if values == nil {
+		return nil, nil
+	}
+	if len(*values) > core.MaxStreamTranscodeReasons {
+		return nil, errors.New("session transcode reason count exceeds limit")
+	}
+	reasons := make([]string, 0, len(*values))
+	for _, value := range *values {
+		reasons = append(reasons, string(value))
+	}
+	return reasons, nil
 }
 
 func positionFromTicks(ticks *int64) (time.Duration, error) {
@@ -502,6 +662,14 @@ func stringValue(value *string) string {
 func boolValue(value *bool) bool { return value != nil && *value }
 
 func cloneInt32(value *int32) *int32 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneBool(value *bool) *bool {
 	if value == nil {
 		return nil
 	}

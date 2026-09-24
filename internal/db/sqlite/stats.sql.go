@@ -638,7 +638,7 @@ func (q *Queries) StatsTotals(ctx context.Context, arg StatsTotalsParams) (Stats
 }
 
 const statsUserRecentWatches = `-- name: StatsUserRecentWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at >= ?1
@@ -660,33 +660,44 @@ type StatsUserRecentWatchesParams struct {
 }
 
 type StatsUserRecentWatchesRow struct {
-	ID              string
-	MediaServerID   string
-	MediaUserID     string
-	Username        string
-	DeviceID        string
-	DeviceName      string
-	Client          string
-	ServerSessionID string
-	ItemID          string
-	ItemName        string
-	ItemType        string
-	SeriesName      string
-	SeasonNumber    sql.NullInt64
-	EpisodeNumber   sql.NullInt64
-	PlayMethod      string
-	State           string
-	StartedAt       string
-	LastSeenAt      string
-	EndedAt         sql.NullString
-	ActiveSeconds   int64
-	LastPositionMs  int64
-	Source          string
-	CreatedAt       string
-	UpdatedAt       string
-	LibraryID       string
-	LibraryName     string
-	MediaServerName string
+	ID                        string
+	MediaServerID             string
+	MediaUserID               string
+	Username                  string
+	DeviceID                  string
+	DeviceName                string
+	Client                    string
+	ServerSessionID           string
+	ItemID                    string
+	ItemName                  string
+	ItemType                  string
+	SeriesName                string
+	SeasonNumber              sql.NullInt64
+	EpisodeNumber             sql.NullInt64
+	PlayMethod                string
+	State                     string
+	StartedAt                 string
+	LastSeenAt                string
+	EndedAt                   sql.NullString
+	ActiveSeconds             int64
+	LastPositionMs            int64
+	Source                    string
+	CreatedAt                 string
+	UpdatedAt                 string
+	LibraryID                 string
+	LibraryName               string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt64
+	StreamHeight              sql.NullInt64
+	StreamFramerateHundredths sql.NullInt64
+	StreamAudioChannels       sql.NullInt64
+	StreamIsVideoDirect       sql.NullInt64
+	StreamIsAudioDirect       sql.NullInt64
+	StreamTranscodeReasons    sql.NullString
+	MediaServerName           string
 }
 
 func (q *Queries) StatsUserRecentWatches(ctx context.Context, arg StatsUserRecentWatchesParams) ([]StatsUserRecentWatchesRow, error) {
@@ -731,6 +742,17 @@ func (q *Queries) StatsUserRecentWatches(ctx context.Context, arg StatsUserRecen
 			&i.UpdatedAt,
 			&i.LibraryID,
 			&i.LibraryName,
+			&i.StreamContainer,
+			&i.StreamVideoCodec,
+			&i.StreamAudioCodec,
+			&i.StreamBitrate,
+			&i.StreamWidth,
+			&i.StreamHeight,
+			&i.StreamFramerateHundredths,
+			&i.StreamAudioChannels,
+			&i.StreamIsVideoDirect,
+			&i.StreamIsAudioDirect,
+			&i.StreamTranscodeReasons,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err

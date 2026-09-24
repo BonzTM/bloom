@@ -102,6 +102,58 @@ func TestPlaybackTrackerKeepsOpeningSourceAcrossMixedObservations(t *testing.T) 
 		resume.Position.Source != core.WatchSourcePoll {
 		t.Fatalf("row sources = start %+v, pause %+v, resume %+v", start, pause, resume)
 	}
+	if start.Position.IsTransition || !pause.Position.IsTransition || !resume.Position.IsTransition {
+		t.Fatalf("transition markers = start %t, pause %t, resume %t",
+			start.Position.IsTransition, pause.Position.IsTransition, resume.Position.IsTransition)
+	}
+}
+
+func TestPlaybackTrackerSamplesStreamChangesWithoutDuplicateUnchangedSamples(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	tracker, err := core.NewPlaybackTracker(playbackServerID, core.PlaybackTrackerConfig{
+		MissedPolls: 3, ResumeWindow: 5 * time.Minute,
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPlaybackTracker: %v", err)
+	}
+	ids := &idSequence{}
+	session := playbackSession()
+	session.Stream = testDirectStreamDetails()
+	started := onlyMutation(t, observe(t, tracker, ids, now, session))
+	if started.Position == nil || started.Position.Stream == nil {
+		t.Fatalf("start sample = %+v", started.Position)
+	}
+	unchanged := onlyMutation(t, observe(t, tracker, ids, now.Add(time.Second), session))
+	if unchanged.Position != nil {
+		t.Fatalf("unchanged sample = %+v, want nil", unchanged.Position)
+	}
+	session.PlayMethod = core.PlayMethodTranscode
+	session.Stream = testTranscodeStreamDetails("h264")
+	transcoded := onlyMutation(t, observe(t, tracker, ids, now.Add(2*time.Second), session))
+	if transcoded.Position == nil || transcoded.Position.PlayMethod != core.PlayMethodTranscode ||
+		transcoded.Position.Stream.VideoCodec != "h264" || !transcoded.Position.IsTransition {
+		t.Fatalf("transcode sample = %+v", transcoded.Position)
+	}
+	session.Stream = testTranscodeStreamDetails("hevc")
+	codecChanged := onlyMutation(t, observe(t, tracker, ids, now.Add(3*time.Second), session))
+	if codecChanged.Position == nil || codecChanged.Position.Stream.VideoCodec != "hevc" ||
+		!codecChanged.Position.IsTransition {
+		t.Fatalf("codec-change sample = %+v", codecChanged.Position)
+	}
+}
+
+func testDirectStreamDetails() *core.StreamDetails {
+	return &core.StreamDetails{Container: "mkv", VideoCodec: "hevc", AudioCodec: "aac"}
+}
+
+func testTranscodeStreamDetails(codec string) *core.StreamDetails {
+	videoDirect, audioDirect := false, true
+	return &core.StreamDetails{
+		Container: "ts", VideoCodec: codec, AudioCodec: "aac", Bitrate: 8_000_000,
+		Width: 1920, Height: 1080, Framerate: 23.98, AudioChannels: 6,
+		IsVideoDirect: &videoDirect, IsAudioDirect: &audioDirect,
+		TranscodeReasons: []string{"VideoCodecNotSupported"},
+	}
 }
 
 func testPlaybackLifecycle(t *testing.T, tracker *core.PlaybackTracker, ids *idSequence, now time.Time) {

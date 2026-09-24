@@ -38,7 +38,11 @@ func (s *postgresPlaybackStore) LoadOpenWatches(
 	}
 	watches := make([]core.PlaybackWatch, 0, len(rows))
 	for _, row := range rows {
-		watches = append(watches, postgresOpenWatch(row))
+		watch, mapErr := postgresOpenWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map open playback watch", mapErr)
+		}
+		watches = append(watches, watch)
 	}
 	return watches, nil
 }
@@ -103,7 +107,11 @@ func savePostgresMutation(
 	queries *postgres.Queries,
 	mutation core.PlaybackMutation,
 ) error {
-	if err := queries.UpsertPlaybackWatch(ctx, postgresWatchParams(mutation.Watch)); err != nil {
+	params, err := postgresWatchParams(mutation.Watch)
+	if err != nil {
+		return playbackStoreError("encode playback watch", err)
+	}
+	if err := queries.UpsertPlaybackWatch(ctx, params); err != nil {
 		return playbackStoreError("upsert playback watch", err)
 	}
 	if mutation.SegmentEnd != nil {
@@ -134,10 +142,22 @@ func savePostgresPosition(
 	if position == nil {
 		return nil
 	}
+	stream, err := encodeStreamDetails(position.Stream)
+	if err != nil {
+		return playbackStoreError("encode playback position", err)
+	}
 	params := postgres.UpsertWatchPositionParams{
 		WatchID: position.WatchID, ObservedAt: core.NormalizeTime(position.ObservedAt),
 		PositionMs: durationMilliseconds(position.Position), Paused: position.Paused,
 		PlayMethod: string(position.PlayMethod), Source: string(position.Source),
+		StreamContainer: stream.container, StreamVideoCodec: stream.videoCodec,
+		StreamAudioCodec: stream.audioCodec, StreamBitrate: stream.bitrate,
+		StreamWidth: postgresNullInt32(stream.width), StreamHeight: postgresNullInt32(stream.height),
+		StreamFramerateHundredths: postgresNullInt32(stream.framerate),
+		StreamAudioChannels:       postgresNullInt32(stream.audioChannels),
+		StreamIsVideoDirect:       stream.videoDirect, StreamIsAudioDirect: stream.audioDirect,
+		StreamTranscodeReasons: stream.reasons,
+		IsTransition:           position.IsTransition,
 	}
 	if err := queries.UpsertWatchPosition(ctx, params); err != nil {
 		return playbackStoreError("upsert playback position", err)
@@ -146,6 +166,32 @@ func savePostgresPosition(
 		return playbackStoreError("trim playback positions", err)
 	}
 	return nil
+}
+
+func (s *postgresPlaybackStore) ListWatchPositions(
+	ctx context.Context, watchID string,
+) ([]core.PlaybackPosition, error) {
+	if !core.ValidID(watchID) {
+		return nil, fmt.Errorf("list watch positions: %w", core.ErrInvalidArgument)
+	}
+	if _, err := s.q.GetPlaybackWatchID(ctx, watchID); errors.Is(err, sql.ErrNoRows) {
+		return nil, core.ErrNotFound
+	} else if err != nil {
+		return nil, playbackStoreError("find playback watch", err)
+	}
+	rows, err := s.q.ListWatchPositions(ctx, watchID)
+	if err != nil {
+		return nil, playbackStoreError("list watch positions", err)
+	}
+	positions := make([]core.PlaybackPosition, 0, len(rows))
+	for _, row := range rows {
+		position, mapErr := postgresPosition(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map watch position", mapErr)
+		}
+		positions = append(positions, position)
+	}
+	return positions, nil
 }
 
 func (s *postgresPlaybackStore) ListWatches(
@@ -182,7 +228,11 @@ func (s *postgresPlaybackStore) listRecent(
 	}
 	watches := make([]core.PlaybackWatch, 0, len(rows))
 	for _, row := range rows {
-		watches = append(watches, postgresRecentServerWatch(row))
+		watch, mapErr := postgresRecentServerWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map recent playback watch", mapErr)
+		}
+		watches = append(watches, watch)
 	}
 	return watches, nil
 }
@@ -201,7 +251,11 @@ func (s *postgresPlaybackStore) listNow(
 	}
 	watches := make([]core.PlaybackWatch, 0, len(rows))
 	for _, row := range rows {
-		watches = append(watches, postgresNowWatch(row))
+		watch, mapErr := postgresNowWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map now playing", mapErr)
+		}
+		watches = append(watches, watch)
 	}
 	return watches, nil
 }
@@ -220,7 +274,11 @@ func (s *postgresPlaybackStore) listHistory(
 	}
 	watches := make([]core.PlaybackWatch, 0, len(rows))
 	for _, row := range rows {
-		watches = append(watches, postgresHistoryWatch(row))
+		watch, mapErr := postgresHistoryWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map playback history", mapErr)
+		}
+		watches = append(watches, watch)
 	}
 	return watches, nil
 }
@@ -241,7 +299,11 @@ func (s *postgresPlaybackStore) findRecent(
 	if err != nil {
 		return nil, playbackStoreError("find recent playback watch", err)
 	}
-	return []core.PlaybackWatch{postgresRecentWatch(row)}, nil
+	watch, err := postgresRecentWatch(row)
+	if err != nil {
+		return nil, playbackStoreError("map recent playback watch", err)
+	}
+	return []core.PlaybackWatch{watch}, nil
 }
 
 func postgresPlaybackCursor(query core.PlaybackQuery) (time.Time, string) {
@@ -251,7 +313,11 @@ func postgresPlaybackCursor(query core.PlaybackQuery) (time.Time, string) {
 	return core.NormalizeTime(query.BeforeStartedAt), query.BeforeID
 }
 
-func postgresWatchParams(w core.PlaybackWatch) postgres.UpsertPlaybackWatchParams {
+func postgresWatchParams(w core.PlaybackWatch) (postgres.UpsertPlaybackWatchParams, error) {
+	stream, err := encodeStreamDetails(w.Stream)
+	if err != nil {
+		return postgres.UpsertPlaybackWatchParams{}, err
+	}
 	return postgres.UpsertPlaybackWatchParams{
 		ID: w.ID, MediaServerID: w.MediaServerID, MediaUserID: w.MediaUserID,
 		Username: w.Username, DeviceID: w.DeviceID, DeviceName: w.DeviceName, Client: w.Client,
@@ -260,11 +326,18 @@ func postgresWatchParams(w core.PlaybackWatch) postgres.UpsertPlaybackWatchParam
 		LibraryID: w.LibraryID, LibraryName: w.LibraryName,
 		SeasonNumber: nullableInt32(w.SeasonNumber), EpisodeNumber: nullableInt32(w.EpisodeNumber),
 		PlayMethod: string(w.PlayMethod), State: string(w.State),
-		StartedAt: core.NormalizeTime(w.StartedAt), LastSeenAt: core.NormalizeTime(w.LastSeenAt),
+		StreamContainer: stream.container, StreamVideoCodec: stream.videoCodec,
+		StreamAudioCodec: stream.audioCodec, StreamBitrate: stream.bitrate,
+		StreamWidth: postgresNullInt32(stream.width), StreamHeight: postgresNullInt32(stream.height),
+		StreamFramerateHundredths: postgresNullInt32(stream.framerate),
+		StreamAudioChannels:       postgresNullInt32(stream.audioChannels),
+		StreamIsVideoDirect:       stream.videoDirect, StreamIsAudioDirect: stream.audioDirect,
+		StreamTranscodeReasons: stream.reasons,
+		StartedAt:              core.NormalizeTime(w.StartedAt), LastSeenAt: core.NormalizeTime(w.LastSeenAt),
 		EndedAt: nullableTime(w.EndedAt), ActiveSeconds: durationSeconds(w.ActiveTime),
 		LastPositionMs: durationMilliseconds(w.LastPosition), Source: string(w.Source),
 		CreatedAt: core.NormalizeTime(w.CreatedAt), UpdatedAt: core.NormalizeTime(w.UpdatedAt),
-	}
+	}, nil
 }
 
 func postgresStoredWatch(
@@ -277,7 +350,12 @@ func postgresStoredWatch(
 	activeSeconds, positionMS int64,
 	source string,
 	created, updated time.Time,
-) core.PlaybackWatch {
+	stream storedStreamDetails,
+) (core.PlaybackWatch, error) {
+	details, err := stream.domain()
+	if err != nil {
+		return core.PlaybackWatch{}, err
+	}
 	return storedPlaybackWatch{
 		id: id, mediaServerID: serverID, mediaServerName: serverName, mediaUserID: userID,
 		username: username, deviceID: deviceID, deviceName: deviceName, client: client,
@@ -285,13 +363,14 @@ func postgresStoredWatch(
 		seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
 		seasonNumber: int32FromNull(season), episodeNumber: int32FromNull(episode),
 		playMethod: core.PlayMethod(method), state: core.WatchState(state),
+		stream:    details,
 		startedAt: core.NormalizeTime(started), lastSeenAt: core.NormalizeTime(lastSeen),
 		endedAt: timeFromNull(ended), activeSeconds: activeSeconds, lastPositionMS: positionMS,
 		source: core.WatchSource(source), createdAt: core.NormalizeTime(created), updatedAt: core.NormalizeTime(updated),
-	}.domain()
+	}.domain(), nil
 }
 
-func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) core.PlaybackWatch {
+func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) (core.PlaybackWatch, error) {
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
@@ -299,10 +378,13 @@ func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) core.PlaybackWat
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
-func postgresNowWatch(row postgres.ListNowPlayingRow) core.PlaybackWatch {
+func postgresNowWatch(row postgres.ListNowPlayingRow) (core.PlaybackWatch, error) {
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
@@ -310,10 +392,13 @@ func postgresNowWatch(row postgres.ListNowPlayingRow) core.PlaybackWatch {
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
-func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) core.PlaybackWatch {
+func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) (core.PlaybackWatch, error) {
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
@@ -321,10 +406,13 @@ func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) core.PlaybackWatc
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
-func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) core.PlaybackWatch {
+func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) (core.PlaybackWatch, error) {
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
@@ -332,10 +420,13 @@ func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) core.PlaybackW
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
-func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) core.PlaybackWatch {
+func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) (core.PlaybackWatch, error) {
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
@@ -343,5 +434,51 @@ func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) core.P
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
+}
+
+func postgresStream(
+	container, videoCodec, audioCodec sql.NullString,
+	bitrate sql.NullInt64,
+	width, height, framerate, channels sql.NullInt32,
+	videoDirect, audioDirect sql.NullBool,
+	reasons sql.NullString,
+) storedStreamDetails {
+	return storedStreamDetails{
+		container: container, videoCodec: videoCodec, audioCodec: audioCodec, bitrate: bitrate,
+		width: int64FromNullInt32(width), height: int64FromNullInt32(height),
+		framerate: int64FromNullInt32(framerate), audioChannels: int64FromNullInt32(channels),
+		videoDirect: videoDirect, audioDirect: audioDirect, reasons: reasons,
+	}
+}
+
+func postgresPosition(row postgres.WatchPosition) (core.PlaybackPosition, error) {
+	stream, err := postgresStream(
+		row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec, row.StreamBitrate,
+		row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths, row.StreamAudioChannels,
+		row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons,
+	).domain()
+	if err != nil {
+		return core.PlaybackPosition{}, err
+	}
+	return core.PlaybackPosition{
+		WatchID: row.WatchID, ObservedAt: core.NormalizeTime(row.ObservedAt),
+		Position: time.Duration(row.PositionMs) * time.Millisecond, Paused: row.Paused,
+		PlayMethod: core.PlayMethod(row.PlayMethod), Stream: stream, Source: core.WatchSource(row.Source),
+		IsTransition: row.IsTransition,
+	}, nil
+}
+
+func postgresNullInt32(value sql.NullInt64) sql.NullInt32 {
+	return sql.NullInt32{
+		Int32: int32(value.Int64), //nolint:gosec // Encoded core stream values already passed bounded validation.
+		Valid: value.Valid,
+	}
+}
+
+func int64FromNullInt32(value sql.NullInt32) sql.NullInt64 {
+	return sql.NullInt64{Int64: int64(value.Int32), Valid: value.Valid}
 }

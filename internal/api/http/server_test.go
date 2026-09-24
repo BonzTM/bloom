@@ -269,6 +269,7 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, sessions: true, authRequired: true, optionalAccount: true},
 		{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/playback/watches/{id}/positions", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/overview", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/daily", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/patterns", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},

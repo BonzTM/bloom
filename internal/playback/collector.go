@@ -133,7 +133,7 @@ func (c *Collector) runPollLoop(ctx context.Context) error {
 	}
 	failures := 0
 	for {
-		_, err := c.runOnce(ctx)
+		err := c.runOnce(ctx)
 		if ctx.Err() != nil &&
 			(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 			return nil
@@ -158,11 +158,11 @@ func (c *Collector) runPollLoop(ctx context.Context) error {
 	}
 }
 
-func (c *Collector) runOnce(ctx context.Context) (string, error) {
+func (c *Collector) runOnce(ctx context.Context) error {
 	started := c.deps.Clock.Now()
 	if err := c.initialize(ctx); err != nil {
 		c.observePoll("failure", started)
-		return "store_failure", err
+		return err
 	}
 	return c.poll(ctx)
 }
@@ -202,27 +202,27 @@ func (c *Collector) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (c *Collector) poll(ctx context.Context) (string, error) {
+func (c *Collector) poll(ctx context.Context) error {
 	started := c.deps.Clock.Now()
 	sessions, err := c.deps.Source.ListSessions(ctx)
 	if err != nil {
 		c.observePoll("failure", started)
-		return "source_failure", fmt.Errorf("list playback sessions: %w", err)
+		return fmt.Errorf("list playback sessions: %w", err)
 	}
 	now := core.NormalizeTime(c.deps.Clock.Now())
 	if restoreErr := c.restoreRecent(ctx, now, sessions); restoreErr != nil {
 		c.observePoll("failure", started)
-		return "store_failure", restoreErr
+		return restoreErr
 	}
 	mutations, err := c.tracker.Observe(now, core.WatchSourcePoll, sessions, c.deps.NewID)
 	if err != nil {
 		c.observePoll("failure", started)
-		return "store_failure", fmt.Errorf("apply playback sessions: %w", err)
+		return fmt.Errorf("apply playback sessions: %w", err)
 	}
 	if err := c.saveMutations(ctx, mutations); err != nil {
 		c.tracker = nil
 		c.observePoll("failure", started)
-		return "store_failure", err
+		return err
 	}
 	c.observePoll("success", started)
 	c.observeOpen()
@@ -230,7 +230,7 @@ func (c *Collector) poll(ctx context.Context) (string, error) {
 		c.resolution.enqueueForeground(mutations)
 		c.resolution.requestBackfill()
 	}
-	return "success", nil
+	return nil
 }
 
 func (c *Collector) restoreRecent(

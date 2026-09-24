@@ -35,6 +35,7 @@ const (
 	providersSchema         = "#/components/schemas/AuthProvidersResponse"
 	playbackNowSchema       = "#/components/schemas/PlaybackNowResponse"
 	playbackHistorySchema   = "#/components/schemas/PlaybackHistoryResponse"
+	playbackPositionsSchema = "#/components/schemas/PlaybackPositionsResponse"
 	statsOverviewSchema     = "#/components/schemas/StatsOverviewResponse"
 	statsDailySchema        = "#/components/schemas/StatsDailyResponse"
 	statsPatternsSchema     = "#/components/schemas/StatsPatternsResponse"
@@ -504,7 +505,7 @@ func assertResponseSchema(
 	case currentSchema, permissionsSchema, rolesSchema, errorSchema,
 		createMediaServerSchema, mediaServersSchema, mediaServerSchema,
 		probeMediaServerSchema, librariesSchema, providersSchema,
-		playbackNowSchema, playbackHistorySchema, statsOverviewSchema,
+		playbackNowSchema, playbackHistorySchema, playbackPositionsSchema, statsOverviewSchema,
 		statsDailySchema, statsPatternsSchema, statsTitlesSchema,
 		statsUsersSchema, statsLibrariesSchema, statsUserSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
