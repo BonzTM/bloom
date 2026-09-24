@@ -46,6 +46,12 @@ import {
   requestQuotaInputSchema,
   type RequestQuota,
 } from "../features/roles/api/quota-schemas.js";
+import {
+  channelRequestSchema,
+  type ChannelRequest,
+  type Delivery,
+  type NotificationChannel,
+} from "../features/notifications/api/notification-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -198,6 +204,7 @@ export const errorCodeSchema = z.enum([
   "download_manager_failure",
   "download_manager_not_found",
   "download_manager_in_use",
+  "notification_channel_failure",
 ]);
 
 export type ErrorCode = z.output<typeof errorCodeSchema>;
@@ -2020,7 +2027,320 @@ const statsHandlers = [
   ),
 ];
 
+// ---- notification channels. The hostname below exercises a failed probe
+// or test send; deliveries belong to a channel and are newest first.
+export const UNREACHABLE_CHANNEL_HOST = "unreachable.example";
+export const CHANNEL_WEBHOOK_ID = "9a1b2c3d-0000-4000-8000-000000000001";
+export const CHANNEL_DISCORD_ID = "9a1b2c3d-0000-4000-8000-000000000002";
+const MAX_CHANNEL_CURSOR_LENGTH = 256;
+
+const blankCredentials = {
+  url_set: false,
+  shared_secret_set: false,
+  password_set: false,
+} as const;
+
+export const mockNotificationChannels: readonly NotificationChannel[] = [
+  {
+    id: CHANNEL_DISCORD_ID,
+    kind: "discord",
+    name: "chat-ops",
+    enabled: true,
+    subscriptions: ["approved", "available"],
+    subject_template: "",
+    body_template: "",
+    allow_insecure: false,
+    allow_private: false,
+    credentials: { ...blankCredentials, url_set: true },
+    consecutive_failures: 4,
+    created_at: "2026-09-20T10:00:00Z",
+    updated_at: "2026-09-23T10:00:00Z",
+  },
+  {
+    id: CHANNEL_WEBHOOK_ID,
+    kind: "webhook",
+    name: "ops-hooks",
+    enabled: true,
+    subscriptions: ["created", "approved", "declined", "available", "failed"],
+    subject_template: "",
+    body_template: "{{.Title}} is {{.Status}}",
+    allow_insecure: false,
+    allow_private: true,
+    credentials: {
+      ...blankCredentials,
+      url_set: true,
+      shared_secret_set: true,
+    },
+    consecutive_failures: 0,
+    created_at: "2026-09-20T10:00:00Z",
+    updated_at: "2026-09-20T10:00:00Z",
+  },
+];
+
+export const mockDeliveries: readonly Delivery[] = [
+  {
+    id: "9a1b2c3d-0000-4000-8000-0000000000a1",
+    event_type: "available",
+    request_id: "6c5f0f8a-0000-4000-8000-000000000001",
+    status: "sent",
+    attempts: 1,
+    last_error: "",
+    next_attempt_at: "2026-09-23T09:00:00Z",
+    sent_at: "2026-09-23T09:00:02Z",
+    created_at: "2026-09-23T09:00:00Z",
+    updated_at: "2026-09-23T09:00:02Z",
+  },
+  {
+    id: "9a1b2c3d-0000-4000-8000-0000000000a2",
+    event_type: "approved",
+    request_id: "6c5f0f8a-0000-4000-8000-000000000002",
+    status: "failed",
+    attempts: 8,
+    last_error: "destination answered 500",
+    next_attempt_at: "2026-09-22T09:00:00Z",
+    created_at: "2026-09-22T08:00:00Z",
+    updated_at: "2026-09-22T09:00:00Z",
+  },
+];
+
+let notificationChannels: NotificationChannel[] = [...mockNotificationChannels];
+let deliveries: Readonly<Record<string, readonly Delivery[]>> = {
+  [CHANNEL_WEBHOOK_ID]: mockDeliveries,
+};
+let registeredChannels = 0;
+
+export function resetMockNotifications(): void {
+  notificationChannels = [...mockNotificationChannels];
+  deliveries = { [CHANNEL_WEBHOOK_ID]: mockDeliveries };
+  registeredChannels = 0;
+}
+
+const channelsQuerySchema = pageQuerySchema(MAX_CHANNEL_CURSOR_LENGTH);
+
+function channelDestinationHost(input: ChannelRequest): string | undefined {
+  const url = input.webhook?.url ?? input.discord?.webhook_url;
+  if (url !== undefined) {
+    return new URL(url).hostname;
+  }
+  return input.email?.smtp_host;
+}
+
+function channelTransportMismatch(input: ChannelRequest): boolean {
+  const part = input.webhook ?? input.discord;
+  const url = input.webhook?.url ?? input.discord?.webhook_url;
+  if (part === undefined || url === undefined) {
+    return false;
+  }
+  return url.startsWith("http://") && !part.allow_insecure;
+}
+
+function channelFromInput(
+  input: ChannelRequest,
+  existing: NotificationChannel | undefined,
+  id: string,
+): NotificationChannel {
+  const kept =
+    existing?.kind === input.kind ? existing.credentials : blankCredentials;
+  const email = input.email;
+  return {
+    id,
+    kind: input.kind,
+    name: input.name,
+    enabled: input.enabled,
+    subscriptions: input.subscriptions,
+    subject_template: input.subject_template,
+    body_template: input.body_template,
+    allow_insecure:
+      input.webhook?.allow_insecure ?? input.discord?.allow_insecure ?? false,
+    allow_private:
+      input.webhook?.allow_private ??
+      input.discord?.allow_private ??
+      email?.allow_private ??
+      false,
+    ...(email === undefined
+      ? {}
+      : {
+          smtp_host: email.smtp_host,
+          smtp_port: email.smtp_port,
+          tls_mode: email.tls_mode,
+          auth_mode: email.auth_mode,
+          username: email.username,
+          from_address: email.from_address,
+          from_name: email.from_name,
+          recipients: email.recipients,
+        }),
+    credentials: {
+      url_set:
+        input.webhook?.url !== undefined ||
+        input.discord?.webhook_url !== undefined ||
+        kept.url_set,
+      shared_secret_set:
+        input.webhook?.shared_secret !== undefined || kept.shared_secret_set,
+      password_set: email?.password !== undefined || kept.password_set,
+    },
+    consecutive_failures: 0,
+    created_at: existing?.created_at ?? "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  };
+}
+
+async function saveChannel(
+  request: Request,
+  existing: NotificationChannel | undefined,
+) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = channelRequestSchema.safeParse(await request.json());
+  if (!input.success || channelTransportMismatch(input.data)) {
+    return envelope(422, "validation_failed", "invalid notification channel");
+  }
+  const name = input.data.name.toLowerCase();
+  if (
+    notificationChannels.some(
+      (channel) =>
+        channel.id !== existing?.id && channel.name.toLowerCase() === name,
+    )
+  ) {
+    return envelope(409, "already_exists", "a channel uses that name");
+  }
+  if (channelDestinationHost(input.data) === UNREACHABLE_CHANNEL_HOST) {
+    return envelope(502, "notification_channel_failure", "probe failed");
+  }
+  let id = existing?.id;
+  if (id === undefined) {
+    registeredChannels += 1;
+    id = `9a1b2c3d-0000-4000-8000-0000000001${String(registeredChannels).padStart(2, "0")}`;
+  }
+  const channel = channelFromInput(input.data, existing, id);
+  notificationChannels = [
+    ...notificationChannels.filter((candidate) => candidate.id !== id),
+    channel,
+  ].sort((a, b) => a.name.localeCompare(b.name, "en"));
+  return HttpResponse.json(channel, {
+    status: existing === undefined ? 201 : 200,
+  });
+}
+
+function channelById(
+  id: string | readonly string[] | undefined,
+): NotificationChannel | undefined {
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return undefined;
+  }
+  return notificationChannels.find((channel) => channel.id === id);
+}
+
+function removeChannel(id: string | readonly string[] | undefined) {
+  const channel = channelById(id);
+  if (channel === undefined) {
+    return envelope(404, "not_found", "notification channel not found");
+  }
+  notificationChannels = notificationChannels.filter(
+    (candidate) => candidate.id !== channel.id,
+  );
+  return new HttpResponse(null, { status: 204 });
+}
+
+function testChannel(id: string | readonly string[] | undefined) {
+  const channel = channelById(id);
+  if (channel === undefined) {
+    return envelope(404, "not_found", "notification channel not found");
+  }
+  if (channel.consecutive_failures > 0) {
+    return envelope(502, "notification_channel_failure", "test send failed");
+  }
+  const delivery: Delivery = {
+    id: `9a1b2c3d-0000-4000-8000-0000000000b${String((deliveries[channel.id] ?? []).length)}`,
+    event_type: "created",
+    request_id: "6c5f0f8a-0000-4000-8000-0000000000ff",
+    status: "sent",
+    attempts: 1,
+    last_error: "",
+    next_attempt_at: "2026-09-23T12:00:00Z",
+    sent_at: "2026-09-23T12:00:01Z",
+    created_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:01Z",
+  };
+  deliveries = {
+    ...deliveries,
+    [channel.id]: [delivery, ...(deliveries[channel.id] ?? [])],
+  };
+  return HttpResponse.json({ outcome: "sent" });
+}
+
+function channelDeliveries(
+  url: URL,
+  id: string | readonly string[] | undefined,
+) {
+  const channel = channelById(id);
+  if (channel === undefined) {
+    return envelope(404, "not_found", "notification channel not found");
+  }
+  return pagedItems(url, channelsQuerySchema, deliveries[channel.id] ?? []);
+}
+
+const notificationHandlers = [
+  http.get(
+    "*/api/v1/notification-channels",
+    jsonApi(
+      ({ request }) =>
+        permissionDenial("admin.settings") ??
+        pagedItems(
+          new URL(request.url),
+          channelsQuerySchema,
+          notificationChannels,
+        ),
+    ),
+  ),
+  http.post(
+    "*/api/v1/notification-channels",
+    jsonApi(
+      async ({ request }) =>
+        permissionDenial("admin.settings") ??
+        (await saveChannel(request, undefined)),
+    ),
+  ),
+  http.put(
+    "*/api/v1/notification-channels/:id",
+    jsonApi(async ({ request, params }) => {
+      const denial = permissionDenial("admin.settings");
+      if (denial !== undefined) {
+        return denial;
+      }
+      const existing = channelById(params.id);
+      if (existing === undefined) {
+        return envelope(404, "not_found", "notification channel not found");
+      }
+      return saveChannel(request, existing);
+    }),
+  ),
+  http.delete(
+    "*/api/v1/notification-channels/:id",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("admin.settings") ?? removeChannel(params.id),
+    ),
+  ),
+  http.post(
+    "*/api/v1/notification-channels/:id/test",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("admin.settings") ?? testChannel(params.id),
+    ),
+  ),
+  http.get(
+    "*/api/v1/notification-channels/:id/deliveries",
+    jsonApi(
+      ({ request, params }) =>
+        permissionDenial("admin.settings") ??
+        channelDeliveries(new URL(request.url), params.id),
+    ),
+  ),
+];
+
 export const handlers = [
+  ...notificationHandlers,
   ...statsHandlers,
   ...requestHandlers,
   ...roleQuotaHandlers,

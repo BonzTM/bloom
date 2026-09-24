@@ -53,6 +53,14 @@ export default function AdminRoute(): ReactNode {
               </p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.adminSettings]}>
+            <li className="card">
+              <h2>
+                <Link to="/admin/notifications">Notifications</Link>
+              </h2>
+              <p>Tell a webhook, Discord, or email about requests.</p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.statsReadAll]}>
             <li className="card">
               <h2>
