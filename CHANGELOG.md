@@ -50,6 +50,12 @@ contracts) gets an entry here.
   then removes the variable from the service environment.
 - Successful login responses now include the account's sorted role names and
   effective permissions, matching `GET /api/v1/auth/me`.
+- Invite acceptance now rejects invalid, expired, deleted-account, and
+  disabled-account session cookies instead of treating them as anonymous.
+- Administrator link deletion now records a durable suppression that blocks
+  automatic username rematching. Administrator `PUT` clears the suppression,
+  and account-link lists expose suppressed rows only with
+  `include_suppressed=true`.
 
 ### Added
 

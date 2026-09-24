@@ -43,6 +43,7 @@ type AccountMediaUser struct {
 	Source          AccountMediaUserSource
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	SuppressedAt    *time.Time
 }
 
 // ValidateAccountMediaUser validates a link before persistence.
@@ -59,6 +60,9 @@ func ValidateAccountMediaUser(link AccountMediaUser) error {
 		return ErrInvalidArgument
 	}
 	if link.CreatedAt.IsZero() || link.UpdatedAt.IsZero() || link.UpdatedAt.Before(link.CreatedAt) {
+		return ErrInvalidArgument
+	}
+	if link.SuppressedAt != nil && link.SuppressedAt.Before(link.CreatedAt) {
 		return ErrInvalidArgument
 	}
 	return nil
@@ -82,12 +86,12 @@ func validBoundedText(value string, maxBytes int) bool {
 // AccountMediaUserReader reads account-to-media-user links.
 type AccountMediaUserReader interface {
 	GetAccountMediaUser(ctx context.Context, accountID, mediaServerID string) (AccountMediaUser, error)
-	ListAccountMediaUsers(ctx context.Context, accountID string, limit int) ([]AccountMediaUser, error)
+	ListAccountMediaUsers(ctx context.Context, accountID string, includeSuppressed bool, limit int) ([]AccountMediaUser, error)
 }
 
 // AccountMediaUserWriter changes account-to-media-user links.
 type AccountMediaUserWriter interface {
 	SetAccountMediaUser(ctx context.Context, link AccountMediaUser) error
 	CreateAccountMediaUserIfAbsent(ctx context.Context, link AccountMediaUser) (bool, error)
-	DeleteAccountMediaUser(ctx context.Context, accountID, mediaServerID string) error
+	SuppressAccountMediaUser(ctx context.Context, accountID, mediaServerID string, suppressedAt time.Time) error
 }

@@ -9,6 +9,7 @@ CREATE TABLE account_media_users (
     source TEXT NOT NULL CHECK (source IN ('invite', 'match', 'admin')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    suppressed_at TEXT,
     PRIMARY KEY (account_id, media_server_id),
     UNIQUE (media_server_id, media_user_id)
 ) STRICT;

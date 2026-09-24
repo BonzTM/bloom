@@ -109,12 +109,12 @@ func (s *authAccountStore) blockLoads(deadlines chan time.Duration) {
 	s.deadlines = deadlines
 }
 
-func (s *authAccountStore) disable(username string) {
+func (s *authAccountStore) disableAlice() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	account := s.accounts[username]
+	account := s.accounts["alice"]
 	account.Disabled = true
-	s.accounts[username] = account
+	s.accounts["alice"] = account
 }
 
 func (s *authAccountStore) delete(username string) {
@@ -1012,7 +1012,7 @@ func TestInvalidAndRevokedSessionsAreAuditedAndCookiesExpire(t *testing.T) {
 	}
 
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
-	h.store.disable("alice")
+	h.store.disableAlice()
 	disabled := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
 	if disabled.Code != http.StatusUnauthorized || h.audit.last(t).Reason != "account_disabled" {
 		t.Fatalf("disabled session = %d audit %+v", disabled.Code, h.audit.last(t))
@@ -1078,7 +1078,7 @@ func TestSessionStoreFailuresReturnOneOpaqueEnvelope(t *testing.T) {
 	store.findErr = nil
 	store.deleteErr = errors.New("delete failed")
 	store.mu.Unlock()
-	h.store.disable("alice")
+	h.store.disableAlice()
 	rec = h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
 	if rec.Code != http.StatusInternalServerError || h.audit.last(t).Reason != "account_disabled" {
 		t.Fatalf("delete failure = %d audit %+v", rec.Code, h.audit.last(t))
@@ -1126,7 +1126,7 @@ func TestMeLogoutAndDisabledSession(t *testing.T) {
 	}
 
 	cookie = sessionCookie(t, h.login(t, "alice", "secret-password"))
-	h.store.disable("alice")
+	h.store.disableAlice()
 	if rec := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie); rec.Code != http.StatusUnauthorized {
 		t.Errorf("me for disabled account = %d, want 401", rec.Code)
 	}

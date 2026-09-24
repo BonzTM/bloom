@@ -36,6 +36,7 @@ type AccountMediaUser struct {
 	Source        string
 	CreatedAt     string
 	UpdatedAt     string
+	SuppressedAt  sql.NullString
 }
 
 type AccountRequestQuota struct {

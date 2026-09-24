@@ -190,6 +190,9 @@ func insertPostgresInviteLink(
 		MediaUserID: redemption.MediaUserID, Username: redemption.Username,
 		Source: core.AccountMediaUserSourceInvite, CreatedAt: redemption.RedeemedAt, UpdatedAt: redemption.RedeemedAt,
 	}
+	if err := core.ValidateAccountMediaUser(link); err != nil {
+		return false, fmt.Errorf("validate invite account media user: %w", err)
+	}
 	rows, err := q.CreateAccountMediaUserIfAbsent(ctx,
 		postgres.CreateAccountMediaUserIfAbsentParams(postgresAccountMediaUserParams(link)))
 	if err != nil {

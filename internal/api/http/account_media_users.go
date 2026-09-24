@@ -3,6 +3,7 @@ package http
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
@@ -19,6 +20,7 @@ type accountMediaUserResponse struct {
 	Source          core.AccountMediaUserSource `json:"source"`
 	CreatedAt       time.Time                   `json:"created_at"`
 	UpdatedAt       time.Time                   `json:"updated_at"`
+	SuppressedAt    *time.Time                  `json:"suppressed_at,omitempty"`
 }
 
 type accountMediaUsersResponse struct {
@@ -44,12 +46,27 @@ func (s *Server) handleAccountMediaUsers(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	links, err := s.accountMediaUsers.List(r.Context(), accountID)
+	includeSuppressed, err := includeSuppressedParam(r)
+	if err != nil {
+		s.writeValidation(w, r, []httputil.FieldError{{
+			Field: "include_suppressed", Code: "invalid", Message: "must be true or false",
+		}})
+		return
+	}
+	links, err := s.accountMediaUsers.List(r.Context(), accountID, includeSuppressed)
 	if err != nil {
 		writeError(w, r, s.logger, err)
 		return
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, accountMediaUsersDTO(links))
+}
+
+func includeSuppressedParam(r *http.Request) (bool, error) {
+	raw := r.URL.Query().Get("include_suppressed")
+	if raw == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(raw)
 }
 
 func (s *Server) handleSetAccountMediaUser(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +156,7 @@ func accountMediaUserDTO(link core.AccountMediaUser) accountMediaUserResponse {
 	return accountMediaUserResponse{
 		AccountID: link.AccountID, MediaServerID: link.MediaServerID, MediaServerName: link.MediaServerName,
 		MediaUserID: link.MediaUserID, Username: link.Username, Source: link.Source,
-		CreatedAt: link.CreatedAt, UpdatedAt: link.UpdatedAt,
+		CreatedAt: link.CreatedAt, UpdatedAt: link.UpdatedAt, SuppressedAt: link.SuppressedAt,
 	}
 }
 

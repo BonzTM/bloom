@@ -989,6 +989,7 @@ paths:
             schema: { $ref: "#/components/schemas/AcceptInviteRequest" }
       responses:
         "201": { $ref: "#/components/responses/InviteAccepted" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PublicForbidden" }
         "404": { $ref: "#/components/responses/InviteAcceptanceNotFound" }
         "409": { $ref: "#/components/responses/InviteAcceptanceConflict" }
@@ -1423,7 +1424,12 @@ paths:
       operationId: listAccountMediaUsers
       summary: Return one account's media-user links.
       security: [{ sessionCookie: [] }]
-      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+        - name: include_suppressed
+          in: query
+          description: Include links suppressed by an administrator.
+          schema: { type: boolean, default: false }
       responses:
         "200": { $ref: "#/components/responses/AccountMediaUsersReturned" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1461,7 +1467,7 @@ paths:
     delete:
       tags: [admin]
       operationId: deleteAccountMediaUser
-      summary: Delete one account-to-media-user link.
+      summary: Suppress one account-to-media-user link from own-data use and automatic matching.
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/EntityID" }
@@ -2973,6 +2979,7 @@ components:
         source: { type: string, enum: [invite, match, admin] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        suppressed_at: { type: string, format: date-time, description: Present when an administrator suppressed the link. }
     AccountMediaUsersResponse:
       type: object
       required: [items]

@@ -70,7 +70,7 @@ func (s *Service) EnsureLinks(
 			return nil, err
 		}
 	}
-	return s.deps.Reader.ListAccountMediaUsers(ctx, account.ID, core.MaxAccountMediaUsers)
+	return s.deps.Reader.ListAccountMediaUsers(ctx, account.ID, false, core.MaxAccountMediaUsers)
 }
 
 func (s *Service) ensureServerLink(
@@ -147,11 +147,11 @@ func (s *Service) persistMatch(ctx context.Context, accountID, serverID string, 
 }
 
 // List returns one account's links after verifying the account exists.
-func (s *Service) List(ctx context.Context, accountID string) ([]core.AccountMediaUser, error) {
+func (s *Service) List(ctx context.Context, accountID string, includeSuppressed bool) ([]core.AccountMediaUser, error) {
 	if _, err := s.deps.Accounts.GetAccount(ctx, accountID); err != nil {
 		return nil, fmt.Errorf("get linked account: %w", err)
 	}
-	links, err := s.deps.Reader.ListAccountMediaUsers(ctx, accountID, core.MaxAccountMediaUsers)
+	links, err := s.deps.Reader.ListAccountMediaUsers(ctx, accountID, includeSuppressed, core.MaxAccountMediaUsers)
 	if err != nil {
 		return nil, fmt.Errorf("list account media users: %w", err)
 	}
@@ -203,13 +203,14 @@ func (s *Service) verifiedUsername(
 	return fallback, nil
 }
 
-// Delete removes one administrator-managed link.
+// Delete suppresses one link so automatic matching cannot recreate it.
 func (s *Service) Delete(ctx context.Context, accountID, serverID string) error {
 	if _, err := s.deps.Accounts.GetAccount(ctx, accountID); err != nil {
 		return fmt.Errorf("get linked account: %w", err)
 	}
-	if err := s.deps.Writer.DeleteAccountMediaUser(ctx, accountID, serverID); err != nil {
-		return fmt.Errorf("delete account media user: %w", err)
+	now := core.NormalizeTime(s.deps.Clock.Now())
+	if err := s.deps.Writer.SuppressAccountMediaUser(ctx, accountID, serverID, now); err != nil {
+		return fmt.Errorf("suppress account media user: %w", err)
 	}
 	return nil
 }

@@ -61,16 +61,18 @@ func (s *Server) sessionAccountMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) optionalSessionAccountMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.sessions.GetString(r.Context(), sessionAccountIDKey) == "" {
+		state := sessionState(r.Context())
+		if state == nil || !state.inbound {
 			next.ServeHTTP(w, r)
 			return
 		}
 		account, reason, err := s.loadSessionAccount(r.Context())
 		if err != nil {
-			if reason != "internal_error" {
-				next.ServeHTTP(w, r)
-				return
+			actor := account.ID
+			if actor == "" {
+				actor = "anonymous"
 			}
+			s.emitAuthAudit(r, actor, "auth.session", routeResource(r), telemetry.AuditFailure, reason, clientIP(r, s.trustedProxyCIDRs))
 			writeError(w, r, s.logger, err)
 			return
 		}

@@ -67,7 +67,7 @@ type inviteManager interface {
 
 type accountMediaUserManager interface {
 	EnsureLinks(ctx context.Context, account core.Account, mediaServerID string) ([]core.AccountMediaUser, error)
-	List(ctx context.Context, accountID string) ([]core.AccountMediaUser, error)
+	List(ctx context.Context, accountID string, includeSuppressed bool) ([]core.AccountMediaUser, error)
 	Set(ctx context.Context, accountID, mediaServerID, mediaUserID string) (core.AccountMediaUser, error)
 	Delete(ctx context.Context, accountID, mediaServerID string) error
 }

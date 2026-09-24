@@ -38,17 +38,18 @@ func (s *postgresAccountMediaUsers) GetAccountMediaUser(
 		return core.AccountMediaUser{}, fmt.Errorf("select account media user: %w", err)
 	}
 	return postgresAccountMediaUser(row.AccountID, row.MediaServerID, row.MediaServerName,
-		row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt), nil
+		row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt, row.SuppressedAt), nil
 }
 
 func (s *postgresAccountMediaUsers) ListAccountMediaUsers(
-	ctx context.Context, accountID string, limit int,
+	ctx context.Context, accountID string, includeSuppressed bool, limit int,
 ) ([]core.AccountMediaUser, error) {
 	if err := validateAccountMediaUserList(accountID, limit); err != nil {
 		return nil, err
 	}
 	rows, err := s.q.ListAccountMediaUsers(ctx, postgres.ListAccountMediaUsersParams{
-		AccountID: accountID, PageSize: int32(limit), //nolint:gosec // validated at 100.
+		AccountID: accountID, IncludeSuppressed: boolInt32(includeSuppressed),
+		PageSize: int32(limit), //nolint:gosec // validated at 100.
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list account media users: %w", err)
@@ -56,7 +57,7 @@ func (s *postgresAccountMediaUsers) ListAccountMediaUsers(
 	links := make([]core.AccountMediaUser, 0, len(rows))
 	for _, row := range rows {
 		links = append(links, postgresAccountMediaUser(row.AccountID, row.MediaServerID, row.MediaServerName,
-			row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt))
+			row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt, row.SuppressedAt))
 	}
 	return links, nil
 }
@@ -88,15 +89,22 @@ func (s *postgresAccountMediaUsers) CreateAccountMediaUserIfAbsent(
 	return rows == 1, nil
 }
 
-func (s *postgresAccountMediaUsers) DeleteAccountMediaUser(ctx context.Context, accountID, serverID string) error {
+func (s *postgresAccountMediaUsers) SuppressAccountMediaUser(
+	ctx context.Context, accountID, serverID string, suppressedAt time.Time,
+) error {
 	if err := validateAccountMediaUserQuery(accountID, serverID); err != nil {
 		return err
 	}
-	rows, err := s.q.DeleteAccountMediaUser(ctx, postgres.DeleteAccountMediaUserParams{
+	if suppressedAt.IsZero() {
+		return core.ErrInvalidArgument
+	}
+	value := core.NormalizeTime(suppressedAt)
+	rows, err := s.q.SuppressAccountMediaUser(ctx, postgres.SuppressAccountMediaUserParams{
+		SuppressedAt: sql.NullTime{Time: value, Valid: true}, UpdatedAt: value,
 		AccountID: accountID, MediaServerID: serverID,
 	})
 	if err != nil {
-		return fmt.Errorf("delete account media user: %w", err)
+		return fmt.Errorf("suppress account media user: %w", err)
 	}
 	if rows != 1 {
 		return core.ErrNotFound
@@ -114,11 +122,23 @@ func postgresAccountMediaUserParams(link core.AccountMediaUser) postgres.SetAcco
 
 func postgresAccountMediaUser(
 	accountID, serverID, serverName, mediaUserID, username, source string,
-	createdAt, updatedAt time.Time,
+	createdAt, updatedAt time.Time, suppressed sql.NullTime,
 ) core.AccountMediaUser {
+	var suppressedAt *time.Time
+	if suppressed.Valid {
+		value := core.NormalizeTime(suppressed.Time)
+		suppressedAt = &value
+	}
 	return core.AccountMediaUser{
 		AccountID: accountID, MediaServerID: serverID, MediaServerName: serverName,
 		MediaUserID: mediaUserID, Username: username, Source: core.AccountMediaUserSource(source),
-		CreatedAt: core.NormalizeTime(createdAt), UpdatedAt: core.NormalizeTime(updatedAt),
+		CreatedAt: core.NormalizeTime(createdAt), UpdatedAt: core.NormalizeTime(updatedAt), SuppressedAt: suppressedAt,
 	}
+}
+
+func boolInt32(value bool) int32 {
+	if value {
+		return 1
+	}
+	return 0
 }

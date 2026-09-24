@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -46,32 +47,14 @@ func (q *Queries) CreateAccountMediaUserIfAbsent(ctx context.Context, arg Create
 	return result.RowsAffected()
 }
 
-const deleteAccountMediaUser = `-- name: DeleteAccountMediaUser :execrows
-DELETE FROM account_media_users
-WHERE account_id = $1
-  AND media_server_id = $2
-`
-
-type DeleteAccountMediaUserParams struct {
-	AccountID     string
-	MediaServerID string
-}
-
-func (q *Queries) DeleteAccountMediaUser(ctx context.Context, arg DeleteAccountMediaUserParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteAccountMediaUser, arg.AccountID, arg.MediaServerID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const getAccountMediaUser = `-- name: GetAccountMediaUser :one
 SELECT amu.account_id, amu.media_server_id, ms.name AS media_server_name,
-       amu.media_user_id, amu.username, amu.source, amu.created_at, amu.updated_at
+       amu.media_user_id, amu.username, amu.source, amu.created_at, amu.updated_at, amu.suppressed_at
 FROM account_media_users AS amu
 JOIN media_servers AS ms ON ms.id = amu.media_server_id
 WHERE amu.account_id = $1
   AND amu.media_server_id = $2
+  AND amu.suppressed_at IS NULL
 `
 
 type GetAccountMediaUserParams struct {
@@ -88,6 +71,7 @@ type GetAccountMediaUserRow struct {
 	Source          string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	SuppressedAt    sql.NullTime
 }
 
 func (q *Queries) GetAccountMediaUser(ctx context.Context, arg GetAccountMediaUserParams) (GetAccountMediaUserRow, error) {
@@ -102,23 +86,26 @@ func (q *Queries) GetAccountMediaUser(ctx context.Context, arg GetAccountMediaUs
 		&i.Source,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SuppressedAt,
 	)
 	return i, err
 }
 
 const listAccountMediaUsers = `-- name: ListAccountMediaUsers :many
 SELECT amu.account_id, amu.media_server_id, ms.name AS media_server_name,
-       amu.media_user_id, amu.username, amu.source, amu.created_at, amu.updated_at
+       amu.media_user_id, amu.username, amu.source, amu.created_at, amu.updated_at, amu.suppressed_at
 FROM account_media_users AS amu
 JOIN media_servers AS ms ON ms.id = amu.media_server_id
 WHERE amu.account_id = $1
+  AND (CAST($2 AS INTEGER) = 1 OR amu.suppressed_at IS NULL)
 ORDER BY ms.name_key, amu.media_server_id
-LIMIT $2
+LIMIT $3
 `
 
 type ListAccountMediaUsersParams struct {
-	AccountID string
-	PageSize  int32
+	AccountID         string
+	IncludeSuppressed int32
+	PageSize          int32
 }
 
 type ListAccountMediaUsersRow struct {
@@ -130,10 +117,11 @@ type ListAccountMediaUsersRow struct {
 	Source          string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	SuppressedAt    sql.NullTime
 }
 
 func (q *Queries) ListAccountMediaUsers(ctx context.Context, arg ListAccountMediaUsersParams) ([]ListAccountMediaUsersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAccountMediaUsers, arg.AccountID, arg.PageSize)
+	rows, err := q.db.QueryContext(ctx, listAccountMediaUsers, arg.AccountID, arg.IncludeSuppressed, arg.PageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +138,7 @@ func (q *Queries) ListAccountMediaUsers(ctx context.Context, arg ListAccountMedi
 			&i.Source,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SuppressedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -175,7 +164,8 @@ ON CONFLICT (account_id, media_server_id) DO UPDATE SET
     media_user_id = excluded.media_user_id,
     username = excluded.username,
     source = excluded.source,
-    updated_at = excluded.updated_at
+    updated_at = excluded.updated_at,
+    suppressed_at = NULL
 `
 
 type SetAccountMediaUserParams struct {
@@ -199,4 +189,33 @@ func (q *Queries) SetAccountMediaUser(ctx context.Context, arg SetAccountMediaUs
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const suppressAccountMediaUser = `-- name: SuppressAccountMediaUser :execrows
+UPDATE account_media_users
+SET suppressed_at = $1,
+    updated_at = $2
+WHERE account_id = $3
+  AND media_server_id = $4
+  AND suppressed_at IS NULL
+`
+
+type SuppressAccountMediaUserParams struct {
+	SuppressedAt  sql.NullTime
+	UpdatedAt     time.Time
+	AccountID     string
+	MediaServerID string
+}
+
+func (q *Queries) SuppressAccountMediaUser(ctx context.Context, arg SuppressAccountMediaUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, suppressAccountMediaUser,
+		arg.SuppressedAt,
+		arg.UpdatedAt,
+		arg.AccountID,
+		arg.MediaServerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

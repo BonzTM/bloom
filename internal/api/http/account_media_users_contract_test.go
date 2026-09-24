@@ -31,6 +31,18 @@ func TestAccountMediaUserOpenAPIContractMatchesHandlers(t *testing.T) {
 	}
 }
 
+func TestAccountMediaUserOpenAPIDocumentsSuppressedFilter(t *testing.T) {
+	operation := loadOpenAPI(t).validator.Paths.Find("/api/v1/accounts/{id}/media-users").Get
+	for _, parameter := range operation.Parameters {
+		if parameter.Value != nil && parameter.Value.Name == "include_suppressed" &&
+			parameter.Value.Schema != nil && parameter.Value.Schema.Value != nil &&
+			parameter.Value.Schema.Value.Type != nil && parameter.Value.Schema.Value.Type.Includes("boolean") {
+			return
+		}
+	}
+	t.Fatal("include_suppressed boolean query parameter is not documented")
+}
+
 func accountMediaUserContractCases() []authContractCase {
 	accountID := "11111111-1111-4111-8111-111111111111"
 	serverID := "33333333-3333-4333-8333-333333333333"

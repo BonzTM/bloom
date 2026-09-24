@@ -48,7 +48,6 @@ type Querier interface {
 	CreateRequestProfileTag(ctx context.Context, arg CreateRequestProfileTagParams) error
 	CreateRequestSeason(ctx context.Context, arg CreateRequestSeasonParams) error
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
-	DeleteAccountMediaUser(ctx context.Context, arg DeleteAccountMediaUserParams) (int64, error)
 	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
 	DeleteDownloadManager(ctx context.Context, id string) (int64, error)
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
@@ -142,6 +141,7 @@ type Querier interface {
 	StatsTotals(ctx context.Context, arg StatsTotalsParams) (StatsTotalsRow, error)
 	StatsUserRecentWatches(ctx context.Context, arg StatsUserRecentWatchesParams) ([]StatsUserRecentWatchesRow, error)
 	StatsUsers(ctx context.Context, arg StatsUsersParams) ([]StatsUsersRow, error)
+	SuppressAccountMediaUser(ctx context.Context, arg SuppressAccountMediaUserParams) (int64, error)
 	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)
 	TransitionRequestSeasons(ctx context.Context, arg TransitionRequestSeasonsParams) error
 	TrimWatchPositions(ctx context.Context, watchID string) error

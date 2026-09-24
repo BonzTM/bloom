@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,10 +39,16 @@ func (f *fakeAccountMediaUsers) EnsureLinks(
 	return []core.AccountMediaUser{}, f.err
 }
 
-func (f *fakeAccountMediaUsers) List(context.Context, string) ([]core.AccountMediaUser, error) {
+func (f *fakeAccountMediaUsers) List(_ context.Context, _ string, includeSuppressed bool) ([]core.AccountMediaUser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.links), f.err
+	links := make([]core.AccountMediaUser, 0, len(f.links))
+	for _, link := range f.links {
+		if includeSuppressed || link.SuppressedAt == nil {
+			links = append(links, link)
+		}
+	}
+	return links, f.err
 }
 
 func (f *fakeAccountMediaUsers) Set(
@@ -150,6 +157,29 @@ func TestAdminAccountMediaUserRoutesValidateAndAudit(t *testing.T) {
 	}
 	if event := h.audit.last(t); event.Action != "account_media_user.delete" || event.Result != telemetry.AuditSuccess {
 		t.Fatalf("delete audit = %+v", event)
+	}
+}
+
+func TestAdminAccountMediaUserListIncludesSuppressedOnRequest(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	link := testAccountMediaUser()
+	suppressedAt := link.UpdatedAt.Add(time.Minute)
+	link.SuppressedAt = &suppressedAt
+	h.accountMediaUsers.links = []core.AccountMediaUser{link}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/accounts/11111111-1111-4111-8111-111111111111/media-users"
+	defaultList := h.request(t, http.MethodGet, path, "", cookie)
+	if defaultList.Code != http.StatusOK || strings.Contains(defaultList.Body.String(), "media-user-1") {
+		t.Fatalf("default list = %d: %s", defaultList.Code, defaultList.Body.String())
+	}
+	included := h.request(t, http.MethodGet, path+"?include_suppressed=true", "", cookie)
+	if included.Code != http.StatusOK || !strings.Contains(included.Body.String(), "suppressed_at") {
+		t.Fatalf("included list = %d: %s", included.Code, included.Body.String())
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), included.Body.Bytes(), accountMediaUsersSchema)
+	invalid := h.request(t, http.MethodGet, path+"?include_suppressed=maybe", "", cookie)
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid include_suppressed = %d: %s", invalid.Code, invalid.Body.String())
 	}
 }
 

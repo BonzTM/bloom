@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db/sqlite"
@@ -37,17 +38,17 @@ func (s *sqliteAccountMediaUsers) GetAccountMediaUser(
 		return core.AccountMediaUser{}, fmt.Errorf("select account media user: %w", err)
 	}
 	return sqliteAccountMediaUser(row.AccountID, row.MediaServerID, row.MediaServerName,
-		row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt)
+		row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt, row.SuppressedAt)
 }
 
 func (s *sqliteAccountMediaUsers) ListAccountMediaUsers(
-	ctx context.Context, accountID string, limit int,
+	ctx context.Context, accountID string, includeSuppressed bool, limit int,
 ) ([]core.AccountMediaUser, error) {
 	if err := validateAccountMediaUserList(accountID, limit); err != nil {
 		return nil, err
 	}
 	rows, err := s.q.ListAccountMediaUsers(ctx, sqlite.ListAccountMediaUsersParams{
-		AccountID: accountID, PageSize: int64(limit),
+		AccountID: accountID, IncludeSuppressed: boolInt64(includeSuppressed), PageSize: int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list account media users: %w", err)
@@ -55,7 +56,7 @@ func (s *sqliteAccountMediaUsers) ListAccountMediaUsers(
 	links := make([]core.AccountMediaUser, 0, len(rows))
 	for _, row := range rows {
 		link, mapErr := sqliteAccountMediaUser(row.AccountID, row.MediaServerID, row.MediaServerName,
-			row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt)
+			row.MediaUserID, row.Username, row.Source, row.CreatedAt, row.UpdatedAt, row.SuppressedAt)
 		if mapErr != nil {
 			return nil, mapErr
 		}
@@ -91,15 +92,22 @@ func (s *sqliteAccountMediaUsers) CreateAccountMediaUserIfAbsent(
 	return rows == 1, nil
 }
 
-func (s *sqliteAccountMediaUsers) DeleteAccountMediaUser(ctx context.Context, accountID, serverID string) error {
+func (s *sqliteAccountMediaUsers) SuppressAccountMediaUser(
+	ctx context.Context, accountID, serverID string, suppressedAt time.Time,
+) error {
 	if err := validateAccountMediaUserQuery(accountID, serverID); err != nil {
 		return err
 	}
-	rows, err := s.q.DeleteAccountMediaUser(ctx, sqlite.DeleteAccountMediaUserParams{
+	if suppressedAt.IsZero() {
+		return core.ErrInvalidArgument
+	}
+	value := formatSQLiteTime(core.NormalizeTime(suppressedAt))
+	rows, err := s.q.SuppressAccountMediaUser(ctx, sqlite.SuppressAccountMediaUserParams{
+		SuppressedAt: sql.NullString{String: value, Valid: true}, UpdatedAt: value,
 		AccountID: accountID, MediaServerID: serverID,
 	})
 	if err != nil {
-		return fmt.Errorf("delete account media user: %w", err)
+		return fmt.Errorf("suppress account media user: %w", err)
 	}
 	if rows != 1 {
 		return core.ErrNotFound
@@ -117,6 +125,7 @@ func sqliteAccountMediaUserParams(link core.AccountMediaUser) sqlite.SetAccountM
 
 func sqliteAccountMediaUser(
 	accountID, serverID, serverName, mediaUserID, username, source, created, updated string,
+	suppressed sql.NullString,
 ) (core.AccountMediaUser, error) {
 	createdAt, err := parseSQLiteTime(created)
 	if err != nil {
@@ -126,9 +135,20 @@ func sqliteAccountMediaUser(
 	if err != nil {
 		return core.AccountMediaUser{}, fmt.Errorf("parse account media user updated_at: %w", err)
 	}
+	suppressedAt, err := parseSQLiteNullableTime(suppressed)
+	if err != nil {
+		return core.AccountMediaUser{}, fmt.Errorf("parse account media user suppressed_at: %w", err)
+	}
 	return core.AccountMediaUser{
 		AccountID: accountID, MediaServerID: serverID, MediaServerName: serverName,
 		MediaUserID: mediaUserID, Username: username, Source: core.AccountMediaUserSource(source),
-		CreatedAt: createdAt, UpdatedAt: updatedAt,
+		CreatedAt: createdAt, UpdatedAt: updatedAt, SuppressedAt: suppressedAt,
 	}, nil
+}
+
+func boolInt64(value bool) int64 {
+	if value {
+		return 1
+	}
+	return 0
 }

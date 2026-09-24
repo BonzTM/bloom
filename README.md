@@ -249,8 +249,10 @@ so a dashboard can trail a newly recorded watch by at most the configured TTL.
 Bloom links an account to at most one media user on each server. A link is
 created from a signed-in invite acceptance, an exact username match during an
 own-data request, or an administrator assignment. Anonymous invite acceptance
-does not create an account link. A media user can belong to at most one Bloom
-account on a server.
+does not create an account link. An invite acceptance carrying an invalid,
+expired, deleted-account, or disabled-account session is rejected with `401`;
+clear the cookie or sign in again before accepting. A media user can belong to
+at most one Bloom account on a server.
 
 An account with `stats.read.own` can list its links with
 `GET /api/v1/me/media-users` and read its per-user dashboard with
@@ -264,7 +266,10 @@ identifies the selected `media_server_id` and `media_user_id`.
 An account with `admin.settings` can inspect links with
 `GET /api/v1/accounts/{id}/media-users`, assign one with
 `PUT /api/v1/accounts/{id}/media-users/{media_server_id}`, and remove one with
-`DELETE` on that item route. The `PUT` body is `{"media_user_id":"..."}`.
+`DELETE` on that item route. Removal suppresses automatic username matching;
+`PUT` relinks the user and clears that suppression. The list hides suppressed
+links unless `include_suppressed=true` is supplied. The `PUT` body is
+`{"media_user_id":"..."}`.
 
 The Statistics page shows the library ranking and filters every report by
 one library.
@@ -556,8 +561,8 @@ server-library-start index used by filtered statistics on both engines. Its
 down migration removes the index and both columns.
 
 Migration `00017_account_media_users` adds account-to-media-user links on both
-engines. Deleting an account or media server cascades to its links. Its down
-migration removes the link table.
+engines, including administrator suppression state. Deleting an account or
+media server cascades to its links. Its down migration removes the link table.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

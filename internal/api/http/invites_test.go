@@ -166,6 +166,72 @@ func TestSignedInInviteAcceptancePassesAccount(t *testing.T) {
 	}
 }
 
+func TestInviteAcceptanceRejectsInvalidInboundSessions(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*testing.T, authHarness) *http.Cookie
+	}{
+		{name: "expired", prepare: expiredInviteSession},
+		{name: "unknown", prepare: func(*testing.T, authHarness) *http.Cookie {
+			return &http.Cookie{Name: sessionCookieName, Value: "unknown-invite-session"}
+		}},
+		{name: "deleted account", prepare: deletedAccountInviteSession},
+		{name: "disabled account", prepare: disabledAccountInviteSession},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			h := newAuthHarness(t, nil)
+			cookie := testCase.prepare(t, h)
+			response := acceptInviteRequestWithCookie(t, h, cookie)
+			h.invites.mu.Lock()
+			accepted := h.invites.accepted
+			h.invites.mu.Unlock()
+			if response.Code != http.StatusUnauthorized || accepted != 0 {
+				t.Fatalf("accept = %d, calls = %d: %s", response.Code, accepted, response.Body.String())
+			}
+			if cleared := sessionCookie(t, response); cleared.MaxAge >= 0 {
+				t.Fatalf("cleared cookie MaxAge = %d", cleared.MaxAge)
+			}
+		})
+	}
+}
+
+func expiredInviteSession(t *testing.T, h authHarness) *http.Cookie {
+	t.Helper()
+	data, err := h.sessions.Codec.Encode(expiredSessionInstant(), map[string]any{
+		sessionAccountIDKey: h.store.accounts["alice"].ID,
+	})
+	if err != nil {
+		t.Fatalf("encode expired session: %v", err)
+	}
+	if err := h.sessions.Store.Commit(hashedSessionToken("expired-invite"), data, expiredSessionInstant()); err != nil {
+		t.Fatalf("commit expired session: %v", err)
+	}
+	return &http.Cookie{Name: sessionCookieName, Value: "expired-invite"}
+}
+
+func deletedAccountInviteSession(t *testing.T, h authHarness) *http.Cookie {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.store.delete("alice")
+	return cookie
+}
+
+func disabledAccountInviteSession(t *testing.T, h authHarness) *http.Cookie {
+	t.Helper()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.store.disableAlice()
+	return cookie
+}
+
+func acceptInviteRequestWithCookie(
+	t *testing.T, h authHarness, cookie *http.Cookie,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	return h.requestWithContentType(t, http.MethodPost, "/api/v1/invite/"+testInviteCode+"/accept",
+		`{"username":"new-user","password":"Th1s-is-a-unique-password!"}`, cookie, "application/json")
+}
+
 func TestInviteAuditMetricsAndAcceptanceDeadline(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
@@ -461,6 +527,19 @@ func TestInviteOpenAPIContractWithValidFixtures(t *testing.T) {
 			assertInviteSuccessDocumented(t, document, testCase)
 		})
 	}
+}
+
+func TestInviteAcceptanceOpenAPIDocumentsInvalidSession(t *testing.T) {
+	document := loadOpenAPI(t)
+	h := newAuthHarness(t, nil)
+	recorder := acceptInviteRequestWithCookie(t, h, &http.Cookie{Name: sessionCookieName, Value: "unknown"})
+	testCase := authContractCase{
+		path: "/api/v1/invite/{code}/accept", method: "post", status: http.StatusUnauthorized,
+		schema: errorSchema, headers: []string{"Cache-Control", "Set-Cookie", "Vary", "X-Request-ID"},
+	}
+	assertHandlerContract(t, document, recorder, testCase)
+	assertDocumentedResponse(t, document, "post /api/v1/invite/{code}/accept",
+		http.StatusUnauthorized, document.Paths[testCase.path][testCase.method].Responses, testCase)
 }
 
 func TestCreateInviteAllLibrariesMatchesOpenAPI(t *testing.T) {

@@ -55,8 +55,8 @@ func validateInvitePage(after *core.InviteCursor, pageSize int) error {
 
 func validateRedemption(invite core.Invite, redemption core.InviteRedemption) error {
 	if !core.ValidID(redemption.ID) || redemption.InviteID != invite.ID ||
-		redemption.MediaServerID != invite.MediaServerID || redemption.MediaUserID == "" ||
-		len(redemption.MediaUserID) > 128 || redemption.RedeemedAt.IsZero() {
+		redemption.MediaServerID != invite.MediaServerID || !core.ValidAccountMediaUserID(redemption.MediaUserID) ||
+		redemption.RedeemedAt.IsZero() {
 		return core.ErrInvalidArgument
 	}
 	if redemption.AccountID != "" && !core.ValidID(redemption.AccountID) {

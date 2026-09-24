@@ -18,17 +18,19 @@ type linkStore struct{ links []core.AccountMediaUser }
 
 func (s *linkStore) GetAccountMediaUser(_ context.Context, accountID, serverID string) (core.AccountMediaUser, error) {
 	for _, link := range s.links {
-		if link.AccountID == accountID && link.MediaServerID == serverID {
+		if link.AccountID == accountID && link.MediaServerID == serverID && link.SuppressedAt == nil {
 			return link, nil
 		}
 	}
 	return core.AccountMediaUser{}, core.ErrNotFound
 }
 
-func (s *linkStore) ListAccountMediaUsers(_ context.Context, accountID string, limit int) ([]core.AccountMediaUser, error) {
+func (s *linkStore) ListAccountMediaUsers(
+	_ context.Context, accountID string, includeSuppressed bool, limit int,
+) ([]core.AccountMediaUser, error) {
 	result := make([]core.AccountMediaUser, 0, limit)
 	for _, link := range s.links {
-		if link.AccountID == accountID && len(result) < limit {
+		if link.AccountID == accountID && (includeSuppressed || link.SuppressedAt == nil) && len(result) < limit {
 			result = append(result, link)
 		}
 	}
@@ -57,14 +59,41 @@ func (s *linkStore) CreateAccountMediaUserIfAbsent(_ context.Context, link core.
 	return true, nil
 }
 
-func (s *linkStore) DeleteAccountMediaUser(_ context.Context, accountID, serverID string) error {
+func (s *linkStore) SuppressAccountMediaUser(
+	_ context.Context, accountID, serverID string, suppressedAt time.Time,
+) error {
 	for index, link := range s.links {
-		if link.AccountID == accountID && link.MediaServerID == serverID {
-			s.links = slices.Delete(s.links, index, index+1)
+		if link.AccountID == accountID && link.MediaServerID == serverID && link.SuppressedAt == nil {
+			s.links[index].SuppressedAt = &suppressedAt
+			s.links[index].UpdatedAt = suppressedAt
 			return nil
 		}
 	}
 	return core.ErrNotFound
+}
+
+func TestDeleteSuppressesAutomaticMatchUntilAdminSet(t *testing.T) {
+	service, store, servers, _ := newService(t)
+	account := core.Account{ID: testID(20), Username: "alice"}
+	serverID := testID(1)
+	servers.servers = []core.MediaServerConnection{{Server: core.MediaServer{ID: serverID, Name: "Home"}}}
+	servers.users[serverID] = core.MediaUser{ID: "media-user", Name: "alice"}
+	if _, err := service.EnsureLinks(t.Context(), account, serverID); err != nil {
+		t.Fatalf("initial EnsureLinks: %v", err)
+	}
+	if err := service.Delete(t.Context(), account.ID, serverID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	links, err := service.EnsureLinks(t.Context(), account, serverID)
+	if err != nil || len(links) != 0 || store.links[0].SuppressedAt == nil {
+		t.Fatalf("EnsureLinks after delete = %+v, %v; stored %+v", links, err, store.links)
+	}
+	if _, err := service.Set(t.Context(), account.ID, serverID, "media-user"); err != nil {
+		t.Fatalf("Set after delete: %v", err)
+	}
+	if store.links[0].SuppressedAt != nil {
+		t.Fatalf("Set retained suppression: %+v", store.links[0])
+	}
 }
 
 type accountStore struct{ account core.Account }

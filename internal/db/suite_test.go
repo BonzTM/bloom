@@ -173,6 +173,9 @@ func runInviteEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acco
 	t.Run("signed-in redemption links atomically and keeps conflicts", func(t *testing.T) {
 		testInviteAccountLink(t, pool, driver, store, account.ID, server.ID, now)
 	})
+	t.Run("redemption rejects unsafe media user ids", func(t *testing.T) {
+		testInviteRejectsUnsafeMediaUserIDs(t, reader, store, account.ID, server.ID, now)
+	})
 	t.Run("concurrent last use", func(t *testing.T) {
 		testConcurrentInviteLastUse(t, reader, store, account.ID, server.ID, now)
 	})
@@ -188,6 +191,32 @@ func runInviteEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acco
 	t.Run("provisioning failure insert error rolls back", func(t *testing.T) {
 		testInviteProvisioningFailureInsertError(t, pool, reader, store, account.ID, server.ID, now)
 	})
+}
+
+func testInviteRejectsUnsafeMediaUserIDs(
+	t *testing.T, reader core.InviteReader, store core.InviteStore,
+	accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	invalidIDs := []string{"control\x00id", string([]byte{0xff})}
+	for index, mediaUserID := range invalidIDs {
+		invite, hash := createInviteFixture(t, store, accountID, serverID,
+			fmt.Sprintf("Invalid media user %d", index), now.Add(time.Duration(index+40)*time.Second))
+		redeem := func(context.Context, core.Invite) (core.InviteRedemption, error) {
+			return core.InviteRedemption{
+				ID: mustID(t), InviteID: invite.ID, AccountID: accountID, MediaServerID: serverID,
+				MediaUserID: mediaUserID, Username: "invite-user", RedeemedAt: now.Add(time.Minute),
+			}, nil
+		}
+		created, err := store.RedeemInvite(t.Context(), hash, testutil.NewFakeClock(now.Add(time.Minute)), redeem)
+		if created || !errors.Is(err, core.ErrInvalidArgument) {
+			t.Fatalf("RedeemInvite invalid id %d = %t, %v", index, created, err)
+		}
+		stored, getErr := reader.GetInvite(t.Context(), invite.ID)
+		if getErr != nil || stored.UseCount != 0 {
+			t.Fatalf("invite after invalid id %d = %+v, %v", index, stored, getErr)
+		}
+	}
 }
 
 func testInviteAccountLink(
