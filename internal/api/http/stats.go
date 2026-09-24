@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	defaultStatsDays    = 30
-	maxMediaUserIDBytes = 256
+	defaultStatsDays = 30
 )
 
 type statsWindowResponse struct {
@@ -147,8 +146,11 @@ func (s *Server) handleStatsUser(w http.ResponseWriter, r *http.Request) {
 	if !core.ValidID(serverID) {
 		fields = append(fields, httputil.FieldError{Field: "media_server_id", Code: "invalid", Message: "must be a valid UUID"})
 	}
-	if userID == "" || len(userID) > maxMediaUserIDBytes {
-		fields = append(fields, httputil.FieldError{Field: "media_user_id", Code: "invalid", Message: "must contain 1 to 256 bytes"})
+	if !core.ValidStatsMediaUserID(userID) {
+		fields = append(fields, httputil.FieldError{
+			Field: "media_user_id", Code: "invalid",
+			Message: "must contain 1 to 256 valid UTF-8 bytes without control characters",
+		})
 	}
 	if filter := firstValue(values["media_server_id"]); filter != "" && filter != serverID {
 		fields = append(fields, httputil.FieldError{Field: "media_server_id", Code: "invalid", Message: "must match the path media server"})

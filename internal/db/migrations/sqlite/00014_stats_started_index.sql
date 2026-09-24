@@ -1,4 +1,5 @@
 -- SQLite migration 00014: support unfiltered bounded statistics windows.
+-- SQLite TEXT columns use the binary BINARY collation unless declared otherwise.
 
 -- +goose Up
 -- +goose StatementBegin

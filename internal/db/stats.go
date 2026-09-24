@@ -173,9 +173,10 @@ func dailyBuckets(window core.StatsWindow, rows []core.StatsBucketRow) []core.St
 		byDate[date] = bucket
 	}
 	buckets := make([]core.StatsDailyBucket, 0, window.Days+1)
-	day := localDayStart(window.Start, window.Location)
+	day := civilDateCounter(window.Start, window.Location)
+	lastDay := civilDateCounter(window.End.Add(-time.Nanosecond), window.Location)
 	for range core.MaxStatsDays + 2 {
-		if !day.Before(window.End.In(window.Location)) {
+		if day.After(lastDay) {
 			break
 		}
 		key := day.Format(time.DateOnly)
@@ -187,9 +188,9 @@ func dailyBuckets(window core.StatsWindow, rows []core.StatsBucketRow) []core.St
 	return buckets
 }
 
-func localDayStart(value time.Time, location *time.Location) time.Time {
-	local := value.In(location)
-	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+func civilDateCounter(value time.Time, location *time.Location) time.Time {
+	year, month, day := value.In(location).Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
 func patternBuckets(location *time.Location, rows []core.StatsBucketRow) ([]core.StatsWeekdayBucket, []core.StatsHourBucket) {

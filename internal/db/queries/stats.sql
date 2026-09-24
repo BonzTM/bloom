@@ -36,7 +36,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
 GROUP BY w.media_server_id, w.item_id
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, title_key
+ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
 LIMIT sqlc.arg(row_limit);
 
 -- name: StatsSeriesTitles :many
@@ -54,7 +54,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
 GROUP BY w.media_server_id, w.series_name
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, title_key
+ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
 LIMIT sqlc.arg(row_limit);
 
 -- name: StatsOtherTitles :many
@@ -72,7 +72,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
 GROUP BY w.media_server_id, w.item_type
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, title_key
+ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
 LIMIT sqlc.arg(row_limit);
 
 -- name: StatsUsers :many
@@ -85,7 +85,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
 GROUP BY w.media_server_id, w.media_user_id
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, w.media_user_id
+ORDER BY plays DESC, watch_seconds DESC, w.media_user_id ASC, w.media_server_id ASC
 LIMIT sqlc.arg(row_limit);
 
 -- name: StatsClients :many
@@ -100,7 +100,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
 GROUP BY w.client
-ORDER BY watch_seconds DESC, plays DESC, name
+ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 1024;
 
 -- name: StatsDevices :many
@@ -115,7 +115,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
 GROUP BY w.device_name
-ORDER BY watch_seconds DESC, plays DESC, name
+ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 1024;
 
 -- name: StatsPlayMethods :many
@@ -130,7 +130,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
 GROUP BY w.play_method
-ORDER BY watch_seconds DESC, plays DESC, name
+ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 8;
 
 -- name: StatsBucketRows :many

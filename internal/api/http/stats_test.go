@@ -77,6 +77,7 @@ func TestStatsRoutesRejectBadParameters(t *testing.T) {
 		"/api/v1/stats/overview?days=366",
 		"/api/v1/stats/overview?media_server_id=bad",
 		"/api/v1/stats/overview?tz=Mars%2FOlympus",
+		"/api/v1/stats/overview?tz=Local",
 		"/api/v1/stats/overview?tz=UTC&tz=UTC",
 		"/api/v1/stats/titles?kind=bad",
 		"/api/v1/stats/titles",
@@ -91,6 +92,28 @@ func TestStatsRoutesRejectBadParameters(t *testing.T) {
 			recorder := h.request(t, http.MethodGet, path, "", cookie)
 			if recorder.Code != http.StatusUnprocessableEntity {
 				t.Fatalf("GET %s = %d, want 422: %s", path, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestStatsUserRejectsUnsafeMediaUserIDBeforeStore(t *testing.T) {
+	t.Parallel()
+	for _, encodedID := range []string{"user%00id", "user%7Fid", "user%FFid"} {
+		t.Run(encodedID, func(t *testing.T) {
+			t.Parallel()
+			h := newAuthHarness(t, nil)
+			cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+			path := "/api/v1/stats/users/33333333-3333-4333-8333-333333333333/" + encodedID
+			recorder := h.request(t, http.MethodGet, path, "", cookie)
+			if recorder.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("GET %s = %d, want 422: %s", path, recorder.Code, recorder.Body.String())
+			}
+			h.stats.mu.Lock()
+			calls := len(h.stats.queries)
+			h.stats.mu.Unlock()
+			if calls != 0 {
+				t.Fatalf("statistics store calls = %d, want 0", calls)
 			}
 		})
 	}

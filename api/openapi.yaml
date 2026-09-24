@@ -1278,8 +1278,8 @@ components:
     StatsTimeZone:
       name: tz
       in: query
-      description: IANA time-zone name used only for calendar buckets.
-      schema: { type: string, minLength: 1, x-max-bytes: 64, default: UTC }
+      description: IANA time-zone name used only for calendar buckets. The host-dependent special value Local is rejected.
+      schema: { type: string, minLength: 1, x-max-bytes: 64, default: UTC, not: { const: Local } }
     StatsTitleKind:
       name: kind
       in: query
@@ -1294,7 +1294,7 @@ components:
       name: media_user_id
       in: path
       required: true
-      schema: { type: string, minLength: 1, x-max-bytes: 256 }
+      schema: { type: string, minLength: 1, x-max-bytes: 256, pattern: '^[^\x00-\x1F\x7F]+$' }
     MediaServerID:
       name: id
       in: path

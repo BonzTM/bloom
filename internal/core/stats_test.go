@@ -9,7 +9,7 @@ import (
 func TestNewStatsWindowValidatesAndDefaults(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 9, 23, 15, 4, 5, 123456789, time.FixedZone("source", 3600))
-	window, err := NewStatsWindow(30, "", "", now)
+	window, err := NewStatsWindow(30, "", "UTC", now)
 	if err != nil {
 		t.Fatalf("NewStatsWindow: %v", err)
 	}
@@ -33,6 +33,8 @@ func TestNewStatsWindowRejectsInvalidInputs(t *testing.T) {
 		{name: "zero now", days: 1},
 		{name: "bad server", days: 1, server: "bad", now: now},
 		{name: "bad zone", days: 1, zone: "Mars/Olympus", now: now},
+		{name: "empty zone", days: 1, now: now},
+		{name: "host local zone", days: 1, zone: "Local", now: now},
 		{name: "long zone", days: 1, zone: string(make([]byte, 65)), now: now},
 	}
 	for _, test := range tests {
@@ -43,6 +45,26 @@ func TestNewStatsWindowRejectsInvalidInputs(t *testing.T) {
 				t.Fatalf("error = %v, want ErrInvalidArgument", err)
 			}
 		})
+	}
+}
+
+func TestValidStatsMediaUserID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value string
+		valid bool
+	}{
+		{value: "user-é", valid: true},
+		{value: "", valid: false},
+		{value: "nul\x00user", valid: false},
+		{value: "delete\x7fuser", valid: false},
+		{value: string([]byte{0xff}), valid: false},
+		{value: string(make([]byte, MaxStatsMediaUserIDBytes+1)), valid: false},
+	}
+	for _, test := range tests {
+		if got := ValidStatsMediaUserID(test.value); got != test.valid {
+			t.Errorf("ValidStatsMediaUserID(%q) = %t, want %t", test.value, got, test.valid)
+		}
 	}
 }
 
@@ -76,6 +98,7 @@ func TestStatsQueryValidate(t *testing.T) {
 		func(query *StatsQuery) { query.Window.Start = query.Window.Start.Add(time.Second) },
 		func(query *StatsQuery) { query.Window.MediaServerID = "bad" },
 		func(query *StatsQuery) { query.Window.Zone = "America/New_York" },
+		func(query *StatsQuery) { query.Window.Zone, query.Window.Location = "Local", time.Local },
 	}
 	for _, mutate := range mutations {
 		query := StatsQuery{Window: window, Report: StatsReportOverview}

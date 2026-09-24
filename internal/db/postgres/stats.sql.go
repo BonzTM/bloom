@@ -81,7 +81,7 @@ WHERE w.started_at >= $1
        OR (w.media_server_id = CAST($4 AS TEXT)
            AND w.media_user_id = CAST($5 AS TEXT)))
 GROUP BY w.client
-ORDER BY watch_seconds DESC, plays DESC, name
+ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 1024
 `
 
@@ -140,7 +140,7 @@ WHERE w.started_at >= $1
        OR (w.media_server_id = CAST($4 AS TEXT)
            AND w.media_user_id = CAST($5 AS TEXT)))
 GROUP BY w.device_name
-ORDER BY watch_seconds DESC, plays DESC, name
+ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 1024
 `
 
@@ -201,7 +201,7 @@ WHERE w.started_at >= $1
        OR (w.media_server_id = CAST($4 AS TEXT)
            AND w.media_user_id = CAST($5 AS TEXT)))
 GROUP BY w.media_server_id, w.item_id
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, title_key
+ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
 LIMIT $6
 `
 
@@ -275,7 +275,7 @@ WHERE w.started_at >= $1
        OR (w.media_server_id = CAST($4 AS TEXT)
            AND w.media_user_id = CAST($5 AS TEXT)))
 GROUP BY w.media_server_id, w.item_type
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, title_key
+ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
 LIMIT $6
 `
 
@@ -346,7 +346,7 @@ WHERE w.started_at >= $1
        OR (w.media_server_id = CAST($4 AS TEXT)
            AND w.media_user_id = CAST($5 AS TEXT)))
 GROUP BY w.play_method
-ORDER BY watch_seconds DESC, plays DESC, name
+ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 8
 `
 
@@ -408,7 +408,7 @@ WHERE w.started_at >= $1
        OR (w.media_server_id = CAST($4 AS TEXT)
            AND w.media_user_id = CAST($5 AS TEXT)))
 GROUP BY w.media_server_id, w.series_name
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, title_key
+ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
 LIMIT $6
 `
 
@@ -636,7 +636,7 @@ WHERE w.started_at >= $1
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
 GROUP BY w.media_server_id, w.media_user_id
-ORDER BY watch_seconds DESC, plays DESC, last_watched_at DESC, w.media_server_id, w.media_user_id
+ORDER BY plays DESC, watch_seconds DESC, w.media_user_id ASC, w.media_server_id ASC
 LIMIT $4
 `
 

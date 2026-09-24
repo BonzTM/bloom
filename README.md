@@ -228,10 +228,13 @@ through 365 rolling 24-hour days. The optional `media_server_id` limits the SQL
 query to one server.
 
 Every response states its resolved window and time zone. `tz` defaults to UTC
-and accepts an IANA time-zone name of at most 64 bytes. Bloom converts
+and accepts an IANA time-zone name of at most 64 bytes; the host-dependent
+`Local` value is rejected. Bloom converts
 `started_at` to that zone in Go for daily, weekday, and hour buckets; totals,
 rankings, and breakdowns remain portable SQL on both database engines. A
-bounded in-process LRU caches complete results for 30 seconds by default.
+bounded in-process LRU caches complete results for 30 seconds by default. A
+cached window end is rounded down to its cache-TTL boundary; with caching
+disabled, it is rounded down to the second.
 `BLOOM_STATS_CACHE_TTL=0` disables it. Cache expiry is the invalidation policy,
 so a dashboard can trail a newly recorded watch by at most the configured TTL.
 

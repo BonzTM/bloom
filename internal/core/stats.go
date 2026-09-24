@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -14,6 +15,8 @@ const (
 	MaxStatsDays = 365
 	// MaxStatsZoneBytes bounds untrusted IANA time-zone names.
 	MaxStatsZoneBytes = 64
+	// MaxStatsMediaUserIDBytes bounds media-server user identifiers from URL paths.
+	MaxStatsMediaUserIDBytes = 256
 	// MaxStatsBucketRows bounds zone-dependent in-memory aggregation input.
 	MaxStatsBucketRows = 100_000
 )
@@ -74,10 +77,7 @@ func NewStatsWindow(days int, mediaServerID, zone string, now time.Time) (StatsW
 	if mediaServerID != "" && !ValidID(mediaServerID) {
 		return StatsWindow{}, fmt.Errorf("statistics media server: %w", ErrInvalidArgument)
 	}
-	if zone == "" {
-		zone = "UTC"
-	}
-	if len(zone) > MaxStatsZoneBytes {
+	if zone == "" || zone == "Local" || len(zone) > MaxStatsZoneBytes {
 		return StatsWindow{}, fmt.Errorf("statistics time zone: %w", ErrInvalidArgument)
 	}
 	location, err := time.LoadLocation(zone)
@@ -106,7 +106,7 @@ func (q StatsQuery) Validate() error {
 		q.Window.Start.IsZero() || q.Window.End.IsZero() || q.Window.Location == nil ||
 		!q.Window.Start.Before(q.Window.End) ||
 		q.Window.End.Sub(q.Window.Start) != time.Duration(q.Window.Days)*24*time.Hour ||
-		q.Window.Zone == "" || len(q.Window.Zone) > MaxStatsZoneBytes ||
+		q.Window.Zone == "" || q.Window.Zone == "Local" || len(q.Window.Zone) > MaxStatsZoneBytes ||
 		q.Window.Location.String() != q.Window.Zone ||
 		(q.Window.MediaServerID != "" && !ValidID(q.Window.MediaServerID)) {
 		return ErrInvalidArgument
@@ -120,13 +120,26 @@ func (q StatsQuery) Validate() error {
 		}
 		return nil
 	case StatsReportUser:
-		if !ValidID(q.UserServerID) || q.MediaUserID == "" {
+		if !ValidID(q.UserServerID) || !ValidStatsMediaUserID(q.MediaUserID) {
 			return ErrInvalidArgument
 		}
 		return nil
 	default:
 		return ErrInvalidArgument
 	}
+}
+
+// ValidStatsMediaUserID reports whether a media-server user ID is safe for both database engines.
+func ValidStatsMediaUserID(value string) bool {
+	if value == "" || len(value) > MaxStatsMediaUserIDBytes || !utf8.ValidString(value) {
+		return false
+	}
+	for _, character := range value {
+		if character < ' ' || character == '\u007f' {
+			return false
+		}
+	}
+	return true
 }
 
 // StatsTotals contains the dashboard headline counters.

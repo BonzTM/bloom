@@ -3,6 +3,8 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,6 +26,8 @@ func runStatsEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertStatsUsers(t, reader, fixture)
 		assertStatsZoneBuckets(t, reader, fixture)
 		assertStatsUserDetail(t, reader, fixture)
+		assertStatsBinaryRanking(t, pool, driver, reader, fixture)
+		assertStatsRejectsUnsafeUserIDs(t, reader, fixture)
 	})
 }
 
@@ -145,7 +149,7 @@ func assertStatsTitleQueries(t *testing.T, reader core.StatsReader, fixture stat
 func assertStatsUsers(t *testing.T, reader core.StatsReader, fixture statsFixture) {
 	t.Helper()
 	result, err := reader.ReadStats(t.Context(), statsQuery(t, fixture, core.StatsReportUsers, "UTC"))
-	if err != nil || len(result.Users) != 3 || result.Users[0].Username != "carol" {
+	if err != nil || len(result.Users) != 3 || result.Users[0].Username != "alice" {
 		t.Fatalf("users = %+v, %v", result.Users, err)
 	}
 }
@@ -186,5 +190,119 @@ func assertStatsUserDetail(t *testing.T, reader core.StatsReader, fixture statsF
 	if err != nil || result.Totals.Plays != 2 || result.Totals.WatchSeconds != 300 ||
 		len(result.Titles) != 2 || len(result.Watches) != 2 || len(result.Daily) == 0 {
 		t.Fatalf("user detail = %+v, %v", result, err)
+	}
+}
+
+func assertStatsBinaryRanking(
+	t *testing.T, pool *sql.DB, driver config.Driver, reader core.StatsReader, fixture statsFixture,
+) {
+	t.Helper()
+	serverID := seedStatsRankingFixture(t, pool, driver, fixture.end)
+	query := statsQuery(t, fixture, core.StatsReportTitles, "UTC")
+	query.Window.MediaServerID = serverID
+	query.TitleKind = core.StatsTitleMovie
+	titles, err := reader.ReadStats(t.Context(), query)
+	if err != nil {
+		t.Fatalf("binary title ranking: %v", err)
+	}
+	assertStatsRankingKeys(t, titleKeys(titles.Titles), rankingKeys()[:50])
+	if titles.Titles[0].Name != "éclair" {
+		t.Fatalf("binary MAX(item_name) = %q, want éclair", titles.Titles[0].Name)
+	}
+	query.Report, query.TitleKind = core.StatsReportUsers, ""
+	users, err := reader.ReadStats(t.Context(), query)
+	if err != nil {
+		t.Fatalf("binary user ranking: %v", err)
+	}
+	assertStatsRankingKeys(t, userKeys(users.Users), rankingKeys()[:50])
+	if users.Users[0].Username != "éclair" {
+		t.Fatalf("binary MAX(username) = %q, want éclair", users.Users[0].Username)
+	}
+}
+
+func seedStatsRankingFixture(
+	t *testing.T, pool *sql.DB, driver config.Driver, now time.Time,
+) string {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewMediaServerStores: %v", err)
+	}
+	server := mediaServerRecord(t, "Stats ranking "+mustID(t), "https://stats-ranking.example.test", now)
+	if err := writer.CreateMediaServer(t.Context(), server); err != nil {
+		t.Fatalf("CreateMediaServer: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := writer.DeleteMediaServer(context.Background(), server.ID); err != nil {
+			t.Errorf("DeleteMediaServer: %v", err)
+		}
+	})
+	store := newPlaybackTestStore(t, pool, driver)
+	mutations := rankingMutations(t, server.ID, now)
+	if err := store.SaveWatches(t.Context(), mutations); err != nil {
+		t.Fatalf("SaveWatches ranking fixture: %v", err)
+	}
+	return server.ID
+}
+
+func rankingMutations(t *testing.T, serverID string, end time.Time) []core.PlaybackMutation {
+	t.Helper()
+	keys := rankingKeys()
+	mutations := make([]core.PlaybackMutation, 0, len(keys)+1)
+	for index, key := range keys {
+		watch := statsWatch(t, serverID, key, "Zulu", end.Add(-time.Hour-time.Duration(index)*time.Microsecond),
+			key, "Zulu", "Movie", "", key, key, core.PlayMethodDirectPlay, 1)
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch})
+	}
+	extra := statsWatch(t, serverID, keys[0], "éclair", end.Add(-30*time.Minute),
+		keys[0], "éclair", "Movie", "", keys[0], keys[0], core.PlayMethodDirectPlay, 1)
+	return append(mutations, core.PlaybackMutation{Watch: extra})
+}
+
+func rankingKeys() []string {
+	keys := make([]string, 0, 52)
+	keys = append(keys, "A-top")
+	for index := range 48 {
+		keys = append(keys, fmt.Sprintf("B-%02d", index))
+	}
+	return append(keys, "Z-edge-in", "a-edge-out", "é-last")
+}
+
+func titleKeys(titles []core.StatsTitle) []string {
+	keys := make([]string, 0, len(titles))
+	for _, title := range titles {
+		keys = append(keys, title.Key)
+	}
+	return keys
+}
+
+func userKeys(users []core.StatsUser) []string {
+	keys := make([]string, 0, len(users))
+	for _, user := range users {
+		keys = append(keys, user.MediaUserID)
+	}
+	return keys
+}
+
+func assertStatsRankingKeys(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("ranking length = %d, want %d", len(got), len(want))
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("ranking[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
+func assertStatsRejectsUnsafeUserIDs(t *testing.T, reader core.StatsReader, fixture statsFixture) {
+	t.Helper()
+	for _, userID := range []string{"nul\x00user", string([]byte{0xff})} {
+		query := statsQuery(t, fixture, core.StatsReportUser, "UTC")
+		query.UserServerID, query.MediaUserID = fixture.serverA, userID
+		if _, err := reader.ReadStats(t.Context(), query); !errors.Is(err, core.ErrInvalidArgument) {
+			t.Fatalf("unsafe media user ID %q error = %v, want ErrInvalidArgument", userID, err)
+		}
 	}
 }

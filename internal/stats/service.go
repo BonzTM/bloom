@@ -42,6 +42,7 @@ func (s *Service) ReadStats(ctx context.Context, query core.StatsQuery) (core.St
 	if err := query.Validate(); err != nil {
 		return core.StatsResult{}, fmt.Errorf("statistics service read: %w", err)
 	}
+	query = canonicalQuery(query, s.cache.ttl)
 	key := resultCacheKey(query)
 	if result, ok := s.cache.get(key); ok {
 		return result, nil
@@ -59,4 +60,14 @@ func (s *Service) ReadStats(ctx context.Context, query core.StatsQuery) (core.St
 		return core.StatsResult{}, fmt.Errorf("statistics service read: %w", err)
 	}
 	return result, nil
+}
+
+func canonicalQuery(query core.StatsQuery, ttl time.Duration) core.StatsQuery {
+	resolution := ttl
+	if resolution == 0 {
+		resolution = time.Second
+	}
+	query.Window.End = query.Window.End.Truncate(resolution)
+	query.Window.Start = query.Window.End.Add(-time.Duration(query.Window.Days) * 24 * time.Hour)
+	return query
 }

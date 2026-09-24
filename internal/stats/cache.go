@@ -9,10 +9,11 @@ import (
 )
 
 type cacheKey struct {
-	days   int
-	server string
-	zone   string
-	kind   string
+	startUnixNano int64
+	endUnixNano   int64
+	server        string
+	zone          string
+	kind          string
 }
 
 type cacheEntry struct {
@@ -49,8 +50,9 @@ func resultCacheKey(query core.StatsQuery) cacheKey {
 		kind += fmt.Sprintf(":%s:%s", query.UserServerID, query.MediaUserID)
 	}
 	return cacheKey{
-		days: query.Window.Days, server: query.Window.MediaServerID,
-		zone: query.Window.Zone, kind: kind,
+		startUnixNano: query.Window.Start.UnixNano(), endUnixNano: query.Window.End.UnixNano(),
+		server: query.Window.MediaServerID,
+		zone:   query.Window.Zone, kind: kind,
 	}
 }
 
