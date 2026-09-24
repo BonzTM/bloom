@@ -121,23 +121,28 @@ type MetadataProvider struct {
 }
 
 type Request struct {
-	ID                    string
-	Kind                  string
-	Provider              string
-	ProviderID            string
-	Title                 string
-	ReleaseYear           int32
-	PosterPath            string
-	RequesterAccountID    string
-	ProfileID             string
-	Status                string
-	DecisionReason        string
-	DecidedByAccountID    sql.NullString
-	DecidedAt             sql.NullTime
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	DownloadManagerItemID string
-	FailureReason         string
+	ID                      string
+	Kind                    string
+	Provider                string
+	ProviderID              string
+	Title                   string
+	ReleaseYear             int32
+	PosterPath              string
+	RequesterAccountID      string
+	ProfileID               string
+	Status                  string
+	DecisionReason          string
+	DecidedByAccountID      sql.NullString
+	DecidedAt               sql.NullTime
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	DownloadManagerItemID   string
+	FailureReason           string
+	DownloadManagerID       string
+	DispatchQualityProfile  string
+	DispatchRootFolder      string
+	DispatchTags            string
+	LastAvailabilityCheckAt sql.NullTime
 }
 
 type RequestProfile struct {

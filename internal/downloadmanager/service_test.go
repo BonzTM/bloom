@@ -75,7 +75,7 @@ func (*serviceAdapter) Add(context.Context, core.DownloadTitle, core.DownloadOpt
 	return "1", nil
 }
 
-func (*serviceAdapter) Queue(context.Context, string) (core.DownloadProgress, error) {
+func (*serviceAdapter) Queue(context.Context, string, []int) (core.DownloadProgress, error) {
 	return core.DownloadProgress{}, nil
 }
 

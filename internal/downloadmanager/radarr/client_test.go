@@ -11,18 +11,32 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-func TestAddAdoptsExistingMovieWithoutPost(t *testing.T) {
-	var posts atomic.Int32
+func TestAddReconcilesAndSearchesExistingMovieWithoutFile(t *testing.T) {
+	var puts, searches atomic.Int32
+	var updated map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Api-Key") != "secret" {
 			t.Error("missing API key")
 		}
-		switch r.URL.Path {
-		case "/api/v3/movie":
-			if r.Method == http.MethodPost {
-				posts.Add(1)
+		switch {
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet:
+			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "monitored": false, "hasFile": false}})
+		case r.URL.Path == "/api/v3/movie/17" && r.Method == http.MethodPut:
+			puts.Add(1)
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("decode update: %v", err)
 			}
-			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100}})
+			writeTestJSON(t, w, updated)
+		case r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost:
+			searches.Add(1)
+			var command map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+				t.Errorf("decode command: %v", err)
+			}
+			if command["name"] != "MoviesSearch" {
+				t.Errorf("command = %+v", command)
+			}
+			writeTestJSON(t, w, map[string]any{"id": 91})
 		default:
 			http.NotFound(w, r)
 		}
@@ -30,8 +44,12 @@ func TestAddAdoptsExistingMovieWithoutPost(t *testing.T) {
 	defer server.Close()
 	client := newTestClient(t, server)
 	id, err := client.Add(t.Context(), movieTitle(), movieOptions())
-	if err != nil || id != "17" || posts.Load() != 0 {
-		t.Fatalf("Add = %q, %v; posts %d", id, err, posts.Load())
+	if err != nil || id != "17" || puts.Load() != 1 || searches.Load() != 1 {
+		t.Fatalf("Add = %q, %v; puts %d searches %d", id, err, puts.Load(), searches.Load())
+	}
+	if updated["monitored"] != true || updated["qualityProfileId"] != float64(1) ||
+		updated["rootFolderPath"] != "/movies" {
+		t.Fatalf("updated movie = %+v", updated)
 	}
 }
 
@@ -75,8 +93,10 @@ func TestProbeOptionsAndQueueProgress(t *testing.T) {
 			writeTestJSON(t, w, []map[string]any{{"id": 2, "label": "requested"}})
 		case "/api/v3/queue":
 			writeTestJSON(t, w, map[string]any{"records": []map[string]any{{
-				"movieId": 18, "status": "downloading", "size": 1000, "sizeleft": 250,
+				"movieId": 18, "status": "downloading", "size": 1000, "sizeleft": 0,
 			}}})
+		case "/api/v3/movie/18":
+			writeTestJSON(t, w, map[string]any{"id": 18, "hasFile": false})
 		default:
 			http.NotFound(w, r)
 		}
@@ -87,8 +107,9 @@ func TestProbeOptionsAndQueueProgress(t *testing.T) {
 	if err != nil || info.Name != "Main Radarr" || len(info.Options.QualityProfiles) != 1 || len(info.Options.RootFolders) != 1 || len(info.Options.Tags) != 1 {
 		t.Fatalf("Probe = %+v, %v", info, err)
 	}
-	progress, err := client.Queue(t.Context(), "18")
-	if err != nil || progress.Status != "downloading" || progress.Size != 1000 || progress.SizeLeft != 250 {
+	progress, err := client.Queue(t.Context(), "18", nil)
+	if err != nil || progress.Status != "downloading" || progress.Size != 1000 || progress.SizeLeft != 0 ||
+		!progress.Complete || progress.HasFile {
 		t.Fatalf("Queue = %+v, %v", progress, err)
 	}
 }

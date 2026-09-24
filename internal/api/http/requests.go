@@ -34,24 +34,29 @@ type (
 		Status core.SeasonStatus `json:"status"`
 	}
 	requestResponse struct {
-		ID                    string                    `json:"id"`
-		Kind                  core.MediaKind            `json:"kind"`
-		Provider              core.MetadataProviderKind `json:"provider"`
-		ProviderID            string                    `json:"provider_id"`
-		Title                 string                    `json:"title"`
-		Year                  int                       `json:"year"`
-		PosterPath            string                    `json:"poster_path"`
-		RequesterID           string                    `json:"requester_account_id"`
-		ProfileID             string                    `json:"profile_id"`
-		Status                core.RequestStatus        `json:"status"`
-		Seasons               []requestSeasonResponse   `json:"seasons"`
-		DecisionReason        string                    `json:"decision_reason"`
-		FailureReason         string                    `json:"failure_reason"`
-		DownloadManagerItemID string                    `json:"download_manager_item_id"`
-		DecidedBy             string                    `json:"decided_by_account_id"`
-		DecidedAt             *time.Time                `json:"decided_at,omitempty"`
-		CreatedAt             time.Time                 `json:"created_at"`
-		UpdatedAt             time.Time                 `json:"updated_at"`
+		ID                      string                    `json:"id"`
+		Kind                    core.MediaKind            `json:"kind"`
+		Provider                core.MetadataProviderKind `json:"provider"`
+		ProviderID              string                    `json:"provider_id"`
+		Title                   string                    `json:"title"`
+		Year                    int                       `json:"year"`
+		PosterPath              string                    `json:"poster_path"`
+		RequesterID             string                    `json:"requester_account_id"`
+		ProfileID               string                    `json:"profile_id"`
+		Status                  core.RequestStatus        `json:"status"`
+		Seasons                 []requestSeasonResponse   `json:"seasons"`
+		DecisionReason          string                    `json:"decision_reason"`
+		FailureReason           string                    `json:"failure_reason"`
+		DownloadManagerID       string                    `json:"download_manager_id"`
+		DownloadManagerItemID   string                    `json:"download_manager_item_id"`
+		DispatchQualityProfile  string                    `json:"dispatch_quality_profile"`
+		DispatchRootFolder      string                    `json:"dispatch_root_folder"`
+		DispatchTags            []string                  `json:"dispatch_tags"`
+		LastAvailabilityCheckAt *time.Time                `json:"last_availability_check_at,omitempty"`
+		DecidedBy               string                    `json:"decided_by_account_id"`
+		DecidedAt               *time.Time                `json:"decided_at,omitempty"`
+		CreatedAt               time.Time                 `json:"created_at"`
+		UpdatedAt               time.Time                 `json:"updated_at"`
 	}
 )
 
@@ -245,6 +250,8 @@ func decodeRequestCursor(raw string) (*core.RequestCursor, error) {
 
 func requestDTO(item core.MediaRequest) requestResponse {
 	seasons := make([]requestSeasonResponse, 0, len(item.Seasons))
+	dispatchTags := make([]string, len(item.DispatchTags))
+	copy(dispatchTags, item.DispatchTags)
 	for _, season := range item.Seasons {
 		seasons = append(seasons, requestSeasonResponse{Number: season.Number, Status: season.Status})
 	}
@@ -252,7 +259,9 @@ func requestDTO(item core.MediaRequest) requestResponse {
 		ID: item.ID, Kind: item.Kind, Provider: item.Provider, ProviderID: item.ProviderID, Title: item.Title, Year: item.Year,
 		PosterPath: item.PosterPath, RequesterID: item.RequesterID, ProfileID: item.ProfileID, Status: item.Status, Seasons: seasons,
 		DecisionReason: item.DecisionReason, FailureReason: item.FailureReason,
-		DownloadManagerItemID: item.DownloadManagerItemID, DecidedBy: item.DecidedBy,
+		DownloadManagerID: item.DownloadManagerID, DownloadManagerItemID: item.DownloadManagerItemID,
+		DispatchQualityProfile: item.DispatchQualityProfile, DispatchRootFolder: item.DispatchRootFolder,
+		DispatchTags: dispatchTags, LastAvailabilityCheckAt: item.LastAvailabilityCheckAt,
 		DecidedAt: item.DecidedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }

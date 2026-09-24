@@ -1830,7 +1830,7 @@ components:
         status: { $ref: "#/components/schemas/SeasonStatus" }
     MediaRequest:
       type: object
-      required: [id, kind, provider, provider_id, title, year, poster_path, requester_account_id, profile_id, status, seasons, decision_reason, failure_reason, download_manager_item_id, decided_by_account_id, created_at, updated_at]
+      required: [id, kind, provider, provider_id, title, year, poster_path, requester_account_id, profile_id, status, seasons, decision_reason, failure_reason, download_manager_id, download_manager_item_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, decided_by_account_id, created_at, updated_at]
       additionalProperties: false
       properties:
         id: { type: string, format: uuid }
@@ -1849,7 +1849,16 @@ components:
           items: { $ref: "#/components/schemas/RequestSeason" }
         decision_reason: { type: string, x-max-bytes: 1000 }
         failure_reason: { type: string, x-max-bytes: 1000 }
-        download_manager_item_id: { type: string, maxLength: 128 }
+        download_manager_id: { type: string }
+        download_manager_item_id: { type: string, maxLength: 100 }
+        dispatch_quality_profile: { type: string, x-max-bytes: 500 }
+        dispatch_root_folder: { type: string, x-max-bytes: 500 }
+        dispatch_tags:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items: { type: string, minLength: 1, x-max-bytes: 100 }
+        last_availability_check_at: { type: string, format: date-time }
         decided_by_account_id: { type: string }
         decided_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }

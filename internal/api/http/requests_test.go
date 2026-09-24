@@ -54,10 +54,11 @@ func TestCreateRequestAutoApprovalEmitsCreateAndApproveAudits(t *testing.T) {
 
 func TestRequestProgressEnforcesOwnershipAndReturnsLiveState(t *testing.T) {
 	store := &requestHandlerStore{
-		profile: core.RequestProfile{ID: testRequestProfileID, DownloadManagerInstance: "Main Radarr"},
+		profile: core.RequestProfile{ID: testRequestProfileID, DownloadManagerInstance: "Replacement Radarr"},
 		created: core.MediaRequest{
 			ID: "33333333-3333-4333-8333-333333333333", RequesterID: "99999999-9999-4999-8999-999999999999",
-			ProfileID: testRequestProfileID, Status: core.RequestProcessing, DownloadManagerItemID: "77",
+			ProfileID: testRequestProfileID, Status: core.RequestProcessing,
+			DownloadManagerID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", DownloadManagerItemID: "77",
 		},
 	}
 	progress := &staticProgressReader{value: core.DownloadProgress{Status: "downloading", Size: 1000, SizeLeft: 250}}
@@ -78,6 +79,9 @@ func TestRequestProgressEnforcesOwnershipAndReturnsLiveState(t *testing.T) {
 	server.handleRequestProgress(approvedRecorder, approved)
 	if approvedRecorder.Code != http.StatusOK || !strings.Contains(approvedRecorder.Body.String(), `"size_left":250`) || progress.calls != 1 {
 		t.Fatalf("approver progress = %d %s calls=%d", approvedRecorder.Code, approvedRecorder.Body.String(), progress.calls)
+	}
+	if progress.managerID != store.created.DownloadManagerID {
+		t.Fatalf("progress manager = %q, want snapshot %q", progress.managerID, store.created.DownloadManagerID)
 	}
 }
 
@@ -288,13 +292,15 @@ func newHandlerRequestService(t *testing.T, provider core.MetadataProvider) *req
 }
 
 type staticProgressReader struct {
-	value core.DownloadProgress
-	err   error
-	calls int
+	value     core.DownloadProgress
+	err       error
+	calls     int
+	managerID string
 }
 
-func (r *staticProgressReader) Progress(context.Context, string, string) (core.DownloadProgress, error) {
+func (r *staticProgressReader) Progress(_ context.Context, managerID, _ string, _ []int) (core.DownloadProgress, error) {
 	r.calls++
+	r.managerID = managerID
 	return r.value, r.err
 }
 

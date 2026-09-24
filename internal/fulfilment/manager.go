@@ -21,13 +21,14 @@ const (
 
 // Downloader dispatches titles and reads their live progress.
 type Downloader interface {
-	Add(ctx context.Context, managerName string, title core.DownloadTitle, options core.DownloadOptions) (string, error)
-	Progress(ctx context.Context, managerName, managerItemID string) (core.DownloadProgress, error)
+	Resolve(ctx context.Context, name string) (core.DownloadManager, error)
+	Add(ctx context.Context, managerID string, title core.DownloadTitle, options core.DownloadOptions) (string, error)
+	Progress(ctx context.Context, managerID, managerItemID string, seasons []int) (core.DownloadProgress, error)
 }
 
 // Availability determines whether a processing request reached its configured authority.
 type Availability interface {
-	Available(ctx context.Context, request core.MediaRequest, profile core.RequestProfile) (bool, error)
+	Available(ctx context.Context, request core.MediaRequest) (bool, error)
 }
 
 // Audit records fulfilment lifecycle actions.
@@ -50,17 +51,18 @@ type Config struct {
 
 // Dependencies contains the explicit fulfilment boundaries.
 type Dependencies struct {
-	Requests  core.RequestReader
-	Writer    RequestWriter
-	Dispatch  core.RequestDispatchWriter
-	Profiles  core.RequestProfileReader
-	Download  Downloader
-	Available Availability
-	Clock     core.Clock
-	Events    core.RequestEventPublisher
-	Audit     Audit
-	Logger    *slog.Logger
-	Wait      func(context.Context, time.Duration) error
+	Requests             core.RequestReader
+	Writer               RequestWriter
+	Dispatch             core.RequestDispatchWriter
+	AvailabilityRequests core.RequestAvailabilityClaimer
+	Profiles             core.RequestProfileReader
+	Download             Downloader
+	Available            Availability
+	Clock                core.Clock
+	Events               core.RequestEventPublisher
+	Audit                Audit
+	Logger               *slog.Logger
+	Wait                 func(context.Context, time.Duration) error
 }
 
 // Manager supervises dispatch and availability polling.
@@ -81,7 +83,7 @@ func New(config Config, deps Dependencies) (*Manager, error) {
 	if config.RetryBase <= 0 {
 		config.RetryBase = time.Second
 	}
-	if deps.Requests == nil || deps.Writer == nil || deps.Dispatch == nil || deps.Profiles == nil || deps.Download == nil ||
+	if deps.Requests == nil || deps.Writer == nil || deps.Dispatch == nil || deps.AvailabilityRequests == nil || deps.Profiles == nil || deps.Download == nil ||
 		deps.Available == nil || deps.Clock == nil || deps.Events == nil || deps.Audit == nil || deps.Logger == nil {
 		return nil, errors.New("fulfilment manager: all dependencies are required")
 	}
@@ -148,15 +150,18 @@ func (m *Manager) dispatchBatch(ctx context.Context) error {
 }
 
 func (m *Manager) dispatch(ctx context.Context, request core.MediaRequest) error {
-	profile, err := m.deps.Profiles.GetRequestProfile(ctx, request.ProfileID)
-	if err != nil {
-		return m.fail(ctx, request, "request profile is unavailable", err)
+	var err error
+	if request.DownloadManagerID == "" {
+		request, err = m.claimDispatch(ctx, request)
+		if err != nil {
+			return m.fail(ctx, request, core.RequestApproved, "request dispatch target is unavailable", "dispatch", err)
+		}
 	}
 	itemID := request.DownloadManagerItemID
 	if itemID == "" {
-		itemID, err = m.addWithRetry(ctx, request, profile)
+		itemID, err = m.addWithRetry(ctx, request)
 		if err != nil {
-			return m.fail(ctx, request, "download manager dispatch failed", err)
+			return m.fail(ctx, request, core.RequestApproved, "download manager dispatch failed", "dispatch", err)
 		}
 	}
 	updated, err := m.deps.Dispatch.RecordRequestDispatch(ctx, request.ID, itemID, core.NormalizeTime(m.deps.Clock.Now()))
@@ -168,19 +173,37 @@ func (m *Manager) dispatch(ctx context.Context, request core.MediaRequest) error
 	return nil
 }
 
-func (m *Manager) addWithRetry(
-	ctx context.Context, request core.MediaRequest, profile core.RequestProfile,
-) (string, error) {
+func (m *Manager) claimDispatch(ctx context.Context, request core.MediaRequest) (core.MediaRequest, error) {
+	profile, err := m.deps.Profiles.GetRequestProfile(ctx, request.ProfileID)
+	if err != nil {
+		return request, err
+	}
+	manager, err := m.deps.Download.Resolve(ctx, profile.DownloadManagerInstance)
+	if err != nil {
+		return request, err
+	}
+	snapshot := core.RequestDispatchSnapshot{
+		DownloadManagerID: manager.ID, QualityProfile: profile.QualityProfile,
+		RootFolder: profile.RootFolder, Tags: append([]string(nil), profile.Tags...),
+	}
+	return m.deps.Dispatch.ClaimRequestDispatch(
+		ctx, request.ID, snapshot, core.NormalizeTime(m.deps.Clock.Now()),
+	)
+}
+
+func (m *Manager) addWithRetry(ctx context.Context, request core.MediaRequest) (string, error) {
 	title := core.DownloadTitle{
 		Kind: request.Kind, ProviderID: request.ProviderID, Title: request.Title,
 		Year: request.Year, Seasons: seasonNumbers(request.Seasons),
 	}
 	options := core.DownloadOptions{
-		QualityProfile: profile.QualityProfile, RootFolder: profile.RootFolder, Tags: profile.Tags,
+		QualityProfile: request.DispatchQualityProfile,
+		RootFolder:     request.DispatchRootFolder,
+		Tags:           append([]string(nil), request.DispatchTags...),
 	}
 	var last error
 	for attempt := range maxDispatchAttempts {
-		itemID, err := m.deps.Download.Add(ctx, profile.DownloadManagerInstance, title, options)
+		itemID, err := m.deps.Download.Add(ctx, request.DownloadManagerID, title, options)
 		if err == nil {
 			return itemID, nil
 		}
@@ -196,21 +219,17 @@ func (m *Manager) addWithRetry(
 }
 
 func (m *Manager) pollAvailability(ctx context.Context) (bool, error) {
-	status := core.RequestProcessing
-	values, err := m.deps.Requests.ListRequests(ctx, core.RequestListFilter{Status: &status, PageSize: m.config.BatchSize})
+	values, err := m.deps.AvailabilityRequests.ClaimRequestsForAvailability(
+		ctx, m.config.BatchSize, core.NormalizeTime(m.deps.Clock.Now()),
+	)
 	if err != nil {
-		return false, fmt.Errorf("list processing requests: %w", err)
+		return false, fmt.Errorf("claim processing requests: %w", err)
 	}
 	var result error
 	for _, request := range values {
-		profile, profileErr := m.deps.Profiles.GetRequestProfile(ctx, request.ProfileID)
-		if profileErr != nil {
-			result = errors.Join(result, profileErr)
-			continue
-		}
-		available, availabilityErr := m.deps.Available.Available(ctx, request, profile)
+		available, availabilityErr := m.deps.Available.Available(ctx, request)
 		if availabilityErr != nil {
-			result = errors.Join(result, availabilityErr)
+			result = errors.Join(result, m.handleAvailabilityError(ctx, request, availabilityErr))
 			continue
 		}
 		if available {
@@ -220,6 +239,17 @@ func (m *Manager) pollAvailability(ctx context.Context) (bool, error) {
 		}
 	}
 	return len(values) != 0, result
+}
+
+func (m *Manager) handleAvailabilityError(
+	ctx context.Context, request core.MediaRequest, cause error,
+) error {
+	if !terminalAvailabilityError(cause) {
+		return cause
+	}
+	return m.fail(
+		ctx, request, core.RequestProcessing, availabilityFailureReason(cause), "availability", cause,
+	)
 }
 
 func (m *Manager) available(ctx context.Context, request core.MediaRequest) error {
@@ -235,20 +265,20 @@ func (m *Manager) available(ctx context.Context, request core.MediaRequest) erro
 }
 
 func (m *Manager) fail(
-	ctx context.Context, request core.MediaRequest, reason string, cause error,
+	ctx context.Context, request core.MediaRequest, from core.RequestStatus, reason, auditReason string, cause error,
 ) error {
 	if len(reason) > maxFailureReason {
 		reason = reason[:maxFailureReason]
 	}
 	updated, err := m.deps.Writer.TransitionRequest(
-		ctx, request.ID, core.RequestApproved, core.RequestFailed, "", reason, core.NormalizeTime(m.deps.Clock.Now()),
+		ctx, request.ID, from, core.RequestFailed, "", reason, core.NormalizeTime(m.deps.Clock.Now()),
 	)
 	if err != nil {
 		return errors.Join(cause, fmt.Errorf("mark request failed: %w", err))
 	}
 	m.publish(ctx, updated, core.RequestEventFailed)
-	m.audit(ctx, updated, "request.fail", telemetry.AuditFailure, "dispatch")
-	return fmt.Errorf("dispatch request %s: %w", request.ID, cause)
+	m.audit(ctx, updated, "request.fail", telemetry.AuditFailure, auditReason)
+	return fmt.Errorf("fail request %s: %w", request.ID, cause)
 }
 
 func (m *Manager) publish(ctx context.Context, request core.MediaRequest, eventType core.RequestEventType) {
@@ -288,6 +318,30 @@ func retryable(err error) bool {
 	return errors.As(err, &classified) && classified.Retryable
 }
 
+func terminalAvailabilityError(err error) bool {
+	if errors.Is(err, core.ErrNotFound) || errors.Is(err, core.ErrDownloadItemMissing) {
+		return true
+	}
+	if downloadErr, ok := errors.AsType[*core.DownloadManagerError](err); ok {
+		return !downloadErr.Retryable
+	}
+	mediaErr, ok := errors.AsType[*core.MediaServerError](err)
+	return ok && !mediaErr.Retryable
+}
+
+func availabilityFailureReason(err error) string {
+	if downloadErr, ok := errors.AsType[*core.DownloadManagerError](err); ok {
+		return "availability check failed: " + string(downloadErr.Kind)
+	}
+	if mediaErr, ok := errors.AsType[*core.MediaServerError](err); ok {
+		return "availability check failed: " + string(mediaErr.Kind)
+	}
+	if errors.Is(err, core.ErrNotFound) {
+		return "availability check failed: dependency not found"
+	}
+	return "availability check failed: download item missing"
+}
+
 func seasonNumbers(values []core.RequestSeason) []int {
 	result := make([]int, 0, len(values))
 	for _, value := range values {
@@ -307,20 +361,22 @@ func waitContext(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// DownloadAvailability uses a manager's file or completion signal.
+// DownloadAvailability uses a manager's authoritative file signal.
 type DownloadAvailability struct {
 	Download Downloader
 }
 
 // Available reports the manager's authoritative completion state.
 func (a DownloadAvailability) Available(
-	ctx context.Context, request core.MediaRequest, profile core.RequestProfile,
+	ctx context.Context, request core.MediaRequest,
 ) (bool, error) {
-	progress, err := a.Download.Progress(ctx, profile.DownloadManagerInstance, request.DownloadManagerItemID)
+	progress, err := a.Download.Progress(
+		ctx, request.DownloadManagerID, request.DownloadManagerItemID, seasonNumbers(request.Seasons),
+	)
 	if err != nil {
 		return false, err
 	}
-	return progress.HasFile || progress.Complete, nil
+	return progress.HasFile, nil
 }
 
 // MediaServerAvailability looks up provider identifiers on registered media servers.
@@ -338,7 +394,7 @@ type MediaAvailability struct {
 
 // Available reports whether a media server contains the requested title.
 func (a MediaAvailability) Available(
-	ctx context.Context, request core.MediaRequest, _ core.RequestProfile,
+	ctx context.Context, request core.MediaRequest,
 ) (bool, error) {
 	available, _, err := a.MediaServers.HasTitle(
 		ctx, request.Kind, request.Provider, request.ProviderID, seasonNumbers(request.Seasons),

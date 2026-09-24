@@ -25,7 +25,7 @@ type managerResolver interface {
 }
 
 type progressReader interface {
-	Progress(ctx context.Context, managerName, managerItemID string) (core.DownloadProgress, error)
+	Progress(ctx context.Context, managerID, managerItemID string, seasons []int) (core.DownloadProgress, error)
 }
 
 type fulfilmentEnqueuer interface {
@@ -289,11 +289,17 @@ func (s *Service) Progress(
 	if request.Status != core.RequestProcessing || s.progress == nil {
 		return core.DownloadProgress{}, core.ErrNotFound
 	}
-	profile, err := s.profiles.GetRequestProfile(ctx, request.ProfileID)
-	if err != nil {
-		return core.DownloadProgress{}, fmt.Errorf("get request profile for progress: %w", err)
+	return s.progress.Progress(
+		ctx, request.DownloadManagerID, request.DownloadManagerItemID, requestSeasonNumbers(request.Seasons),
+	)
+}
+
+func requestSeasonNumbers(seasons []core.RequestSeason) []int {
+	result := make([]int, 0, len(seasons))
+	for _, season := range seasons {
+		result = append(result, season.Number)
 	}
-	return s.progress.Progress(ctx, profile.DownloadManagerInstance, request.DownloadManagerItemID)
+	return result
 }
 
 func (s *Service) normalizeProfileTarget(ctx context.Context, profile *core.RequestProfile) error {

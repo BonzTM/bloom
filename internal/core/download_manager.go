@@ -119,7 +119,7 @@ type DownloadProgress struct {
 type DownloadManagerAdapter interface {
 	Probe(ctx context.Context) (DownloadManagerInfo, error)
 	Add(ctx context.Context, title DownloadTitle, options DownloadOptions) (string, error)
-	Queue(ctx context.Context, managerID string) (DownloadProgress, error)
+	Queue(ctx context.Context, managerID string, seasons []int) (DownloadProgress, error)
 }
 
 // DownloadManagerReader retrieves encrypted registrations and public pages.

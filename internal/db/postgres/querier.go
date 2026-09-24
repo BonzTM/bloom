@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
+	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
@@ -80,6 +81,7 @@ type Querier interface {
 	ListRequestProfiles(ctx context.Context, arg ListRequestProfilesParams) ([]RequestProfile, error)
 	ListRequestSeasons(ctx context.Context, requestID string) ([]ListRequestSeasonsRow, error)
 	ListRequests(ctx context.Context, arg ListRequestsParams) ([]Request, error)
+	ListRequestsForAvailability(ctx context.Context, pageSize int32) ([]Request, error)
 	ListRoleRequestQuotasForAccount(ctx context.Context, accountID string) ([]RoleRequestQuota, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
@@ -88,6 +90,7 @@ type Querier interface {
 	RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
+	StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error)
 	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)
 	TransitionRequestSeasons(ctx context.Context, arg TransitionRequestSeasonsParams) error
 	TrimWatchPositions(ctx context.Context, watchID string) error

@@ -106,13 +106,16 @@ func (c *Client) Add(
 		return "", err
 	}
 	if existing != nil {
-		configureSeries(existing, qualityID, options.RootFolder, tags, title.Seasons)
+		newSeasons := configureSeries(existing, qualityID, options.RootFolder, tags, title.Seasons, true)
+		if err := c.searchSeasons(ctx, *existing.Id, newSeasons); err != nil {
+			return "", err
+		}
 		if err := c.http.PutJSON(ctx, "monitor_seasons", "/api/v3/series/"+strconv.FormatInt(int64(*existing.Id), 10), *existing, existing); err != nil {
 			return "", err
 		}
 		return strconv.FormatInt(int64(*existing.Id), 10), nil
 	}
-	configureSeries(&series, qualityID, options.RootFolder, tags, title.Seasons)
+	configureSeries(&series, qualityID, options.RootFolder, tags, title.Seasons, false)
 	var added sonarrapi.SeriesResource
 	if err := c.http.PostJSON(ctx, "add", "/api/v3/series", series, &added); err != nil {
 		return "", err
@@ -121,6 +124,19 @@ func (c *Client) Add(
 		return "", managerError("add", core.DownloadManagerMalformed, errors.New("missing series id"))
 	}
 	return strconv.FormatInt(int64(*added.Id), 10), nil
+}
+
+func (c *Client) searchSeasons(ctx context.Context, seriesID int32, seasons []int) error {
+	for _, season := range seasons {
+		command := map[string]any{
+			"name": "SeasonSearch", "seriesId": seriesID, "seasonNumber": season,
+		}
+		var response map[string]any
+		if err := c.http.PostJSON(ctx, "search_season", "/api/v3/command", command, &response); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) lookup(ctx context.Context, tmdbID int32) (sonarrapi.SeriesResource, error) {
@@ -152,7 +168,7 @@ func (c *Client) find(ctx context.Context, tvdbID int32) (*sonarrapi.SeriesResou
 }
 
 // Queue reads live queue progress and falls back to the series file state.
-func (c *Client) Queue(ctx context.Context, managerID string) (core.DownloadProgress, error) {
+func (c *Client) Queue(ctx context.Context, managerID string, seasons []int) (core.DownloadProgress, error) {
 	id, err := parsePositiveInt32(managerID)
 	if err != nil {
 		return core.DownloadProgress{}, err
@@ -162,10 +178,12 @@ func (c *Client) Queue(ctx context.Context, managerID string) (core.DownloadProg
 	if err := c.http.GetJSON(ctx, "queue", path, &queue); err != nil {
 		return core.DownloadProgress{}, err
 	}
+	progress := core.DownloadProgress{Status: "not_queued"}
 	if queue.Records != nil {
 		for _, item := range *queue.Records {
 			if item.SeriesId != nil && *item.SeriesId == id {
-				return queueProgress(item), nil
+				progress = queueProgress(item)
+				break
 			}
 		}
 	}
@@ -173,17 +191,22 @@ func (c *Client) Queue(ctx context.Context, managerID string) (core.DownloadProg
 	if err := c.http.GetJSON(ctx, "series", "/api/v3/series/"+managerID, &series); err != nil {
 		return core.DownloadProgress{}, err
 	}
-	complete := monitoredSeasonsComplete(series)
-	return core.DownloadProgress{Status: "not_queued", Complete: complete, HasFile: complete}, nil
+	hasFile := requestedSeasonsComplete(series, seasons)
+	progress.HasFile = hasFile
+	if progress.Status == "not_queued" {
+		progress.Complete = hasFile
+	}
+	return progress, nil
 }
 
 // CloseIdleConnections releases pooled connections.
 func (c *Client) CloseIdleConnections() { c.http.CloseIdleConnections() }
 
 func configureSeries(
-	series *sonarrapi.SeriesResource, qualityID int32, root string, tags []int32, seasons []int,
-) {
+	series *sonarrapi.SeriesResource, qualityID int32, root string, tags []int32, seasons []int, preserve bool,
+) []int {
 	monitored, search := true, true
+	newSeasons := make([]int, 0, len(seasons))
 	series.QualityProfileId = &qualityID
 	series.RootFolderPath = &root
 	series.Tags = &tags
@@ -192,11 +215,21 @@ func configureSeries(
 		for index := range *series.Seasons {
 			season := &(*series.Seasons)[index]
 			selected := season.SeasonNumber != nil && containsSeason(seasons, int(*season.SeasonNumber))
-			season.Monitored = &selected
+			wasMonitored := season.Monitored != nil && *season.Monitored
+			if selected && !wasMonitored {
+				newSeasons = append(newSeasons, int(*season.SeasonNumber))
+			}
+			value := selected || preserve && wasMonitored
+			season.Monitored = &value
 		}
 	}
-	monitor := sonarrapi.MonitorTypes("none")
-	series.AddOptions = &sonarrapi.AddSeriesOptions{Monitor: &monitor, SearchForMissingEpisodes: &search}
+	if preserve {
+		series.AddOptions = nil
+	} else {
+		monitor := sonarrapi.MonitorTypes("none")
+		series.AddOptions = &sonarrapi.AddSeriesOptions{Monitor: &monitor, SearchForMissingEpisodes: &search}
+	}
+	return newSeasons
 }
 
 func containsSeason(values []int, target int) bool {
@@ -239,21 +272,24 @@ func queueProgress(item sonarrapi.QueueResource) core.DownloadProgress {
 	}
 }
 
-func monitoredSeasonsComplete(series sonarrapi.SeriesResource) bool {
+func requestedSeasonsComplete(series sonarrapi.SeriesResource, requested []int) bool {
+	if len(requested) == 0 {
+		return false
+	}
 	if series.Seasons == nil {
 		return statisticsComplete(series.Statistics)
 	}
-	monitored := 0
+	complete := 0
 	for _, season := range *series.Seasons {
-		if season.Monitored == nil || !*season.Monitored {
+		if season.SeasonNumber == nil || !containsSeason(requested, int(*season.SeasonNumber)) {
 			continue
 		}
-		monitored++
 		if !seasonStatisticsComplete(season.Statistics) {
 			return false
 		}
+		complete++
 	}
-	return monitored > 0
+	return complete == len(requested)
 }
 
 func statisticsComplete(statistics *sonarrapi.SeriesStatisticsResource) bool {

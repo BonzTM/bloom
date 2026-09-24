@@ -112,7 +112,13 @@ UPDATE requests SET
     decision_reason = CASE WHEN status IN ('pending', 'failed') THEN sqlc.arg(decision_reason) ELSE decision_reason END,
     decided_by_account_id = CASE WHEN status IN ('pending', 'failed') THEN sqlc.arg(decided_by_account_id) ELSE decided_by_account_id END,
     decided_at = CASE WHEN status IN ('pending', 'failed') THEN sqlc.arg(decided_at) ELSE decided_at END,
-    failure_reason = CASE WHEN status = 'approved' THEN sqlc.arg(decision_reason) ELSE '' END,
+    failure_reason = CASE WHEN status IN ('approved', 'processing') THEN sqlc.arg(decision_reason) ELSE '' END,
+    download_manager_id = CASE WHEN status = 'failed' THEN '' ELSE download_manager_id END,
+    download_manager_item_id = CASE WHEN status = 'failed' THEN '' ELSE download_manager_item_id END,
+    dispatch_quality_profile = CASE WHEN status = 'failed' THEN '' ELSE dispatch_quality_profile END,
+    dispatch_root_folder = CASE WHEN status = 'failed' THEN '' ELSE dispatch_root_folder END,
+    dispatch_tags = CASE WHEN status = 'failed' THEN '[]' ELSE dispatch_tags END,
+    last_availability_check_at = CASE WHEN status = 'failed' THEN NULL ELSE last_availability_check_at END,
     updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND status = sqlc.arg(from_status);
 
@@ -121,9 +127,23 @@ UPDATE request_seasons SET status = sqlc.arg(to_status) WHERE request_id = sqlc.
 
 -- name: RecordRequestDispatch :execrows
 UPDATE requests SET status = 'processing', download_manager_item_id = sqlc.arg(manager_item_id),
-    failure_reason = '', updated_at = sqlc.arg(updated_at)
+    failure_reason = '', last_availability_check_at = NULL, updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND status = 'approved'
+  AND download_manager_id <> ''
   AND (download_manager_item_id = '' OR download_manager_item_id = sqlc.arg(manager_item_id));
+
+-- name: ClaimRequestDispatch :execrows
+UPDATE requests SET
+    download_manager_id = sqlc.arg(download_manager_id),
+    dispatch_quality_profile = sqlc.arg(dispatch_quality_profile),
+    dispatch_root_folder = sqlc.arg(dispatch_root_folder),
+    dispatch_tags = sqlc.arg(dispatch_tags),
+    updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND status = 'approved' AND download_manager_id = '';
+
+-- name: StampRequestAvailabilityCheck :execrows
+UPDATE requests SET last_availability_check_at = sqlc.arg(checked_at)
+WHERE id = sqlc.arg(id) AND status = 'processing';
 
 -- name: CountRequestedMoviesSince :one
 SELECT COUNT(*) FROM requests

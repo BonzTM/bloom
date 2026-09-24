@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -27,6 +28,7 @@ var (
 	_ core.RequestReader              = (*requests)(nil)
 	_ core.RequestWriter              = (*requests)(nil)
 	_ core.RequestDispatchWriter      = (*requests)(nil)
+	_ core.RequestAvailabilityClaimer = (*requests)(nil)
 	_ core.RequestQuotaReader         = (*requests)(nil)
 	_ core.RequestQuotaWriter         = (*requests)(nil)
 	_ core.AccountRequestQuotaDeleter = (*requests)(nil)
@@ -223,7 +225,10 @@ func (s *requests) GetRequest(ctx context.Context, id string) (core.MediaRequest
 	if err != nil {
 		return core.MediaRequest{}, mapNotFound("get request", err)
 	}
-	request := postgresRequest(row)
+	request, err := postgresRequest(row)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
 	seasons, err := s.postgres.ListRequestSeasons(ctx, id)
 	if err != nil {
 		return core.MediaRequest{}, fmt.Errorf("list request seasons: %w", err)
@@ -311,7 +316,10 @@ func (s *requests) listPostgresRequests(ctx context.Context, filter core.Request
 	}
 	result := make([]core.MediaRequest, 0, len(rows))
 	for _, row := range rows {
-		request := postgresRequest(row)
+		request, mapErr := postgresRequest(row)
+		if mapErr != nil {
+			return nil, mapErr
+		}
 		seasons, listErr := s.postgres.ListRequestSeasons(ctx, request.ID)
 		if listErr != nil {
 			return nil, fmt.Errorf("list request seasons: %w", listErr)
@@ -346,24 +354,182 @@ func (s *requests) RecordRequestDispatch(
 	if !core.ValidID(id) || managerItemID == "" || len(managerItemID) > 100 {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
-	var rows int64
-	var err error
+	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		return s.recordDispatch(ctx, tx, id, managerItemID, at)
+	})
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	return s.GetRequest(ctx, id)
+}
+
+func (s *requests) recordDispatch(
+	ctx context.Context, tx *sql.Tx, id, managerItemID string, at time.Time,
+) error {
 	if s.sqlite != nil {
-		rows, err = s.sqlite.RecordRequestDispatch(ctx, sqlite.RecordRequestDispatchParams{
+		q := s.sqlite.WithTx(tx)
+		rows, err := q.RecordRequestDispatch(ctx, sqlite.RecordRequestDispatchParams{
 			ManagerItemID: managerItemID, UpdatedAt: formatSQLiteTime(at), ID: id,
 		})
-	} else {
-		rows, err = s.postgres.RecordRequestDispatch(ctx, postgres.RecordRequestDispatchParams{
-			ManagerItemID: managerItemID, UpdatedAt: core.NormalizeTime(at), ID: id,
-		})
+		if resultErr := dispatchTransitionResult(rows, err); resultErr != nil {
+			return resultErr
+		}
+		if err := q.TransitionRequestSeasons(ctx, sqlite.TransitionRequestSeasonsParams{RequestID: id, ToStatus: string(core.RequestProcessing)}); err != nil {
+			return fmt.Errorf("record request dispatch seasons: %w", err)
+		}
+		return nil
 	}
+	q := s.postgres.WithTx(tx)
+	rows, err := q.RecordRequestDispatch(ctx, postgres.RecordRequestDispatchParams{
+		ManagerItemID: managerItemID, UpdatedAt: core.NormalizeTime(at), ID: id,
+	})
+	if resultErr := dispatchTransitionResult(rows, err); resultErr != nil {
+		return resultErr
+	}
+	if err := q.TransitionRequestSeasons(ctx, postgres.TransitionRequestSeasonsParams{RequestID: id, ToStatus: string(core.RequestProcessing)}); err != nil {
+		return fmt.Errorf("record request dispatch seasons: %w", err)
+	}
+	return nil
+}
+
+func dispatchTransitionResult(rows int64, err error) error {
 	if err != nil {
-		return core.MediaRequest{}, fmt.Errorf("record request dispatch: %w", err)
+		return fmt.Errorf("record request dispatch: %w", err)
+	}
+	if rows != 1 {
+		return core.ErrInvalidTransition
+	}
+	return nil
+}
+
+func (s *requests) ClaimRequestDispatch(
+	ctx context.Context, id string, snapshot core.RequestDispatchSnapshot, at time.Time,
+) (core.MediaRequest, error) {
+	if !core.ValidID(id) || core.ValidateRequestDispatchSnapshot(snapshot) != nil {
+		return core.MediaRequest{}, core.ErrInvalidArgument
+	}
+	tags, err := json.Marshal(snapshot.Tags)
+	if err != nil {
+		return core.MediaRequest{}, fmt.Errorf("encode dispatch tags: %w", err)
+	}
+	rows, err := s.claimRequestDispatch(ctx, id, snapshot, string(tags), at)
+	if err != nil {
+		return core.MediaRequest{}, err
 	}
 	if rows != 1 {
 		return core.MediaRequest{}, core.ErrInvalidTransition
 	}
 	return s.GetRequest(ctx, id)
+}
+
+func (s *requests) claimRequestDispatch(
+	ctx context.Context, id string, snapshot core.RequestDispatchSnapshot, tags string, at time.Time,
+) (int64, error) {
+	if s.sqlite != nil {
+		rows, err := s.sqlite.ClaimRequestDispatch(ctx, sqlite.ClaimRequestDispatchParams{
+			DownloadManagerID: snapshot.DownloadManagerID, DispatchQualityProfile: snapshot.QualityProfile,
+			DispatchRootFolder: snapshot.RootFolder, DispatchTags: tags, UpdatedAt: formatSQLiteTime(at), ID: id,
+		})
+		return rows, wrapRequestClaimError(err)
+	}
+	rows, err := s.postgres.ClaimRequestDispatch(ctx, postgres.ClaimRequestDispatchParams{
+		DownloadManagerID: snapshot.DownloadManagerID, DispatchQualityProfile: snapshot.QualityProfile,
+		DispatchRootFolder: snapshot.RootFolder, DispatchTags: tags, UpdatedAt: core.NormalizeTime(at), ID: id,
+	})
+	return rows, wrapRequestClaimError(err)
+}
+
+func wrapRequestClaimError(err error) error {
+	if err != nil {
+		return fmt.Errorf("claim request dispatch: %w", err)
+	}
+	return nil
+}
+
+func (s *requests) ClaimRequestsForAvailability(
+	ctx context.Context, pageSize int, at time.Time,
+) ([]core.MediaRequest, error) {
+	if pageSize < 1 || pageSize > maxRequestQueryPageSize {
+		return nil, core.ErrInvalidArgument
+	}
+	var result []core.MediaRequest
+	if s.sqlite != nil {
+		err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+			var claimErr error
+			result, claimErr = claimSQLiteAvailability(ctx, sqlite.New(conn), pageSize, at)
+			return claimErr
+		})
+		return result, err
+	}
+	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		var claimErr error
+		result, claimErr = claimPostgresAvailability(ctx, s.postgres.WithTx(tx), pageSize, at)
+		return claimErr
+	})
+	return result, err
+}
+
+func claimSQLiteAvailability(
+	ctx context.Context, q *sqlite.Queries, pageSize int, at time.Time,
+) ([]core.MediaRequest, error) {
+	rows, err := q.ListRequestsForAvailability(ctx, int64(pageSize))
+	if err != nil {
+		return nil, fmt.Errorf("list requests for availability: %w", err)
+	}
+	result := make([]core.MediaRequest, 0, len(rows))
+	checkedAt := formatSQLiteTime(at)
+	for _, row := range rows {
+		request, mapErr := sqliteRequestWithSeasons(ctx, q, row)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		count, stampErr := q.StampRequestAvailabilityCheck(ctx, sqlite.StampRequestAvailabilityCheckParams{
+			CheckedAt: sql.NullString{String: checkedAt, Valid: true}, ID: row.ID,
+		})
+		if stampErr != nil || count != 1 {
+			return nil, availabilityStampError(stampErr)
+		}
+		request.LastAvailabilityCheckAt = new(core.NormalizeTime(at))
+		result = append(result, request)
+	}
+	return result, nil
+}
+
+func claimPostgresAvailability(
+	ctx context.Context, q *postgres.Queries, pageSize int, at time.Time,
+) ([]core.MediaRequest, error) {
+	limit, err := checkedInt32(pageSize)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.ListRequestsForAvailability(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list requests for availability: %w", err)
+	}
+	result := make([]core.MediaRequest, 0, len(rows))
+	checkedAt := core.NormalizeTime(at)
+	for _, row := range rows {
+		request, mapErr := postgresRequestWithSeasons(ctx, q, row)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		count, stampErr := q.StampRequestAvailabilityCheck(ctx, postgres.StampRequestAvailabilityCheckParams{
+			CheckedAt: sql.NullTime{Time: checkedAt, Valid: true}, ID: row.ID,
+		})
+		if stampErr != nil || count != 1 {
+			return nil, availabilityStampError(stampErr)
+		}
+		request.LastAvailabilityCheckAt = new(checkedAt)
+		result = append(result, request)
+	}
+	return result, nil
+}
+
+func availabilityStampError(err error) error {
+	if err != nil {
+		return fmt.Errorf("stamp request availability check: %w", err)
+	}
+	return core.ErrInvalidTransition
 }
 
 func (s *requests) transition(ctx context.Context, tx *sql.Tx, id string, from, to core.RequestStatus, actorID, reason string, at time.Time) error {
@@ -399,6 +565,44 @@ func (s *requests) transition(ctx context.Context, tx *sql.Tx, id string, from, 
 	return nil
 }
 
+func sqliteRequestWithSeasons(
+	ctx context.Context, q *sqlite.Queries, row sqlite.Request,
+) (core.MediaRequest, error) {
+	request, err := sqliteRequest(row)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	seasons, err := q.ListRequestSeasons(ctx, row.ID)
+	if err != nil {
+		return core.MediaRequest{}, fmt.Errorf("list request seasons: %w", err)
+	}
+	for _, season := range seasons {
+		request.Seasons = append(request.Seasons, core.RequestSeason{
+			Number: int(season.SeasonNumber), Status: core.SeasonStatus(season.Status),
+		})
+	}
+	return request, nil
+}
+
+func postgresRequestWithSeasons(
+	ctx context.Context, q *postgres.Queries, row postgres.Request,
+) (core.MediaRequest, error) {
+	request, err := postgresRequest(row)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	seasons, err := q.ListRequestSeasons(ctx, row.ID)
+	if err != nil {
+		return core.MediaRequest{}, fmt.Errorf("list request seasons: %w", err)
+	}
+	for _, season := range seasons {
+		request.Seasons = append(request.Seasons, core.RequestSeason{
+			Number: int(season.SeasonNumber), Status: core.SeasonStatus(season.Status),
+		})
+	}
+	return request, nil
+}
+
 func sqliteRequest(row sqlite.Request) (core.MediaRequest, error) {
 	created, err := parseSQLiteTime(row.CreatedAt)
 	if err != nil {
@@ -412,28 +616,60 @@ func sqliteRequest(row sqlite.Request) (core.MediaRequest, error) {
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
+	lastCheck, err := parseNullableSQLiteTime(row.LastAvailabilityCheckAt)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	tags, err := decodeDispatchTags(row.DispatchTags)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
 	return core.MediaRequest{
 		ID: row.ID, Kind: core.MediaKind(row.Kind), Provider: core.MetadataProviderKind(row.Provider), ProviderID: row.ProviderID,
 		Title: row.Title, Year: int(row.ReleaseYear), PosterPath: row.PosterPath, RequesterID: row.RequesterAccountID, ProfileID: row.ProfileID,
 		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, FailureReason: row.FailureReason,
-		DownloadManagerItemID: row.DownloadManagerItemID, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
+		DownloadManagerID: row.DownloadManagerID, DownloadManagerItemID: row.DownloadManagerItemID,
+		DispatchQualityProfile: row.DispatchQualityProfile, DispatchRootFolder: row.DispatchRootFolder, DispatchTags: tags,
+		LastAvailabilityCheckAt: lastCheck, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
 		CreatedAt: created, UpdatedAt: updated,
 	}, nil
 }
 
-func postgresRequest(row postgres.Request) core.MediaRequest {
+func postgresRequest(row postgres.Request) (core.MediaRequest, error) {
 	var decided *time.Time
 	if row.DecidedAt.Valid {
 		value := core.NormalizeTime(row.DecidedAt.Time)
 		decided = &value
 	}
+	var lastCheck *time.Time
+	if row.LastAvailabilityCheckAt.Valid {
+		value := core.NormalizeTime(row.LastAvailabilityCheckAt.Time)
+		lastCheck = &value
+	}
+	tags, err := decodeDispatchTags(row.DispatchTags)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
 	return core.MediaRequest{
 		ID: row.ID, Kind: core.MediaKind(row.Kind), Provider: core.MetadataProviderKind(row.Provider), ProviderID: row.ProviderID,
 		Title: row.Title, Year: int(row.ReleaseYear), PosterPath: row.PosterPath, RequesterID: row.RequesterAccountID, ProfileID: row.ProfileID,
 		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, FailureReason: row.FailureReason,
-		DownloadManagerItemID: row.DownloadManagerItemID, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
+		DownloadManagerID: row.DownloadManagerID, DownloadManagerItemID: row.DownloadManagerItemID,
+		DispatchQualityProfile: row.DispatchQualityProfile, DispatchRootFolder: row.DispatchRootFolder, DispatchTags: tags,
+		LastAvailabilityCheckAt: lastCheck, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
 		CreatedAt: core.NormalizeTime(row.CreatedAt), UpdatedAt: core.NormalizeTime(row.UpdatedAt),
+	}, nil
+}
+
+func decodeDispatchTags(value string) ([]string, error) {
+	var tags []string
+	if err := json.Unmarshal([]byte(value), &tags); err != nil {
+		return nil, fmt.Errorf("decode request dispatch tags: %w", err)
 	}
+	if tags == nil {
+		tags = []string{}
+	}
+	return tags, nil
 }
 
 func parseNullableSQLiteTime(value sql.NullString) (*time.Time, error) {

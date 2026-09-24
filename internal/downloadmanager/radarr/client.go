@@ -100,14 +100,14 @@ func (c *Client) Add(
 	if err != nil {
 		return "", err
 	}
-	if id, ok := existingMovieID(existing, tmdbID); ok {
-		return strconv.FormatInt(int64(id), 10), nil
+	if movie, ok := existingMovie(existing, tmdbID); ok {
+		return c.reconcileMovie(ctx, movie, qualityID, options.RootFolder, tags)
 	}
 	movie, err := c.lookup(ctx, tmdbID)
 	if err != nil {
 		return "", err
 	}
-	configureMovie(&movie, qualityID, options.RootFolder, tags)
+	configureMovie(&movie, qualityID, options.RootFolder, tags, true)
 	var added radarrapi.MovieResource
 	if err := c.http.PostJSON(ctx, "add", "/api/v3/movie", movie, &added); err != nil {
 		return "", err
@@ -116,6 +116,25 @@ func (c *Client) Add(
 		return "", malformedError("add", errors.New("missing movie id"))
 	}
 	return strconv.FormatInt(int64(*added.Id), 10), nil
+}
+
+func (c *Client) reconcileMovie(
+	ctx context.Context, movie radarrapi.MovieResource, qualityID int32, root string, tags []int32,
+) (string, error) {
+	id := *movie.Id
+	configureMovie(&movie, qualityID, root, tags, false)
+	path := "/api/v3/movie/" + strconv.FormatInt(int64(id), 10)
+	if err := c.http.PutJSON(ctx, "reconcile", path, movie, &movie); err != nil {
+		return "", err
+	}
+	if movie.HasFile == nil || !*movie.HasFile {
+		command := map[string]any{"name": "MoviesSearch", "movieIds": []int32{id}}
+		var response map[string]any
+		if err := c.http.PostJSON(ctx, "search", "/api/v3/command", command, &response); err != nil {
+			return "", err
+		}
+	}
+	return strconv.FormatInt(int64(id), 10), nil
 }
 
 func (c *Client) movies(ctx context.Context, tmdbID int32) ([]radarrapi.MovieResource, error) {
@@ -140,7 +159,7 @@ func (c *Client) lookup(ctx context.Context, tmdbID int32) (radarrapi.MovieResou
 }
 
 // Queue reads live queue progress and falls back to the movie's file state.
-func (c *Client) Queue(ctx context.Context, managerID string) (core.DownloadProgress, error) {
+func (c *Client) Queue(ctx context.Context, managerID string, _ []int) (core.DownloadProgress, error) {
 	id, err := parsePositiveInt32(managerID)
 	if err != nil {
 		return core.DownloadProgress{}, err
@@ -150,10 +169,12 @@ func (c *Client) Queue(ctx context.Context, managerID string) (core.DownloadProg
 	if err := c.http.GetJSON(ctx, "queue", path, &queue); err != nil {
 		return core.DownloadProgress{}, err
 	}
+	progress := core.DownloadProgress{Status: "not_queued"}
 	if queue.Records != nil {
 		for _, item := range *queue.Records {
 			if item.MovieId != nil && *item.MovieId == id {
-				return queueProgress(item), nil
+				progress = queueProgress(item)
+				break
 			}
 		}
 	}
@@ -162,7 +183,11 @@ func (c *Client) Queue(ctx context.Context, managerID string) (core.DownloadProg
 		return core.DownloadProgress{}, err
 	}
 	hasFile := movie.HasFile != nil && *movie.HasFile
-	return core.DownloadProgress{Status: "not_queued", Complete: hasFile, HasFile: hasFile}, nil
+	progress.HasFile = hasFile
+	if progress.Status == "not_queued" {
+		progress.Complete = hasFile
+	}
+	return progress, nil
 }
 
 // CloseIdleConnections releases pooled connections.
@@ -196,22 +221,26 @@ func parsePositiveInt32(value string) (int32, error) {
 	return int32(parsed), nil
 }
 
-func existingMovieID(values []radarrapi.MovieResource, tmdbID int32) (int32, bool) {
+func existingMovie(values []radarrapi.MovieResource, tmdbID int32) (radarrapi.MovieResource, bool) {
 	for _, value := range values {
 		if value.TmdbId != nil && *value.TmdbId == tmdbID && value.Id != nil && *value.Id > 0 {
-			return *value.Id, true
+			return value, true
 		}
 	}
-	return 0, false
+	return radarrapi.MovieResource{}, false
 }
 
-func configureMovie(movie *radarrapi.MovieResource, qualityID int32, root string, tags []int32) {
+func configureMovie(movie *radarrapi.MovieResource, qualityID int32, root string, tags []int32, add bool) {
 	monitored, search := true, true
 	movie.QualityProfileId = &qualityID
 	movie.RootFolderPath = &root
 	movie.Tags = &tags
 	movie.Monitored = &monitored
-	movie.AddOptions = &radarrapi.AddMovieOptions{SearchForMovie: &search}
+	if add {
+		movie.AddOptions = &radarrapi.AddMovieOptions{SearchForMovie: &search}
+	} else {
+		movie.AddOptions = nil
+	}
 }
 
 func queueProgress(item radarrapi.QueueResource) core.DownloadProgress {

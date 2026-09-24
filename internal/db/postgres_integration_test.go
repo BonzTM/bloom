@@ -70,6 +70,7 @@ func TestPostgresEngineSuite(t *testing.T) {
 	assertColumns(t, pool, postgresWatchColumns, expectedWatchColumns)
 	assertColumns(t, pool, postgresWatchSegmentColumns, expectedWatchSegmentColumns)
 	assertColumns(t, pool, postgresWatchPositionColumns, expectedWatchPositionColumns)
+	assertColumns(t, pool, postgresRequestColumns, expectedRequestColumns)
 }
 
 func postgresSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
@@ -112,6 +113,10 @@ func postgresWatchSegmentColumns(ctx context.Context, pool *sql.DB) ([]string, e
 
 func postgresWatchPositionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return postgresTableColumns(ctx, pool, "watch_positions")
+}
+
+func postgresRequestColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "requests")
 }
 
 func postgresTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {

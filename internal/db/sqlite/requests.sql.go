@@ -10,6 +10,40 @@ import (
 	"database/sql"
 )
 
+const claimRequestDispatch = `-- name: ClaimRequestDispatch :execrows
+UPDATE requests SET
+    download_manager_id = ?1,
+    dispatch_quality_profile = ?2,
+    dispatch_root_folder = ?3,
+    dispatch_tags = ?4,
+    updated_at = ?5
+WHERE id = ?6 AND status = 'approved' AND download_manager_id = ''
+`
+
+type ClaimRequestDispatchParams struct {
+	DownloadManagerID      string
+	DispatchQualityProfile string
+	DispatchRootFolder     string
+	DispatchTags           string
+	UpdatedAt              string
+	ID                     string
+}
+
+func (q *Queries) ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimRequestDispatch,
+		arg.DownloadManagerID,
+		arg.DispatchQualityProfile,
+		arg.DispatchRootFolder,
+		arg.DispatchTags,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countActiveRequestSeason = `-- name: CountActiveRequestSeason :one
 SELECT COUNT(*)
 FROM request_seasons
@@ -306,7 +340,7 @@ func (q *Queries) GetMetadataProvider(ctx context.Context, kind string) (Metadat
 }
 
 const getRequest = `-- name: GetRequest :one
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason FROM requests WHERE id = ?1
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, last_availability_check_at FROM requests WHERE id = ?1
 `
 
 func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
@@ -330,6 +364,11 @@ func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
 		&i.UpdatedAt,
 		&i.DownloadManagerItemID,
 		&i.FailureReason,
+		&i.DownloadManagerID,
+		&i.DispatchQualityProfile,
+		&i.DispatchRootFolder,
+		&i.DispatchTags,
+		&i.LastAvailabilityCheckAt,
 	)
 	return i, err
 }
@@ -484,7 +523,7 @@ func (q *Queries) ListRequestSeasons(ctx context.Context, requestID string) ([]L
 }
 
 const listRequests = `-- name: ListRequests :many
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason FROM requests
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, last_availability_check_at FROM requests
 WHERE (CAST(?1 AS INTEGER) = 0 OR requester_account_id = ?2)
   AND (CAST(?3 AS INTEGER) = 0 OR status = ?4)
   AND (CAST(?5 AS INTEGER) = 0
@@ -541,6 +580,11 @@ func (q *Queries) ListRequests(ctx context.Context, arg ListRequestsParams) ([]R
 			&i.UpdatedAt,
 			&i.DownloadManagerItemID,
 			&i.FailureReason,
+			&i.DownloadManagerID,
+			&i.DispatchQualityProfile,
+			&i.DispatchRootFolder,
+			&i.DispatchTags,
+			&i.LastAvailabilityCheckAt,
 		); err != nil {
 			return nil, err
 		}
@@ -594,8 +638,9 @@ func (q *Queries) ListRoleRequestQuotasForAccount(ctx context.Context, accountID
 
 const recordRequestDispatch = `-- name: RecordRequestDispatch :execrows
 UPDATE requests SET status = 'processing', download_manager_item_id = ?1,
-    failure_reason = '', updated_at = ?2
+    failure_reason = '', last_availability_check_at = NULL, updated_at = ?2
 WHERE id = ?3 AND status = 'approved'
+  AND download_manager_id <> ''
   AND (download_manager_item_id = '' OR download_manager_item_id = ?1)
 `
 
@@ -613,13 +658,37 @@ func (q *Queries) RecordRequestDispatch(ctx context.Context, arg RecordRequestDi
 	return result.RowsAffected()
 }
 
+const stampRequestAvailabilityCheck = `-- name: StampRequestAvailabilityCheck :execrows
+UPDATE requests SET last_availability_check_at = ?1
+WHERE id = ?2 AND status = 'processing'
+`
+
+type StampRequestAvailabilityCheckParams struct {
+	CheckedAt sql.NullString
+	ID        string
+}
+
+func (q *Queries) StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, stampRequestAvailabilityCheck, arg.CheckedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const transitionRequest = `-- name: TransitionRequest :execrows
 UPDATE requests SET
     status = ?1,
     decision_reason = CASE WHEN status IN ('pending', 'failed') THEN ?2 ELSE decision_reason END,
     decided_by_account_id = CASE WHEN status IN ('pending', 'failed') THEN ?3 ELSE decided_by_account_id END,
     decided_at = CASE WHEN status IN ('pending', 'failed') THEN ?4 ELSE decided_at END,
-    failure_reason = CASE WHEN status = 'approved' THEN ?2 ELSE '' END,
+    failure_reason = CASE WHEN status IN ('approved', 'processing') THEN ?2 ELSE '' END,
+    download_manager_id = CASE WHEN status = 'failed' THEN '' ELSE download_manager_id END,
+    download_manager_item_id = CASE WHEN status = 'failed' THEN '' ELSE download_manager_item_id END,
+    dispatch_quality_profile = CASE WHEN status = 'failed' THEN '' ELSE dispatch_quality_profile END,
+    dispatch_root_folder = CASE WHEN status = 'failed' THEN '' ELSE dispatch_root_folder END,
+    dispatch_tags = CASE WHEN status = 'failed' THEN '[]' ELSE dispatch_tags END,
+    last_availability_check_at = CASE WHEN status = 'failed' THEN NULL ELSE last_availability_check_at END,
     updated_at = ?5
 WHERE id = ?6 AND status = ?7
 `

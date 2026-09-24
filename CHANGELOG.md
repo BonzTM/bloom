@@ -16,6 +16,11 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Fulfilment now snapshots each request's manager and dispatch options, polls
+  processing requests fairly, treats only authoritative Radarr or Sonarr file
+  state as availability, and moves permanent availability errors to `failed`.
+  Existing Radarr movies are reconciled and searched, while existing Sonarr
+  monitored seasons are preserved and only newly requested seasons are searched.
 - The web UI has a design system: a dark-first palette with a light scheme
   when the system asks for it, an app shell with a sidebar that becomes a
   sticky top bar on narrow screens, and shared cards, forms, buttons, badges,
@@ -36,7 +41,8 @@ contracts) gets an entry here.
 - Radarr and Sonarr registration with probe-before-save encrypted API keys,
   instance options, profile validation, idempotent approved-request dispatch,
   bounded retries, live queue progress, configurable availability polling,
-  lifecycle audit/domain events, and SQLite/PostgreSQL migration `00013`.
+  lifecycle audit/domain events, and SQLite/PostgreSQL migration `00013` with
+  immutable dispatch snapshots and availability-check scheduling state.
 - Request fulfilment settings `BLOOM_REQUEST_AVAILABILITY_SOURCE` and
   `BLOOM_REQUEST_AVAILABILITY_INTERVAL`.
 - Anyone allowed to request media can search The Movie Database from the web

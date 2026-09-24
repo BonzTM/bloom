@@ -154,11 +154,11 @@ func (s *Service) Resolve(ctx context.Context, name string) (core.DownloadManage
 	return record.DownloadManager, nil
 }
 
-// Add dispatches a title through the named manager.
+// Add dispatches a title through the snapshotted manager registration.
 func (s *Service) Add(
-	ctx context.Context, managerName string, title core.DownloadTitle, options core.DownloadOptions,
+	ctx context.Context, managerID string, title core.DownloadTitle, options core.DownloadOptions,
 ) (string, error) {
-	record, adapter, err := s.adapterByName(ctx, managerName)
+	record, adapter, err := s.recordAndAdapterByID(ctx, managerID)
 	if err != nil {
 		return "", err
 	}
@@ -174,20 +174,31 @@ func (s *Service) Add(
 
 // Progress reads live queue state for a recorded manager item.
 func (s *Service) Progress(
-	ctx context.Context, managerName, managerItemID string,
+	ctx context.Context, managerID, managerItemID string, seasons []int,
 ) (core.DownloadProgress, error) {
 	if managerItemID == "" {
 		return core.DownloadProgress{}, core.ErrDownloadItemMissing
 	}
-	_, adapter, err := s.adapterByName(ctx, managerName)
+	adapter, err := s.adapterByID(ctx, managerID)
 	if err != nil {
 		return core.DownloadProgress{}, err
 	}
-	progress, err := adapter.Queue(ctx, managerItemID)
+	progress, err := adapter.Queue(ctx, managerItemID, seasons)
 	if err != nil {
 		return core.DownloadProgress{}, fmt.Errorf("read download manager queue: %w", err)
 	}
 	return progress, nil
+}
+
+func (s *Service) recordAndAdapterByID(
+	ctx context.Context, id string,
+) (core.DownloadManager, core.DownloadManagerAdapter, error) {
+	record, err := s.reader.GetDownloadManager(ctx, id)
+	if err != nil {
+		return core.DownloadManager{}, nil, fmt.Errorf("get download manager: %w", err)
+	}
+	adapter, err := s.adapterByID(ctx, id)
+	return record.DownloadManager, adapter, err
 }
 
 func (s *Service) adapterByID(ctx context.Context, id string) (core.DownloadManagerAdapter, error) {
@@ -202,17 +213,6 @@ func (s *Service) adapterByID(ctx context.Context, id string) (core.DownloadMana
 		return nil, fmt.Errorf("get download manager: %w", err)
 	}
 	return s.buildAdapter(record)
-}
-
-func (s *Service) adapterByName(
-	ctx context.Context, name string,
-) (core.DownloadManager, core.DownloadManagerAdapter, error) {
-	record, err := s.reader.GetDownloadManagerByName(ctx, name)
-	if err != nil {
-		return core.DownloadManager{}, nil, fmt.Errorf("get download manager by name: %w", err)
-	}
-	adapter, err := s.adapterByID(ctx, record.ID)
-	return record.DownloadManager, adapter, err
 }
 
 func (s *Service) buildAdapter(record core.DownloadManagerRecord) (core.DownloadManagerAdapter, error) {

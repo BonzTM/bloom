@@ -280,12 +280,20 @@ are approved immediately. Other requests remain pending until an approver uses
 the request's `/approve` or `/decline` route. Approved requests are dispatched
 idempotently and move to `processing`; permanent failures move to `failed` and
 may be approved again. `GET /api/v1/requests/{id}/progress` reads current queue
-state for the owner or an approver.
+state for the owner or an approver. Bloom snapshots the manager registration,
+quality profile, root folder, and tags when dispatch starts. Editing the request
+profile cannot redirect an in-flight request. Deleting that snapshotted manager
+causes the next availability check to move the request to `failed`, where an
+approver can retry it after correcting the profile.
 
 Bloom marks processing requests available from registered media servers by
 default. Set `BLOOM_REQUEST_AVAILABILITY_SOURCE=download_manager` to use the
 manager's completed-file signal instead. The poller runs only while processing
 requests exist and uses `BLOOM_REQUEST_AVAILABILITY_INTERVAL` between checks.
+Queue completion never marks a request available. Radarr's movie file flag and
+Sonarr's requested-season file statistics are the download-manager authority.
+Transient upstream failures remain in `processing`; permanent authorization,
+missing-resource, and malformed-response failures move the request to `failed`.
 
 Role quotas are managed at `/api/v1/roles/{id}/request-quota` with
 `admin.roles`, or from the Roles page in the web UI. Account overrides are managed at

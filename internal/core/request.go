@@ -91,24 +91,37 @@ type RequestProfile struct {
 
 // MediaRequest is a metadata snapshot and its approval state.
 type MediaRequest struct {
-	ID                    string
-	Kind                  MediaKind
-	Provider              MetadataProviderKind
-	ProviderID            string
-	Title                 string
-	Year                  int
-	PosterPath            string
-	RequesterID           string
-	ProfileID             string
-	Status                RequestStatus
-	Seasons               []RequestSeason
-	DecisionReason        string
-	FailureReason         string
-	DownloadManagerItemID string
-	DecidedBy             string
-	DecidedAt             *time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID                      string
+	Kind                    MediaKind
+	Provider                MetadataProviderKind
+	ProviderID              string
+	Title                   string
+	Year                    int
+	PosterPath              string
+	RequesterID             string
+	ProfileID               string
+	Status                  RequestStatus
+	Seasons                 []RequestSeason
+	DecisionReason          string
+	FailureReason           string
+	DownloadManagerID       string
+	DownloadManagerItemID   string
+	DispatchQualityProfile  string
+	DispatchRootFolder      string
+	DispatchTags            []string
+	LastAvailabilityCheckAt *time.Time
+	DecidedBy               string
+	DecidedAt               *time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+// RequestDispatchSnapshot freezes the manager target and options used by one request.
+type RequestDispatchSnapshot struct {
+	DownloadManagerID string
+	QualityProfile    string
+	RootFolder        string
+	Tags              []string
 }
 
 // RequestSeason identifies one requested series season.
@@ -239,7 +252,24 @@ type RequestWriter interface {
 
 // RequestDispatchWriter records a successful download-manager dispatch.
 type RequestDispatchWriter interface {
+	ClaimRequestDispatch(ctx context.Context, id string, snapshot RequestDispatchSnapshot, at time.Time) (MediaRequest, error)
 	RecordRequestDispatch(ctx context.Context, id, managerItemID string, at time.Time) (MediaRequest, error)
+}
+
+// RequestAvailabilityClaimer atomically selects and stamps the fairest processing batch.
+type RequestAvailabilityClaimer interface {
+	ClaimRequestsForAvailability(ctx context.Context, pageSize int, at time.Time) ([]MediaRequest, error)
+}
+
+// ValidateRequestDispatchSnapshot validates immutable dispatch routing data.
+func ValidateRequestDispatchSnapshot(snapshot RequestDispatchSnapshot) error {
+	if !ValidID(snapshot.DownloadManagerID) ||
+		!boundedText(snapshot.QualityProfile, MaxRequestProfileFieldBytes) ||
+		!boundedText(snapshot.RootFolder, MaxRequestProfileFieldBytes) ||
+		!requestTagsValid(snapshot.Tags) {
+		return ErrInvalidArgument
+	}
+	return nil
 }
 
 // RequestQuotaReader retrieves role and account request quotas.

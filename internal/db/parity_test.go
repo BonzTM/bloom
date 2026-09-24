@@ -85,6 +85,7 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteWatchColumns, expectedWatchColumns)
 	assertColumns(t, pool, sqliteWatchSegmentColumns, expectedWatchSegmentColumns)
 	assertColumns(t, pool, sqliteWatchPositionColumns, expectedWatchPositionColumns)
+	assertColumns(t, pool, sqliteRequestColumns, expectedRequestColumns)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
@@ -104,6 +105,7 @@ var (
 	expectedWatchColumns                     = []string{"active_seconds", "client", "created_at", "device_id", "device_name", "ended_at", "episode_number", "id", "item_id", "item_name", "item_type", "last_position_ms", "last_seen_at", "media_server_id", "media_user_id", "play_method", "season_number", "series_name", "server_session_id", "source", "started_at", "state", "updated_at", "username"}
 	expectedWatchSegmentColumns              = []string{"ended_at", "source", "started_at", "watch_id"}
 	expectedWatchPositionColumns             = []string{"observed_at", "paused", "play_method", "position_ms", "source", "watch_id"}
+	expectedRequestColumns                   = []string{"created_at", "decided_at", "decided_by_account_id", "decision_reason", "dispatch_quality_profile", "dispatch_root_folder", "dispatch_tags", "download_manager_id", "download_manager_item_id", "failure_reason", "id", "kind", "last_availability_check_at", "poster_path", "profile_id", "provider", "provider_id", "release_year", "requester_account_id", "status", "title", "updated_at"}
 )
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
@@ -214,6 +216,10 @@ func sqliteSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 
 func sqliteInviteColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return sqliteTableColumns(ctx, pool, "invites")
+}
+
+func sqliteRequestColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "requests")
 }
 
 func sqliteInviteLibraryColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
