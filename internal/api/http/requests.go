@@ -262,7 +262,7 @@ func requestDTO(item core.MediaRequest) requestResponse {
 		DownloadManagerID: item.DownloadManagerID, DownloadManagerItemID: item.DownloadManagerItemID,
 		DispatchQualityProfile: item.DispatchQualityProfile, DispatchRootFolder: item.DispatchRootFolder,
 		DispatchTags: dispatchTags, LastAvailabilityCheckAt: item.LastAvailabilityCheckAt,
-		DecidedAt: item.DecidedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		DecidedBy: item.DecidedBy, DecidedAt: item.DecidedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 

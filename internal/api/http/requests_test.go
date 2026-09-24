@@ -36,6 +36,16 @@ func TestCreateRequestAutoApprovalEmitsCreateAndApproveAudits(t *testing.T) {
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
+	var created struct {
+		Status    string `json:"status"`
+		DecidedBy string `json:"decided_by_account_id"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if created.Status != "approved" || created.DecidedBy != testRequestAccountID {
+		t.Fatalf("decided request = %+v, want approved by %s", created, testRequestAccountID)
+	}
 	events := audit.snapshot()
 	if len(events) != 2 {
 		t.Fatalf("audit event count = %d, want 2", len(events))
