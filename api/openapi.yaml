@@ -1198,6 +1198,7 @@ paths:
       parameters: &StatsWindowParameters
         - { $ref: "#/components/parameters/StatsDays" }
         - { $ref: "#/components/parameters/StatsMediaServerID" }
+        - { $ref: "#/components/parameters/StatsLibraryID" }
         - { $ref: "#/components/parameters/StatsTimeZone" }
       responses: &StatsOverviewResponses
         "200": { $ref: "#/components/responses/StatsOverviewReturned" }
@@ -1235,6 +1236,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/StatsDays" }
         - { $ref: "#/components/parameters/StatsMediaServerID" }
+        - { $ref: "#/components/parameters/StatsLibraryID" }
         - { $ref: "#/components/parameters/StatsTimeZone" }
         - { $ref: "#/components/parameters/StatsTitleKind" }
       responses:
@@ -1250,6 +1252,16 @@ paths:
       responses:
         <<: *StatsOverviewResponses
         "200": { $ref: "#/components/responses/StatsUsersReturned" }
+  /api/v1/stats/libraries:
+    get:
+      tags: [stats]
+      operationId: listStatsLibraries
+      summary: Return up to 50 libraries ranked by plays and recorded watch seconds.
+      security: [{ sessionCookie: [] }]
+      parameters: *StatsWindowParameters
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsLibrariesReturned" }
   /api/v1/stats/users/{media_server_id}/{media_user_id}:
     get:
       tags: [stats]
@@ -1261,6 +1273,7 @@ paths:
         - { $ref: "#/components/parameters/StatsMediaUserID" }
         - { $ref: "#/components/parameters/StatsDays" }
         - { $ref: "#/components/parameters/StatsMediaServerID" }
+        - { $ref: "#/components/parameters/StatsLibraryID" }
         - { $ref: "#/components/parameters/StatsTimeZone" }
       responses:
         <<: *StatsOverviewResponses
@@ -1275,6 +1288,11 @@ components:
       name: media_server_id
       in: query
       schema: { type: string, format: uuid }
+    StatsLibraryID:
+      name: library_id
+      in: query
+      description: Media-server library identifier. Requires media_server_id in the same request.
+      schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
     StatsTimeZone:
       name: tz
       in: query
@@ -1540,6 +1558,10 @@ components:
       description: At most 50 ranked media-server users.
       headers: *AuthenticatedHeaders
       content: { application/json: { schema: { $ref: "#/components/schemas/StatsUsersResponse" } } }
+    StatsLibrariesReturned:
+      description: At most 50 ranked libraries, including an empty-id unknown-library group.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsLibrariesResponse" } } }
     StatsUserReturned:
       description: One media-server user's dashboard and at most 20 latest watches.
       headers: *AuthenticatedHeaders
@@ -2270,6 +2292,8 @@ components:
         - item_name
         - item_type
         - series_name
+        - library_id
+        - library_name
         - season_number
         - episode_number
         - position_ms
@@ -2292,6 +2316,8 @@ components:
         item_name: { type: string }
         item_type: { type: string }
         series_name: { type: string }
+        library_id: { type: string, maxLength: 128 }
+        library_name: { type: string, maxLength: 500 }
         season_number: { type: [integer, "null"], format: int32 }
         episode_number: { type: [integer, "null"], format: int32 }
         position_ms: { type: integer, format: int64, minimum: 0 }
@@ -2376,6 +2402,19 @@ components:
         plays: { type: integer, format: int64, minimum: 1 }
         watch_seconds: { type: integer, format: int64, minimum: 0 }
         last_watched_at: { type: string, format: date-time }
+    StatsLibrary:
+      type: object
+      required: [media_server_id, library_id, library_name, plays, watch_seconds, unique_users, unique_titles, last_watched_at]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        library_id: { type: string, maxLength: 128 }
+        library_name: { type: string, maxLength: 500 }
+        plays: { type: integer, format: int64, minimum: 1 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+        unique_users: { type: integer, format: int64, minimum: 1 }
+        unique_titles: { type: integer, format: int64, minimum: 1 }
+        last_watched_at: { type: string, format: date-time }
     StatsBreakdown:
       type: object
       required: [name, plays, watch_seconds]
@@ -2448,6 +2487,13 @@ components:
       properties:
         window: { $ref: "#/components/schemas/StatsWindow" }
         items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/StatsUser" } }
+    StatsLibrariesResponse:
+      type: object
+      required: [window, items]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/StatsLibrary" } }
     StatsUserResponse:
       type: object
       required: [window, totals, titles, clients, devices, play_methods, daily, watches]

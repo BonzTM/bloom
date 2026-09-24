@@ -19,7 +19,7 @@ func (s *sqliteStatsBackend) totals(ctx context.Context, query core.StatsQuery) 
 	filter := sqliteStatsFilter(query)
 	row, err := s.q.StatsTotals(ctx, sqlite.StatsTotalsParams{
 		WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
-		UserServerFilter: filter.userServer, MediaUserFilter: filter.user,
+		LibraryFilter: filter.library, UserServerFilter: filter.userServer, MediaUserFilter: filter.user,
 	})
 	if err != nil {
 		return core.StatsTotals{}, statsStoreError("query statistics totals", err)
@@ -42,19 +42,22 @@ func (s *sqliteStatsBackend) titles(
 	case core.StatsTitleMovie:
 		rows, err := s.q.StatsMovieTitles(ctx, sqlite.StatsMovieTitlesParams{
 			WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
-			UserServerFilter: filter.userServer, MediaUserFilter: filter.user, RowLimit: int64(limit),
+			LibraryFilter: filter.library, UserServerFilter: filter.userServer,
+			MediaUserFilter: filter.user, RowLimit: int64(limit),
 		})
 		return mapSQLiteMovieTitles(rows, err)
 	case core.StatsTitleSeries:
 		rows, err := s.q.StatsSeriesTitles(ctx, sqlite.StatsSeriesTitlesParams{
 			WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
-			UserServerFilter: filter.userServer, MediaUserFilter: filter.user, RowLimit: int64(limit),
+			LibraryFilter: filter.library, UserServerFilter: filter.userServer,
+			MediaUserFilter: filter.user, RowLimit: int64(limit),
 		})
 		return mapSQLiteSeriesTitles(rows, err)
 	case core.StatsTitleOther:
 		rows, err := s.q.StatsOtherTitles(ctx, sqlite.StatsOtherTitlesParams{
 			WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
-			UserServerFilter: filter.userServer, MediaUserFilter: filter.user, RowLimit: int64(limit),
+			LibraryFilter: filter.library, UserServerFilter: filter.userServer,
+			MediaUserFilter: filter.user, RowLimit: int64(limit),
 		})
 		return mapSQLiteOtherTitles(rows, err)
 	default:
@@ -66,7 +69,7 @@ func (s *sqliteStatsBackend) users(ctx context.Context, query core.StatsQuery, l
 	filter := sqliteStatsFilter(query)
 	rows, err := s.q.StatsUsers(ctx, sqlite.StatsUsersParams{
 		WindowStart: filter.start, WindowEnd: filter.end,
-		MediaServerFilter: filter.server, RowLimit: int64(limit),
+		MediaServerFilter: filter.server, LibraryFilter: filter.library, RowLimit: int64(limit),
 	})
 	if err != nil {
 		return nil, statsStoreError("query statistics users", err)
@@ -83,6 +86,29 @@ func (s *sqliteStatsBackend) users(ctx context.Context, query core.StatsQuery, l
 			MediaServerID: row.MediaServerID, MediaUserID: row.MediaUserID, Username: username,
 			Plays: row.Plays, WatchSeconds: seconds, LastWatchedAt: watched,
 		})
+	}
+	return result, nil
+}
+
+func (s *sqliteStatsBackend) libraries(
+	ctx context.Context, query core.StatsQuery, limit int32,
+) ([]core.StatsLibrary, error) {
+	filter := sqliteStatsFilter(query)
+	rows, err := s.q.StatsLibraries(ctx, sqlite.StatsLibrariesParams{
+		WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
+		LibraryFilter: filter.library, RowLimit: int64(limit),
+	})
+	if err != nil {
+		return nil, statsStoreError("query statistics libraries", err)
+	}
+	result := make([]core.StatsLibrary, 0, len(rows))
+	for _, row := range rows {
+		mapped, mapErr := mapStatsLibrary(row.MediaServerID, row.LibraryID, row.LibraryName,
+			row.Plays, row.WatchSeconds, row.UniqueUsers, row.UniqueTitles, row.LastWatchedAt)
+		if mapErr != nil {
+			return nil, statsStoreError("map statistics libraries", mapErr)
+		}
+		result = append(result, mapped)
 	}
 	return result, nil
 }
@@ -119,7 +145,7 @@ func (s *sqliteStatsBackend) bucketRows(ctx context.Context, query core.StatsQue
 	filter := sqliteStatsFilter(query)
 	rows, err := s.q.StatsBucketRows(ctx, sqlite.StatsBucketRowsParams{
 		WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
-		UserServerFilter: filter.userServer, MediaUserFilter: filter.user,
+		LibraryFilter: filter.library, UserServerFilter: filter.userServer, MediaUserFilter: filter.user,
 		RowLimit: core.MaxStatsBucketRows + 1,
 	})
 	if err != nil {
@@ -142,7 +168,7 @@ func (s *sqliteStatsBackend) bucketRows(ctx context.Context, query core.StatsQue
 func (s *sqliteStatsBackend) recentWatches(ctx context.Context, query core.StatsQuery) ([]core.PlaybackWatch, error) {
 	rows, err := s.q.StatsUserRecentWatches(ctx, sqlite.StatsUserRecentWatchesParams{
 		WindowStart: formatSQLiteTime(query.Window.Start), WindowEnd: formatSQLiteTime(query.Window.End),
-		UserServerID: query.UserServerID, MediaUserID: query.MediaUserID,
+		UserServerID: query.UserServerID, MediaUserID: query.MediaUserID, LibraryFilter: query.LibraryID,
 	})
 	if err != nil {
 		return nil, statsStoreError("query statistics recent watches", err)
@@ -158,18 +184,19 @@ func (s *sqliteStatsBackend) recentWatches(ctx context.Context, query core.Stats
 	return result, nil
 }
 
-type sqliteStatsFilterValues struct{ start, end, server, userServer, user string }
+type sqliteStatsFilterValues struct{ start, end, server, library, userServer, user string }
 
 func sqliteStatsFilter(query core.StatsQuery) sqliteStatsFilterValues {
 	return sqliteStatsFilterValues{
 		start: formatSQLiteTime(query.Window.Start), end: formatSQLiteTime(query.Window.End),
-		server: query.Window.MediaServerID, userServer: query.UserServerID, user: query.MediaUserID,
+		server: query.Window.MediaServerID, library: query.LibraryID,
+		userServer: query.UserServerID, user: query.MediaUserID,
 	}
 }
 
 func (f sqliteStatsFilterValues) params() sqlite.StatsClientsParams {
 	return sqlite.StatsClientsParams{
-		WindowStart: f.start, WindowEnd: f.end, MediaServerFilter: f.server,
+		WindowStart: f.start, WindowEnd: f.end, MediaServerFilter: f.server, LibraryFilter: f.library,
 		UserServerFilter: f.userServer, MediaUserFilter: f.user,
 	}
 }

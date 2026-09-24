@@ -200,7 +200,11 @@ opened it if later observations arrive from another source. Bloom stores playing
 and paused intervals as separate segments, so active time excludes observed
 pauses. It also retains the newest 512 position and play-method samples per
 watch. Open watches are persisted on every observation and restored after a
-restart.
+restart. Bloom resolves each item's Jellyfin `CollectionFolder` ancestor and
+stores that library on the watch. A per-server cache bounds ancestor lookups to
+4096 entries for 24 hours. After each successful poll, Bloom also attempts up to
+25 oldest unresolved item identifiers so watches recorded before library
+resolution are filled in gradually.
 
 Polling is adaptive and jittered. The default interval is five seconds while a
 watch is open and thirty seconds while the server is idle. Failed polls use
@@ -219,13 +223,16 @@ An authenticated account with `stats.read.all` can use cursor-paged
 authorization denials continue to use the shared security audit stream.
 
 An account with `stats.read.all` can also read the statistics dashboards at
-`GET /api/v1/stats/overview`, `/daily`, `/patterns`, `/titles`, `/users`, and
-`/users/{media_server_id}/{media_user_id}`. One recorded watch row is one play.
+`GET /api/v1/stats/overview`, `/daily`, `/patterns`, `/titles`, `/users`,
+`/libraries`, and `/users/{media_server_id}/{media_user_id}`. One recorded watch row is one play.
 Watch time is the row's recorded `active_seconds`. A watch belongs to the
 half-open window when `started_at` is at or after the window start and before
 the response's end time. The `days` parameter defaults to 30 and accepts 1
 through 365 rolling 24-hour days. The optional `media_server_id` limits the SQL
-query to one server.
+query to one server. Every report also accepts `library_id` when
+`media_server_id` is present. The `/libraries` report returns at most 50 ranked
+library rows. Watches whose library is unresolved appear in one row with empty
+`library_id` and `library_name` values.
 
 Every response states its resolved window and time zone. `tz` defaults to UTC
 and accepts an IANA time-zone name of at most 64 bytes; the host-dependent
@@ -238,10 +245,8 @@ disabled, it is rounded down to the second.
 `BLOOM_STATS_CACHE_TTL=0` disables it. Cache expiry is the invalidation policy,
 so a dashboard can trail a newly recorded watch by at most the configured TTL.
 
-Per-library dashboards are a later slice because recorded watches do not yet
-carry a library identifier. Own-statistics access for non-administrator
-accounts is also later because Bloom accounts are not yet linked to
-media-server users.
+Own-statistics access for non-administrator accounts remains later because
+Bloom accounts are not yet linked to media-server users.
 
 The web UI shows the same reports under Statistics in the administration
 area: totals, most-watched titles, most active people, breakdowns, plays and
@@ -461,6 +466,10 @@ cascades to all three playback tables.
 Migration `00014_stats_started_index` adds the unfiltered watch-start index used
 by bounded statistics windows on both engines. Its down migration removes only
 that index.
+
+Migration `00016_watch_libraries` adds the library identity columns and the
+server-library-start index used by filtered statistics on both engines. Its
+down migration removes the index and both columns.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

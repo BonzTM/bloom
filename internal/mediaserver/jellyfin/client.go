@@ -64,6 +64,7 @@ var (
 	_ core.MediaServerAdapter      = (*Client)(nil)
 	_ core.MediaUserProvisioner    = (*Client)(nil)
 	_ core.MediaAvailabilityLookup = (*Client)(nil)
+	_ core.LibraryResolver         = (*Client)(nil)
 )
 
 // New validates cfg and returns a bounded Jellyfin client.
@@ -317,6 +318,49 @@ func (c *Client) ListSessions(ctx context.Context) ([]core.PlaybackSession, erro
 	}
 	c.observe("list_sessions", "success", started)
 	return sessions, nil
+}
+
+// ResolveLibrary returns the collection-folder ancestor for one item.
+func (c *Client) ResolveLibrary(ctx context.Context, itemID string) (core.Library, bool, error) {
+	if !core.ValidLibraryID(itemID) {
+		return core.Library{}, false, core.ErrInvalidArgument
+	}
+	var ancestors []jellyfinapi.BaseItemDto
+	path := "/Items/" + url.PathEscape(itemID) + "/Ancestors"
+	started, err := c.getJSON(ctx, "resolve_library", path, &ancestors)
+	if err != nil {
+		if isMediaNotFound(err) {
+			return core.Library{}, false, nil
+		}
+		return core.Library{}, false, err
+	}
+	if len(ancestors) > core.MaxMediaServerLibraries {
+		c.observe("resolve_library", "malformed", started)
+		return core.Library{}, false, mediaError("resolve_library", core.MediaServerMalformed,
+			errors.New("ancestor count exceeds limit"))
+	}
+	for _, ancestor := range ancestors {
+		if ancestor.Type == nil || string(*ancestor.Type) != string(jellyfinapi.BaseItemKindCollectionFolder) {
+			continue
+		}
+		library := core.Library{ID: uuidString(ancestor.Id), Name: stringValue(ancestor.Name)}
+		if !library.Valid() {
+			c.observe("resolve_library", "malformed", started)
+			return core.Library{}, false, mediaError("resolve_library", core.MediaServerMalformed,
+				errors.New("collection folder is missing identity"))
+		}
+		c.observe("resolve_library", "success", started)
+		return library, true, nil
+	}
+	c.observe("resolve_library", "success", started)
+	return core.Library{}, false, nil
+}
+
+func uuidString(value *openapi_types.UUID) string {
+	if value == nil {
+		return ""
+	}
+	return value.String()
 }
 
 // Capabilities returns Jellyfin's known optional-operation support.

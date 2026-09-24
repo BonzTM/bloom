@@ -40,6 +40,7 @@ const (
 	statsPatternsSchema     = "#/components/schemas/StatsPatternsResponse"
 	statsTitlesSchema       = "#/components/schemas/StatsTitlesResponse"
 	statsUsersSchema        = "#/components/schemas/StatsUsersResponse"
+	statsLibrariesSchema    = "#/components/schemas/StatsLibrariesResponse"
 	statsUserSchema         = "#/components/schemas/StatsUserResponse"
 )
 
@@ -505,7 +506,7 @@ func assertResponseSchema(
 		probeMediaServerSchema, librariesSchema, providersSchema,
 		playbackNowSchema, playbackHistorySchema, statsOverviewSchema,
 		statsDailySchema, statsPatternsSchema, statsTitlesSchema,
-		statsUsersSchema, statsUserSchema:
+		statsUsersSchema, statsLibrariesSchema, statsUserSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)

@@ -223,6 +223,8 @@ type Watch struct {
 	Source          string
 	CreatedAt       string
 	UpdatedAt       string
+	LibraryID       string
+	LibraryName     string
 }
 
 type WatchPosition struct {

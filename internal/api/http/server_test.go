@@ -266,6 +266,7 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodGet, path: "/api/v1/stats/patterns", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/titles", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/users", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/stats/libraries", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/users/{media_server_id}/{media_user_id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},

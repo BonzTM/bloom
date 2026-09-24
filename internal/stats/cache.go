@@ -12,6 +12,7 @@ type cacheKey struct {
 	startUnixNano int64
 	endUnixNano   int64
 	server        string
+	library       string
 	zone          string
 	kind          string
 }
@@ -51,8 +52,9 @@ func resultCacheKey(query core.StatsQuery) cacheKey {
 	}
 	return cacheKey{
 		startUnixNano: query.Window.Start.UnixNano(), endUnixNano: query.Window.End.UnixNano(),
-		server: query.Window.MediaServerID,
-		zone:   query.Window.Zone, kind: kind,
+		server:  query.Window.MediaServerID,
+		library: query.LibraryID,
+		zone:    query.Window.Zone, kind: kind,
 	}
 }
 
@@ -132,6 +134,7 @@ func (c *resultCache) remove(entry *cacheEntry) {
 func cloneResult(value core.StatsResult) core.StatsResult {
 	value.Titles = append([]core.StatsTitle(nil), value.Titles...)
 	value.Users = append([]core.StatsUser(nil), value.Users...)
+	value.Libraries = append([]core.StatsLibrary(nil), value.Libraries...)
 	value.Clients = append([]core.StatsBreakdown(nil), value.Clients...)
 	value.Devices = append([]core.StatsBreakdown(nil), value.Devices...)
 	value.PlayMethods = append([]core.StatsBreakdown(nil), value.PlayMethods...)

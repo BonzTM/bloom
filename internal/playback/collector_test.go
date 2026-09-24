@@ -18,16 +18,19 @@ import (
 const collectorServerID = "11111111-1111-4111-8111-111111111111"
 
 type memoryPlaybackStore struct {
-	mu        sync.Mutex
-	open      []core.PlaybackWatch
-	recent    []core.PlaybackWatch
-	mutations []core.PlaybackMutation
-	queries   []core.PlaybackQuery
-	loadErrs  []error
-	saveErrs  []error
-	loads     int
-	saves     int
-	calls     []storeContextCall
+	mu            sync.Mutex
+	open          []core.PlaybackWatch
+	recent        []core.PlaybackWatch
+	mutations     []core.PlaybackMutation
+	queries       []core.PlaybackQuery
+	loadErrs      []error
+	saveErrs      []error
+	loads         int
+	saves         int
+	calls         []storeContextCall
+	unresolved    []string
+	backfills     []core.Library
+	backfillItems []string
 }
 
 type storeContextCall struct {
@@ -84,6 +87,26 @@ func (s *memoryPlaybackStore) ListWatches(
 	return append([]core.PlaybackWatch(nil), s.recent...), nil
 }
 
+func (s *memoryPlaybackStore) ListUnresolvedWatchItemIDs(
+	ctx context.Context, _ string, limit int,
+) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordContext(ctx, "list unresolved")
+	return append([]string(nil), s.unresolved[:min(limit, len(s.unresolved))]...), nil
+}
+
+func (s *memoryPlaybackStore) BackfillWatchLibrary(
+	ctx context.Context, _, itemID string, library core.Library,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordContext(ctx, "backfill")
+	s.backfillItems = append(s.backfillItems, itemID)
+	s.backfills = append(s.backfills, library)
+	return nil
+}
+
 func (s *memoryPlaybackStore) recordContext(ctx context.Context, operation string) {
 	_, hasDeadline := ctx.Deadline()
 	s.calls = append(s.calls, storeContextCall{operation: operation, hasDeadline: hasDeadline})
@@ -97,8 +120,9 @@ type sequenceSource struct {
 }
 
 type collectorObserver struct {
-	mu     sync.Mutex
-	closed map[string]int
+	mu        sync.Mutex
+	closed    map[string]int
+	libraries map[string]int
 }
 
 func (*collectorObserver) ObservePlaybackPoll(string, string, float64) {}
@@ -107,6 +131,34 @@ func (o *collectorObserver) IncWatchesClosed(_, reason string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.closed[reason]++
+}
+
+func (o *collectorObserver) IncLibraryResolution(_, outcome string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.libraries[outcome]++
+}
+
+type resolvingSource struct {
+	*sequenceSource
+	mu        sync.Mutex
+	responses map[string]core.Library
+	found     map[string]bool
+	errors    []error
+	calls     []string
+}
+
+func (s *resolvingSource) ResolveLibrary(
+	_ context.Context, itemID string,
+) (core.Library, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, itemID)
+	index := len(s.calls) - 1
+	if index < len(s.errors) && s.errors[index] != nil {
+		return core.Library{}, false, s.errors[index]
+	}
+	return s.responses[itemID], s.found[itemID], nil
 }
 
 func (s *sequenceSource) ListSessions(context.Context) ([]core.PlaybackSession, error) {
@@ -126,7 +178,7 @@ func (s *sequenceSource) ListSessions(context.Context) ([]core.PlaybackSession, 
 func testCollector(
 	t *testing.T,
 	source Source,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	wait func(context.Context, time.Duration) error,
 ) (context.CancelFunc, <-chan error) {
 	t.Helper()
@@ -298,6 +350,104 @@ func TestCollectorPersistenceFailureBacksOffAndRecovers(t *testing.T) {
 	}
 }
 
+func TestCollectorSetsLibraryOnFirstWatchAndBackfillsOldHistory(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	source := &resolvingSource{
+		sequenceSource: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}}},
+		responses: map[string]core.Library{
+			"item": {ID: "library-one", Name: "Movies"},
+			"old":  {ID: "library-two", Name: "Shows"},
+		},
+		found: map[string]bool{"item": true, "old": true},
+	}
+	store := &memoryPlaybackStore{unresolved: []string{"old"}}
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	collector := newLibraryCollector(t, now, source, store, observer, slog.New(slog.DiscardHandler))
+	if outcome, err := collector.runOnce(t.Context()); err != nil || outcome != "success" {
+		t.Fatalf("runOnce = %q, %v", outcome, err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.mutations) != 1 || store.mutations[0].Watch.LibraryID != "library-one" ||
+		len(store.backfillItems) != 1 || store.backfillItems[0] != "old" {
+		t.Fatalf("library persistence = mutations %+v, items %v", store.mutations, store.backfillItems)
+	}
+	if observer.libraries["resolved"] != 2 {
+		t.Fatalf("resolved metric = %d, want 2", observer.libraries["resolved"])
+	}
+}
+
+func TestCollectorCachesLibraryNotFoundAcrossPolls(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	source := &resolvingSource{
+		sequenceSource: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}, {collectorSession()}}},
+		responses:      make(map[string]core.Library), found: make(map[string]bool),
+	}
+	store := &memoryPlaybackStore{unresolved: []string{"item"}}
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	collector := newLibraryCollector(t, now, source, store, observer, slog.New(slog.DiscardHandler))
+	for range 2 {
+		if _, err := collector.runOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source.mu.Lock()
+	calls := len(source.calls)
+	source.mu.Unlock()
+	observer.mu.Lock()
+	failed := observer.libraries["failed"]
+	observer.mu.Unlock()
+	if calls != 1 || failed != 1 {
+		t.Fatalf("not-found resolution calls = %d, failed metric = %d", calls, failed)
+	}
+}
+
+func TestCollectorRetriesResolutionOnceOnNextPoll(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	source := &resolvingSource{
+		sequenceSource: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}, {collectorSession()}}},
+		responses:      map[string]core.Library{"item": {ID: "library-one", Name: "Movies"}},
+		found:          map[string]bool{"item": true}, errors: []error{errors.New("sensitive upstream detail")},
+	}
+	store := &memoryPlaybackStore{unresolved: []string{"item"}}
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	var logs strings.Builder
+	collector := newLibraryCollector(t, now, source, store, observer,
+		slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	for range 2 {
+		if _, err := collector.runOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source.mu.Lock()
+	calls := len(source.calls)
+	source.mu.Unlock()
+	if calls != 2 || strings.Contains(logs.String(), "sensitive upstream detail") ||
+		!strings.Contains(logs.String(), "item_id=item") {
+		t.Fatalf("resolution calls = %d, log = %q", calls, logs.String())
+	}
+}
+
+func newLibraryCollector(
+	t *testing.T, now time.Time, source Source, store core.PlaybackPersistence,
+	observer Observer, logger *slog.Logger,
+) *Collector {
+	t.Helper()
+	collector, err := NewCollector(managerTestServer(), Config{
+		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
+		MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+	}, Dependencies{
+		Store: store, Source: source, Clock: testutil.NewFakeClock(now), Logger: logger,
+		Observer: observer, NewID: func() (string, error) {
+			return "00000000-0000-4000-8000-000000000001", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewCollector: %v", err)
+	}
+	return collector
+}
+
 func TestCollectorObserveFailureDoesNotLoseEarlierStartTransition(t *testing.T) {
 	first := collectorSession()
 	first.MediaUserID = "user-a"
@@ -462,7 +612,7 @@ func TestCollectorShutdownJoinsBlockedStoreCall(t *testing.T) {
 func testCollectorWithTimeout(
 	t *testing.T,
 	source Source,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	delays chan<- time.Duration,
 	release <-chan struct{},
 ) (context.CancelFunc, <-chan error) {

@@ -17,7 +17,10 @@ type sqlitePlaybackStore struct {
 	q    *sqlite.Queries
 }
 
-var _ core.PlaybackStore = (*sqlitePlaybackStore)(nil)
+var (
+	_ core.PlaybackStore        = (*sqlitePlaybackStore)(nil)
+	_ core.PlaybackLibraryStore = (*sqlitePlaybackStore)(nil)
+)
 
 func newSQLitePlaybackStore(pool *sql.DB) *sqlitePlaybackStore {
 	return &sqlitePlaybackStore{pool: pool, q: sqlite.New(pool)}
@@ -43,6 +46,36 @@ func (s *sqlitePlaybackStore) LoadOpenWatches(
 		watches = append(watches, watch)
 	}
 	return watches, nil
+}
+
+func (s *sqlitePlaybackStore) ListUnresolvedWatchItemIDs(
+	ctx context.Context, mediaServerID string, limit int,
+) ([]string, error) {
+	if !core.ValidID(mediaServerID) || limit < 1 || limit > core.MaxPlaybackLibraryBackfillItems {
+		return nil, fmt.Errorf("list unresolved watch items: %w", core.ErrInvalidArgument)
+	}
+	items, err := s.q.ListUnresolvedWatchItemIDs(ctx, sqlite.ListUnresolvedWatchItemIDsParams{
+		MediaServerID: mediaServerID, RowLimit: int64(limit),
+	})
+	if err != nil {
+		return nil, playbackStoreError("list unresolved watch items", err)
+	}
+	return items, nil
+}
+
+func (s *sqlitePlaybackStore) BackfillWatchLibrary(
+	ctx context.Context, mediaServerID, itemID string, library core.Library,
+) error {
+	if !core.ValidID(mediaServerID) || !core.ValidLibraryID(itemID) || !library.Valid() {
+		return fmt.Errorf("backfill watch library: %w", core.ErrInvalidArgument)
+	}
+	_, err := s.q.BackfillWatchLibrary(ctx, sqlite.BackfillWatchLibraryParams{
+		MediaServerID: mediaServerID, ItemID: itemID, LibraryID: library.ID, LibraryName: library.Name,
+	})
+	if err != nil {
+		return playbackStoreError("backfill watch library", err)
+	}
+	return nil
 }
 
 func (s *sqlitePlaybackStore) SaveWatches(
@@ -243,6 +276,7 @@ func sqliteWatchParams(w core.PlaybackWatch) sqlite.UpsertPlaybackWatchParams {
 		Username: w.Username, DeviceID: w.DeviceID, DeviceName: w.DeviceName, Client: w.Client,
 		ServerSessionID: w.ServerSessionID, ItemID: w.ItemID, ItemName: w.ItemName,
 		ItemType: w.ItemType, SeriesName: w.SeriesName,
+		LibraryID: w.LibraryID, LibraryName: w.LibraryName,
 		SeasonNumber: sqliteNullableInt32(w.SeasonNumber), EpisodeNumber: sqliteNullableInt32(w.EpisodeNumber),
 		PlayMethod: string(w.PlayMethod), State: string(w.State),
 		StartedAt: formatSQLiteTime(w.StartedAt), LastSeenAt: formatSQLiteTime(w.LastSeenAt),
@@ -283,7 +317,7 @@ func sqliteOptionalTime(value sql.NullString) (*time.Time, error) {
 
 func sqliteStoredWatch(
 	id, serverID, serverName, userID, username, deviceID, deviceName, client, sessionID string,
-	itemID, itemName, itemType, seriesName string,
+	itemID, itemName, itemType, seriesName, libraryID, libraryName string,
 	season, episode sql.NullInt64,
 	method, state, started, lastSeen string,
 	ended sql.NullString,
@@ -322,7 +356,8 @@ func sqliteStoredWatch(
 		id: id, mediaServerID: serverID, mediaServerName: serverName, mediaUserID: userID,
 		username: username, deviceID: deviceID, deviceName: deviceName, client: client,
 		serverSessionID: sessionID, itemID: itemID, itemName: itemName, itemType: itemType,
-		seriesName: seriesName, seasonNumber: seasonNumber, episodeNumber: episodeNumber,
+		seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
+		seasonNumber: seasonNumber, episodeNumber: episodeNumber,
 		playMethod: core.PlayMethod(method), state: core.WatchState(state),
 		startedAt: startedAt, lastSeenAt: lastSeenAt, endedAt: endedAt,
 		activeSeconds: activeSeconds, lastPositionMS: positionMS, source: core.WatchSource(source),
@@ -334,7 +369,8 @@ func sqliteOpenWatch(row sqlite.ListOpenPlaybackWatchesRow) (core.PlaybackWatch,
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.SeasonNumber, row.EpisodeNumber,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
 	)
@@ -344,7 +380,8 @@ func sqliteNowWatch(row sqlite.ListNowPlayingRow) (core.PlaybackWatch, error) {
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.SeasonNumber, row.EpisodeNumber,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
 	)
@@ -354,7 +391,8 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.SeasonNumber, row.EpisodeNumber,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
 	)
@@ -364,7 +402,8 @@ func sqliteRecentWatch(row sqlite.FindRecentPlaybackWatchRow) (core.PlaybackWatc
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.SeasonNumber, row.EpisodeNumber,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
 	)
@@ -374,7 +413,8 @@ func sqliteRecentServerWatch(row sqlite.ListRecentPlaybackWatchesRow) (core.Play
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.SeasonNumber, row.EpisodeNumber,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
 	)

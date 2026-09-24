@@ -48,6 +48,17 @@ type statsUserResponse struct {
 	LastWatchedAt time.Time `json:"last_watched_at"`
 }
 
+type statsLibraryResponse struct {
+	MediaServerID string    `json:"media_server_id"`
+	LibraryID     string    `json:"library_id"`
+	LibraryName   string    `json:"library_name"`
+	Plays         int64     `json:"plays"`
+	WatchSeconds  int64     `json:"watch_seconds"`
+	UniqueUsers   int64     `json:"unique_users"`
+	UniqueTitles  int64     `json:"unique_titles"`
+	LastWatchedAt time.Time `json:"last_watched_at"`
+}
+
 type statsBreakdownResponse struct {
 	Name         string `json:"name"`
 	Plays        int64  `json:"plays"`
@@ -102,6 +113,11 @@ type statsUsersResponse struct {
 	Items  []statsUserResponse `json:"items"`
 }
 
+type statsLibrariesResponse struct {
+	Window statsWindowResponse    `json:"window"`
+	Items  []statsLibraryResponse `json:"items"`
+}
+
 type statsUserDetailResponse struct {
 	Window      statsWindowResponse        `json:"window"`
 	Totals      statsTotalsResponse        `json:"totals"`
@@ -127,6 +143,10 @@ func (s *Server) handleStatsPatterns(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatsUsers(w http.ResponseWriter, r *http.Request) {
 	s.handleStatsReport(w, r, core.StatsReportUsers)
+}
+
+func (s *Server) handleStatsLibraries(w http.ResponseWriter, r *http.Request) {
+	s.handleStatsReport(w, r, core.StatsReportLibraries)
 }
 
 func (s *Server) handleStatsTitles(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +191,7 @@ func (s *Server) handleParsedStats(
 ) {
 	days, fields := statsDays(values["days"], fields)
 	serverID, fields := statsServer(values["media_server_id"], fields)
+	libraryID, fields := statsLibrary(values["library_id"], serverID, fields)
 	zone, fields := statsZone(values["tz"], fields)
 	window, err := core.NewStatsWindow(days, serverID, zone, s.clock.Now())
 	if err != nil && len(fields) == 0 {
@@ -182,7 +203,7 @@ func (s *Server) handleParsedStats(
 	}
 	query := core.StatsQuery{
 		Window: window, Report: report, TitleKind: kind,
-		UserServerID: userServerID, MediaUserID: userID,
+		UserServerID: userServerID, MediaUserID: userID, LibraryID: libraryID,
 	}
 	result, err := s.statsReader.ReadStats(r.Context(), query)
 	if err != nil {
@@ -190,6 +211,26 @@ func (s *Server) handleParsedStats(
 		return
 	}
 	s.writeStatsResult(w, r, report, kind, result)
+}
+
+func statsLibrary(
+	values []string, mediaServerID string, fields []httputil.FieldError,
+) (string, []httputil.FieldError) {
+	if len(values) == 0 {
+		return "", fields
+	}
+	if len(values) != 1 || !core.ValidStatsLibraryID(values[0]) {
+		return "", append(fields, httputil.FieldError{
+			Field: "library_id", Code: "invalid",
+			Message: "must be one value of 1 to 128 valid UTF-8 bytes without control characters",
+		})
+	}
+	if mediaServerID == "" {
+		return "", append(fields, httputil.FieldError{
+			Field: "media_server_id", Code: "required", Message: "is required with library_id",
+		})
+	}
+	return values[0], fields
 }
 
 func statsQueryValues(raw string) (url.Values, []httputil.FieldError) {
@@ -256,6 +297,8 @@ func (s *Server) writeStatsResult(
 		writeJSON(w, r, s.logger, http.StatusOK, statsTitlesResponse{Window: window, Kind: kind, Items: statsTitleDTOs(result.Titles)})
 	case core.StatsReportUsers:
 		writeJSON(w, r, s.logger, http.StatusOK, statsUsersResponse{Window: window, Items: statsUserDTOs(result.Users)})
+	case core.StatsReportLibraries:
+		writeJSON(w, r, s.logger, http.StatusOK, statsLibrariesResponse{Window: window, Items: statsLibraryDTOs(result.Libraries)})
 	case core.StatsReportUser:
 		writeJSON(w, r, s.logger, http.StatusOK, statsUserDetailDTO(window, result))
 	}
@@ -304,6 +347,14 @@ func statsUserDTOs(values []core.StatsUser) []statsUserResponse {
 	result := make([]statsUserResponse, 0, len(values))
 	for _, value := range values {
 		result = append(result, statsUserResponse(value))
+	}
+	return result
+}
+
+func statsLibraryDTOs(values []core.StatsLibrary) []statsLibraryResponse {
+	result := make([]statsLibraryResponse, 0, len(values))
+	for _, value := range values {
+		result = append(result, statsLibraryResponse(value))
 	}
 	return result
 }

@@ -17,6 +17,8 @@ const (
 	MaxPlaybackMutations = 2 * MaxPlaybackSessions
 	// MaxRestoredPlaybackWatches covers the largest configured missed-poll lifecycle.
 	MaxRestoredPlaybackWatches = 100 * MaxPlaybackSessions
+	// MaxPlaybackLibraryBackfillItems bounds one post-poll history trickle.
+	MaxPlaybackLibraryBackfillItems = 25
 )
 
 // PlayMethod is Bloom's stable playback delivery classification.
@@ -112,6 +114,8 @@ type PlaybackWatch struct {
 	ItemName        string
 	ItemType        string
 	SeriesName      string
+	LibraryID       string
+	LibraryName     string
 	SeasonNumber    *int32
 	EpisodeNumber   *int32
 	PlayMethod      PlayMethod
@@ -192,6 +196,18 @@ type PlaybackStore interface {
 	LoadOpenWatches(ctx context.Context, mediaServerID string) ([]PlaybackWatch, error)
 	SaveWatches(ctx context.Context, mutations []PlaybackMutation) error
 	ListWatches(ctx context.Context, query PlaybackQuery) ([]PlaybackWatch, error)
+}
+
+// PlaybackLibraryStore is the bounded persistence seam for library backfill.
+type PlaybackLibraryStore interface {
+	ListUnresolvedWatchItemIDs(ctx context.Context, mediaServerID string, limit int) ([]string, error)
+	BackfillWatchLibrary(ctx context.Context, mediaServerID, itemID string, library Library) error
+}
+
+// PlaybackPersistence combines lifecycle persistence with library backfill.
+type PlaybackPersistence interface {
+	PlaybackStore
+	PlaybackLibraryStore
 }
 
 // PlaybackTrackerConfig contains the pure lifecycle thresholds.
@@ -663,6 +679,10 @@ func ValidatePlaybackWatch(watch PlaybackWatch) error {
 	if !ValidID(watch.ID) || !ValidID(watch.MediaServerID) || watch.MediaUserID == "" ||
 		watch.DeviceID == "" || watch.ItemID == "" || !watch.PlayMethod.Valid() ||
 		!watch.Source.Valid() || watch.ActiveTime < 0 || watch.LastPosition < 0 {
+		return ErrInvalidArgument
+	}
+	if (watch.LibraryID == "") != (watch.LibraryName == "") ||
+		(watch.LibraryID != "" && !(Library{ID: watch.LibraryID, Name: watch.LibraryName}).Valid()) {
 		return ErrInvalidArgument
 	}
 	if watch.State != WatchPlaying && watch.State != WatchPaused && watch.State != WatchStopped {

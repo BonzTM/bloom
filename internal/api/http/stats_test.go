@@ -43,6 +43,7 @@ func TestStatsRoutesReturnEmptyWindowsAndParsedQueries(t *testing.T) {
 		{"/api/v1/stats/patterns", core.StatsReportPatterns},
 		{"/api/v1/stats/titles?kind=movie", core.StatsReportTitles},
 		{"/api/v1/stats/users", core.StatsReportUsers},
+		{"/api/v1/stats/libraries", core.StatsReportLibraries},
 		{"/api/v1/stats/users/33333333-3333-4333-8333-333333333333/user-1", core.StatsReportUser},
 	}
 	for _, test := range tests {
@@ -76,6 +77,9 @@ func TestStatsRoutesRejectBadParameters(t *testing.T) {
 		"/api/v1/stats/overview?days=0",
 		"/api/v1/stats/overview?days=366",
 		"/api/v1/stats/overview?media_server_id=bad",
+		"/api/v1/stats/overview?library_id=library",
+		"/api/v1/stats/overview?media_server_id=33333333-3333-4333-8333-333333333333&library_id=nul%00library",
+		"/api/v1/stats/overview?media_server_id=33333333-3333-4333-8333-333333333333&library_id=one&library_id=two",
 		"/api/v1/stats/overview?tz=Mars%2FOlympus",
 		"/api/v1/stats/overview?tz=Local",
 		"/api/v1/stats/overview?tz=UTC&tz=UTC",
@@ -93,7 +97,31 @@ func TestStatsRoutesRejectBadParameters(t *testing.T) {
 			if recorder.Code != http.StatusUnprocessableEntity {
 				t.Fatalf("GET %s = %d, want 422: %s", path, recorder.Code, recorder.Body.String())
 			}
+			if path == "/api/v1/stats/overview?library_id=library" {
+				envelope := decodeEnvelope(t, recorder)
+				if envelope.Code != codeValidationFailed || len(envelope.Fields) != 1 ||
+					envelope.Fields[0].Field != "media_server_id" {
+					t.Fatalf("library dependency validation = %+v", envelope)
+				}
+			}
 		})
+	}
+}
+
+func TestStatsRoutesPassLibraryFilterWithMediaServer(t *testing.T) {
+	t.Parallel()
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/stats/overview?media_server_id=33333333-3333-4333-8333-333333333333&library_id=library-1"
+	recorder := h.request(t, http.MethodGet, path, "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d: %s", path, recorder.Code, recorder.Body.String())
+	}
+	h.stats.mu.Lock()
+	query := h.stats.queries[len(h.stats.queries)-1]
+	h.stats.mu.Unlock()
+	if query.LibraryID != "library-1" || query.Window.MediaServerID != "33333333-3333-4333-8333-333333333333" {
+		t.Fatalf("query = %+v", query)
 	}
 }
 
@@ -167,6 +195,7 @@ func statsRoutePaths() []string {
 	return []string{
 		"/api/v1/stats/overview", "/api/v1/stats/daily", "/api/v1/stats/patterns",
 		"/api/v1/stats/titles?kind=movie", "/api/v1/stats/users",
+		"/api/v1/stats/libraries",
 		"/api/v1/stats/users/33333333-3333-4333-8333-333333333333/user-1",
 	}
 }
@@ -207,6 +236,7 @@ func TestStatsOpenAPIContract(t *testing.T) {
 		{"/api/v1/stats/patterns", "/api/v1/stats/patterns", statsPatternsSchema},
 		{"/api/v1/stats/titles", "/api/v1/stats/titles?kind=movie", statsTitlesSchema},
 		{"/api/v1/stats/users", "/api/v1/stats/users", statsUsersSchema},
+		{"/api/v1/stats/libraries", "/api/v1/stats/libraries", statsLibrariesSchema},
 		{"/api/v1/stats/users/{media_server_id}/{media_user_id}", "/api/v1/stats/users/33333333-3333-4333-8333-333333333333/user-1", statsUserSchema},
 	}
 	for _, test := range tests {

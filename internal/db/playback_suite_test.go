@@ -53,6 +53,71 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("now playing paginates across large multi-server set", func(t *testing.T) {
 		testNowPlayingPagination(t, pool, driver)
 	})
+	t.Run("library backfill is bounded and fill only", func(t *testing.T) {
+		testPlaybackLibraryBackfill(t, pool, driver)
+	})
+}
+
+func testPlaybackLibraryBackfill(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 19, 0, 0, 0, time.UTC))
+	server := mediaServerRecord(t, "Backfill "+mustID(t), "https://backfill.example.test", now)
+	if createErr := writer.CreateMediaServer(t.Context(), server); createErr != nil {
+		t.Fatal(createErr)
+	}
+	t.Cleanup(func() {
+		if deleteErr := writer.DeleteMediaServer(context.Background(), server.ID); deleteErr != nil {
+			t.Errorf("DeleteMediaServer cleanup: %v", deleteErr)
+		}
+	})
+	store := newPlaybackTestStore(t, pool, driver)
+	first := playbackStoreWatch(t, server.ID, now.Add(-2*time.Hour))
+	second := playbackStoreWatch(t, server.ID, now.Add(-time.Hour))
+	second.ItemID = "item-2"
+	third := playbackStoreWatch(t, server.ID, now)
+	third.ItemID = first.ItemID
+	if saveErr := store.SaveWatches(t.Context(), playbackMutations(first, second, third)); saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	items, err := store.ListUnresolvedWatchItemIDs(t.Context(), server.ID, 1)
+	if err != nil || len(items) != 1 || items[0] != first.ItemID {
+		t.Fatalf("unresolved items = %v, %v", items, err)
+	}
+	library := core.Library{ID: "library-1", Name: "Movies"}
+	if err := store.BackfillWatchLibrary(t.Context(), server.ID, first.ItemID, library); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BackfillWatchLibrary(t.Context(), server.ID, first.ItemID,
+		core.Library{ID: "library-2", Name: "Other"}); err != nil {
+		t.Fatal(err)
+	}
+	assertBackfilledLibrary(t, pool, server.ID, first.ItemID, library)
+}
+
+func playbackMutations(watches ...core.PlaybackWatch) []core.PlaybackMutation {
+	mutations := make([]core.PlaybackMutation, 0, len(watches))
+	for _, watch := range watches {
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch})
+	}
+	return mutations
+}
+
+func assertBackfilledLibrary(
+	t *testing.T, pool *sql.DB, serverID, itemID string, want core.Library,
+) {
+	t.Helper()
+	var libraryID, libraryName string
+	var count int
+	err := pool.QueryRowContext(t.Context(), `SELECT MIN(library_id), MIN(library_name), COUNT(*)
+		FROM watches WHERE media_server_id = $1 AND item_id = $2`, serverID, itemID).
+		Scan(&libraryID, &libraryName, &count)
+	if err != nil || count != 2 || libraryID != want.ID || libraryName != want.Name {
+		t.Fatalf("backfilled library = %q, %q, %d, %v", libraryID, libraryName, count, err)
+	}
 }
 
 func testNowPlayingPagination(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -200,7 +265,7 @@ func largePlaybackMutations(
 	return open, recent
 }
 
-func newPlaybackTestStore(t *testing.T, pool *sql.DB, driver config.Driver) core.PlaybackStore {
+func newPlaybackTestStore(t *testing.T, pool *sql.DB, driver config.Driver) core.PlaybackPersistence {
 	t.Helper()
 	store, err := db.NewPlaybackStore(pool, driver)
 	if err != nil {

@@ -4079,6 +4079,12 @@ type GetItemsParams struct {
 	EnableImages *bool `form:"enableImages,omitempty" json:"enableImages,omitempty"`
 }
 
+// GetAncestorsParams defines parameters for GetAncestors.
+type GetAncestorsParams struct {
+	// UserId Optional. Filter by user id, and attach user data.
+	UserId *openapi_types.UUID `form:"userId,omitempty" json:"userId,omitempty"`
+}
+
 // GetSessionsParams defines parameters for GetSessions.
 type GetSessionsParams struct {
 	// ControllableByUserId Filter by sessions that a given user is allowed to remote control.
@@ -4331,6 +4337,11 @@ type ClientInterface interface {
 	// Corresponds with GET /Items (the `GetItems` operationId).
 	GetItems(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetAncestors Gets all parents of an item.
+	//
+	// Corresponds with GET /Items/{itemId}/Ancestors (the `GetAncestors` operationId).
+	GetAncestors(ctx context.Context, itemId openapi_types.UUID, params *GetAncestorsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetVirtualFolders Gets all virtual folders.
 	//
 	// Corresponds with GET /Library/VirtualFolders (the `GetVirtualFolders` operationId).
@@ -4409,6 +4420,21 @@ type ClientInterface interface {
 // Corresponds with GET /Items (the `GetItems` operationId).
 func (c *Client) GetItems(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetItemsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAncestors Gets all parents of an item.
+//
+// Corresponds with GET /Items/{itemId}/Ancestors (the `GetAncestors` operationId).
+func (c *Client) GetAncestors(ctx context.Context, itemId openapi_types.UUID, params *GetAncestorsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAncestorsRequest(c.Server, itemId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5709,6 +5735,67 @@ func NewGetItemsRequest(server string, params *GetItemsParams) (*http.Request, e
 	return req, nil
 }
 
+// NewGetAncestorsRequest constructs an http.Request for the GetAncestors method
+func NewGetAncestorsRequest(server string, itemId openapi_types.UUID, params *GetAncestorsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "itemId", itemId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Items/%s/Ancestors", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.UserId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "userId", *params.UserId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetVirtualFoldersRequest constructs an http.Request for the GetVirtualFolders method
 func NewGetVirtualFoldersRequest(server string) (*http.Request, error) {
 	var err error
@@ -6135,6 +6222,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /Items (the `GetItems` operationId).
 	GetItemsWithResponse(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*GetItemsResponse, error)
 
+	// GetAncestorsWithResponse Gets all parents of an item.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /Items/{itemId}/Ancestors (the `GetAncestors` operationId).
+	GetAncestorsWithResponse(ctx context.Context, itemId openapi_types.UUID, params *GetAncestorsParams, reqEditors ...RequestEditorFn) (*GetAncestorsResponse, error)
+
 	// GetVirtualFoldersWithResponse Gets all virtual folders.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -6277,6 +6371,90 @@ func (r GetItemsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetItemsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetAncestorsResponse503Headers the declared response headers of an HTTP 503 response for GetAncestors
+type GetAncestorsResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type GetAncestorsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]BaseItemDto
+	// ApplicationjsonProfileCamelCase200 the response for an HTTP 200 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase200 *[]BaseItemDto
+	// ApplicationjsonProfilePascalCase200 the response for an HTTP 200 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase200 *[]BaseItemDto
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// ApplicationjsonProfileCamelCase404 the response for an HTTP 404 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase404 *ProblemDetails
+	// ApplicationjsonProfilePascalCase404 the response for an HTTP 404 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase404 *ProblemDetails
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *GetAncestorsResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAncestorsResponse) GetJSON200() *[]BaseItemDto {
+	return r.JSON200
+}
+
+// GetApplicationjsonProfileCamelCase200 returns the response for an HTTP 200 `application/json; profile="CamelCase"` response
+func (r GetAncestorsResponse) GetApplicationjsonProfileCamelCase200() *[]BaseItemDto {
+	return r.ApplicationjsonProfileCamelCase200
+}
+
+// GetApplicationjsonProfilePascalCase200 returns the response for an HTTP 200 `application/json; profile="PascalCase"` response
+func (r GetAncestorsResponse) GetApplicationjsonProfilePascalCase200() *[]BaseItemDto {
+	return r.ApplicationjsonProfilePascalCase200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetAncestorsResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetApplicationjsonProfileCamelCase404 returns the response for an HTTP 404 `application/json; profile="CamelCase"` response
+func (r GetAncestorsResponse) GetApplicationjsonProfileCamelCase404() *ProblemDetails {
+	return r.ApplicationjsonProfileCamelCase404
+}
+
+// GetApplicationjsonProfilePascalCase404 returns the response for an HTTP 404 `application/json; profile="PascalCase"` response
+func (r GetAncestorsResponse) GetApplicationjsonProfilePascalCase404() *ProblemDetails {
+	return r.ApplicationjsonProfilePascalCase404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAncestorsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAncestorsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAncestorsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAncestorsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6863,6 +7041,19 @@ func (c *ClientWithResponses) GetItemsWithResponse(ctx context.Context, params *
 	return ParseGetItemsResponse(rsp)
 }
 
+// GetAncestorsWithResponse Gets all parents of an item.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /Items/{itemId}/Ancestors (the `GetAncestors` operationId).
+func (c *ClientWithResponses) GetAncestorsWithResponse(ctx context.Context, itemId openapi_types.UUID, params *GetAncestorsParams, reqEditors ...RequestEditorFn) (*GetAncestorsResponse, error) {
+	rsp, err := c.GetAncestors(ctx, itemId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAncestorsResponse(rsp)
+}
+
 // GetVirtualFoldersWithResponse Gets all virtual folders.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -7065,6 +7256,93 @@ func ParseGetItemsResponse(rsp *http.Response) (*GetItemsResponse, error) {
 	switch {
 	case rsp.StatusCode == 503:
 		var headers GetItemsResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetAncestorsResponse parses an HTTP response from a GetAncestorsWithResponse call
+func ParseGetAncestorsResponse(rsp *http.Response) (*GetAncestorsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAncestorsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 200:
+		var dest []BaseItemDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 200:
+		var dest []BaseItemDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 200:
+		var dest []BaseItemDto
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase404 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase404 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers GetAncestorsResponse503Headers
 		if values := rsp.Header.Values("Message"); len(values) > 0 {
 			var value string
 			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {

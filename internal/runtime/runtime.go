@@ -567,9 +567,7 @@ func playbackDependencies(
 		StoreTimeout: cfg.Playback.StoreTimeout,
 	}
 	factory := func(server core.MediaServer) playback.Source {
-		return playback.SourceFunc(func(ctx context.Context) ([]core.PlaybackSession, error) {
-			return mediaServers.ListSessions(ctx, server.ID)
-		})
+		return mediaPlaybackSource{service: mediaServers, serverID: server.ID}
 	}
 	manager, err := newManager(playbackManagerDependencies{
 		servers: mediaServers, store: store, config: collectorConfig, factory: factory,
@@ -582,9 +580,24 @@ func playbackDependencies(
 	return store, manager, nil
 }
 
+type mediaPlaybackSource struct {
+	service  *mediaserver.Service
+	serverID string
+}
+
+func (s mediaPlaybackSource) ListSessions(ctx context.Context) ([]core.PlaybackSession, error) {
+	return s.service.ListSessions(ctx, s.serverID)
+}
+
+func (s mediaPlaybackSource) ResolveLibrary(
+	ctx context.Context, itemID string,
+) (core.Library, bool, error) {
+	return s.service.ResolveLibrary(ctx, s.serverID, itemID)
+}
+
 type playbackManagerDependencies struct {
 	servers *mediaserver.Service
-	store   core.PlaybackStore
+	store   core.PlaybackPersistence
 	config  playback.Config
 	factory playback.SourceFactory
 	clock   core.Clock

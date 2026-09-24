@@ -3,13 +3,15 @@
 -- name: UpsertPlaybackWatch :exec
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,
-    server_session_id, item_id, item_name, item_type, series_name, season_number,
+    server_session_id, item_id, item_name, item_type, series_name, library_id,
+    library_name, season_number,
     episode_number, play_method, state, started_at, last_seen_at, ended_at,
     active_seconds, last_position_ms, source, created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(media_user_id), sqlc.arg(username),
     sqlc.arg(device_id), sqlc.arg(device_name), sqlc.arg(client), sqlc.arg(server_session_id),
     sqlc.arg(item_id), sqlc.arg(item_name), sqlc.arg(item_type), sqlc.arg(series_name),
+    sqlc.arg(library_id), sqlc.arg(library_name),
     sqlc.narg(season_number), sqlc.narg(episode_number), sqlc.arg(play_method), sqlc.arg(state),
     sqlc.arg(started_at), sqlc.arg(last_seen_at), sqlc.narg(ended_at), sqlc.arg(active_seconds),
     sqlc.arg(last_position_ms), sqlc.arg(source), sqlc.arg(created_at), sqlc.arg(updated_at)
@@ -22,6 +24,8 @@ ON CONFLICT (id) DO UPDATE SET
     item_name = excluded.item_name,
     item_type = excluded.item_type,
     series_name = excluded.series_name,
+    library_id = CASE WHEN watches.library_id = '' THEN excluded.library_id ELSE watches.library_id END,
+    library_name = CASE WHEN watches.library_id = '' THEN excluded.library_name ELSE watches.library_name END,
     season_number = excluded.season_number,
     episode_number = excluded.episode_number,
     play_method = excluded.play_method,
@@ -49,6 +53,21 @@ WHERE w.state <> 'stopped'
        OR (w.started_at = sqlc.arg(before_started_at) AND w.id < sqlc.arg(before_id)))
 ORDER BY w.started_at DESC, w.id DESC
 LIMIT sqlc.arg(page_size);
+
+-- name: ListUnresolvedWatchItemIDs :many
+SELECT w.item_id
+FROM watches w
+WHERE w.media_server_id = sqlc.arg(media_server_id) AND w.library_id = ''
+GROUP BY w.item_id
+ORDER BY MIN(w.started_at), w.item_id
+LIMIT sqlc.arg(row_limit);
+
+-- name: BackfillWatchLibrary :execrows
+UPDATE watches
+SET library_id = sqlc.arg(library_id), library_name = sqlc.arg(library_name)
+WHERE media_server_id = sqlc.arg(media_server_id)
+  AND item_id = sqlc.arg(item_id)
+  AND library_id = '';
 
 -- name: ListPlaybackHistory :many
 SELECT w.*, ms.name AS media_server_name
