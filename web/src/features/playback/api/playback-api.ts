@@ -1,5 +1,25 @@
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
+  mediaUserIdSchema,
+  statsDailySchema,
+  statsDaysSchema,
+  statsOverviewSchema,
+  statsPatternsSchema,
+  statsTitleKindSchema,
+  statsTitlesSchema,
+  statsUserDetailSchema,
+  statsUsersSchema,
+  statsZoneSchema,
+  type StatsDaily,
+  type StatsOverview,
+  type StatsParams,
+  type StatsPatterns,
+  type StatsTitleKind,
+  type StatsTitles,
+  type StatsUserDetail,
+  type StatsUsers,
+} from "./stats-schemas.js";
+import {
   historyCursorSchema,
   historyPageSchema,
   mediaServerIdSchema,
@@ -10,6 +30,7 @@ import {
 
 const NOW_PATH = "api/v1/playback/now";
 const HISTORY_PATH = "api/v1/playback/history";
+const STATS_PATH = "api/v1/stats";
 
 export type HistoryFilter = Readonly<{ mediaServerId?: string }>;
 
@@ -38,6 +59,93 @@ export class PlaybackApi {
       { signal },
     );
   }
+
+  // ---- statistics (stats.read.all)
+
+  statsOverview(
+    params: StatsParams,
+    signal: AbortSignal,
+  ): Promise<StatsOverview> {
+    return this.#client.requestJson(
+      statsPath("overview", params),
+      statsOverviewSchema,
+      { signal },
+    );
+  }
+
+  statsDaily(params: StatsParams, signal: AbortSignal): Promise<StatsDaily> {
+    return this.#client.requestJson(
+      statsPath("daily", params),
+      statsDailySchema,
+      {
+        signal,
+      },
+    );
+  }
+
+  statsPatterns(
+    params: StatsParams,
+    signal: AbortSignal,
+  ): Promise<StatsPatterns> {
+    return this.#client.requestJson(
+      statsPath("patterns", params),
+      statsPatternsSchema,
+      { signal },
+    );
+  }
+
+  statsTitles(
+    params: StatsParams,
+    kind: StatsTitleKind,
+    signal: AbortSignal,
+  ): Promise<StatsTitles> {
+    return this.#client.requestJson(
+      statsPath("titles", params, { kind: statsTitleKindSchema.parse(kind) }),
+      statsTitlesSchema,
+      { signal },
+    );
+  }
+
+  statsUsers(params: StatsParams, signal: AbortSignal): Promise<StatsUsers> {
+    return this.#client.requestJson(
+      statsPath("users", params),
+      statsUsersSchema,
+      {
+        signal,
+      },
+    );
+  }
+
+  statsUser(
+    params: StatsParams,
+    mediaServerId: string,
+    mediaUserId: string,
+    signal: AbortSignal,
+  ): Promise<StatsUserDetail> {
+    const segment = `users/${encodeURIComponent(mediaServerIdSchema.parse(mediaServerId))}/${encodeURIComponent(mediaUserIdSchema.parse(mediaUserId))}`;
+    return this.#client.requestJson(
+      statsPath(segment, params),
+      statsUserDetailSchema,
+      { signal },
+    );
+  }
+}
+
+function statsPath(
+  report: string,
+  params: StatsParams,
+  extra: Readonly<Record<string, string>> = {},
+): string {
+  const query = new URLSearchParams(extra);
+  query.set("days", String(statsDaysSchema.parse(params.days)));
+  query.set("tz", statsZoneSchema.parse(params.timeZone));
+  if (params.mediaServerId !== undefined) {
+    query.set(
+      "media_server_id",
+      mediaServerIdSchema.parse(params.mediaServerId),
+    );
+  }
+  return `${STATS_PATH}/${report}?${query.toString()}`;
 }
 
 function historyPath(

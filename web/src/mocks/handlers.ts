@@ -1717,7 +1717,254 @@ const requestHandlers = [
   ),
 ];
 
+// Statistics the mock server answers for any window: fixed rankings and
+// breakdowns, a daily series as long as the window, and flat patterns. The
+// window in the answer echoes the request so the UI can show it.
+const STATS_ZONE_MAX_BYTES = 64;
+
+function statsWindow(url: URL) {
+  const daysRaw = url.searchParams.get("days") ?? "30";
+  const tz = url.searchParams.get("tz") ?? "UTC";
+  const serverId = url.searchParams.get("media_server_id") ?? "";
+  if (
+    !/^[0-9]{1,3}$/.test(daysRaw) ||
+    Number(daysRaw) < 1 ||
+    Number(daysRaw) > 365 ||
+    tz === "" ||
+    new TextEncoder().encode(tz).length > STATS_ZONE_MAX_BYTES ||
+    (serverId !== "" && !z.uuid().safeParse(serverId).success)
+  ) {
+    return undefined;
+  }
+  const days = Number(daysRaw);
+  const end = new Date("2026-09-24T00:00:00Z");
+  const start = new Date(end.getTime() - days * 86_400_000);
+  return {
+    days,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    media_server_id: serverId,
+    time_zone: tz,
+  };
+}
+
+const statsTitles = [
+  {
+    kind: "movie",
+    media_server_id: LIVING_ROOM,
+    key: "i-4",
+    name: "Ronin",
+    plays: 6,
+    watch_seconds: 39_600,
+    last_watched_at: "2026-09-22T22:02:00Z",
+  },
+  {
+    kind: "movie",
+    media_server_id: CABIN,
+    key: "i-9",
+    name: "Heat",
+    plays: 3,
+    watch_seconds: 28_800,
+    last_watched_at: "2026-09-20T21:00:00Z",
+  },
+  {
+    kind: "series",
+    media_server_id: CABIN,
+    key: "The Arrival",
+    name: "The Arrival",
+    plays: 14,
+    watch_seconds: 36_120,
+    last_watched_at: "2026-09-23T21:44:00Z",
+  },
+] as const;
+
+const statsUsers = [
+  {
+    media_server_id: CABIN,
+    media_user_id: "u-alice",
+    username: "alice",
+    plays: 17,
+    watch_seconds: 64_920,
+    last_watched_at: "2026-09-23T21:44:00Z",
+  },
+  {
+    media_server_id: LIVING_ROOM,
+    media_user_id: "u-bob",
+    username: "bob",
+    plays: 6,
+    watch_seconds: 39_600,
+    last_watched_at: "2026-09-22T22:02:00Z",
+  },
+] as const;
+
+const statsBreakdowns = {
+  clients: [
+    { name: "Jellyfin Web", plays: 15, watch_seconds: 60_000 },
+    { name: "Findroid", plays: 8, watch_seconds: 44_520 },
+  ],
+  devices: [
+    { name: "Living room TV", plays: 15, watch_seconds: 60_000 },
+    { name: "Pixel", plays: 8, watch_seconds: 44_520 },
+  ],
+  play_methods: [
+    { name: "direct_play", plays: 20, watch_seconds: 90_000 },
+    { name: "transcode", plays: 3, watch_seconds: 14_520 },
+  ],
+};
+
+function statsDailyItems(days: number) {
+  const end = new Date("2026-09-24T00:00:00Z");
+  return Array.from({ length: days }, (_, index) => {
+    const day = new Date(end.getTime() - (days - index) * 86_400_000);
+    const plays = index % 3 === 0 ? 0 : (index % 5) + 1;
+    return {
+      date: day.toISOString().slice(0, 10),
+      plays,
+      watch_seconds: plays * 3600,
+    };
+  });
+}
+
+function statsDenial() {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("stats.read.all")) {
+    return envelope(403, "forbidden", "missing permission stats.read.all");
+  }
+  return undefined;
+}
+
+function statsReport(
+  url: URL,
+  build: (
+    window: NonNullable<ReturnType<typeof statsWindow>>,
+  ) => Record<string, unknown>,
+) {
+  const window = statsWindow(url);
+  if (window === undefined) {
+    return envelope(422, "validation_failed", "invalid statistics parameters");
+  }
+  return HttpResponse.json(build(window));
+}
+
+const statsHandlers = [
+  http.get(
+    "*/api/v1/stats/overview",
+    jsonApi(
+      ({ request }) =>
+        statsDenial() ??
+        statsReport(new URL(request.url), (window) => ({
+          window,
+          totals: {
+            plays: 23,
+            watch_seconds: 104_520,
+            unique_users: 2,
+            unique_titles: 3,
+          },
+          titles: statsTitles,
+          users: statsUsers,
+          ...statsBreakdowns,
+        })),
+    ),
+  ),
+  http.get(
+    "*/api/v1/stats/daily",
+    jsonApi(
+      ({ request }) =>
+        statsDenial() ??
+        statsReport(new URL(request.url), (window) => ({
+          window,
+          items: statsDailyItems(window.days),
+        })),
+    ),
+  ),
+  http.get(
+    "*/api/v1/stats/patterns",
+    jsonApi(
+      ({ request }) =>
+        statsDenial() ??
+        statsReport(new URL(request.url), (window) => ({
+          window,
+          weekdays: Array.from({ length: 7 }, (_, weekday) => ({
+            weekday,
+            plays: weekday === 6 ? 9 : weekday === 0 ? 7 : 1,
+          })),
+          hours: Array.from({ length: 24 }, (_, hour) => ({
+            hour,
+            plays: hour === 21 ? 12 : hour >= 18 && hour <= 23 ? 3 : 0,
+          })),
+        })),
+    ),
+  ),
+  http.get(
+    "*/api/v1/stats/titles",
+    jsonApi(({ request }) => {
+      const denied = statsDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const url = new URL(request.url);
+      const kind = url.searchParams.get("kind");
+      if (kind !== "movie" && kind !== "series" && kind !== "other") {
+        return envelope(422, "validation_failed", "invalid kind");
+      }
+      return statsReport(url, (window) => ({
+        window,
+        kind,
+        items: statsTitles.filter((title) => title.kind === kind),
+      }));
+    }),
+  ),
+  http.get(
+    "*/api/v1/stats/users",
+    jsonApi(
+      ({ request }) =>
+        statsDenial() ??
+        statsReport(new URL(request.url), (window) => ({
+          window,
+          items: statsUsers,
+        })),
+    ),
+  ),
+  http.get(
+    "*/api/v1/stats/users/:serverId/:userId",
+    jsonApi(({ request, params }) => {
+      const denied = statsDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const user = statsUsers.find(
+        (candidate) =>
+          candidate.media_server_id === params.serverId &&
+          candidate.media_user_id === params.userId,
+      );
+      if (user === undefined) {
+        return envelope(404, "not_found", "user not found");
+      }
+      return statsReport(new URL(request.url), (window) => ({
+        window,
+        totals: {
+          plays: user.plays,
+          watch_seconds: user.watch_seconds,
+          unique_users: 1,
+          unique_titles: 2,
+        },
+        titles: statsTitles.filter(
+          (t) => t.media_server_id === user.media_server_id,
+        ),
+        ...statsBreakdowns,
+        daily: statsDailyItems(window.days),
+        watches: mockPlaybackHistory.filter(
+          (watch) => watch.media_user_id === user.media_user_id,
+        ),
+      }));
+    }),
+  ),
+];
+
 export const handlers = [
+  ...statsHandlers,
   ...requestHandlers,
   ...roleQuotaHandlers,
   http.get(

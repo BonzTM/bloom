@@ -25,6 +25,8 @@ const LazyMediaServersRoute = lazy(
 );
 const LazyInvitesRoute = lazy(() => import("../routes/invites-route.js"));
 const LazyPlaybackRoute = lazy(() => import("../routes/playback-route.js"));
+const LazyStatisticsRoute = lazy(() => import("../routes/statistics-route.js"));
+const LazyUserStatsRoute = lazy(() => import("../routes/user-stats-route.js"));
 const LazyRequestsAdminRoute = lazy(
   () => import("../routes/requests-admin-route.js"),
 );
@@ -166,6 +168,26 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.statsReadAll]}>
                 <LazyPage loading="Loading playback…">
                   <LazyPlaybackRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "statistics",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading statistics…">
+                  <LazyStatisticsRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "statistics/users/:serverId/:userId",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading statistics…">
+                  <LazyUserStatsRoute />
                 </LazyPage>
               </RequirePermission>
             ),

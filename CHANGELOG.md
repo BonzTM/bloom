@@ -40,6 +40,12 @@ contracts) gets an entry here.
 
 ### Added
 
+- A Statistics page for accounts with `stats.read.all`: totals, most-watched
+  movies and series, most active people, client, device, and play-method
+  breakdowns, plays and watch time per day, and plays by weekday and hour in
+  the viewer's own time zone, over the last 7, 30, 90, or 365 days and
+  optionally one server; each person links to their own dashboard with
+  their latest watches.
 - Chart primitives for the web UI: bar and line charts drawn in SVG from the
   design tokens, each with its numbers available as a table.
 - Statistics dashboard APIs for overview totals and rankings, daily and local
