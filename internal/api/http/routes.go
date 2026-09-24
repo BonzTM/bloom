@@ -51,6 +51,10 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleProbeMediaServer},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerLibraries},
 	{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMediaServer},
+	{method: http.MethodPost, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateDownloadManager},
+	{method: http.MethodGet, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListDownloadManagers},
+	{method: http.MethodDelete, path: "/api/v1/download-managers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteDownloadManager},
+	{method: http.MethodGet, path: "/api/v1/download-managers/{id}/options", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDownloadManagerOptions},
 	{method: http.MethodPost, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleCreateInvite},
 	{method: http.MethodGet, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleListInvites},
 	{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleGetInvite},
@@ -72,6 +76,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/requests", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleCreateRequest},
 	{method: http.MethodGet, path: "/api/v1/requests", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true, handler: (*Server).handleListRequests},
 	{method: http.MethodGet, path: "/api/v1/requests/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true, handler: (*Server).handleGetRequest},
+	{method: http.MethodGet, path: "/api/v1/requests/{id}/progress", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true, handler: (*Server).handleRequestProgress},
 	{method: http.MethodPost, path: "/api/v1/requests/{id}/approve", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true, handler: (*Server).handleApproveRequest},
 	{method: http.MethodPost, path: "/api/v1/requests/{id}/decline", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true, handler: (*Server).handleDeclineRequest},
 	{method: http.MethodGet, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true, handler: (*Server).handleGetRoleRequestQuota},
@@ -140,6 +145,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/media-servers") && (s.mediaServerReader == nil || s.mediaServerManager == nil) {
+			continue
+		}
+		if strings.HasPrefix(route.path, "/api/v1/download-managers") && (s.downloadManagerReader == nil || s.downloadManagerManager == nil) {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/invite") &&
@@ -213,6 +221,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		handler = s.sessionHandler(handler, false)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/media-servers") {
+		handler = s.mediaServerOperationMiddleware(handler)
+	}
+	if strings.HasPrefix(route.path, "/api/v1/download-managers") || strings.HasSuffix(route.path, "/progress") {
 		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/invite") {

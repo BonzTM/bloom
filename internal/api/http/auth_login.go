@@ -280,6 +280,7 @@ const (
 	auditResourceAuthOIDCCallback = "route:auth.oidc.callback"
 	auditResourceRoles            = "route:roles"
 	auditResourceMediaServers     = "route:media_servers"
+	auditResourceDownloadManagers = "route:download_managers"
 	auditResourceInvites          = "route:invites"
 	auditResourceInvitePublic     = "route:invite_public"
 	auditResourcePlayback         = "route:playback"
@@ -311,6 +312,8 @@ func routeResource(r *http.Request) string {
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
 		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
 		return auditResourceMediaServers
+	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
+		return auditResourceDownloadManagers
 	case "/api/v1/invites", "/api/v1/invites/{id}":
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
@@ -323,7 +326,8 @@ func routeResource(r *http.Request) string {
 		return auditResourceMetadataSettings
 	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
 		return auditResourceRequestProfiles
-	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
+	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/progress",
+		"/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
 		return auditResourceRequests
 	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
 		return auditResourceRequestQuotas

@@ -64,13 +64,15 @@ SELECT tag FROM request_profile_tags WHERE profile_id = sqlc.arg(profile_id) ORD
 INSERT INTO requests (
     id, kind, provider, provider_id, title, release_year, poster_path,
     requester_account_id, profile_id, status, decision_reason,
-    decided_by_account_id, decided_at, created_at, updated_at
+    decided_by_account_id, decided_at, download_manager_item_id, failure_reason,
+    created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(kind), sqlc.arg(provider), sqlc.arg(provider_id),
     sqlc.arg(title), sqlc.arg(release_year), sqlc.arg(poster_path),
     sqlc.arg(requester_account_id), sqlc.arg(profile_id), sqlc.arg(status),
     sqlc.arg(decision_reason), sqlc.narg(decided_by_account_id),
-    sqlc.narg(decided_at), sqlc.arg(created_at), sqlc.arg(updated_at)
+    sqlc.narg(decided_at), sqlc.arg(download_manager_item_id), sqlc.arg(failure_reason),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
 );
 
 -- name: CreateRequestSeason :exec
@@ -89,16 +91,10 @@ WHERE requests.kind = 'series'
   AND request_seasons.season_number = sqlc.arg(season_number);
 
 -- name: GetRequest :one
-SELECT id, kind, provider, provider_id, title, release_year, poster_path,
-       requester_account_id, profile_id, status, decision_reason,
-       decided_by_account_id, decided_at, created_at, updated_at
-FROM requests WHERE id = sqlc.arg(id);
+SELECT * FROM requests WHERE id = sqlc.arg(id);
 
 -- name: ListRequests :many
-SELECT id, kind, provider, provider_id, title, release_year, poster_path,
-       requester_account_id, profile_id, status, decision_reason,
-       decided_by_account_id, decided_at, created_at, updated_at
-FROM requests
+SELECT * FROM requests
 WHERE (CAST(sqlc.arg(has_requester) AS INTEGER) = 0 OR requester_account_id = sqlc.arg(requester_id))
   AND (CAST(sqlc.arg(has_status) AS INTEGER) = 0 OR status = sqlc.arg(status_filter))
   AND (CAST(sqlc.arg(has_cursor) AS INTEGER) = 0
@@ -112,13 +108,61 @@ SELECT season_number, status FROM request_seasons WHERE request_id = sqlc.arg(re
 
 -- name: TransitionRequest :execrows
 UPDATE requests SET
-    status = sqlc.arg(to_status), decision_reason = sqlc.arg(decision_reason),
-    decided_by_account_id = sqlc.arg(decided_by_account_id), decided_at = sqlc.arg(decided_at),
+    status = sqlc.arg(to_status),
+    decision_reason = CASE WHEN status IN ('pending', 'failed') THEN sqlc.arg(decision_reason) ELSE decision_reason END,
+    decided_by_account_id = CASE WHEN status IN ('pending', 'failed') THEN sqlc.arg(decided_by_account_id) ELSE decided_by_account_id END,
+    decided_at = CASE WHEN status IN ('pending', 'failed') THEN sqlc.arg(decided_at) ELSE decided_at END,
+    failure_reason = CASE WHEN status IN ('approved', 'processing') THEN sqlc.arg(decision_reason) ELSE '' END,
+    download_manager_id = CASE WHEN status = 'failed' THEN '' ELSE download_manager_id END,
+    download_manager_item_id = CASE WHEN status = 'failed' THEN '' ELSE download_manager_item_id END,
+    dispatch_quality_profile = CASE WHEN status = 'failed' THEN '' ELSE dispatch_quality_profile END,
+    dispatch_root_folder = CASE WHEN status = 'failed' THEN '' ELSE dispatch_root_folder END,
+    dispatch_tags = CASE WHEN status = 'failed' THEN '[]' ELSE dispatch_tags END,
+    dispatch_lease_token = CASE WHEN status IN ('approved', 'failed') THEN '' ELSE dispatch_lease_token END,
+    dispatch_lease_expires_at = CASE WHEN status IN ('approved', 'failed') THEN NULL ELSE dispatch_lease_expires_at END,
+    last_availability_check_at = CASE WHEN status = 'failed' THEN NULL ELSE last_availability_check_at END,
     updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND status = sqlc.arg(from_status);
 
 -- name: TransitionRequestSeasons :exec
 UPDATE request_seasons SET status = sqlc.arg(to_status) WHERE request_id = sqlc.arg(request_id);
+
+-- name: RecordRequestDispatch :execrows
+UPDATE requests SET status = 'processing', download_manager_item_id = sqlc.arg(manager_item_id),
+    failure_reason = '', dispatch_lease_token = '', dispatch_lease_expires_at = NULL,
+    last_availability_check_at = NULL, updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND status = 'approved'
+  AND download_manager_id <> ''
+  AND dispatch_lease_token = sqlc.arg(dispatch_lease_token)
+  AND dispatch_lease_expires_at > sqlc.arg(updated_at)
+  AND (download_manager_item_id = '' OR download_manager_item_id = sqlc.arg(manager_item_id));
+
+-- name: ClaimRequestDispatch :execrows
+UPDATE requests SET
+    download_manager_id = sqlc.arg(download_manager_id),
+    dispatch_quality_profile = sqlc.arg(dispatch_quality_profile),
+    dispatch_root_folder = sqlc.arg(dispatch_root_folder),
+    dispatch_tags = sqlc.arg(dispatch_tags),
+    dispatch_lease_token = sqlc.arg(dispatch_lease_token),
+    dispatch_lease_expires_at = sqlc.arg(dispatch_lease_expires_at),
+    updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND status = 'approved'
+  AND (dispatch_lease_token = '' OR dispatch_lease_expires_at <= sqlc.arg(updated_at));
+
+-- name: FailRequestDispatch :execrows
+UPDATE requests SET
+    status = 'failed', failure_reason = sqlc.arg(failure_reason),
+    download_manager_id = '', download_manager_item_id = '',
+    dispatch_quality_profile = '', dispatch_root_folder = '', dispatch_tags = '[]',
+    dispatch_lease_token = '', dispatch_lease_expires_at = NULL,
+    last_availability_check_at = NULL, updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND status = 'approved'
+  AND dispatch_lease_token = sqlc.arg(dispatch_lease_token)
+  AND dispatch_lease_expires_at > sqlc.arg(updated_at);
+
+-- name: StampRequestAvailabilityCheck :execrows
+UPDATE requests SET last_availability_check_at = sqlc.arg(checked_at)
+WHERE id = sqlc.arg(id) AND status = 'processing';
 
 -- name: CountRequestedMoviesSince :one
 SELECT COUNT(*) FROM requests

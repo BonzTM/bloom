@@ -9,6 +9,62 @@ import (
 	"context"
 )
 
+const listRequestsForAvailability = `-- name: ListRequestsForAvailability :many
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at FROM requests
+WHERE status = 'processing'
+ORDER BY last_availability_check_at ASC NULLS FIRST, created_at ASC, id ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) ListRequestsForAvailability(ctx context.Context, pageSize int32) ([]Request, error) {
+	rows, err := q.db.QueryContext(ctx, listRequestsForAvailability, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Request{}
+	for rows.Next() {
+		var i Request
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Provider,
+			&i.ProviderID,
+			&i.Title,
+			&i.ReleaseYear,
+			&i.PosterPath,
+			&i.RequesterAccountID,
+			&i.ProfileID,
+			&i.Status,
+			&i.DecisionReason,
+			&i.DecidedByAccountID,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DownloadManagerItemID,
+			&i.FailureReason,
+			&i.DownloadManagerID,
+			&i.DispatchQualityProfile,
+			&i.DispatchRootFolder,
+			&i.DispatchTags,
+			&i.DispatchLeaseExpiresAt,
+			&i.DispatchLeaseToken,
+			&i.LastAvailabilityCheckAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAccountRequestQuota = `-- name: LockAccountRequestQuota :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
 `

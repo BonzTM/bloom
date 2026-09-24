@@ -18,6 +18,7 @@ sql:
       - internal/db/queries/accounts.sql
       - internal/db/queries/authorization.sql
       - internal/db/queries/media_servers.sql
+      - internal/db/queries/download_managers.sql
       - internal/db/queries/oidc.sql
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_sqlite.sql
@@ -41,6 +42,7 @@ sql:
       - internal/db/queries/accounts.sql
       - internal/db/queries/authorization.sql
       - internal/db/queries/media_servers.sql
+      - internal/db/queries/download_managers.sql
       - internal/db/queries/oidc.sql
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_postgres.sql

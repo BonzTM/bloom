@@ -191,6 +191,41 @@ func TestLoadOIDCConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadRequestFulfilmentConfiguration(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load defaults: %v", err)
+	}
+	if cfg.Requests.AvailabilitySource != AvailabilityMediaServer || cfg.Requests.AvailabilityInterval != 5*time.Minute {
+		t.Fatalf("request defaults = %+v", cfg.Requests)
+	}
+
+	t.Setenv("BLOOM_REQUEST_AVAILABILITY_SOURCE", "download_manager")
+	t.Setenv("BLOOM_REQUEST_AVAILABILITY_INTERVAL", "2m")
+	cfg, err = Load(nil)
+	if err != nil || cfg.Requests.AvailabilitySource != AvailabilityDownloadManager || cfg.Requests.AvailabilityInterval != 2*time.Minute {
+		t.Fatalf("request settings = %+v, %v", cfg.Requests, err)
+	}
+}
+
+func TestRequestFulfilmentConfigurationRejectsInvalidValues(t *testing.T) {
+	tests := []struct{ key, value string }{
+		{key: "BLOOM_REQUEST_AVAILABILITY_SOURCE", value: "queue"},
+		{key: "BLOOM_REQUEST_AVAILABILITY_INTERVAL", value: "59s"},
+		{key: "BLOOM_REQUEST_AVAILABILITY_INTERVAL", value: "25h"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.key+"="+testCase.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(testCase.key, testCase.value)
+			if _, err := Load(nil); err == nil {
+				t.Fatal("Load accepted invalid request fulfilment configuration")
+			}
+		})
+	}
+}
+
 func TestOIDCValidation(t *testing.T) {
 	base := func(t *testing.T) {
 		t.Helper()

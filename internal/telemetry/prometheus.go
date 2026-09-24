@@ -50,6 +50,9 @@ type PromMetrics struct {
 	metadataSeconds         *prometheus.HistogramVec
 	metadataRetries         *prometheus.CounterVec
 	mediaRequests           *prometheus.CounterVec
+	downloadManagerRequests *prometheus.CounterVec
+	downloadManagerSeconds  *prometheus.HistogramVec
+	downloadManagerRetries  *prometheus.CounterVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -67,6 +70,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
 		"Total failed playback manager refresh attempts.")
 	requestCollectors := newRequestCollectors(namespace)
+	downloadCollectors := newDownloadManagerCollectors(namespace)
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -91,9 +95,36 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		metadataSeconds:         requestCollectors.metadataSeconds,
 		metadataRetries:         requestCollectors.metadataRetries,
 		mediaRequests:           requestCollectors.mediaRequests,
+		downloadManagerRequests: downloadCollectors.requests,
+		downloadManagerSeconds:  downloadCollectors.seconds,
+		downloadManagerRetries:  downloadCollectors.retries,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
+}
+
+type downloadManagerCollectors struct {
+	requests *prometheus.CounterVec
+	seconds  *prometheus.HistogramVec
+	retries  *prometheus.CounterVec
+}
+
+func newDownloadManagerCollectors(namespace string) downloadManagerCollectors {
+	labels := []string{"kind", "operation", "outcome"}
+	return downloadManagerCollectors{
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "download_manager_requests_total",
+			Help: "Total outbound download-manager requests by kind, operation, and outcome.",
+		}, labels),
+		seconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace, Name: "download_manager_request_duration_seconds",
+			Help: "Outbound download-manager request latency by kind, operation, and outcome.", Buckets: prometheus.DefBuckets,
+		}, labels),
+		retries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "download_manager_retries_total",
+			Help: "Total outbound download-manager retries by kind, operation, and outcome.",
+		}, labels),
+	}
 }
 
 type requestCollectors struct {
@@ -290,7 +321,21 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.metadataSeconds,
 		m.metadataRetries,
 		m.mediaRequests,
+		m.downloadManagerRequests,
+		m.downloadManagerSeconds,
+		m.downloadManagerRetries,
 	)
+}
+
+// ObserveDownloadManagerRequest records one bounded Radarr or Sonarr operation.
+func (m *PromMetrics) ObserveDownloadManagerRequest(kind, operation, outcome string, seconds float64) {
+	m.downloadManagerRequests.WithLabelValues(kind, operation, outcome).Inc()
+	m.downloadManagerSeconds.WithLabelValues(kind, operation, outcome).Observe(seconds)
+}
+
+// ObserveDownloadManagerRetry records one bounded retry decision.
+func (m *PromMetrics) ObserveDownloadManagerRetry(kind, operation, outcome string) {
+	m.downloadManagerRetries.WithLabelValues(kind, operation, outcome).Inc()
 }
 
 // ObserveMetadataRequest records one bounded metadata-provider operation.

@@ -232,8 +232,8 @@ func TestVersionContract(t *testing.T) {
 	}
 }
 
-func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
-	want := []apiRoute{
+func expectedAPIRoutes() []apiRoute {
+	return []apiRoute{
 		{method: http.MethodGet, path: "/api/v1/version", access: routePublic},
 		{method: http.MethodGet, path: "/api/v1/auth/permissions", access: routePublic},
 		{method: http.MethodGet, path: "/api/v1/auth/providers", access: routePublic},
@@ -249,6 +249,10 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPost, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/download-managers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/download-managers/{id}/options", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
@@ -270,6 +274,7 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/requests", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/requests", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/requests/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/requests/{id}/progress", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsReadOwn, core.PermissionRequestsApprove}, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/requests/{id}/approve", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/requests/{id}/decline", access: routePermission, permission: core.PermissionRequestsApprove, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/roles/{id}/request-quota", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
@@ -279,6 +284,10 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		{method: http.MethodPut, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodDelete, path: "/api/v1/accounts/{id}/request-quota", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 	}
+}
+
+func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
+	want := expectedAPIRoutes()
 	if len(apiRouteInventory) != len(want) {
 		t.Fatalf("route inventory length = %d, want %d", len(apiRouteInventory), len(want))
 	}

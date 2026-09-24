@@ -7,6 +7,6 @@
 The full stable document is committed so generation is deterministic and works
 offline. A local `x-go-name` on `VideoRangeType` avoids an upstream enum-value
 name collision when session models are generated; it does not alter the wire
-contract. `oapi-codegen.yaml` limits generated code to `GetSessions`,
-`GetSystemInfo`, and `GetVirtualFolders`. Run `make generate` after changing the
-pin or generator.
+contract. `oapi-codegen.yaml` limits generated code to the operations Bloom
+uses, including `GetItems` for provider-id availability checks. Run
+`make generate` after changing the pin or generator.

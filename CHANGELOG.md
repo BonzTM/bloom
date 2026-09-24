@@ -16,6 +16,15 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Fulfilment now snapshots each request's manager and dispatch options, polls
+  processing requests fairly, uses expiring exclusive dispatch leases, treats
+  only authoritative Radarr or complete per-season Sonarr file state as
+  availability, and moves structurally malformed availability responses to
+  `failed`.
+  Existing Radarr movies are reconciled and searched, while existing Sonarr
+  monitored seasons are preserved and only newly requested seasons are searched.
+- Download-manager option responses now encode empty quality-profile,
+  root-folder, and tag collections as `[]` instead of `null`.
 - The web UI has a design system: a dark-first palette with a light scheme
   when the system asks for it, an app shell with a sidebar that becomes a
   sticky top bar on narrow screens, and shared cards, forms, buttons, badges,
@@ -33,6 +42,15 @@ contracts) gets an entry here.
 
 - The Roles page shows and edits each role's request quota: how many movies
   and seasons its members may request in a rolling period, or no limit.
+- Radarr and Sonarr registration with probe-before-save encrypted API keys,
+  instance options, profile validation, idempotent approved-request dispatch,
+  bounded retries, live queue progress, configurable availability polling,
+  lifecycle audit/domain events, and SQLite/PostgreSQL migration `00013` with
+  immutable dispatch snapshots, expiring lease state, and availability-check
+  scheduling state. PostgreSQL manager-name ordering uses binary collation to
+  match SQLite.
+- Request fulfilment settings `BLOOM_REQUEST_AVAILABILITY_SOURCE` and
+  `BLOOM_REQUEST_AVAILABILITY_INTERVAL`.
 - Anyone allowed to request media can search The Movie Database from the web
   UI, browse results as a poster grid, open a movie or series, pick seasons
   and a request profile, and follow their own requests. Posters load from

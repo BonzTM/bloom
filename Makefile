@@ -41,12 +41,14 @@ tidy-check: ## Fail if go mod tidy would change go.mod/go.sum (CI-safe, no write
 generate: ## Regenerate pinned API clients and sqlc database code.
 	go generate ./internal/mediaserver/jellyfin
 	go generate ./internal/metadata/tmdb
+	go generate ./internal/downloadmanager/radarr
+	go generate ./internal/downloadmanager/sonarr
 	go tool sqlc generate
 
 generate-check: ## Fail when committed generated code is stale.
-	@before="$$(sha256sum internal/mediaserver/jellyfin/api/zz_generated.openapi.go internal/metadata/tmdb/api/zz_generated.openapi.go internal/db/sqlite/*.go internal/db/postgres/*.go)"; \
+	@before="$$(sha256sum internal/mediaserver/jellyfin/api/zz_generated.openapi.go internal/metadata/tmdb/api/zz_generated.openapi.go internal/downloadmanager/radarr/api/zz_generated.openapi.go internal/downloadmanager/sonarr/api/zz_generated.openapi.go internal/db/sqlite/*.go internal/db/postgres/*.go)"; \
 	$(MAKE) --no-print-directory generate; \
-	after="$$(sha256sum internal/mediaserver/jellyfin/api/zz_generated.openapi.go internal/metadata/tmdb/api/zz_generated.openapi.go internal/db/sqlite/*.go internal/db/postgres/*.go)"; \
+	after="$$(sha256sum internal/mediaserver/jellyfin/api/zz_generated.openapi.go internal/metadata/tmdb/api/zz_generated.openapi.go internal/downloadmanager/radarr/api/zz_generated.openapi.go internal/downloadmanager/sonarr/api/zz_generated.openapi.go internal/db/sqlite/*.go internal/db/postgres/*.go)"; \
 	if [ "$$before" != "$$after" ]; then echo "generated code is stale; run: make generate"; exit 1; fi
 
 fmt: ## Format all Go source in place (gofumpt + gci, per .golangci.yml).

@@ -1,0 +1,17 @@
+package: sonarrapi
+output: api/zz_generated.openapi.go
+generate:
+  models: true
+  client: true
+output-options:
+  include-operation-ids:
+    - GetSystemStatus
+    - ListQualityProfiles
+    - ListRootFolders
+    - ListTags
+    - ListSeries
+    - GetSeries
+    - LookupSeries
+    - AddSeries
+    - UpdateSeries
+    - GetQueue

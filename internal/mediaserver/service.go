@@ -279,6 +279,44 @@ func (s *Service) ListSessions(ctx context.Context, id string) ([]core.PlaybackS
 	return sessions, nil
 }
 
+// HasTitle checks every registered provider-id-capable server until one reports the title.
+func (s *Service) HasTitle(
+	ctx context.Context, kind core.MediaKind, provider core.MetadataProviderKind,
+	providerID string, seasons []int,
+) (bool, []int, error) {
+	servers, err := s.reader.ListMediaServers(ctx, "", 101)
+	if err != nil {
+		return false, nil, fmt.Errorf("list media servers for availability: %w", err)
+	}
+	for _, server := range servers {
+		capabilities, capabilityErr := s.factory.Capabilities(server.Kind)
+		if capabilityErr != nil {
+			return false, nil, capabilityErr
+		}
+		if !capabilities.ProviderIDLookup {
+			continue
+		}
+		call, callErr := s.adapter(ctx, server.ID, "provider_id_lookup")
+		if callErr != nil {
+			return false, nil, callErr
+		}
+		lookup, ok := call.entry.adapter.(core.MediaAvailabilityLookup)
+		if !ok {
+			call.release()
+			continue
+		}
+		found, availableSeasons, lookupErr := lookup.HasTitle(ctx, kind, provider, providerID, seasons)
+		call.release()
+		if lookupErr != nil {
+			return false, nil, lookupErr
+		}
+		if found {
+			return true, availableSeasons, nil
+		}
+	}
+	return false, nil, nil
+}
+
 func (s *Service) adapter(ctx context.Context, id, operation string) (*adapterCall, error) {
 	build := s.adapters.begin(id, operation)
 	callCtx, cancel := dependencyContext(ctx)

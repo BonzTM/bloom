@@ -42,6 +42,16 @@ type mediaServerManager interface {
 	Delete(ctx context.Context, id string) (core.MediaServer, error)
 }
 
+type downloadManagerReader interface {
+	List(ctx context.Context, afterNameKey string, pageSize int) ([]core.DownloadManager, error)
+	Options(ctx context.Context, id string) (core.DownloadManagerOptions, error)
+}
+
+type downloadManagerManager interface {
+	Register(ctx context.Context, kind core.DownloadManagerKind, name, baseURL, apiKey string, allowInsecure bool) (core.DownloadManagerConnection, error)
+	Delete(ctx context.Context, id string) (core.DownloadManager, error)
+}
+
 type inviteReader interface {
 	List(ctx context.Context, after *core.InviteCursor, pageSize int) ([]core.Invite, error)
 	Get(ctx context.Context, id string) (core.Invite, error)
@@ -74,47 +84,49 @@ type metadataManager interface {
 // dependencies the handlers need and the readiness flag the shutdown sequence
 // flips. It never stores a request context.
 type Server struct {
-	httpServer            *http.Server
-	handlers              handlerTracker
-	logger                *slog.Logger
-	metrics               telemetry.Metrics
-	metricsHandler        http.Handler
-	readiness             *telemetry.Readiness
-	pinger                Pinger
-	web                   http.Handler
-	maxBodyBytes          int64
-	identity              core.IdentityProvider
-	accounts              core.AccountStore
-	sessions              *scs.SessionManager
-	audit                 auditEmitter
-	auditFailureMetrics   telemetry.AuditFailureMetrics
-	authorizationMetrics  telemetry.AuthorizationMetrics
-	usernameAuditKey      [32]byte
-	loginLimiter          *loginLimiter
-	passwordVerifications chan struct{}
-	oidcExchanges         chan struct{}
-	authOperationTimeout  time.Duration
-	mediaOperationTimeout time.Duration
-	trustedProxyCIDRs     []netip.Prefix
-	authorizer            core.Authorizer
-	roles                 core.RoleReader
-	mediaServerReader     mediaServerReader
-	mediaServerManager    mediaServerManager
-	inviteReader          inviteReader
-	inviteManager         inviteManager
-	inviteLimiter         *loginLimiter
-	inviteAcceptances     chan struct{}
-	inviteMetrics         telemetry.InviteMetrics
-	playbackReader        playbackReader
-	metadataReader        metadataReader
-	metadataManager       metadataManager
-	requestService        *requestapp.Service
-	clock                 core.Clock
-	oidcProvider          core.OIDCProvider
-	oidcAccounts          core.OIDCAccountStore
-	oidcFlows             core.OIDCFlowStore
-	oidcConfig            config.OIDCConfig
-	publicURL             string
+	httpServer             *http.Server
+	handlers               handlerTracker
+	logger                 *slog.Logger
+	metrics                telemetry.Metrics
+	metricsHandler         http.Handler
+	readiness              *telemetry.Readiness
+	pinger                 Pinger
+	web                    http.Handler
+	maxBodyBytes           int64
+	identity               core.IdentityProvider
+	accounts               core.AccountStore
+	sessions               *scs.SessionManager
+	audit                  auditEmitter
+	auditFailureMetrics    telemetry.AuditFailureMetrics
+	authorizationMetrics   telemetry.AuthorizationMetrics
+	usernameAuditKey       [32]byte
+	loginLimiter           *loginLimiter
+	passwordVerifications  chan struct{}
+	oidcExchanges          chan struct{}
+	authOperationTimeout   time.Duration
+	mediaOperationTimeout  time.Duration
+	trustedProxyCIDRs      []netip.Prefix
+	authorizer             core.Authorizer
+	roles                  core.RoleReader
+	mediaServerReader      mediaServerReader
+	mediaServerManager     mediaServerManager
+	downloadManagerReader  downloadManagerReader
+	downloadManagerManager downloadManagerManager
+	inviteReader           inviteReader
+	inviteManager          inviteManager
+	inviteLimiter          *loginLimiter
+	inviteAcceptances      chan struct{}
+	inviteMetrics          telemetry.InviteMetrics
+	playbackReader         playbackReader
+	metadataReader         metadataReader
+	metadataManager        metadataManager
+	requestService         *requestapp.Service
+	clock                  core.Clock
+	oidcProvider           core.OIDCProvider
+	oidcAccounts           core.OIDCAccountStore
+	oidcFlows              core.OIDCFlowStore
+	oidcConfig             config.OIDCConfig
+	publicURL              string
 }
 
 // Deps bundles the dependencies the server wires on top of config. Grouping
@@ -145,6 +157,10 @@ type Deps struct {
 	MediaServerReader mediaServerReader
 	// MediaServerManager supplies registered-server changes and probes.
 	MediaServerManager mediaServerManager
+	// DownloadManagerReader supplies registered Radarr and Sonarr reads.
+	DownloadManagerReader downloadManagerReader
+	// DownloadManagerManager supplies download-manager registration changes.
+	DownloadManagerManager downloadManagerManager
 	// InviteReader supplies invite administration and public reads.
 	InviteReader inviteReader
 	// InviteManager supplies invite creation, revocation, and acceptance.
@@ -260,37 +276,39 @@ func (t *handlerTracker) seal() {
 
 func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 	s := &Server{
-		logger:                deps.Logger,
-		metrics:               deps.Metrics,
-		readiness:             deps.Readiness,
-		pinger:                deps.Pinger,
-		web:                   deps.Web,
-		maxBodyBytes:          cfg.MaxBodyBytes,
-		identity:              deps.Identity,
-		accounts:              deps.Accounts,
-		sessions:              deps.Sessions,
-		audit:                 deps.Audit,
-		auditFailureMetrics:   telemetry.NopMetrics{},
-		authorizationMetrics:  telemetry.NopMetrics{},
-		trustedProxyCIDRs:     deps.Auth.TrustedProxyCIDRs,
-		authorizer:            deps.Authorizer,
-		roles:                 deps.Roles,
-		mediaServerReader:     deps.MediaServerReader,
-		mediaServerManager:    deps.MediaServerManager,
-		inviteReader:          deps.InviteReader,
-		inviteManager:         deps.InviteManager,
-		inviteMetrics:         telemetry.NopMetrics{},
-		playbackReader:        deps.PlaybackReader,
-		metadataReader:        deps.MetadataReader,
-		metadataManager:       deps.MetadataManager,
-		requestService:        deps.RequestService,
-		mediaOperationTimeout: derivedAuthOperationTimeout(cfg.WriteTimeout),
-		clock:                 deps.Clock,
-		oidcProvider:          deps.OIDC,
-		oidcAccounts:          deps.OIDCAccounts,
-		oidcFlows:             deps.OIDCFlows,
-		oidcConfig:            deps.OIDCConfig,
-		publicURL:             deps.PublicURL,
+		logger:                 deps.Logger,
+		metrics:                deps.Metrics,
+		readiness:              deps.Readiness,
+		pinger:                 deps.Pinger,
+		web:                    deps.Web,
+		maxBodyBytes:           cfg.MaxBodyBytes,
+		identity:               deps.Identity,
+		accounts:               deps.Accounts,
+		sessions:               deps.Sessions,
+		audit:                  deps.Audit,
+		auditFailureMetrics:    telemetry.NopMetrics{},
+		authorizationMetrics:   telemetry.NopMetrics{},
+		trustedProxyCIDRs:      deps.Auth.TrustedProxyCIDRs,
+		authorizer:             deps.Authorizer,
+		roles:                  deps.Roles,
+		mediaServerReader:      deps.MediaServerReader,
+		mediaServerManager:     deps.MediaServerManager,
+		downloadManagerReader:  deps.DownloadManagerReader,
+		downloadManagerManager: deps.DownloadManagerManager,
+		inviteReader:           deps.InviteReader,
+		inviteManager:          deps.InviteManager,
+		inviteMetrics:          telemetry.NopMetrics{},
+		playbackReader:         deps.PlaybackReader,
+		metadataReader:         deps.MetadataReader,
+		metadataManager:        deps.MetadataManager,
+		requestService:         deps.RequestService,
+		mediaOperationTimeout:  derivedAuthOperationTimeout(cfg.WriteTimeout),
+		clock:                  deps.Clock,
+		oidcProvider:           deps.OIDC,
+		oidcAccounts:           deps.OIDCAccounts,
+		oidcFlows:              deps.OIDCFlows,
+		oidcConfig:             deps.OIDCConfig,
+		publicURL:              deps.PublicURL,
 	}
 	if s.audit == nil {
 		s.audit = telemetry.NopAuditLogger()
@@ -460,6 +478,8 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
 		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
 		return auditResourceMediaServers
+	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
+		return auditResourceDownloadManagers
 	case "/api/v1/invites", "/api/v1/invites/{id}":
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
@@ -468,7 +488,8 @@ func csrfAuditResource(path string) string {
 		return auditResourceMetadataSettings
 	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
 		return auditResourceRequestProfiles
-	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
+	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/progress",
+		"/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
 		return auditResourceRequests
 	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
 		return auditResourceRequestQuotas

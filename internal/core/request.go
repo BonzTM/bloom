@@ -91,22 +91,45 @@ type RequestProfile struct {
 
 // MediaRequest is a metadata snapshot and its approval state.
 type MediaRequest struct {
-	ID             string
-	Kind           MediaKind
-	Provider       MetadataProviderKind
-	ProviderID     string
-	Title          string
-	Year           int
-	PosterPath     string
-	RequesterID    string
-	ProfileID      string
-	Status         RequestStatus
-	Seasons        []RequestSeason
-	DecisionReason string
-	DecidedBy      string
-	DecidedAt      *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                      string
+	Kind                    MediaKind
+	Provider                MetadataProviderKind
+	ProviderID              string
+	Title                   string
+	Year                    int
+	PosterPath              string
+	RequesterID             string
+	ProfileID               string
+	Status                  RequestStatus
+	Seasons                 []RequestSeason
+	DecisionReason          string
+	FailureReason           string
+	DownloadManagerID       string
+	DownloadManagerItemID   string
+	DispatchQualityProfile  string
+	DispatchRootFolder      string
+	DispatchTags            []string
+	DispatchLeaseToken      string
+	DispatchLeaseExpiresAt  *time.Time
+	LastAvailabilityCheckAt *time.Time
+	DecidedBy               string
+	DecidedAt               *time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+// RequestDispatchSnapshot freezes the manager target and options used by one request.
+type RequestDispatchSnapshot struct {
+	DownloadManagerID string
+	QualityProfile    string
+	RootFolder        string
+	Tags              []string
+}
+
+// RequestDispatchLease grants one worker temporary ownership of dispatch.
+type RequestDispatchLease struct {
+	Token     string
+	ExpiresAt time.Time
 }
 
 // RequestSeason identifies one requested series season.
@@ -187,6 +210,12 @@ const (
 	RequestEventApproved RequestEventType = "approved"
 	// RequestEventDeclined records request decline.
 	RequestEventDeclined RequestEventType = "declined"
+	// RequestEventDispatched records successful download-manager dispatch.
+	RequestEventDispatched RequestEventType = "dispatched"
+	// RequestEventAvailable records availability at the configured source.
+	RequestEventAvailable RequestEventType = "available"
+	// RequestEventFailed records terminal fulfilment failure.
+	RequestEventFailed RequestEventType = "failed"
 )
 
 // RequestEvent is the in-process lifecycle payload for later consumers.
@@ -227,6 +256,37 @@ type RequestReader interface {
 type RequestWriter interface {
 	CreateRequest(ctx context.Context, request MediaRequest, now time.Time, quotaExempt bool) error
 	TransitionRequest(ctx context.Context, id string, from, to RequestStatus, actorID, reason string, decidedAt time.Time) (MediaRequest, error)
+}
+
+// RequestDispatchWriter records a successful download-manager dispatch.
+type RequestDispatchWriter interface {
+	ClaimRequestDispatch(ctx context.Context, id string, snapshot RequestDispatchSnapshot, lease RequestDispatchLease, at time.Time) (MediaRequest, error)
+	RecordRequestDispatch(ctx context.Context, id, leaseToken, managerItemID string, at time.Time) (MediaRequest, error)
+	FailRequestDispatch(ctx context.Context, id, leaseToken, reason string, at time.Time) (MediaRequest, error)
+}
+
+// RequestAvailabilityClaimer atomically selects and stamps the fairest processing batch.
+type RequestAvailabilityClaimer interface {
+	ClaimRequestsForAvailability(ctx context.Context, pageSize int, at time.Time) ([]MediaRequest, error)
+}
+
+// ValidateRequestDispatchSnapshot validates immutable dispatch routing data.
+func ValidateRequestDispatchSnapshot(snapshot RequestDispatchSnapshot) error {
+	if !ValidID(snapshot.DownloadManagerID) ||
+		!boundedText(snapshot.QualityProfile, MaxRequestProfileFieldBytes) ||
+		!boundedText(snapshot.RootFolder, MaxRequestProfileFieldBytes) ||
+		!requestTagsValid(snapshot.Tags) {
+		return ErrInvalidArgument
+	}
+	return nil
+}
+
+// ValidateRequestDispatchLease validates lease identity and a future expiry.
+func ValidateRequestDispatchLease(lease RequestDispatchLease, at time.Time) error {
+	if !ValidID(lease.Token) || at.IsZero() || !lease.ExpiresAt.After(at) {
+		return ErrInvalidArgument
+	}
+	return nil
 }
 
 // RequestQuotaReader retrieves role and account request quotas.
@@ -388,10 +448,9 @@ type RequestTransition struct {
 var requestTransitions = [...]RequestTransition{
 	{From: RequestPending, To: RequestApproved, Permission: PermissionRequestsApprove},
 	{From: RequestPending, To: RequestDeclined, Permission: PermissionRequestsApprove},
-	{From: RequestApproved, To: RequestProcessing, Permission: PermissionAdminSettings},
 	{From: RequestProcessing, To: RequestAvailable, Permission: PermissionAdminSettings},
-	{From: RequestApproved, To: RequestFailed, Permission: PermissionAdminSettings},
 	{From: RequestProcessing, To: RequestFailed, Permission: PermissionAdminSettings},
+	{From: RequestFailed, To: RequestApproved, Permission: PermissionRequestsApprove},
 }
 
 // TransitionPermission returns the permission required by an allowed transition.

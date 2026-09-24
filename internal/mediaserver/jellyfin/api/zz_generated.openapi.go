@@ -762,6 +762,306 @@ func (e IsoType) Valid() bool {
 	}
 }
 
+// Defines values for ItemFields.
+const (
+	ItemFieldsAirTime                  ItemFields = "AirTime"
+	ItemFieldsCanDelete                ItemFields = "CanDelete"
+	ItemFieldsCanDownload              ItemFields = "CanDownload"
+	ItemFieldsChannelImage             ItemFields = "ChannelImage"
+	ItemFieldsChannelInfo              ItemFields = "ChannelInfo"
+	ItemFieldsChapters                 ItemFields = "Chapters"
+	ItemFieldsChildCount               ItemFields = "ChildCount"
+	ItemFieldsCumulativeRunTimeTicks   ItemFields = "CumulativeRunTimeTicks"
+	ItemFieldsCustomRating             ItemFields = "CustomRating"
+	ItemFieldsDateCreated              ItemFields = "DateCreated"
+	ItemFieldsDateLastMediaAdded       ItemFields = "DateLastMediaAdded"
+	ItemFieldsDateLastRefreshed        ItemFields = "DateLastRefreshed"
+	ItemFieldsDateLastSaved            ItemFields = "DateLastSaved"
+	ItemFieldsDisplayPreferencesId     ItemFields = "DisplayPreferencesId"
+	ItemFieldsEnableMediaSourceDisplay ItemFields = "EnableMediaSourceDisplay"
+	ItemFieldsEtag                     ItemFields = "Etag"
+	ItemFieldsExternalUrls             ItemFields = "ExternalUrls"
+	ItemFieldsExtraIds                 ItemFields = "ExtraIds"
+	ItemFieldsGenres                   ItemFields = "Genres"
+	ItemFieldsHeight                   ItemFields = "Height"
+	ItemFieldsIsHD                     ItemFields = "IsHD"
+	ItemFieldsItemCounts               ItemFields = "ItemCounts"
+	ItemFieldsLocalTrailerCount        ItemFields = "LocalTrailerCount"
+	ItemFieldsMediaSourceCount         ItemFields = "MediaSourceCount"
+	ItemFieldsMediaSources             ItemFields = "MediaSources"
+	ItemFieldsMediaStreams             ItemFields = "MediaStreams"
+	ItemFieldsOriginalTitle            ItemFields = "OriginalTitle"
+	ItemFieldsOverview                 ItemFields = "Overview"
+	ItemFieldsParentId                 ItemFields = "ParentId"
+	ItemFieldsPath                     ItemFields = "Path"
+	ItemFieldsPeople                   ItemFields = "People"
+	ItemFieldsPlayAccess               ItemFields = "PlayAccess"
+	ItemFieldsPrimaryImageAspectRatio  ItemFields = "PrimaryImageAspectRatio"
+	ItemFieldsProductionLocations      ItemFields = "ProductionLocations"
+	ItemFieldsProviderIds              ItemFields = "ProviderIds"
+	ItemFieldsRecursiveItemCount       ItemFields = "RecursiveItemCount"
+	ItemFieldsRefreshState             ItemFields = "RefreshState"
+	ItemFieldsRemoteTrailers           ItemFields = "RemoteTrailers"
+	ItemFieldsSeasonUserData           ItemFields = "SeasonUserData"
+	ItemFieldsSeriesStudio             ItemFields = "SeriesStudio"
+	ItemFieldsSettings                 ItemFields = "Settings"
+	ItemFieldsSortName                 ItemFields = "SortName"
+	ItemFieldsSpecialEpisodeNumbers    ItemFields = "SpecialEpisodeNumbers"
+	ItemFieldsSpecialFeatureCount      ItemFields = "SpecialFeatureCount"
+	ItemFieldsStudios                  ItemFields = "Studios"
+	ItemFieldsTaglines                 ItemFields = "Taglines"
+	ItemFieldsTags                     ItemFields = "Tags"
+	ItemFieldsTrickplay                ItemFields = "Trickplay"
+	ItemFieldsWidth                    ItemFields = "Width"
+)
+
+// Valid indicates whether the value is a known member of the ItemFields enum.
+func (e ItemFields) Valid() bool {
+	switch e {
+	case ItemFieldsAirTime:
+		return true
+	case ItemFieldsCanDelete:
+		return true
+	case ItemFieldsCanDownload:
+		return true
+	case ItemFieldsChannelImage:
+		return true
+	case ItemFieldsChannelInfo:
+		return true
+	case ItemFieldsChapters:
+		return true
+	case ItemFieldsChildCount:
+		return true
+	case ItemFieldsCumulativeRunTimeTicks:
+		return true
+	case ItemFieldsCustomRating:
+		return true
+	case ItemFieldsDateCreated:
+		return true
+	case ItemFieldsDateLastMediaAdded:
+		return true
+	case ItemFieldsDateLastRefreshed:
+		return true
+	case ItemFieldsDateLastSaved:
+		return true
+	case ItemFieldsDisplayPreferencesId:
+		return true
+	case ItemFieldsEnableMediaSourceDisplay:
+		return true
+	case ItemFieldsEtag:
+		return true
+	case ItemFieldsExternalUrls:
+		return true
+	case ItemFieldsExtraIds:
+		return true
+	case ItemFieldsGenres:
+		return true
+	case ItemFieldsHeight:
+		return true
+	case ItemFieldsIsHD:
+		return true
+	case ItemFieldsItemCounts:
+		return true
+	case ItemFieldsLocalTrailerCount:
+		return true
+	case ItemFieldsMediaSourceCount:
+		return true
+	case ItemFieldsMediaSources:
+		return true
+	case ItemFieldsMediaStreams:
+		return true
+	case ItemFieldsOriginalTitle:
+		return true
+	case ItemFieldsOverview:
+		return true
+	case ItemFieldsParentId:
+		return true
+	case ItemFieldsPath:
+		return true
+	case ItemFieldsPeople:
+		return true
+	case ItemFieldsPlayAccess:
+		return true
+	case ItemFieldsPrimaryImageAspectRatio:
+		return true
+	case ItemFieldsProductionLocations:
+		return true
+	case ItemFieldsProviderIds:
+		return true
+	case ItemFieldsRecursiveItemCount:
+		return true
+	case ItemFieldsRefreshState:
+		return true
+	case ItemFieldsRemoteTrailers:
+		return true
+	case ItemFieldsSeasonUserData:
+		return true
+	case ItemFieldsSeriesStudio:
+		return true
+	case ItemFieldsSettings:
+		return true
+	case ItemFieldsSortName:
+		return true
+	case ItemFieldsSpecialEpisodeNumbers:
+		return true
+	case ItemFieldsSpecialFeatureCount:
+		return true
+	case ItemFieldsStudios:
+		return true
+	case ItemFieldsTaglines:
+		return true
+	case ItemFieldsTags:
+		return true
+	case ItemFieldsTrickplay:
+		return true
+	case ItemFieldsWidth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ItemFilter.
+const (
+	ItemFilterDislikes          ItemFilter = "Dislikes"
+	ItemFilterIsFavorite        ItemFilter = "IsFavorite"
+	ItemFilterIsFavoriteOrLikes ItemFilter = "IsFavoriteOrLikes"
+	ItemFilterIsFolder          ItemFilter = "IsFolder"
+	ItemFilterIsNotFolder       ItemFilter = "IsNotFolder"
+	ItemFilterIsPlayed          ItemFilter = "IsPlayed"
+	ItemFilterIsResumable       ItemFilter = "IsResumable"
+	ItemFilterIsUnplayed        ItemFilter = "IsUnplayed"
+	ItemFilterLikes             ItemFilter = "Likes"
+)
+
+// Valid indicates whether the value is a known member of the ItemFilter enum.
+func (e ItemFilter) Valid() bool {
+	switch e {
+	case ItemFilterDislikes:
+		return true
+	case ItemFilterIsFavorite:
+		return true
+	case ItemFilterIsFavoriteOrLikes:
+		return true
+	case ItemFilterIsFolder:
+		return true
+	case ItemFilterIsNotFolder:
+		return true
+	case ItemFilterIsPlayed:
+		return true
+	case ItemFilterIsResumable:
+		return true
+	case ItemFilterIsUnplayed:
+		return true
+	case ItemFilterLikes:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ItemSortBy.
+const (
+	ItemSortByAirTime              ItemSortBy = "AirTime"
+	ItemSortByAiredEpisodeOrder    ItemSortBy = "AiredEpisodeOrder"
+	ItemSortByAlbum                ItemSortBy = "Album"
+	ItemSortByAlbumArtist          ItemSortBy = "AlbumArtist"
+	ItemSortByArtist               ItemSortBy = "Artist"
+	ItemSortByCommunityRating      ItemSortBy = "CommunityRating"
+	ItemSortByCriticRating         ItemSortBy = "CriticRating"
+	ItemSortByDateCreated          ItemSortBy = "DateCreated"
+	ItemSortByDateLastContentAdded ItemSortBy = "DateLastContentAdded"
+	ItemSortByDatePlayed           ItemSortBy = "DatePlayed"
+	ItemSortByDefault              ItemSortBy = "Default"
+	ItemSortByIndexNumber          ItemSortBy = "IndexNumber"
+	ItemSortByIsFavoriteOrLiked    ItemSortBy = "IsFavoriteOrLiked"
+	ItemSortByIsFolder             ItemSortBy = "IsFolder"
+	ItemSortByIsPlayed             ItemSortBy = "IsPlayed"
+	ItemSortByIsUnplayed           ItemSortBy = "IsUnplayed"
+	ItemSortByName                 ItemSortBy = "Name"
+	ItemSortByOfficialRating       ItemSortBy = "OfficialRating"
+	ItemSortByParentIndexNumber    ItemSortBy = "ParentIndexNumber"
+	ItemSortByPlayCount            ItemSortBy = "PlayCount"
+	ItemSortByPremiereDate         ItemSortBy = "PremiereDate"
+	ItemSortByProductionYear       ItemSortBy = "ProductionYear"
+	ItemSortByRandom               ItemSortBy = "Random"
+	ItemSortByRuntime              ItemSortBy = "Runtime"
+	ItemSortBySeriesDatePlayed     ItemSortBy = "SeriesDatePlayed"
+	ItemSortBySeriesSortName       ItemSortBy = "SeriesSortName"
+	ItemSortBySortName             ItemSortBy = "SortName"
+	ItemSortByStartDate            ItemSortBy = "StartDate"
+	ItemSortByStudio               ItemSortBy = "Studio"
+	ItemSortByVideoBitRate         ItemSortBy = "VideoBitRate"
+)
+
+// Valid indicates whether the value is a known member of the ItemSortBy enum.
+func (e ItemSortBy) Valid() bool {
+	switch e {
+	case ItemSortByAirTime:
+		return true
+	case ItemSortByAiredEpisodeOrder:
+		return true
+	case ItemSortByAlbum:
+		return true
+	case ItemSortByAlbumArtist:
+		return true
+	case ItemSortByArtist:
+		return true
+	case ItemSortByCommunityRating:
+		return true
+	case ItemSortByCriticRating:
+		return true
+	case ItemSortByDateCreated:
+		return true
+	case ItemSortByDateLastContentAdded:
+		return true
+	case ItemSortByDatePlayed:
+		return true
+	case ItemSortByDefault:
+		return true
+	case ItemSortByIndexNumber:
+		return true
+	case ItemSortByIsFavoriteOrLiked:
+		return true
+	case ItemSortByIsFolder:
+		return true
+	case ItemSortByIsPlayed:
+		return true
+	case ItemSortByIsUnplayed:
+		return true
+	case ItemSortByName:
+		return true
+	case ItemSortByOfficialRating:
+		return true
+	case ItemSortByParentIndexNumber:
+		return true
+	case ItemSortByPlayCount:
+		return true
+	case ItemSortByPremiereDate:
+		return true
+	case ItemSortByProductionYear:
+		return true
+	case ItemSortByRandom:
+		return true
+	case ItemSortByRuntime:
+		return true
+	case ItemSortBySeriesDatePlayed:
+		return true
+	case ItemSortBySeriesSortName:
+		return true
+	case ItemSortBySortName:
+		return true
+	case ItemSortByStartDate:
+		return true
+	case ItemSortByStudio:
+		return true
+	case ItemSortByVideoBitRate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocationType.
 const (
 	FileSystem LocationType = "FileSystem"
@@ -917,37 +1217,37 @@ func (e MediaType) Valid() bool {
 
 // Defines values for MetadataField.
 const (
-	Cast                MetadataField = "Cast"
-	Genres              MetadataField = "Genres"
-	Name                MetadataField = "Name"
-	OfficialRating      MetadataField = "OfficialRating"
-	Overview            MetadataField = "Overview"
-	ProductionLocations MetadataField = "ProductionLocations"
-	Runtime             MetadataField = "Runtime"
-	Studios             MetadataField = "Studios"
-	Tags                MetadataField = "Tags"
+	MetadataFieldCast                MetadataField = "Cast"
+	MetadataFieldGenres              MetadataField = "Genres"
+	MetadataFieldName                MetadataField = "Name"
+	MetadataFieldOfficialRating      MetadataField = "OfficialRating"
+	MetadataFieldOverview            MetadataField = "Overview"
+	MetadataFieldProductionLocations MetadataField = "ProductionLocations"
+	MetadataFieldRuntime             MetadataField = "Runtime"
+	MetadataFieldStudios             MetadataField = "Studios"
+	MetadataFieldTags                MetadataField = "Tags"
 )
 
 // Valid indicates whether the value is a known member of the MetadataField enum.
 func (e MetadataField) Valid() bool {
 	switch e {
-	case Cast:
+	case MetadataFieldCast:
 		return true
-	case Genres:
+	case MetadataFieldGenres:
 		return true
-	case Name:
+	case MetadataFieldName:
 		return true
-	case OfficialRating:
+	case MetadataFieldOfficialRating:
 		return true
-	case Overview:
+	case MetadataFieldOverview:
 		return true
-	case ProductionLocations:
+	case MetadataFieldProductionLocations:
 		return true
-	case Runtime:
+	case MetadataFieldRuntime:
 		return true
-	case Studios:
+	case MetadataFieldStudios:
 		return true
-	case Tags:
+	case MetadataFieldTags:
 		return true
 	default:
 		return false
@@ -1130,88 +1430,88 @@ func (e ProfileConditionType) Valid() bool {
 
 // Defines values for ProfileConditionValue.
 const (
-	AudioBitDepth    ProfileConditionValue = "AudioBitDepth"
-	AudioBitrate     ProfileConditionValue = "AudioBitrate"
-	AudioChannels    ProfileConditionValue = "AudioChannels"
-	AudioProfile     ProfileConditionValue = "AudioProfile"
-	AudioSampleRate  ProfileConditionValue = "AudioSampleRate"
-	Has64BitOffsets  ProfileConditionValue = "Has64BitOffsets"
-	Height           ProfileConditionValue = "Height"
-	IsAnamorphic     ProfileConditionValue = "IsAnamorphic"
-	IsAvc            ProfileConditionValue = "IsAvc"
-	IsInterlaced     ProfileConditionValue = "IsInterlaced"
-	IsSecondaryAudio ProfileConditionValue = "IsSecondaryAudio"
-	NumAudioStreams  ProfileConditionValue = "NumAudioStreams"
-	NumStreams       ProfileConditionValue = "NumStreams"
-	NumVideoStreams  ProfileConditionValue = "NumVideoStreams"
-	PacketLength     ProfileConditionValue = "PacketLength"
-	RefFrames        ProfileConditionValue = "RefFrames"
-	VideoBitDepth    ProfileConditionValue = "VideoBitDepth"
-	VideoBitrate     ProfileConditionValue = "VideoBitrate"
-	VideoCodecTag    ProfileConditionValue = "VideoCodecTag"
-	VideoFramerate   ProfileConditionValue = "VideoFramerate"
-	VideoLevel       ProfileConditionValue = "VideoLevel"
-	VideoProfile     ProfileConditionValue = "VideoProfile"
-	VideoRangeType   ProfileConditionValue = "VideoRangeType"
-	VideoRotation    ProfileConditionValue = "VideoRotation"
-	VideoTimestamp   ProfileConditionValue = "VideoTimestamp"
-	Width            ProfileConditionValue = "Width"
+	ProfileConditionValueAudioBitDepth    ProfileConditionValue = "AudioBitDepth"
+	ProfileConditionValueAudioBitrate     ProfileConditionValue = "AudioBitrate"
+	ProfileConditionValueAudioChannels    ProfileConditionValue = "AudioChannels"
+	ProfileConditionValueAudioProfile     ProfileConditionValue = "AudioProfile"
+	ProfileConditionValueAudioSampleRate  ProfileConditionValue = "AudioSampleRate"
+	ProfileConditionValueHas64BitOffsets  ProfileConditionValue = "Has64BitOffsets"
+	ProfileConditionValueHeight           ProfileConditionValue = "Height"
+	ProfileConditionValueIsAnamorphic     ProfileConditionValue = "IsAnamorphic"
+	ProfileConditionValueIsAvc            ProfileConditionValue = "IsAvc"
+	ProfileConditionValueIsInterlaced     ProfileConditionValue = "IsInterlaced"
+	ProfileConditionValueIsSecondaryAudio ProfileConditionValue = "IsSecondaryAudio"
+	ProfileConditionValueNumAudioStreams  ProfileConditionValue = "NumAudioStreams"
+	ProfileConditionValueNumStreams       ProfileConditionValue = "NumStreams"
+	ProfileConditionValueNumVideoStreams  ProfileConditionValue = "NumVideoStreams"
+	ProfileConditionValuePacketLength     ProfileConditionValue = "PacketLength"
+	ProfileConditionValueRefFrames        ProfileConditionValue = "RefFrames"
+	ProfileConditionValueVideoBitDepth    ProfileConditionValue = "VideoBitDepth"
+	ProfileConditionValueVideoBitrate     ProfileConditionValue = "VideoBitrate"
+	ProfileConditionValueVideoCodecTag    ProfileConditionValue = "VideoCodecTag"
+	ProfileConditionValueVideoFramerate   ProfileConditionValue = "VideoFramerate"
+	ProfileConditionValueVideoLevel       ProfileConditionValue = "VideoLevel"
+	ProfileConditionValueVideoProfile     ProfileConditionValue = "VideoProfile"
+	ProfileConditionValueVideoRangeType   ProfileConditionValue = "VideoRangeType"
+	ProfileConditionValueVideoRotation    ProfileConditionValue = "VideoRotation"
+	ProfileConditionValueVideoTimestamp   ProfileConditionValue = "VideoTimestamp"
+	ProfileConditionValueWidth            ProfileConditionValue = "Width"
 )
 
 // Valid indicates whether the value is a known member of the ProfileConditionValue enum.
 func (e ProfileConditionValue) Valid() bool {
 	switch e {
-	case AudioBitDepth:
+	case ProfileConditionValueAudioBitDepth:
 		return true
-	case AudioBitrate:
+	case ProfileConditionValueAudioBitrate:
 		return true
-	case AudioChannels:
+	case ProfileConditionValueAudioChannels:
 		return true
-	case AudioProfile:
+	case ProfileConditionValueAudioProfile:
 		return true
-	case AudioSampleRate:
+	case ProfileConditionValueAudioSampleRate:
 		return true
-	case Has64BitOffsets:
+	case ProfileConditionValueHas64BitOffsets:
 		return true
-	case Height:
+	case ProfileConditionValueHeight:
 		return true
-	case IsAnamorphic:
+	case ProfileConditionValueIsAnamorphic:
 		return true
-	case IsAvc:
+	case ProfileConditionValueIsAvc:
 		return true
-	case IsInterlaced:
+	case ProfileConditionValueIsInterlaced:
 		return true
-	case IsSecondaryAudio:
+	case ProfileConditionValueIsSecondaryAudio:
 		return true
-	case NumAudioStreams:
+	case ProfileConditionValueNumAudioStreams:
 		return true
-	case NumStreams:
+	case ProfileConditionValueNumStreams:
 		return true
-	case NumVideoStreams:
+	case ProfileConditionValueNumVideoStreams:
 		return true
-	case PacketLength:
+	case ProfileConditionValuePacketLength:
 		return true
-	case RefFrames:
+	case ProfileConditionValueRefFrames:
 		return true
-	case VideoBitDepth:
+	case ProfileConditionValueVideoBitDepth:
 		return true
-	case VideoBitrate:
+	case ProfileConditionValueVideoBitrate:
 		return true
-	case VideoCodecTag:
+	case ProfileConditionValueVideoCodecTag:
 		return true
-	case VideoFramerate:
+	case ProfileConditionValueVideoFramerate:
 		return true
-	case VideoLevel:
+	case ProfileConditionValueVideoLevel:
 		return true
-	case VideoProfile:
+	case ProfileConditionValueVideoProfile:
 		return true
-	case VideoRangeType:
+	case ProfileConditionValueVideoRangeType:
 		return true
-	case VideoRotation:
+	case ProfileConditionValueVideoRotation:
 		return true
-	case VideoTimestamp:
+	case ProfileConditionValueVideoTimestamp:
 		return true
-	case Width:
+	case ProfileConditionValueWidth:
 		return true
 	default:
 		return false
@@ -1263,6 +1563,45 @@ func (e RepeatMode) Valid() bool {
 	case RepeatNone:
 		return true
 	case RepeatOne:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SeriesStatus.
+const (
+	Continuing SeriesStatus = "Continuing"
+	Ended      SeriesStatus = "Ended"
+	Unreleased SeriesStatus = "Unreleased"
+)
+
+// Valid indicates whether the value is a known member of the SeriesStatus enum.
+func (e SeriesStatus) Valid() bool {
+	switch e {
+	case Continuing:
+		return true
+	case Ended:
+		return true
+	case Unreleased:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SortOrder.
+const (
+	Ascending  SortOrder = "Ascending"
+	Descending SortOrder = "Descending"
+)
+
+// Valid indicates whether the value is a known member of the SortOrder enum.
+func (e SortOrder) Valid() bool {
+	switch e {
+	case Ascending:
+		return true
+	case Descending:
 		return true
 	default:
 		return false
@@ -2072,6 +2411,18 @@ type BaseItemDto struct {
 	Width     *int32     `json:"Width,omitempty"`
 }
 
+// BaseItemDtoQueryResult Query result container.
+type BaseItemDtoQueryResult struct {
+	// Items Gets or sets the items.
+	Items *[]BaseItemDto `json:"Items,omitempty"`
+
+	// StartIndex Gets or sets the index of the first record in Items.
+	StartIndex *int32 `json:"StartIndex,omitempty"`
+
+	// TotalRecordCount Gets or sets the total number of records available.
+	TotalRecordCount *int32 `json:"TotalRecordCount,omitempty"`
+}
+
 // BaseItemKind The base item kind.
 type BaseItemKind string
 
@@ -2348,6 +2699,15 @@ type InstallationInfo struct {
 
 // IsoType Enum IsoType.
 type IsoType string
+
+// ItemFields Used to control the data that gets attached to DtoBaseItems.
+type ItemFields string
+
+// ItemFilter Enum ItemFilter.
+type ItemFilter string
+
+// ItemSortBy These represent sort orders.
+type ItemSortBy string
 
 // LibraryOptions defines model for LibraryOptions.
 type LibraryOptions struct {
@@ -2843,6 +3203,9 @@ type RemoteSearchResult struct {
 // RepeatMode The repeat mode of a play queue.
 type RepeatMode string
 
+// SeriesStatus The status of a series.
+type SeriesStatus string
+
 // SessionInfoDto Session info DTO.
 type SessionInfoDto struct {
 	// AdditionalUsers Gets or sets the additional users.
@@ -2938,6 +3301,9 @@ type SessionUserInfo struct {
 	// UserName Gets or sets the name of the user.
 	UserName *string `json:"UserName,omitempty"`
 }
+
+// SortOrder An enum representing the sorting order.
+type SortOrder string
 
 // SubtitleDeliveryMethod Delivery method to use during playback of a specific subtitle format.
 type SubtitleDeliveryMethod string
@@ -3446,6 +3812,273 @@ type VirtualFolderInfo struct {
 	RefreshStatus      *string  `json:"RefreshStatus,omitempty"`
 }
 
+// GetItemsParams defines parameters for GetItems.
+type GetItemsParams struct {
+	// UserId The user id supplied as query parameter; this is required when not using an API key.
+	UserId *openapi_types.UUID `form:"userId,omitempty" json:"userId,omitempty"`
+
+	// MaxOfficialRating Optional filter by maximum official rating (PG, PG-13, TV-MA, etc).
+	MaxOfficialRating *string `form:"maxOfficialRating,omitempty" json:"maxOfficialRating,omitempty"`
+
+	// HasThemeSong Optional filter by items with theme songs.
+	HasThemeSong *bool `form:"hasThemeSong,omitempty" json:"hasThemeSong,omitempty"`
+
+	// HasThemeVideo Optional filter by items with theme videos.
+	HasThemeVideo *bool `form:"hasThemeVideo,omitempty" json:"hasThemeVideo,omitempty"`
+
+	// HasSubtitles Optional filter by items with subtitles.
+	HasSubtitles *bool `form:"hasSubtitles,omitempty" json:"hasSubtitles,omitempty"`
+
+	// HasSpecialFeature Optional filter by items with special features.
+	HasSpecialFeature *bool `form:"hasSpecialFeature,omitempty" json:"hasSpecialFeature,omitempty"`
+
+	// HasTrailer Optional filter by items with trailers.
+	HasTrailer *bool `form:"hasTrailer,omitempty" json:"hasTrailer,omitempty"`
+
+	// AdjacentTo Optional. Return items that are siblings of a supplied item.
+	AdjacentTo *openapi_types.UUID `form:"adjacentTo,omitempty" json:"adjacentTo,omitempty"`
+
+	// IndexNumber Optional filter by index number.
+	IndexNumber *int32 `form:"indexNumber,omitempty" json:"indexNumber,omitempty"`
+
+	// ParentIndexNumber Optional filter by parent index number.
+	ParentIndexNumber *int32 `form:"parentIndexNumber,omitempty" json:"parentIndexNumber,omitempty"`
+
+	// HasParentalRating Optional filter by items that have or do not have a parental rating.
+	HasParentalRating *bool `form:"hasParentalRating,omitempty" json:"hasParentalRating,omitempty"`
+
+	// IsHd Optional filter by items that are HD or not.
+	IsHd *bool `form:"isHd,omitempty" json:"isHd,omitempty"`
+
+	// Is4K Optional filter by items that are 4K or not.
+	Is4K *bool `form:"is4K,omitempty" json:"is4K,omitempty"`
+
+	// LocationTypes Optional. If specified, results will be filtered based on LocationType. This allows multiple, comma delimited.
+	LocationTypes *[]LocationType `form:"locationTypes,omitempty" json:"locationTypes,omitempty"`
+
+	// ExcludeLocationTypes Optional. If specified, results will be filtered based on the LocationType. This allows multiple, comma delimited.
+	ExcludeLocationTypes *[]LocationType `form:"excludeLocationTypes,omitempty" json:"excludeLocationTypes,omitempty"`
+
+	// IsMissing Optional filter by items that are missing episodes or not.
+	IsMissing *bool `form:"isMissing,omitempty" json:"isMissing,omitempty"`
+
+	// IsUnaired Optional filter by items that are unaired episodes or not.
+	IsUnaired *bool `form:"isUnaired,omitempty" json:"isUnaired,omitempty"`
+
+	// MinCommunityRating Optional filter by minimum community rating.
+	MinCommunityRating *float64 `form:"minCommunityRating,omitempty" json:"minCommunityRating,omitempty"`
+
+	// MinCriticRating Optional filter by minimum critic rating.
+	MinCriticRating *float64 `form:"minCriticRating,omitempty" json:"minCriticRating,omitempty"`
+
+	// MinPremiereDate Optional. The minimum premiere date. Format = ISO.
+	MinPremiereDate *time.Time `form:"minPremiereDate,omitempty" json:"minPremiereDate,omitempty"`
+
+	// MinDateLastSaved Optional. The minimum last saved date. Format = ISO.
+	MinDateLastSaved *time.Time `form:"minDateLastSaved,omitempty" json:"minDateLastSaved,omitempty"`
+
+	// MinDateLastSavedForUser Optional. The minimum last saved date for the current user. Format = ISO.
+	MinDateLastSavedForUser *time.Time `form:"minDateLastSavedForUser,omitempty" json:"minDateLastSavedForUser,omitempty"`
+
+	// MaxPremiereDate Optional. The maximum premiere date. Format = ISO.
+	MaxPremiereDate *time.Time `form:"maxPremiereDate,omitempty" json:"maxPremiereDate,omitempty"`
+
+	// HasOverview Optional filter by items that have an overview or not.
+	HasOverview *bool `form:"hasOverview,omitempty" json:"hasOverview,omitempty"`
+
+	// HasImdbId Optional filter by items that have an IMDb id or not.
+	HasImdbId *bool `form:"hasImdbId,omitempty" json:"hasImdbId,omitempty"`
+
+	// HasTmdbId Optional filter by items that have a TMDb id or not.
+	HasTmdbId *bool `form:"hasTmdbId,omitempty" json:"hasTmdbId,omitempty"`
+
+	// HasTvdbId Optional filter by items that have a TVDb id or not.
+	HasTvdbId *bool `form:"hasTvdbId,omitempty" json:"hasTvdbId,omitempty"`
+
+	// IsMovie Optional filter for live tv movies.
+	IsMovie *bool `form:"isMovie,omitempty" json:"isMovie,omitempty"`
+
+	// IsSeries Optional filter for live tv series.
+	IsSeries *bool `form:"isSeries,omitempty" json:"isSeries,omitempty"`
+
+	// IsNews Optional filter for live tv news.
+	IsNews *bool `form:"isNews,omitempty" json:"isNews,omitempty"`
+
+	// IsKids Optional filter for live tv kids.
+	IsKids *bool `form:"isKids,omitempty" json:"isKids,omitempty"`
+
+	// IsSports Optional filter for live tv sports.
+	IsSports *bool `form:"isSports,omitempty" json:"isSports,omitempty"`
+
+	// ExcludeItemIds Optional. If specified, results will be filtered by excluding item ids. This allows multiple, comma delimited.
+	ExcludeItemIds *[]openapi_types.UUID `form:"excludeItemIds,omitempty" json:"excludeItemIds,omitempty"`
+
+	// StartIndex Optional. The record index to start at. All items with a lower index will be dropped from the results.
+	StartIndex *int32 `form:"startIndex,omitempty" json:"startIndex,omitempty"`
+
+	// Limit Optional. The maximum number of records to return.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Recursive When searching within folders, this determines whether or not the search will be recursive. true/false.
+	Recursive *bool `form:"recursive,omitempty" json:"recursive,omitempty"`
+
+	// SearchTerm Optional. Filter based on a search term.
+	SearchTerm *string `form:"searchTerm,omitempty" json:"searchTerm,omitempty"`
+
+	// SortOrder Sort Order - Ascending, Descending.
+	SortOrder *[]SortOrder `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
+
+	// ParentId Specify this to localize the search to a specific item or folder. Omit to use the root.
+	ParentId *openapi_types.UUID `form:"parentId,omitempty" json:"parentId,omitempty"`
+
+	// Fields Optional. Specify additional fields of information to return in the output. This allows multiple, comma delimited. Options: Budget, Chapters, DateCreated, Genres, HomePageUrl, IndexOptions, MediaStreams, Overview, ParentId, Path, People, ProviderIds, PrimaryImageAspectRatio, Revenue, SortName, Studios, Taglines.
+	Fields *[]ItemFields `form:"fields,omitempty" json:"fields,omitempty"`
+
+	// ExcludeItemTypes Optional. If specified, results will be filtered based on item type. This allows multiple, comma delimited.
+	ExcludeItemTypes *[]BaseItemKind `form:"excludeItemTypes,omitempty" json:"excludeItemTypes,omitempty"`
+
+	// IncludeItemTypes Optional. If specified, results will be filtered based on the item type. This allows multiple, comma delimited.
+	IncludeItemTypes *[]BaseItemKind `form:"includeItemTypes,omitempty" json:"includeItemTypes,omitempty"`
+
+	// Filters Optional. Specify additional filters to apply. This allows multiple, comma delimited. Options: IsFolder, IsNotFolder, IsUnplayed, IsPlayed, IsFavorite, IsResumable, Likes, Dislikes.
+	Filters *[]ItemFilter `form:"filters,omitempty" json:"filters,omitempty"`
+
+	// IsFavorite Optional filter by items that are marked as favorite, or not.
+	IsFavorite *bool `form:"isFavorite,omitempty" json:"isFavorite,omitempty"`
+
+	// MediaTypes Optional filter by MediaType. Allows multiple, comma delimited.
+	MediaTypes *[]MediaType `form:"mediaTypes,omitempty" json:"mediaTypes,omitempty"`
+
+	// ImageTypes Optional. If specified, results will be filtered based on those containing image types. This allows multiple, comma delimited.
+	ImageTypes *[]ImageType `form:"imageTypes,omitempty" json:"imageTypes,omitempty"`
+
+	// SortBy Optional. Specify one or more sort orders, comma delimited. Options: Album, AlbumArtist, Artist, Budget, CommunityRating, CriticRating, DateCreated, DatePlayed, PlayCount, PremiereDate, ProductionYear, SortName, Random, Revenue, Runtime.
+	SortBy *[]ItemSortBy `form:"sortBy,omitempty" json:"sortBy,omitempty"`
+
+	// IsPlayed Optional filter by items that are played, or not.
+	IsPlayed *bool `form:"isPlayed,omitempty" json:"isPlayed,omitempty"`
+
+	// Genres Optional. If specified, results will be filtered based on genre. This allows multiple, pipe delimited.
+	Genres *[]string `form:"genres,omitempty" json:"genres,omitempty"`
+
+	// OfficialRatings Optional. If specified, results will be filtered based on OfficialRating. This allows multiple, pipe delimited.
+	OfficialRatings *[]string `form:"officialRatings,omitempty" json:"officialRatings,omitempty"`
+
+	// Tags Optional. If specified, results will be filtered based on tag. This allows multiple, pipe delimited.
+	Tags *[]string `form:"tags,omitempty" json:"tags,omitempty"`
+
+	// Years Optional. If specified, results will be filtered based on production year. This allows multiple, comma delimited.
+	Years *[]int32 `form:"years,omitempty" json:"years,omitempty"`
+
+	// EnableUserData Optional, include user data.
+	EnableUserData *bool `form:"enableUserData,omitempty" json:"enableUserData,omitempty"`
+
+	// ImageTypeLimit Optional, the max number of images to return, per image type.
+	ImageTypeLimit *int32 `form:"imageTypeLimit,omitempty" json:"imageTypeLimit,omitempty"`
+
+	// EnableImageTypes Optional. The image types to include in the output.
+	EnableImageTypes *[]ImageType `form:"enableImageTypes,omitempty" json:"enableImageTypes,omitempty"`
+
+	// Person Optional. If specified, results will be filtered to include only those containing the specified person.
+	Person *string `form:"person,omitempty" json:"person,omitempty"`
+
+	// PersonIds Optional. If specified, results will be filtered to include only those containing the specified person id.
+	PersonIds *[]openapi_types.UUID `form:"personIds,omitempty" json:"personIds,omitempty"`
+
+	// PersonTypes Optional. If specified, along with Person, results will be filtered to include only those containing the specified person and PersonType. Allows multiple, comma-delimited.
+	PersonTypes *[]string `form:"personTypes,omitempty" json:"personTypes,omitempty"`
+
+	// Studios Optional. If specified, results will be filtered based on studio. This allows multiple, pipe delimited.
+	Studios *[]string `form:"studios,omitempty" json:"studios,omitempty"`
+
+	// Artists Optional. If specified, results will be filtered based on artists. This allows multiple, pipe delimited.
+	Artists *[]string `form:"artists,omitempty" json:"artists,omitempty"`
+
+	// ExcludeArtistIds Optional. If specified, results will be filtered based on artist id. This allows multiple, pipe delimited.
+	ExcludeArtistIds *[]openapi_types.UUID `form:"excludeArtistIds,omitempty" json:"excludeArtistIds,omitempty"`
+
+	// ArtistIds Optional. If specified, results will be filtered to include only those containing the specified artist id.
+	ArtistIds *[]openapi_types.UUID `form:"artistIds,omitempty" json:"artistIds,omitempty"`
+
+	// AlbumArtistIds Optional. If specified, results will be filtered to include only those containing the specified album artist id.
+	AlbumArtistIds *[]openapi_types.UUID `form:"albumArtistIds,omitempty" json:"albumArtistIds,omitempty"`
+
+	// ContributingArtistIds Optional. If specified, results will be filtered to include only those containing the specified contributing artist id.
+	ContributingArtistIds *[]openapi_types.UUID `form:"contributingArtistIds,omitempty" json:"contributingArtistIds,omitempty"`
+
+	// Albums Optional. If specified, results will be filtered based on album. This allows multiple, pipe delimited.
+	Albums *[]string `form:"albums,omitempty" json:"albums,omitempty"`
+
+	// AlbumIds Optional. If specified, results will be filtered based on album id. This allows multiple, pipe delimited.
+	AlbumIds *[]openapi_types.UUID `form:"albumIds,omitempty" json:"albumIds,omitempty"`
+
+	// Ids Optional. If specific items are needed, specify a list of item id's to retrieve. This allows multiple, comma delimited.
+	Ids *[]openapi_types.UUID `form:"ids,omitempty" json:"ids,omitempty"`
+
+	// VideoTypes Optional filter by VideoType (videofile, dvd, bluray, iso). Allows multiple, comma delimited.
+	VideoTypes *[]VideoType `form:"videoTypes,omitempty" json:"videoTypes,omitempty"`
+
+	// MinOfficialRating Optional filter by minimum official rating (PG, PG-13, TV-MA, etc).
+	MinOfficialRating *string `form:"minOfficialRating,omitempty" json:"minOfficialRating,omitempty"`
+
+	// IsLocked Optional filter by items that are locked.
+	IsLocked *bool `form:"isLocked,omitempty" json:"isLocked,omitempty"`
+
+	// IsPlaceHolder Optional filter by items that are placeholders.
+	IsPlaceHolder *bool `form:"isPlaceHolder,omitempty" json:"isPlaceHolder,omitempty"`
+
+	// HasOfficialRating Optional filter by items that have official ratings.
+	HasOfficialRating *bool `form:"hasOfficialRating,omitempty" json:"hasOfficialRating,omitempty"`
+
+	// CollapseBoxSetItems Whether or not to hide items behind their boxsets.
+	CollapseBoxSetItems *bool `form:"collapseBoxSetItems,omitempty" json:"collapseBoxSetItems,omitempty"`
+
+	// MinWidth Optional. Filter by the minimum width of the item.
+	MinWidth *int32 `form:"minWidth,omitempty" json:"minWidth,omitempty"`
+
+	// MinHeight Optional. Filter by the minimum height of the item.
+	MinHeight *int32 `form:"minHeight,omitempty" json:"minHeight,omitempty"`
+
+	// MaxWidth Optional. Filter by the maximum width of the item.
+	MaxWidth *int32 `form:"maxWidth,omitempty" json:"maxWidth,omitempty"`
+
+	// MaxHeight Optional. Filter by the maximum height of the item.
+	MaxHeight *int32 `form:"maxHeight,omitempty" json:"maxHeight,omitempty"`
+
+	// Is3D Optional filter by items that are 3D, or not.
+	Is3D *bool `form:"is3D,omitempty" json:"is3D,omitempty"`
+
+	// SeriesStatus Optional filter by Series Status. Allows multiple, comma delimited.
+	SeriesStatus *[]SeriesStatus `form:"seriesStatus,omitempty" json:"seriesStatus,omitempty"`
+
+	// NameStartsWithOrGreater Optional filter by items whose name is sorted equally or greater than a given input string.
+	NameStartsWithOrGreater *string `form:"nameStartsWithOrGreater,omitempty" json:"nameStartsWithOrGreater,omitempty"`
+
+	// NameStartsWith Optional filter by items whose name is sorted equally than a given input string.
+	NameStartsWith *string `form:"nameStartsWith,omitempty" json:"nameStartsWith,omitempty"`
+
+	// NameLessThan Optional filter by items whose name is equally or lesser than a given input string.
+	NameLessThan *string `form:"nameLessThan,omitempty" json:"nameLessThan,omitempty"`
+
+	// StudioIds Optional. If specified, results will be filtered based on studio id. This allows multiple, pipe delimited.
+	StudioIds *[]openapi_types.UUID `form:"studioIds,omitempty" json:"studioIds,omitempty"`
+
+	// GenreIds Optional. If specified, results will be filtered based on genre id. This allows multiple, pipe delimited.
+	GenreIds *[]openapi_types.UUID `form:"genreIds,omitempty" json:"genreIds,omitempty"`
+
+	// AudioLanguages Optional. If specified, results will be filtered based on audio language. This allows multiple, comma delimited values.
+	AudioLanguages *[]string `form:"audioLanguages,omitempty" json:"audioLanguages,omitempty"`
+
+	// SubtitleLanguages Optional. If specified, results will be filtered based on subtitle language. This allows multiple, comma delimited values.
+	SubtitleLanguages *[]string `form:"subtitleLanguages,omitempty" json:"subtitleLanguages,omitempty"`
+
+	// EnableTotalRecordCount Optional. Enable the total record count.
+	EnableTotalRecordCount *bool `form:"enableTotalRecordCount,omitempty" json:"enableTotalRecordCount,omitempty"`
+
+	// EnableImages Optional, include image information in output.
+	EnableImages *bool `form:"enableImages,omitempty" json:"enableImages,omitempty"`
+}
+
 // GetSessionsParams defines parameters for GetSessions.
 type GetSessionsParams struct {
 	// ControllableByUserId Filter by sessions that a given user is allowed to remote control.
@@ -3693,6 +4326,11 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// GetItems Gets items based on a query.
+	//
+	// Corresponds with GET /Items (the `GetItems` operationId).
+	GetItems(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetVirtualFolders Gets all virtual folders.
 	//
 	// Corresponds with GET /Library/VirtualFolders (the `GetVirtualFolders` operationId).
@@ -3764,6 +4402,21 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
 	UpdateUserPolicy(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// GetItems Gets items based on a query.
+//
+// Corresponds with GET /Items (the `GetItems` operationId).
+func (c *Client) GetItems(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetItemsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // GetVirtualFolders Gets all virtual folders.
@@ -3956,6 +4609,1104 @@ func (c *Client) UpdateUserPolicy(ctx context.Context, userId openapi_types.UUID
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewGetItemsRequest constructs an http.Request for the GetItems method
+func NewGetItemsRequest(server string, params *GetItemsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/Items")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.UserId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "userId", *params.UserId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MaxOfficialRating != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "maxOfficialRating", *params.MaxOfficialRating, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasThemeSong != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasThemeSong", *params.HasThemeSong, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasThemeVideo != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasThemeVideo", *params.HasThemeVideo, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasSubtitles != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasSubtitles", *params.HasSubtitles, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasSpecialFeature != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasSpecialFeature", *params.HasSpecialFeature, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasTrailer != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasTrailer", *params.HasTrailer, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AdjacentTo != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "adjacentTo", *params.AdjacentTo, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IndexNumber != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "indexNumber", *params.IndexNumber, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ParentIndexNumber != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "parentIndexNumber", *params.ParentIndexNumber, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasParentalRating != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasParentalRating", *params.HasParentalRating, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsHd != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isHd", *params.IsHd, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Is4K != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "is4K", *params.Is4K, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.LocationTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "locationTypes", *params.LocationTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ExcludeLocationTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "excludeLocationTypes", *params.ExcludeLocationTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsMissing != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isMissing", *params.IsMissing, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsUnaired != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isUnaired", *params.IsUnaired, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinCommunityRating != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minCommunityRating", *params.MinCommunityRating, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "double"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinCriticRating != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minCriticRating", *params.MinCriticRating, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "double"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinPremiereDate != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minPremiereDate", *params.MinPremiereDate, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinDateLastSaved != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minDateLastSaved", *params.MinDateLastSaved, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinDateLastSavedForUser != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minDateLastSavedForUser", *params.MinDateLastSavedForUser, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MaxPremiereDate != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "maxPremiereDate", *params.MaxPremiereDate, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasOverview != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasOverview", *params.HasOverview, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasImdbId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasImdbId", *params.HasImdbId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasTmdbId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasTmdbId", *params.HasTmdbId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasTvdbId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasTvdbId", *params.HasTvdbId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsMovie != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isMovie", *params.IsMovie, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsSeries != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isSeries", *params.IsSeries, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsNews != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isNews", *params.IsNews, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsKids != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isKids", *params.IsKids, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsSports != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isSports", *params.IsSports, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ExcludeItemIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "excludeItemIds", *params.ExcludeItemIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.StartIndex != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "startIndex", *params.StartIndex, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Recursive != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "recursive", *params.Recursive, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SearchTerm != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "searchTerm", *params.SearchTerm, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SortOrder != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sortOrder", *params.SortOrder, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ParentId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "parentId", *params.ParentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Fields != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "fields", *params.Fields, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ExcludeItemTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "excludeItemTypes", *params.ExcludeItemTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IncludeItemTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "includeItemTypes", *params.IncludeItemTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Filters != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "filters", *params.Filters, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsFavorite != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isFavorite", *params.IsFavorite, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MediaTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "mediaTypes", *params.MediaTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ImageTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "imageTypes", *params.ImageTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SortBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sortBy", *params.SortBy, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsPlayed != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isPlayed", *params.IsPlayed, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Genres != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "genres", *params.Genres, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.OfficialRatings != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "officialRatings", *params.OfficialRatings, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Tags != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "tags", *params.Tags, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Years != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "years", *params.Years, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.EnableUserData != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "enableUserData", *params.EnableUserData, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ImageTypeLimit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "imageTypeLimit", *params.ImageTypeLimit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.EnableImageTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "enableImageTypes", *params.EnableImageTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Person != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "person", *params.Person, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PersonIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "personIds", *params.PersonIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PersonTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "personTypes", *params.PersonTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Studios != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "studios", *params.Studios, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Artists != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "artists", *params.Artists, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ExcludeArtistIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "excludeArtistIds", *params.ExcludeArtistIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ArtistIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "artistIds", *params.ArtistIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AlbumArtistIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "albumArtistIds", *params.AlbumArtistIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ContributingArtistIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "contributingArtistIds", *params.ContributingArtistIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Albums != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "albums", *params.Albums, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AlbumIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "albumIds", *params.AlbumIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Ids != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "ids", *params.Ids, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VideoTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "videoTypes", *params.VideoTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinOfficialRating != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minOfficialRating", *params.MinOfficialRating, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsLocked != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isLocked", *params.IsLocked, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IsPlaceHolder != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "isPlaceHolder", *params.IsPlaceHolder, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.HasOfficialRating != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "hasOfficialRating", *params.HasOfficialRating, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.CollapseBoxSetItems != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "collapseBoxSetItems", *params.CollapseBoxSetItems, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinWidth != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minWidth", *params.MinWidth, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MinHeight != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "minHeight", *params.MinHeight, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MaxWidth != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "maxWidth", *params.MaxWidth, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.MaxHeight != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "maxHeight", *params.MaxHeight, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Is3D != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "is3D", *params.Is3D, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SeriesStatus != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "seriesStatus", *params.SeriesStatus, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.NameStartsWithOrGreater != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "nameStartsWithOrGreater", *params.NameStartsWithOrGreater, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.NameStartsWith != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "nameStartsWith", *params.NameStartsWith, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.NameLessThan != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "nameLessThan", *params.NameLessThan, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.StudioIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "studioIds", *params.StudioIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.GenreIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "genreIds", *params.GenreIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AudioLanguages != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "audioLanguages", *params.AudioLanguages, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SubtitleLanguages != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "subtitleLanguages", *params.SubtitleLanguages, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.EnableTotalRecordCount != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "enableTotalRecordCount", *params.EnableTotalRecordCount, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.EnableImages != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "enableImages", *params.EnableImages, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewGetVirtualFoldersRequest constructs an http.Request for the GetVirtualFolders method
@@ -4377,6 +6128,13 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// GetItemsWithResponse Gets items based on a query.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /Items (the `GetItems` operationId).
+	GetItemsWithResponse(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*GetItemsResponse, error)
+
 	// GetVirtualFoldersWithResponse Gets all virtual folders.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -4460,6 +6218,69 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /Users/{userId}/Policy (the `UpdateUserPolicy` operationId).
 	UpdateUserPolicyWithResponse(ctx context.Context, userId openapi_types.UUID, body UpdateUserPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserPolicyResponse, error)
+}
+
+// GetItemsResponse503Headers the declared response headers of an HTTP 503 response for GetItems
+type GetItemsResponse503Headers struct {
+	Message    *string
+	RetryAfter *int32
+}
+
+type GetItemsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BaseItemDtoQueryResult
+	// ApplicationjsonProfileCamelCase200 the response for an HTTP 200 `application/json; profile="CamelCase"` response
+	ApplicationjsonProfileCamelCase200 *BaseItemDtoQueryResult
+	// ApplicationjsonProfilePascalCase200 the response for an HTTP 200 `application/json; profile="PascalCase"` response
+	ApplicationjsonProfilePascalCase200 *BaseItemDtoQueryResult
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *GetItemsResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetItemsResponse) GetJSON200() *BaseItemDtoQueryResult {
+	return r.JSON200
+}
+
+// GetApplicationjsonProfileCamelCase200 returns the response for an HTTP 200 `application/json; profile="CamelCase"` response
+func (r GetItemsResponse) GetApplicationjsonProfileCamelCase200() *BaseItemDtoQueryResult {
+	return r.ApplicationjsonProfileCamelCase200
+}
+
+// GetApplicationjsonProfilePascalCase200 returns the response for an HTTP 200 `application/json; profile="PascalCase"` response
+func (r GetItemsResponse) GetApplicationjsonProfilePascalCase200() *BaseItemDtoQueryResult {
+	return r.ApplicationjsonProfilePascalCase200
+}
+
+// GetBody returns the raw response body bytes
+func (r GetItemsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetItemsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetItemsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetItemsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 // GetVirtualFoldersResponse503Headers the declared response headers of an HTTP 503 response for GetVirtualFolders
@@ -5029,6 +6850,19 @@ func (r UpdateUserPolicyResponse) ContentType() string {
 	return ""
 }
 
+// GetItemsWithResponse Gets items based on a query.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /Items (the `GetItems` operationId).
+func (c *ClientWithResponses) GetItemsWithResponse(ctx context.Context, params *GetItemsParams, reqEditors ...RequestEditorFn) (*GetItemsResponse, error) {
+	rsp, err := c.GetItems(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetItemsResponse(rsp)
+}
+
 // GetVirtualFoldersWithResponse Gets all virtual folders.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5183,6 +7017,72 @@ func (c *ClientWithResponses) UpdateUserPolicyWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseUpdateUserPolicyResponse(rsp)
+}
+
+// ParseGetItemsResponse parses an HTTP response from a GetItemsWithResponse call
+func ParseGetItemsResponse(rsp *http.Response) (*GetItemsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetItemsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.Header.Get("Content-Type") == "application/json" && rsp.StatusCode == 200:
+		var dest BaseItemDtoQueryResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"CamelCase\"" && rsp.StatusCode == 200:
+		var dest BaseItemDtoQueryResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfileCamelCase200 = &dest
+
+	case rsp.Header.Get("Content-Type") == "application/json; profile=\"PascalCase\"" && rsp.StatusCode == 200:
+		var dest BaseItemDtoQueryResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationjsonProfilePascalCase200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	}
+
+	switch {
+	case rsp.StatusCode == 503:
+		var headers GetItemsResponse503Headers
+		if values := rsp.Header.Values("Message"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Message", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "text"}); err != nil {
+				return nil, err
+			}
+			headers.Message = &value
+		}
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int32
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
 }
 
 // ParseGetVirtualFoldersResponse parses an HTTP response from a GetVirtualFoldersWithResponse call

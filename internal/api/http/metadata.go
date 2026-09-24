@@ -168,7 +168,7 @@ func metadataTitleDTO(title core.MetadataTitle) metadataTitleResponse {
 	}
 }
 
-func hasPermission(r *http.Request, permission core.Permission) bool {
+func hasPermission(r *http.Request, permission core.Permission) bool { //nolint:unparam // kept generic for route-policy checks.
 	permissions, ok := permissionsFrom(r.Context())
 	return ok && slices.Contains(permissions, permission)
 }

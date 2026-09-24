@@ -43,6 +43,11 @@ func TestTransitionPermissionClosedTable(t *testing.T) {
 	if _, err := TransitionPermission(RequestDeclined, RequestApproved); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("declined to approved error = %v", err)
 	}
+	for _, target := range []RequestStatus{RequestProcessing, RequestFailed} {
+		if _, err := TransitionPermission(RequestApproved, target); !errors.Is(err, ErrInvalidTransition) {
+			t.Errorf("approved to %s bypass error = %v", target, err)
+		}
+	}
 }
 
 func TestRequestOwnershipPolicy(t *testing.T) {

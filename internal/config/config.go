@@ -66,6 +66,8 @@ type Config struct {
 	OIDC OIDCConfig
 	// Playback configures adaptive media-server session polling.
 	Playback PlaybackConfig
+	// Requests configures fulfilment availability polling.
+	Requests RequestFulfilmentConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -114,6 +116,22 @@ type PlaybackConfig struct {
 	MissedPolls  int
 	ResumeWindow time.Duration
 	StoreTimeout time.Duration
+}
+
+// AvailabilitySource selects the authority for request availability.
+type AvailabilitySource string
+
+const (
+	// AvailabilityMediaServer uses registered media servers as the availability authority.
+	AvailabilityMediaServer AvailabilitySource = "media_server"
+	// AvailabilityDownloadManager uses the selected download manager as the availability authority.
+	AvailabilityDownloadManager AvailabilitySource = "download_manager"
+)
+
+// RequestFulfilmentConfig controls the processing-request availability poller.
+type RequestFulfilmentConfig struct {
+	AvailabilityInterval time.Duration
+	AvailabilitySource   AvailabilitySource
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -208,49 +226,52 @@ const MinSecretKeyBytes = 32
 // Default values. Kept as named constants so the defaults are a single,
 // reviewable source of truth rather than scattered literals.
 const (
-	defaultAddr                    = ":8080"
-	defaultReadHeaderTimeout       = 5 * time.Second
-	defaultReadTimeout             = 15 * time.Second
-	defaultWriteTimeout            = 15 * time.Second
-	defaultIdleTimeout             = 60 * time.Second
-	defaultMaxBodyBytes            = 1 << 20 // 1 MiB
-	defaultMaxOpenConns            = 25
-	defaultMaxIdleConns            = 25
-	defaultConnMaxLifetime         = 30 * time.Minute
-	defaultConnMaxIdleTime         = 5 * time.Minute
-	defaultShutdownGrace           = 15 * time.Second
-	defaultTraceSampleRatio        = 1.0
-	defaultSessionLifetime         = 24 * time.Hour
-	defaultSessionIdleTimeout      = 30 * time.Minute
-	defaultLoginRateRefillInterval = time.Minute
-	defaultLoginRateBurst          = 5
-	defaultLoginRateMaxKeys        = 10_000
-	maxLoginRateMaxKeys            = 100_000
-	defaultLoginMaxConcurrent      = 4
-	maxLoginMaxConcurrent          = 64
-	defaultBootstrapUsername       = "admin"
-	defaultPublicURL               = "http://localhost:8080"
-	defaultOIDCDisplayName         = "OpenID Connect"
-	defaultOIDCScopes              = "openid profile email"
-	defaultOIDCUsernameClaim       = "preferred_username"
-	defaultOIDCDefaultRole         = ""
-	defaultOIDCTimeout             = 5 * time.Second
-	minOIDCTimeout                 = 100 * time.Millisecond
-	maxOIDCTimeout                 = 30 * time.Second
-	defaultPlaybackPollActive      = 5 * time.Second
-	defaultPlaybackPollIdle        = 30 * time.Second
-	defaultPlaybackMissedPolls     = 3
-	defaultPlaybackResumeWindow    = 5 * time.Minute
-	defaultPlaybackStoreTimeout    = 5 * time.Second
-	minPlaybackPollActive          = time.Second
-	maxPlaybackPollActive          = time.Minute
-	minPlaybackPollIdle            = 5 * time.Second
-	maxPlaybackPollIdle            = 10 * time.Minute
-	maxPlaybackMissedPolls         = 100
-	minPlaybackResumeWindow        = time.Second
-	maxPlaybackResumeWindow        = 24 * time.Hour
-	minPlaybackStoreTimeout        = 100 * time.Millisecond
-	maxPlaybackStoreTimeout        = 30 * time.Second
+	defaultAddr                        = ":8080"
+	defaultReadHeaderTimeout           = 5 * time.Second
+	defaultReadTimeout                 = 15 * time.Second
+	defaultWriteTimeout                = 15 * time.Second
+	defaultIdleTimeout                 = 60 * time.Second
+	defaultMaxBodyBytes                = 1 << 20 // 1 MiB
+	defaultMaxOpenConns                = 25
+	defaultMaxIdleConns                = 25
+	defaultConnMaxLifetime             = 30 * time.Minute
+	defaultConnMaxIdleTime             = 5 * time.Minute
+	defaultShutdownGrace               = 15 * time.Second
+	defaultTraceSampleRatio            = 1.0
+	defaultSessionLifetime             = 24 * time.Hour
+	defaultSessionIdleTimeout          = 30 * time.Minute
+	defaultLoginRateRefillInterval     = time.Minute
+	defaultLoginRateBurst              = 5
+	defaultLoginRateMaxKeys            = 10_000
+	maxLoginRateMaxKeys                = 100_000
+	defaultLoginMaxConcurrent          = 4
+	maxLoginMaxConcurrent              = 64
+	defaultBootstrapUsername           = "admin"
+	defaultPublicURL                   = "http://localhost:8080"
+	defaultOIDCDisplayName             = "OpenID Connect"
+	defaultOIDCScopes                  = "openid profile email"
+	defaultOIDCUsernameClaim           = "preferred_username"
+	defaultOIDCDefaultRole             = ""
+	defaultOIDCTimeout                 = 5 * time.Second
+	minOIDCTimeout                     = 100 * time.Millisecond
+	maxOIDCTimeout                     = 30 * time.Second
+	defaultPlaybackPollActive          = 5 * time.Second
+	defaultPlaybackPollIdle            = 30 * time.Second
+	defaultPlaybackMissedPolls         = 3
+	defaultPlaybackResumeWindow        = 5 * time.Minute
+	defaultPlaybackStoreTimeout        = 5 * time.Second
+	minPlaybackPollActive              = time.Second
+	maxPlaybackPollActive              = time.Minute
+	minPlaybackPollIdle                = 5 * time.Second
+	maxPlaybackPollIdle                = 10 * time.Minute
+	maxPlaybackMissedPolls             = 100
+	minPlaybackResumeWindow            = time.Second
+	maxPlaybackResumeWindow            = 24 * time.Hour
+	minPlaybackStoreTimeout            = 100 * time.Millisecond
+	maxPlaybackStoreTimeout            = 30 * time.Second
+	defaultRequestAvailabilityInterval = 5 * time.Minute
+	minRequestAvailabilityInterval     = time.Minute
+	maxRequestAvailabilityInterval     = 24 * time.Hour
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -300,6 +321,7 @@ type rawFlags struct {
 	auth                                                            authRawFlags
 	oidc                                                            oidcRawFlags
 	playback                                                        playbackRawFlags
+	requests                                                        requestRawFlags
 }
 
 type authRawFlags struct {
@@ -324,6 +346,11 @@ type playbackRawFlags struct {
 	pollActive, pollIdle, resumeWindow *time.Duration
 	storeTimeout                       *time.Duration
 	missedPolls                        *int
+}
+
+type requestRawFlags struct {
+	availabilityInterval *time.Duration
+	availabilitySource   *string
 }
 
 // bindFlags declares every flag with its env-seeded default.
@@ -358,11 +385,21 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		auth:             bindAuthFlags(fs, env),
 		oidc:             bindOIDCFlags(fs, env),
 		playback:         bindPlaybackFlags(fs, env),
+		requests:         bindRequestFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
+	}
+}
+
+func bindRequestFlags(fs *flag.FlagSet, env *envReader) requestRawFlags {
+	return requestRawFlags{
+		availabilityInterval: fs.Duration("request-availability-interval", env.duration(
+			"BLOOM_REQUEST_AVAILABILITY_INTERVAL", defaultRequestAvailabilityInterval), "request availability poll interval"),
+		availabilitySource: fs.String("request-availability-source", env.string(
+			"BLOOM_REQUEST_AVAILABILITY_SOURCE", string(AvailabilityMediaServer)), "availability source: media_server|download_manager"),
 	}
 }
 
@@ -442,10 +479,18 @@ func (r rawFlags) build() (Config, error) {
 		PublicURL:     *r.publicURL,
 		OIDC:          r.oidcConfig(roleMap),
 		Playback:      r.playbackConfig(),
+		Requests:      r.requestConfig(),
 		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
 	}, nil
+}
+
+func (r rawFlags) requestConfig() RequestFulfilmentConfig {
+	return RequestFulfilmentConfig{
+		AvailabilityInterval: *r.requests.availabilityInterval,
+		AvailabilitySource:   AvailabilitySource(*r.requests.availabilitySource),
+	}
 }
 
 func (r rawFlags) playbackConfig() PlaybackConfig {
@@ -579,6 +624,9 @@ func (c Config) Validate() error {
 	if err := c.Playback.validate(); err != nil {
 		return err
 	}
+	if err := c.Requests.validate(); err != nil {
+		return err
+	}
 	if err := c.Bootstrap.validate(); err != nil {
 		return err
 	}
@@ -596,6 +644,19 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownGrace <= 0 {
 		return fmt.Errorf("config: BLOOM_SHUTDOWN_GRACE must be positive, got %s", c.ShutdownGrace)
+	}
+	return nil
+}
+
+func (r RequestFulfilmentConfig) validate() error {
+	if r.AvailabilityInterval == 0 && r.AvailabilitySource == "" {
+		return nil
+	}
+	if r.AvailabilityInterval < minRequestAvailabilityInterval || r.AvailabilityInterval > maxRequestAvailabilityInterval {
+		return fmt.Errorf("config: BLOOM_REQUEST_AVAILABILITY_INTERVAL must be between %s and %s", minRequestAvailabilityInterval, maxRequestAvailabilityInterval)
+	}
+	if r.AvailabilitySource != AvailabilityMediaServer && r.AvailabilitySource != AvailabilityDownloadManager {
+		return errors.New("config: BLOOM_REQUEST_AVAILABILITY_SOURCE must be media_server or download_manager")
 	}
 	return nil
 }
