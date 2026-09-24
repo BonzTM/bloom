@@ -960,6 +960,58 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGetDelete" }
+  /api/v1/invites/servers:
+    get:
+      tags: [invites]
+      operationId: listInviteServers
+      summary: List media server identifiers and names for invite creation.
+      description: Requires `users.invite`; this view omits settings, credentials, and capabilities.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 400 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { $ref: "#/components/responses/InviteServersListed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/invites/provisioning-failures:
+    get:
+      tags: [invites]
+      operationId: listInviteProvisioningFailures
+      summary: List unresolved invite provisioning failures.
+      description: Requires `admin.settings`.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { $ref: "#/components/responses/InviteProvisioningFailuresListed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/invites/provisioning-failures/{id}:
+    delete:
+      tags: [invites]
+      operationId: dismissInviteProvisioningFailure
+      summary: Dismiss one unresolved invite provisioning failure.
+      description: Requires `admin.settings`; the dismissal is audited.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/EntityID"
+      responses:
+        "204": { $ref: "#/components/responses/InviteProvisioningFailureDismissed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/InviteProvisioningFailureLeased" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedDelete" }
   /api/v1/invite/{code}:
     get:
       tags: [invites]
@@ -1616,6 +1668,25 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/InvitesResponse" }
+    InviteServersListed:
+      description: At most 100 least-privilege media server summaries ordered by normalized name.
+      headers: *AuthenticatedHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/InviteServersResponse" }
+    InviteProvisioningFailuresListed:
+      description: At most 100 unresolved provisioning failures ordered newest first.
+      headers: *AuthenticatedHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/InviteProvisioningFailuresResponse" }
+    InviteProvisioningFailureDismissed:
+      description: Provisioning failure dismissed.
+      headers: *AuthenticatedHeaders
+    InviteProvisioningFailureLeased:
+      description: A reconciliation worker holds a live lease. The error code is `invite_provisioning_failure_leased`.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     InviteReturned:
       description: Invite metadata without its one-time plaintext code.
       headers: *AuthenticatedHeaders
@@ -2039,6 +2110,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    AuthMethodNotAllowedDelete:
+      description: The route accepts only `DELETE`.
+      headers:
+        Allow:
+          description: Allowed method for this route.
+          schema: { type: string, const: DELETE }
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     AuthInternalError:
       description: Opaque authentication or session failure. `Set-Cookie` may refresh or expire the session.
       headers:
@@ -2610,6 +2692,50 @@ components:
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/Invite" }
+        next_cursor: { type: string, maxLength: 128 }
+    InviteServer:
+      type: object
+      required: [id, name]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, x-max-bytes: 100 }
+    InviteServersResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/InviteServer" }
+        next_cursor: { type: string, maxLength: 400 }
+    InviteProvisioningFailure:
+      type: object
+      required: [id, invite_id, media_server_id, media_server_name, media_user_owned, username, reason, attempts, next_attempt_at, last_error, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        invite_id: { type: string, format: uuid }
+        media_server_id: { type: string, format: uuid }
+        media_server_name: { type: string, minLength: 1, x-max-bytes: 100 }
+        media_user_owned: { type: boolean, description: True only when the create response confirmed that this acceptance created the media user. }
+        username: { type: string, minLength: 1, x-max-bytes: 64 }
+        reason: { type: string, enum: [cleanup_failed, ambiguous_create] }
+        attempts: { type: integer, minimum: 0, maximum: 8 }
+        next_attempt_at: { type: string, format: date-time }
+        last_error: { type: string, x-max-bytes: 512 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    InviteProvisioningFailuresResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/InviteProvisioningFailure" }
         next_cursor: { type: string, maxLength: 128 }
     PublicInviteResponse:
       type: object
@@ -3260,6 +3386,7 @@ components:
         - download_manager_in_use
         - notification_channel_failure
         - media_user_not_linked
+        - invite_provisioning_failure_leased
     OIDCCallbackErrorCode:
       type: string
       description: Closed browser-facing OIDC callback failure code set.

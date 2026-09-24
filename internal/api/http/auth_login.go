@@ -319,7 +319,8 @@ func routeResource(r *http.Request) string {
 	case "/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
 		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries":
 		return auditResourceNotifications
-	case "/api/v1/invites", "/api/v1/invites/{id}":
+	case "/api/v1/invites", "/api/v1/invites/{id}", "/api/v1/invites/servers",
+		"/api/v1/invites/provisioning-failures", "/api/v1/invites/provisioning-failures/{id}":
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
 		return auditResourceInvitePublic

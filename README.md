@@ -109,6 +109,11 @@ create requests. Accounts may hold multiple roles; their effective permission
 set is the union of those roles. Bloom reads that set from the database for each
 authenticated request. It does not cache authorization decisions.
 
+`users.invite` grants invite administration and the least-privilege
+`GET /api/v1/invites/servers` selector. It does not grant media-server settings
+access. `admin.settings` grants provisioning-failure inspection and dismissal,
+in addition to the configuration routes described below.
+
 `GET /api/v1/auth/me` returns the current account, its sorted role names, and
 its sorted effective permissions. `GET /api/v1/roles` requires `admin.roles`
 and returns roles with their permissions using cursor pagination. The default
@@ -303,6 +308,11 @@ only response that contains the 26-character invite code. Copy and share its
 `accept_path` immediately. Bloom stores only a SHA-256 digest of the code and
 cannot recover it later.
 
+`GET /api/v1/invites/servers` uses the same cursor and page-size bounds as the
+administrative media-server list, but returns only each server's `id` and
+`name`. It requires `users.invite`, not `admin.settings`, and never returns a
+base URL, credential, or capability detail.
+
 Use `GET /api/v1/invites` to review status and use counts. Use
 `DELETE /api/v1/invites/{id}` to revoke an invite. Revocation retains the invite
 and its redemption history; Bloom does not offer invite deletion.
@@ -316,10 +326,33 @@ offline common-password denylist. Bloom sends the password to Jellyfin for user
 creation. It never stores, logs, or audits the password.
 
 Bloom applies the invite's library access immediately after creating the
-Jellyfin user. If that update fails, Bloom deletes the new user and returns an
-upstream failure. A used, expired, exhausted, revoked, or unknown code returns
-the same public not-found response. A username that Jellyfin rejects as taken
-or invalid returns a conflict response.
+Jellyfin user. If that update fails, Bloom deletes the user only when the create
+response confirmed that this request created it, then returns an upstream
+failure. A malformed, non-canonical, used, expired, exhausted, revoked, or
+unknown code performs the same fixed database work and returns the same public
+not-found response. A username that Jellyfin rejects as taken or invalid
+returns a conflict response.
+
+Bloom records any unresolved cleanup or ambiguous user creation as a durable
+provisioning failure. Failure persistence uses one stable identifier across a
+transaction and its bounded fallback, so retrying an unknown commit outcome
+does not duplicate the obligation. A supervised worker claims at most 50 due
+rows per pass with expiring leases. It retries deletion or policy completion
+only for a media user whose create response confirmed ownership, with capped
+exponential backoff. An ambiguous create resolved only by username is terminal
+for manual resolution; Bloom never deletes that user or changes its policy.
+Every worker database operation has its own timeout. A provisioner panic is
+reduced to a generic retry or terminal outcome after releasing the provisioner
+and operation context. The eighth other failed attempt becomes terminal. An
+account with `admin.settings` can
+inspect safe failure fields at
+`GET /api/v1/invites/provisioning-failures` and can auditably dismiss a row with
+`DELETE /api/v1/invites/provisioning-failures/{id}`. Dismissal returns
+`409 invite_provisioning_failure_leased` while a worker lease is live. A process
+crash leaves the lease to expire so another pass can reclaim the row.
+`bloom_invite_provisioning_backlog` reports unresolved rows, and
+`bloom_invite_provisioning_reconciliations_total{reason,outcome}` counts bounded
+worker outcomes without usernames, invite codes, passwords, or error text.
 
 The public invite routes are rate limited per client address and per code
 with the same `BLOOM_LOGIN_RATE_*` settings that bound sign-in attempts, so a
@@ -534,6 +567,8 @@ this table.
 | `BLOOM_REQUEST_AVAILABILITY_INTERVAL` | duration | no | `5m` | no | Poll interval while processing requests exist. Valid range: `1m`-`24h`. |
 | `BLOOM_NOTIFY_RETENTION` | duration | no | `720h` | no | Retention for sent and terminally failed notification delivery rows. Must be positive. |
 | `BLOOM_NOTIFY_WORKER_INTERVAL` | duration | no | `5s` | no | Interval between notification outbox scans. Valid range: `1s`-`1h`. |
+| `BLOOM_INVITE_RECONCILE_INTERVAL` | duration | no | `5m` | no | Interval between invite provisioning reconciliation passes. Valid range: `1s`-`1h`. |
+| `BLOOM_INVITE_STORE_TIMEOUT` | duration | no | `5s` | no | Timeout for each invite reconciliation database operation. Valid range: `100ms`-`30s`. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
 | `BLOOM_LOG_FORMAT` | `json` \| `text` | no | `json` | no | Log record format. |
 | `BLOOM_OTLP_ENDPOINT` | string | no | — | no | OTLP/HTTP trace collector `host:port`. Empty disables span export. |
@@ -562,6 +597,10 @@ effective assignment, so preserve a backup if the provenance must be restored.
 Migration `00010_invites` adds invite metadata, library selections, and
 redemption records on both engines. Its down migration removes those records,
 so back up the database before schema rollback when invite history matters.
+Migration `00018_invite_provisioning_reconciliation` adds leased retry state,
+attempt and error bounds, terminal state, media-user ownership provenance, and
+optional accepting-account identity to provisioning failures on both engines.
+Apply it before running the reconciliation worker.
 
 Migration `00011_playback_collection` adds watches, active-time segments, and
 bounded position samples on both engines. Apply it before enabling this binary.

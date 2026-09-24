@@ -13,11 +13,21 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-const compensationTimeout = 5 * time.Second
+const (
+	compensationTimeout       = 5 * time.Second
+	invalidInviteCodeHashSeed = "bloom invalid invite code fixed-work digest"
+)
+
+var (
+	errCreateUserPanic = errors.New("media user creation failed unexpectedly")
+	errSetAccessPanic  = errors.New("media user library access failed unexpectedly")
+	errDeleteUserPanic = errors.New("media user cleanup failed unexpectedly")
+)
 
 type mediaServers interface {
 	Get(ctx context.Context, id string) (core.MediaServerConnection, error)
 	Libraries(ctx context.Context, id string) ([]core.Library, error)
+	ListInviteServers(ctx context.Context, afterNameKey string, pageSize int) ([]core.InviteServer, error)
 }
 
 type provisionerAcquirer interface {
@@ -28,6 +38,7 @@ type provisionerAcquirer interface {
 type Service struct {
 	reader       core.InviteReader
 	store        core.InviteStore
+	failures     core.InviteProvisioningFailureStore
 	servers      mediaServers
 	provisioners provisionerAcquirer
 	clock        core.Clock
@@ -77,7 +88,14 @@ func NewService(
 	if reader == nil || store == nil || servers == nil || provisioners == nil || clock == nil || logger == nil {
 		return nil, errors.New("invite service: all dependencies are required")
 	}
-	return &Service{reader: reader, store: store, servers: servers, provisioners: provisioners, clock: clock, logger: logger}, nil
+	failures, ok := store.(core.InviteProvisioningFailureStore)
+	if !ok {
+		return nil, errors.New("invite service: provisioning failure store is required")
+	}
+	return &Service{
+		reader: reader, store: store, failures: failures, servers: servers,
+		provisioners: provisioners, clock: clock, logger: logger,
+	}, nil
 }
 
 // Create validates server libraries and persists a freshly generated code hash.
@@ -156,6 +174,15 @@ func (s *Service) List(ctx context.Context, after *core.InviteCursor, pageSize i
 	return invites, nil
 }
 
+// ListServers returns the least-privilege server page used by invite creation.
+func (s *Service) ListServers(ctx context.Context, afterNameKey string, pageSize int) ([]core.InviteServer, error) {
+	servers, err := s.servers.ListInviteServers(ctx, afterNameKey, pageSize)
+	if err != nil {
+		return nil, fmt.Errorf("list invite servers: %w", err)
+	}
+	return servers, nil
+}
+
 // Get returns one invite by identifier.
 func (s *Service) Get(ctx context.Context, id string) (core.Invite, error) {
 	invite, err := s.reader.GetInvite(ctx, id)
@@ -163,6 +190,26 @@ func (s *Service) Get(ctx context.Context, id string) (core.Invite, error) {
 		return core.Invite{}, fmt.Errorf("get invite: %w", err)
 	}
 	return invite, nil
+}
+
+// ListProvisioningFailures returns one safe newest-first administrator page.
+func (s *Service) ListProvisioningFailures(
+	ctx context.Context, after *core.InviteProvisioningFailureCursor, pageSize int,
+) ([]core.InviteProvisioningFailure, error) {
+	values, err := s.failures.ListInviteProvisioningFailures(ctx, after, pageSize)
+	if err != nil {
+		return nil, fmt.Errorf("list invite provisioning failures: %w", err)
+	}
+	return values, nil
+}
+
+// DismissProvisioningFailure removes one administrator-accepted obligation.
+func (s *Service) DismissProvisioningFailure(ctx context.Context, id string) error {
+	now := core.NormalizeTime(s.clock.Now())
+	if err := s.failures.DismissInviteProvisioningFailure(ctx, id, now); err != nil {
+		return fmt.Errorf("dismiss invite provisioning failure: %w", err)
+	}
+	return nil
 }
 
 // Revoke makes an invite permanently unavailable.
@@ -176,19 +223,33 @@ func (s *Service) Revoke(ctx context.Context, id string) (core.Invite, error) {
 
 // Preview returns public metadata only while the invite remains acceptable.
 func (s *Service) Preview(ctx context.Context, code string) (Preview, error) {
-	hash, err := core.ParseInviteCode(code)
-	if err != nil {
+	hash, valid := inviteLookupHash(code)
+	return s.previewByHash(ctx, hash, valid)
+}
+
+func (s *Service) previewByHash(ctx context.Context, hash [sha256.Size]byte, parseValid bool) (Preview, error) {
+	lookup, err := s.reader.GetInviteByCodeHash(ctx, hash)
+	matches := lookup.Matches(hash)
+	if !parseValid || !matches {
 		return Preview{}, core.ErrInviteUnavailable
 	}
-	invite, err := s.reader.GetInviteByCodeHash(ctx, hash)
-	if err != nil || invite.Status(s.clock.Now()) != core.InviteActive {
+	if err != nil || lookup.Blocked || lookup.Invite.Status(s.clock.Now()) != core.InviteActive {
 		return Preview{}, opaqueInviteError(err)
 	}
+	invite := lookup.Invite
 	server, err := s.servers.Get(ctx, invite.MediaServerID)
 	if err != nil {
 		return Preview{}, fmt.Errorf("get invite media server: %w", err)
 	}
 	return Preview{Invite: invite, MediaServerName: server.Server.Name}, nil
+}
+
+func inviteLookupHash(code string) ([sha256.Size]byte, bool) {
+	hash, err := core.ParseInviteCode(code)
+	if err != nil {
+		return sha256.Sum256([]byte(invalidInviteCodeHashSeed)), false
+	}
+	return hash, true
 }
 
 func opaqueInviteError(err error) error {
@@ -250,11 +311,8 @@ func validateAcceptance(username, password string) error {
 func (s *Service) acceptancePreview(
 	ctx context.Context, code string,
 ) (Preview, [sha256.Size]byte, error) {
-	hash, err := core.ParseInviteCode(code)
-	if err != nil {
-		return Preview{}, hash, core.ErrInviteUnavailable
-	}
-	preview, err := s.Preview(ctx, code)
+	hash, valid := inviteLookupHash(code)
+	preview, err := s.previewByHash(ctx, hash, valid)
 	return preview, hash, err
 }
 
@@ -273,18 +331,19 @@ type acceptanceState struct {
 
 func (s *acceptanceState) redeem(ctx context.Context, invite core.Invite) (core.InviteRedemption, error) {
 	s.invite = invite
-	user, err := s.provisioner.CreateUser(ctx, s.username, s.password)
+	user, err := createMediaUser(ctx, s.provisioner, s.username, s.password)
+	s.created = user
 	if err != nil {
-		if user.ID != "" {
-			s.created, s.cleanup = user, true
-		} else if errors.Is(err, core.ErrMediaUserCreateAmbiguous) {
-			s.unresolved = true
-		}
+		s.captureCreationFailure(user, err)
 		return core.InviteRedemption{}, s.finishProvisioningFailure(ctx, fmt.Errorf("create media user: %w", err), 1)
 	}
-	s.created, s.cleanup = user, true
+	if !user.Created {
+		s.unresolved = true
+		return core.InviteRedemption{}, s.finishProvisioningFailure(ctx, core.ErrMediaUserCreateAmbiguous, 1)
+	}
+	s.cleanup = true
 	allLibraries := len(invite.LibraryIDs) == 0
-	if policyErr := s.provisioner.SetLibraryAccess(ctx, user.ID, invite.LibraryIDs, allLibraries); policyErr != nil {
+	if policyErr := setMediaUserLibraryAccess(ctx, s.provisioner, user.ID, invite.LibraryIDs, allLibraries); policyErr != nil {
 		cause := fmt.Errorf("set media user library access: %w", policyErr)
 		return core.InviteRedemption{}, s.finishProvisioningFailure(ctx, cause, 2)
 	}
@@ -296,6 +355,16 @@ func (s *acceptanceState) redeem(ctx context.Context, invite core.Invite) (core.
 		ID: id, InviteID: invite.ID, AccountID: s.accountID, MediaServerID: invite.MediaServerID,
 		MediaUserID: user.ID, Username: s.username, RedeemedAt: core.NormalizeTime(s.service.clock.Now()),
 	}, nil
+}
+
+func (s *acceptanceState) captureCreationFailure(user core.MediaUser, err error) {
+	if user.Created {
+		s.cleanup = true
+		return
+	}
+	if user.ID != "" || errors.Is(err, core.ErrMediaUserCreateAmbiguous) {
+		s.unresolved = true
+	}
 }
 
 func (s *acceptanceState) finishProvisioningFailure(ctx context.Context, cause error, attempts int) error {
@@ -310,11 +379,7 @@ func (s *acceptanceState) finishProvisioningFailure(ctx context.Context, cause e
 		return cause
 	}
 	now := core.NormalizeTime(s.service.clock.Now())
-	failure := core.InviteProvisioningFailure{
-		ID: s.failureID, InviteID: s.invite.ID, MediaServerID: s.invite.MediaServerID,
-		MediaUserID: s.created.ID, Username: s.username, Reason: reason,
-		CreatedAt: now, UpdatedAt: now,
-	}
+	failure := s.provisioningFailure(s.failureID, reason, now)
 	return &core.InviteProvisioningError{Failure: failure, Err: cause}
 }
 
@@ -322,9 +387,13 @@ func (s *acceptanceState) compensate(ctx context.Context, cause error) error {
 	if !s.cleanup {
 		return cause
 	}
+	if !s.created.Created {
+		s.cleanup, s.unresolved = false, true
+		return cause
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compensationTimeout)
 	defer cancel()
-	if err := s.provisioner.DeleteUser(cleanupCtx, s.created.ID); err != nil {
+	if err := deleteMediaUser(cleanupCtx, s.provisioner, s.created.ID); err != nil {
 		return errors.Join(cause, fmt.Errorf("%w: %w", core.ErrInviteCompensation, err))
 	}
 	s.cleanup = false
@@ -336,20 +405,27 @@ func (s *acceptanceState) persistPending(ctx context.Context, cause error) error
 	if !pending {
 		return cause
 	}
-	id, err := core.NewID()
-	if err != nil {
-		return errors.Join(cause, core.ErrInviteProvisioningPending, err)
-	}
 	now := core.NormalizeTime(s.service.clock.Now())
-	failure := core.InviteProvisioningFailure{
-		ID: id, InviteID: s.invite.ID, MediaServerID: s.invite.MediaServerID,
-		MediaUserID: s.created.ID, Username: s.username, Reason: reason,
-		CreatedAt: now, UpdatedAt: now,
-	}
+	failure := s.provisioningFailure(s.failureID, reason, now)
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compensationTimeout)
 	defer cancel()
-	err = s.service.store.RecordInviteProvisioningFailure(persistCtx, failure)
+	err := s.service.store.RecordInviteProvisioningFailure(persistCtx, failure)
 	return errors.Join(cause, core.ErrInviteProvisioningPending, err)
+}
+
+func (s *acceptanceState) provisioningFailure(
+	id string, reason core.InviteProvisioningFailureReason, now time.Time,
+) core.InviteProvisioningFailure {
+	failure := core.InviteProvisioningFailure{
+		ID: id, InviteID: s.invite.ID, MediaServerID: s.invite.MediaServerID,
+		MediaUserID: s.created.ID, MediaUserOwned: s.created.Created, AccountID: s.accountID,
+		Username: s.username, Reason: reason, CreatedAt: now, UpdatedAt: now,
+	}
+	if !failure.MediaUserOwned {
+		failure.Terminal = true
+		failure.LastError = core.InviteManualResolutionError
+	}
+	return failure
 }
 
 func (s *acceptanceState) pendingReason() (core.InviteProvisioningFailureReason, bool) {
@@ -363,3 +439,35 @@ func (s *acceptanceState) pendingReason() (core.InviteProvisioningFailureReason,
 }
 
 func (s *acceptanceState) clearPassword() { s.password = "" }
+
+func createMediaUser(
+	ctx context.Context, provisioner core.MediaUserProvisioner, username, password string,
+) (user core.MediaUser, err error) {
+	defer func() {
+		if recover() != nil {
+			user = core.MediaUser{}
+			err = errors.Join(core.ErrMediaUserCreateAmbiguous, errCreateUserPanic)
+		}
+	}()
+	return provisioner.CreateUser(ctx, username, password)
+}
+
+func setMediaUserLibraryAccess(
+	ctx context.Context, provisioner core.MediaUserProvisioner, userID string, libraryIDs []string, all bool,
+) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errSetAccessPanic
+		}
+	}()
+	return provisioner.SetLibraryAccess(ctx, userID, libraryIDs, all)
+}
+
+func deleteMediaUser(ctx context.Context, provisioner core.MediaUserProvisioner, userID string) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errDeleteUserPanic
+		}
+	}()
+	return provisioner.DeleteUser(ctx, userID)
+}

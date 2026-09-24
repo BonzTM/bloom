@@ -57,12 +57,15 @@ type inviteReader interface {
 	List(ctx context.Context, after *core.InviteCursor, pageSize int) ([]core.Invite, error)
 	Get(ctx context.Context, id string) (core.Invite, error)
 	Preview(ctx context.Context, code string) (inviteapp.Preview, error)
+	ListServers(ctx context.Context, afterNameKey string, pageSize int) ([]core.InviteServer, error)
+	ListProvisioningFailures(ctx context.Context, after *core.InviteProvisioningFailureCursor, pageSize int) ([]core.InviteProvisioningFailure, error)
 }
 
 type inviteManager interface {
 	Create(ctx context.Context, input inviteapp.CreateInput) (inviteapp.Created, error)
 	Revoke(ctx context.Context, id string) (core.Invite, error)
 	Accept(ctx context.Context, accountID, code, username, password string) (inviteapp.Accepted, error)
+	DismissProvisioningFailure(ctx context.Context, id string) error
 }
 
 type accountMediaUserManager interface {
@@ -528,7 +531,8 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
 		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries":
 		return auditResourceNotifications
-	case "/api/v1/invites", "/api/v1/invites/{id}":
+	case "/api/v1/invites", "/api/v1/invites/{id}", "/api/v1/invites/servers",
+		"/api/v1/invites/provisioning-failures", "/api/v1/invites/provisioning-failures/{id}":
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
 		return auditResourceInvitePublic

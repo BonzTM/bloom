@@ -26,14 +26,40 @@ func (q *Queries) InviteHasProvisioningFailure(ctx context.Context, inviteID str
 }
 
 const lockInviteByCodeHash = `-- name: LockInviteByCodeHash :one
-SELECT id, media_server_id, created_by_account_id, label, expires_at,
+SELECT id, media_server_id, created_by_account_id, code_hash, label, expires_at,
        max_uses, use_count, revoked_at, created_at, updated_at
 FROM invites
 WHERE code_hash = $1
 FOR UPDATE
 `
 
-type LockInviteByCodeHashRow struct {
+func (q *Queries) LockInviteByCodeHash(ctx context.Context, codeHash []byte) (Invite, error) {
+	row := q.db.QueryRowContext(ctx, lockInviteByCodeHash, codeHash)
+	var i Invite
+	err := row.Scan(
+		&i.ID,
+		&i.MediaServerID,
+		&i.CreatedByAccountID,
+		&i.CodeHash,
+		&i.Label,
+		&i.ExpiresAt,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockInviteByID = `-- name: LockInviteByID :one
+SELECT id, media_server_id, created_by_account_id, label, expires_at,
+       max_uses, use_count, revoked_at, created_at, updated_at
+FROM invites WHERE id = $1
+FOR UPDATE
+`
+
+type LockInviteByIDRow struct {
 	ID                 string
 	MediaServerID      string
 	CreatedByAccountID string
@@ -46,9 +72,9 @@ type LockInviteByCodeHashRow struct {
 	UpdatedAt          time.Time
 }
 
-func (q *Queries) LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error) {
-	row := q.db.QueryRowContext(ctx, lockInviteByCodeHash, codeHash)
-	var i LockInviteByCodeHashRow
+func (q *Queries) LockInviteByID(ctx context.Context, id string) (LockInviteByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, lockInviteByID, id)
+	var i LockInviteByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.MediaServerID,
@@ -62,4 +88,19 @@ func (q *Queries) LockInviteByCodeHash(ctx context.Context, codeHash []byte) (Lo
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const lockInviteProvisioningFailureForClaim = `-- name: LockInviteProvisioningFailureForClaim :one
+SELECT id FROM invite_provisioning_failures
+WHERE terminal = FALSE AND attempts < 8 AND next_attempt_at <= $1
+  AND (lease_token = '' OR lease_expires_at <= $1)
+ORDER BY next_attempt_at, created_at, id LIMIT 1
+FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) LockInviteProvisioningFailureForClaim(ctx context.Context, dueAt time.Time) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockInviteProvisioningFailureForClaim, dueAt)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }

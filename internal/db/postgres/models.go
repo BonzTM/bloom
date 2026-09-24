@@ -92,14 +92,22 @@ type InviteLibrary struct {
 }
 
 type InviteProvisioningFailure struct {
-	ID            string
-	InviteID      string
-	MediaServerID string
-	MediaUserID   sql.NullString
-	Username      string
-	Reason        string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID             string
+	InviteID       string
+	MediaServerID  string
+	MediaUserID    sql.NullString
+	Username       string
+	Reason         string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	AccountID      sql.NullString
+	MediaUserOwned bool
+	Attempts       int32
+	NextAttemptAt  time.Time
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	LastError      string
+	Terminal       bool
 }
 
 type InviteRedemption struct {

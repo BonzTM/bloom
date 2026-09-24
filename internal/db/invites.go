@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -14,7 +16,45 @@ func provisioningFailureRecordError(err error) error {
 	return fmt.Errorf("insert invite provisioning failure: %w", errors.Join(core.ErrInviteProvisioningFailureRecord, err))
 }
 
+func redeemTransactionError(provisioningErr *core.InviteProvisioningError, transactionErr error) error {
+	if transactionErr == nil {
+		if provisioningErr == nil {
+			return nil
+		}
+		return provisioningErr
+	}
+	if provisioningErr == nil {
+		return transactionErr
+	}
+	return errors.Join(provisioningErr.Err, transactionErr)
+}
+
+func dismissalConflict(exists bool, err error) error {
+	if err != nil {
+		return fmt.Errorf("inspect invite provisioning failure after dismissal: %w", err)
+	}
+	if exists {
+		return core.ErrInviteProvisioningFailureLeased
+	}
+	return core.ErrNotFound
+}
+
 const maxInviteQueryPageSize = 101
+
+var dummyInviteCodeHash = sha256.Sum256([]byte("bloom fixed-work invite lookup dummy"))
+
+func dummyInviteLookup() core.InviteCodeLookup {
+	stamp := time.Unix(0, 0).UTC()
+	return core.InviteCodeLookup{
+		Invite: core.Invite{
+			ID:            "00000000-0000-4000-8000-000000000000",
+			MediaServerID: "00000000-0000-4000-8000-000000000001",
+			CreatedBy:     "00000000-0000-4000-8000-000000000002",
+			Label:         "Unavailable", CreatedAt: stamp, UpdatedAt: stamp,
+		},
+		CodeHash: dummyInviteCodeHash,
+	}
+}
 
 // NewInviteStores returns the invite read and serialized-write seams.
 func NewInviteStores(pool *sql.DB, driver config.Driver) (core.InviteReader, core.InviteStore, error) {
@@ -73,6 +113,12 @@ func validateProvisioningFailure(failure core.InviteProvisioningFailure) error {
 	if failure.MediaUserID != "" && (len(failure.MediaUserID) > 128 || !core.ValidID(failure.MediaUserID)) {
 		return core.ErrInvalidArgument
 	}
+	if failure.MediaUserOwned && failure.MediaUserID == "" {
+		return core.ErrInvalidArgument
+	}
+	if failure.AccountID != "" && !core.ValidID(failure.AccountID) {
+		return core.ErrInvalidArgument
+	}
 	if err := core.ValidateJellyfinUsername(failure.Username); err != nil {
 		return err
 	}
@@ -80,7 +126,57 @@ func validateProvisioningFailure(failure core.InviteProvisioningFailure) error {
 		failure.Reason != core.InviteProvisioningCreateAmbiguous {
 		return core.ErrInvalidArgument
 	}
+	if failure.Reason == core.InviteProvisioningCleanupFailed && !failure.MediaUserOwned {
+		return core.ErrInvalidArgument
+	}
+	if !failure.MediaUserOwned && (!failure.Terminal || failure.LastError != core.InviteManualResolutionError) {
+		return core.ErrInvalidArgument
+	}
+	if len(failure.LastError) > core.MaxInviteProvisioningErrorBytes {
+		return core.ErrInvalidArgument
+	}
 	return nil
+}
+
+func validateProvisioningLease(lease core.InviteProvisioningLease, at time.Time) error {
+	if !core.ValidID(lease.Token) || at.IsZero() || !lease.ExpiresAt.After(at) {
+		return core.ErrInvalidArgument
+	}
+	return nil
+}
+
+func validateProvisioningFailurePage(after *core.InviteProvisioningFailureCursor, pageSize int) error {
+	if pageSize < 1 || pageSize > maxInviteQueryPageSize {
+		return core.ErrInvalidArgument
+	}
+	if after != nil && (!core.ValidID(after.ID) || after.CreatedAt.IsZero()) {
+		return core.ErrInvalidArgument
+	}
+	return nil
+}
+
+func completeProvisioningPolicy(
+	ctx context.Context, failure core.InviteProvisioningFailure, redemption core.InviteRedemption,
+	invite core.Invite, insertRedemption func(context.Context, core.InviteRedemption) error,
+	insertLink func(context.Context, core.InviteRedemption) (bool, error), increment func(context.Context) error,
+	complete func(context.Context) error,
+) error {
+	if !failure.MediaUserOwned || failure.LeaseToken == "" || redemption.AccountID != failure.AccountID {
+		return core.ErrInvalidArgument
+	}
+	if err := validateRedemption(invite, redemption); err != nil {
+		return fmt.Errorf("validate reconciled invite redemption: %w", err)
+	}
+	if err := insertRedemption(ctx, redemption); err != nil {
+		return err
+	}
+	if _, err := insertLink(ctx, redemption); err != nil {
+		return err
+	}
+	if err := increment(ctx); err != nil {
+		return err
+	}
+	return complete(ctx)
 }
 
 func nullableInviteMediaUserID(value string) sql.NullString {

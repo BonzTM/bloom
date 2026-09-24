@@ -51,6 +51,7 @@ const (
 	codeDownloadManagerInUse    = "download_manager_in_use"
 	codeNotificationFailure     = "notification_channel_failure"
 	codeMediaUserNotLinked      = "media_user_not_linked"
+	codeInviteFailureLeased     = "invite_provisioning_failure_leased"
 	oidcFailureClassification   = "OpenID Connect callback failure"
 	maxLoggedErrorBytes         = 512
 )
@@ -80,12 +81,6 @@ func errorClass(err error) (status int, code string) {
 		return http.StatusConflict, codeProfileInUse
 	case errors.Is(err, core.ErrInvalidTransition):
 		return http.StatusConflict, codeInvalidTransition
-	case errors.Is(err, core.ErrInviteProvisioningPending):
-		return http.StatusBadGateway, codeMediaServerFailure
-	case isMediaUserNameError(err):
-		return http.StatusConflict, codeUsernameUnavailable
-	case errors.Is(err, core.ErrInviteUnavailable):
-		return http.StatusNotFound, codeNotFound
 	case isMediaServerErrorKind(err, core.MediaServerSaturated):
 		return http.StatusServiceUnavailable, codeUnavailable
 	case isMediaServerError(err):
@@ -124,10 +119,28 @@ func errorClass(err error) (status int, code string) {
 }
 
 func specializedErrorClass(err error) (int, string, bool) {
+	if status, code, ok := inviteErrorClass(err); ok {
+		return status, code, true
+	}
 	if errors.Is(err, core.ErrMediaUserNotLinked) {
 		return http.StatusNotFound, codeMediaUserNotLinked, true
 	}
 	return downloadManagerErrorClass(err)
+}
+
+func inviteErrorClass(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, core.ErrInviteProvisioningPending):
+		return http.StatusBadGateway, codeMediaServerFailure, true
+	case errors.Is(err, core.ErrInviteProvisioningFailureLeased):
+		return http.StatusConflict, codeInviteFailureLeased, true
+	case isMediaUserNameError(err):
+		return http.StatusConflict, codeUsernameUnavailable, true
+	case errors.Is(err, core.ErrInviteUnavailable):
+		return http.StatusNotFound, codeNotFound, true
+	default:
+		return 0, "", false
+	}
 }
 
 func downloadManagerErrorClass(err error) (int, string, bool) {

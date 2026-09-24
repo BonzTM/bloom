@@ -157,6 +157,7 @@ func runService(
 	serving, err := serveWithFulfilment(
 		ctx, srv, wiring.oidcProvider, wiring.playbackManager, wiring.fulfilment,
 		wiring.notificationWorker,
+		wiring.inviteReconciler,
 		connectionGroup{wiring.mediaServers, wiring.metadata, wiring.downloadManagers},
 		pool, tracerProvider, logger, cfg.ShutdownGrace,
 		deps.ListenerReady, deps.listen,
@@ -180,6 +181,7 @@ type serviceWiring struct {
 	fulfilment         *fulfilment.Manager
 	notifications      *notifyapp.Service
 	notificationWorker *notifyapp.Worker
+	inviteReconciler   *inviteapp.Reconciler
 	invites            *inviteapp.Service
 	playbackStore      core.PlaybackStore
 	playbackManager    *playback.Manager
@@ -224,7 +226,7 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	ownership.media = connectionGroup{mediaServers, metadataService, downloadManagers}
-	invites, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock, logger)
+	invites, inviteReconciler, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock, metrics, logger)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -253,7 +255,8 @@ func wireServiceDependencies(
 		metadata:          metadataService, requests: requestService,
 		downloadManagers: downloadManagers, fulfilment: fulfilmentManager,
 		notifications: notifications, notificationWorker: notificationWorker,
-		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
+		inviteReconciler: inviteReconciler,
+		oidcProvider:     provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
 	}, nil
 }
 
@@ -619,17 +622,34 @@ func buildFulfilmentManager(
 }
 
 func inviteDependencies(
-	pool *sql.DB, cfg config.Config, mediaServers *mediaserver.Service, clock core.Clock, logger *slog.Logger,
-) (*inviteapp.Service, error) {
+	pool *sql.DB, cfg config.Config, mediaServers *mediaserver.Service, clock core.Clock,
+	metrics *telemetry.PromMetrics, logger *slog.Logger,
+) (*inviteapp.Service, *inviteapp.Reconciler, error) {
 	reader, store, err := db.NewInviteStores(pool, cfg.Database.Driver)
 	if err != nil {
-		return nil, fmt.Errorf("build invite stores: %w", err)
+		return nil, nil, fmt.Errorf("build invite stores: %w", err)
 	}
 	service, err := inviteapp.NewService(reader, store, mediaServers, mediaServers, clock, logger)
 	if err != nil {
-		return nil, fmt.Errorf("build invite service: %w", err)
+		return nil, nil, fmt.Errorf("build invite service: %w", err)
 	}
-	return service, nil
+	failureStore, ok := store.(core.InviteProvisioningFailureStore)
+	if !ok {
+		return nil, nil, errors.New("build invite reconciler: provisioning failure store is unavailable")
+	}
+	interval := cfg.Invites.ReconcileInterval
+	if interval == 0 {
+		interval = 5 * time.Minute
+	}
+	reconciler, err := inviteapp.NewReconciler(inviteapp.ReconcilerConfig{
+		Interval: interval, StoreTimeout: cfg.Invites.StoreTimeout,
+	}, inviteapp.ReconcilerDependencies{
+		Store: failureStore, Provisioners: mediaServers, Clock: clock, Metrics: metrics, Logger: logger,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("build invite reconciler: %w", err)
+	}
+	return service, reconciler, nil
 }
 
 func accountMediaDependencies(
@@ -868,7 +888,7 @@ func serve(
 	listen func(context.Context, string, string) (net.Listener, error),
 ) (bool, error) {
 	return serveWithFulfilment(
-		ctx, srv, oidcProvider, playbackManager, nil, nil, media, pool, tp, logger, grace, listenerReady, listen,
+		ctx, srv, oidcProvider, playbackManager, nil, nil, nil, media, pool, tp, logger, grace, listenerReady, listen,
 	)
 }
 
@@ -879,6 +899,7 @@ func serveWithFulfilment(
 	playbackManager playbackLifecycle,
 	fulfilmentManager *fulfilment.Manager,
 	notificationWorker *notifyapp.Worker,
+	inviteReconciler *inviteapp.Reconciler,
 	media mediaConnectionCloser,
 	pool *sql.DB,
 	tp tracerLifecycle,
@@ -901,7 +922,8 @@ func serveWithFulfilment(
 	serving := make(chan struct{})
 	startRuntimeWorkers(
 		gctx, g, serving, listener, srv, oidcProvider, playbackManager,
-		fulfilmentManager, notificationWorker, media, pool, tp, logger, grace, listenerReady,
+		fulfilmentManager, notificationWorker, inviteReconciler,
+		media, pool, tp, logger, grace, listenerReady,
 	)
 	<-serving
 	listenerOwned = false
@@ -916,6 +938,7 @@ func startRuntimeWorkers(
 	ctx context.Context, g *errgroup.Group, serving chan struct{}, listener net.Listener,
 	srv *httpapi.Server, oidcProvider oidcLifecycle, playbackManager playbackLifecycle,
 	fulfilmentManager *fulfilment.Manager, notificationWorker *notifyapp.Worker,
+	inviteReconciler *inviteapp.Reconciler,
 	media mediaConnectionCloser, pool *sql.DB,
 	tp tracerLifecycle, logger *slog.Logger, grace time.Duration, listenerReady func(net.Addr),
 ) {
@@ -948,6 +971,12 @@ func startRuntimeWorkers(
 		g.Go(func() error {
 			<-serving
 			return notificationWorker.Run(ctx)
+		})
+	}
+	if inviteReconciler != nil {
+		g.Go(func() error {
+			<-serving
+			return inviteReconciler.Run(ctx)
 		})
 	}
 }

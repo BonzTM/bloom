@@ -15,14 +15,22 @@ import (
 )
 
 type fakeStore struct {
-	invite      core.Invite
-	createHash  [sha256.Size]byte
-	createErr   error
-	redeemErr   error
-	failCommit  error
-	redemptions []core.InviteRedemption
-	failures    []core.InviteProvisioningFailure
-	failureErr  error
+	invite                 core.Invite
+	createHash             [sha256.Size]byte
+	createErr              error
+	redeemErr              error
+	failCommit             error
+	redemptions            []core.InviteRedemption
+	failures               []core.InviteProvisioningFailure
+	transactionFailureErr  error
+	failureErr             error
+	ambiguousFailureCommit error
+	recordAttempts         int
+	lookupHash             *[sha256.Size]byte
+	blocked                bool
+	lookups                int
+	redeems                int
+	dismissedAt            time.Time
 }
 
 func (s *fakeStore) CreateInvite(_ context.Context, value core.Invite, hash [sha256.Size]byte) error {
@@ -38,14 +46,21 @@ func (s *fakeStore) RevokeInvite(_ context.Context, _ string, at time.Time) (cor
 func (s *fakeStore) RedeemInvite(
 	ctx context.Context, _ [sha256.Size]byte, _ core.Clock, redeem core.InviteRedeemFunc,
 ) (bool, error) {
+	s.redeems++
 	if s.redeemErr != nil {
 		return false, s.redeemErr
 	}
 	redemption, err := redeem(ctx, s.invite)
 	if err != nil {
 		if provisioningErr, ok := errors.AsType[*core.InviteProvisioningError](err); ok && provisioningErr != nil {
-			s.failures = append(s.failures, provisioningErr.Failure)
-			return false, errors.Join(err, s.failureErr)
+			if s.transactionFailureErr != nil {
+				return false, errors.Join(provisioningErr.Err, s.transactionFailureErr)
+			}
+			s.appendFailureIfAbsent(provisioningErr.Failure)
+			if s.ambiguousFailureCommit != nil {
+				return false, errors.Join(provisioningErr.Err, s.ambiguousFailureCommit)
+			}
+			return false, err
 		}
 		return false, err
 	}
@@ -56,19 +71,63 @@ func (s *fakeStore) RedeemInvite(
 func (s *fakeStore) RecordInviteProvisioningFailure(
 	_ context.Context, failure core.InviteProvisioningFailure,
 ) error {
+	s.recordAttempts++
+	if s.failureErr != nil {
+		return s.failureErr
+	}
+	s.appendFailureIfAbsent(failure)
+	return nil
+}
+
+func (s *fakeStore) appendFailureIfAbsent(failure core.InviteProvisioningFailure) {
+	for _, existing := range s.failures {
+		if existing.ID == failure.ID {
+			return
+		}
+	}
 	s.failures = append(s.failures, failure)
-	return s.failureErr
 }
 
 func (s *fakeStore) GetInvite(_ context.Context, _ string) (core.Invite, error) { return s.invite, nil }
 
-func (s *fakeStore) GetInviteByCodeHash(_ context.Context, _ [sha256.Size]byte) (core.Invite, error) {
-	return s.invite, nil
+func (s *fakeStore) GetInviteByCodeHash(_ context.Context, hash [sha256.Size]byte) (core.InviteCodeLookup, error) {
+	s.lookups++
+	stored := hash
+	if s.lookupHash != nil {
+		stored = *s.lookupHash
+	}
+	return core.InviteCodeLookup{Invite: s.invite, CodeHash: stored, Blocked: s.blocked}, nil
 }
 
 func (s *fakeStore) ListInvites(context.Context, *core.InviteCursor, int) ([]core.Invite, error) {
 	return []core.Invite{s.invite}, nil
 }
+
+func (*fakeStore) ClaimInviteProvisioningFailure(context.Context, core.InviteProvisioningLease, time.Time) (core.InviteProvisioningFailure, error) {
+	return core.InviteProvisioningFailure{}, core.ErrNotFound
+}
+
+func (*fakeStore) CompleteInviteProvisioningCleanup(context.Context, string, string) error {
+	return nil
+}
+
+func (*fakeStore) CompleteInviteProvisioningPolicy(context.Context, core.InviteProvisioningFailure, core.InviteRedemption, time.Time) error {
+	return nil
+}
+
+func (*fakeStore) RescheduleInviteProvisioningFailure(context.Context, string, string, string, time.Time, time.Time, bool) error {
+	return nil
+}
+
+func (*fakeStore) ListInviteProvisioningFailures(context.Context, *core.InviteProvisioningFailureCursor, int) ([]core.InviteProvisioningFailure, error) {
+	return nil, nil
+}
+
+func (s *fakeStore) DismissInviteProvisioningFailure(_ context.Context, _ string, at time.Time) error {
+	s.dismissedAt = at
+	return nil
+}
+func (*fakeStore) InviteProvisioningFailureDepth(context.Context) (int64, error) { return 0, nil }
 
 type fakeServers struct {
 	connection core.MediaServerConnection
@@ -83,27 +142,48 @@ func (s fakeServers) Libraries(context.Context, string) ([]core.Library, error) 
 	return slices.Clone(s.libraries), nil
 }
 
+func (s fakeServers) ListInviteServers(context.Context, string, int) ([]core.InviteServer, error) {
+	return []core.InviteServer{{ID: s.connection.Server.ID, Name: s.connection.Server.Name}}, nil
+}
+
 type fakeProvisioner struct {
 	createErr, policyErr, deleteErr error
 	created, policies, deleted      int
 	lastPassword                    string
 	deleteContextCanceled           bool
+	panicCreate, panicPolicy        bool
+	panicDelete, live               bool
 }
 
 func (p *fakeProvisioner) CreateUser(_ context.Context, name, password string) (core.MediaUser, error) {
 	p.created++
 	p.lastPassword = password
-	return core.MediaUser{ID: "55555555-5555-4555-8555-555555555555", Name: name}, p.createErr
+	p.live = true
+	if p.panicCreate {
+		panic("create panic with " + password)
+	}
+	return core.MediaUser{
+		ID: "55555555-5555-4555-8555-555555555555", Name: name, Created: p.createErr == nil,
+	}, p.createErr
 }
 
 func (p *fakeProvisioner) SetLibraryAccess(context.Context, string, []string, bool) error {
 	p.policies++
+	if p.panicPolicy {
+		panic("policy panic with " + p.lastPassword)
+	}
 	return p.policyErr
 }
 
 func (p *fakeProvisioner) DeleteUser(ctx context.Context, _ string) error {
 	p.deleted++
 	p.deleteContextCanceled = ctx.Err() != nil
+	if p.panicDelete {
+		panic("delete panic with " + p.lastPassword)
+	}
+	if p.deleteErr == nil {
+		p.live = false
+	}
 	return p.deleteErr
 }
 
@@ -132,6 +212,18 @@ func TestCreateValidatesSelectedLibraries(t *testing.T) {
 	created, err := service.Create(context.Background(), input)
 	if err != nil || created.Code == "" || store.invite.ID == "" || len(store.invite.LibraryIDs) != 0 {
 		t.Fatalf("Create default-all = %+v, %v", created, err)
+	}
+}
+
+func TestDismissProvisioningFailureUsesNormalizedClock(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 123456789, time.FixedZone("west", -4*60*60))
+	store := &fakeStore{}
+	service := newService(t, store, defaultServers(), &fakeProvisioner{}, now)
+	if err := service.DismissProvisioningFailure(t.Context(), "55555555-5555-4555-8555-555555555555"); err != nil {
+		t.Fatalf("DismissProvisioningFailure: %v", err)
+	}
+	if want := core.NormalizeTime(now); !store.dismissedAt.Equal(want) || store.dismissedAt.Location() != time.UTC {
+		t.Fatalf("dismissed at = %v, want %v", store.dismissedAt, want)
 	}
 }
 
@@ -193,25 +285,90 @@ func TestAcceptRecordsDeleteExhaustionWithoutConsumingInvite(t *testing.T) {
 	}
 	failure := store.failures[0]
 	if failure.InviteID != store.invite.ID || failure.MediaServerID != store.invite.MediaServerID ||
-		failure.MediaUserID == "" || failure.Username != "new-user" || failure.Reason != core.InviteProvisioningCleanupFailed {
+		failure.MediaUserID == "" || !failure.MediaUserOwned || failure.Username != "new-user" ||
+		failure.Reason != core.InviteProvisioningCleanupFailed {
 		t.Fatalf("failure = %+v", failure)
 	}
 }
 
-func TestAcceptSurfacesProvisioningFailureInsertError(t *testing.T) {
+func TestAcceptContainsProvisionerPanicsAndTracksCreatedUser(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	recordErr := errors.New("record failure")
-	store := &fakeStore{invite: activeInvite(now), failureErr: recordErr}
+	tests := []struct {
+		name        string
+		provisioner fakeProvisioner
+		wantReason  core.InviteProvisioningFailureReason
+	}{
+		{name: "create", provisioner: fakeProvisioner{panicCreate: true}, wantReason: core.InviteProvisioningCreateAmbiguous},
+		{name: "policy", provisioner: fakeProvisioner{panicPolicy: true}},
+		{name: "cleanup", provisioner: fakeProvisioner{policyErr: errors.New("policy failed"), panicDelete: true}, wantReason: core.InviteProvisioningCleanupFailed},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := &fakeStore{invite: activeInvite(now)}
+			provisioner := testCase.provisioner
+			service := newService(t, store, defaultServers(), &provisioner, now)
+			_, err := service.Accept(t.Context(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
+			if err == nil || (provisioner.live && len(store.failures) != 1) {
+				t.Fatalf("Accept error=%v live=%t failures=%d", err, provisioner.live, len(store.failures))
+			}
+			if testCase.wantReason != "" && store.failures[0].Reason != testCase.wantReason {
+				t.Fatalf("failure reason = %q, want %q", store.failures[0].Reason, testCase.wantReason)
+			}
+		})
+	}
+}
+
+func TestAcceptPersistsFailureAfterTransactionalRollback(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	transactionErr := errors.New("transaction failed")
+	store := &fakeStore{invite: activeInvite(now), transactionFailureErr: transactionErr}
 	provisioner := &fakeProvisioner{policyErr: errors.New("policy failed"), deleteErr: errors.New("delete exhausted")}
 	service := newService(t, store, defaultServers(), provisioner, now)
 
 	_, err := service.Accept(context.Background(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
-	if !errors.Is(err, recordErr) || !errors.Is(err, core.ErrInviteProvisioningPending) {
-		t.Fatalf("Accept error = %v, want pending and record failure", err)
+	if !errors.Is(err, transactionErr) || !errors.Is(err, core.ErrInviteProvisioningPending) {
+		t.Fatalf("Accept error = %v, want pending and transaction failure", err)
+	}
+	if len(store.failures) != 1 || store.recordAttempts != 1 {
+		t.Fatalf("failures=%d fallback attempts=%d, want 1 and 1", len(store.failures), store.recordAttempts)
 	}
 }
 
-func TestAcceptDeletesUserFoundAfterAmbiguousCreate(t *testing.T) {
+func TestAcceptDoesNotFakeFailedFallbackPersistence(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	transactionErr, fallbackErr := errors.New("transaction failed"), errors.New("fallback failed")
+	store := &fakeStore{
+		invite: activeInvite(now), transactionFailureErr: transactionErr, failureErr: fallbackErr,
+	}
+	provisioner := &fakeProvisioner{policyErr: errors.New("policy failed"), deleteErr: errors.New("delete exhausted")}
+	service := newService(t, store, defaultServers(), provisioner, now)
+
+	_, err := service.Accept(t.Context(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
+	if !errors.Is(err, fallbackErr) || !errors.Is(err, core.ErrInviteProvisioningPending) {
+		t.Fatalf("Accept error = %v, want pending and fallback failure", err)
+	}
+	if len(store.failures) != 0 || store.recordAttempts != 1 {
+		t.Fatalf("failures=%d fallback attempts=%d, want 0 and 1", len(store.failures), store.recordAttempts)
+	}
+}
+
+func TestAcceptRetriesAmbiguousFailureCommitByOriginalID(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	ambiguous := errors.New("commit outcome unknown")
+	store := &fakeStore{invite: activeInvite(now), ambiguousFailureCommit: ambiguous}
+	provisioner := &fakeProvisioner{policyErr: errors.New("policy failed"), deleteErr: errors.New("delete exhausted")}
+	service := newService(t, store, defaultServers(), provisioner, now)
+
+	_, err := service.Accept(t.Context(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
+	if !errors.Is(err, ambiguous) || !errors.Is(err, core.ErrInviteProvisioningPending) {
+		t.Fatalf("Accept error = %v, want pending and ambiguous commit", err)
+	}
+	if len(store.failures) != 1 || store.recordAttempts != 1 {
+		t.Fatalf("failures=%d fallback attempts=%d, want 1 and 1", len(store.failures), store.recordAttempts)
+	}
+}
+
+func TestAcceptLeavesUnownedUserFoundAfterAmbiguousCreate(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	store := &fakeStore{invite: activeInvite(now)}
 	provisioner := &fakeProvisioner{createErr: core.ErrMediaUserCreateAmbiguous}
@@ -221,9 +378,15 @@ func TestAcceptDeletesUserFoundAfterAmbiguousCreate(t *testing.T) {
 	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) {
 		t.Fatalf("Accept error = %v, want ambiguous create", err)
 	}
-	if provisioner.deleted != 1 || len(store.failures) != 0 || len(store.redemptions) != 0 {
-		t.Fatalf("delete=%d failures=%d redemptions=%d, want 1, 0, 0",
+	if provisioner.deleted != 0 || len(store.failures) != 1 || len(store.redemptions) != 0 {
+		t.Fatalf("delete=%d failures=%d redemptions=%d, want 0, 1, 0",
 			provisioner.deleted, len(store.failures), len(store.redemptions))
+	}
+	failure := store.failures[0]
+	if failure.MediaUserOwned || failure.MediaUserID == "" || !failure.Terminal ||
+		failure.Reason != core.InviteProvisioningCreateAmbiguous ||
+		failure.LastError != core.InviteManualResolutionError {
+		t.Fatalf("failure = %+v", failure)
 	}
 }
 
@@ -243,6 +406,55 @@ func TestPreviewUsesFakeClockForExpiry(t *testing.T) {
 	clock.Advance(time.Minute)
 	if _, err := service.Preview(context.Background(), validCode(t)); !errors.Is(err, core.ErrInviteUnavailable) {
 		t.Fatalf("expired Preview = %v", err)
+	}
+}
+
+func TestUnusableInviteLookupsHaveIdenticalWork(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	code := validCode(t)
+	unknownHash := sha256.Sum256([]byte("unknown"))
+	one := 1
+	revoked := now.Add(-time.Minute)
+	expired := now.Add(-time.Second)
+	tests := []struct {
+		name   string
+		code   string
+		mutate func(*fakeStore)
+	}{
+		{name: "unknown", mutate: func(store *fakeStore) { store.lookupHash = &unknownHash }},
+		{name: "expired", mutate: func(store *fakeStore) { store.invite.ExpiresAt = &expired }},
+		{name: "exhausted", mutate: func(store *fakeStore) { store.invite.MaxUses, store.invite.UseCount = &one, 1 }},
+		{name: "revoked", mutate: func(store *fakeStore) { store.invite.RevokedAt = &revoked }},
+		{name: "malformed", code: "not-a-code", mutate: func(*fakeStore) {}},
+		{name: "non-canonical", code: "aaaaaaaaaaaaaaaaaaaaaaaaaa", mutate: func(*fakeStore) {}},
+	}
+	for _, operation := range []string{"preview", "accept"} {
+		var wantError string
+		for _, testCase := range tests {
+			t.Run(operation+"/"+testCase.name, func(t *testing.T) {
+				store := &fakeStore{invite: activeInvite(now)}
+				testCase.mutate(store)
+				service := newService(t, store, defaultServers(), &fakeProvisioner{}, now)
+				lookupCode := code
+				if testCase.code != "" {
+					lookupCode = testCase.code
+				}
+				var err error
+				if operation == "preview" {
+					_, err = service.Preview(t.Context(), lookupCode)
+				} else {
+					_, err = service.Accept(t.Context(), "", lookupCode, "new-user", "Th1s-is-a-unique-password!")
+				}
+				if !errors.Is(err, core.ErrInviteUnavailable) || store.lookups != 1 || store.redeems != 0 {
+					t.Fatalf("error=%v lookups=%d redeems=%d", err, store.lookups, store.redeems)
+				}
+				if wantError == "" {
+					wantError = err.Error()
+				} else if err.Error() != wantError {
+					t.Fatalf("error body %q, want %q", err.Error(), wantError)
+				}
+			})
+		}
 	}
 }
 
