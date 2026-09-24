@@ -26,6 +26,7 @@ type requests struct {
 var (
 	_ core.RequestReader              = (*requests)(nil)
 	_ core.RequestWriter              = (*requests)(nil)
+	_ core.RequestDispatchWriter      = (*requests)(nil)
 	_ core.RequestQuotaReader         = (*requests)(nil)
 	_ core.RequestQuotaWriter         = (*requests)(nil)
 	_ core.AccountRequestQuotaDeleter = (*requests)(nil)
@@ -143,6 +144,7 @@ func insertSQLiteRequest(ctx context.Context, q *sqlite.Queries, request core.Me
 		ProviderID: request.ProviderID, Title: request.Title, ReleaseYear: int64(request.Year), PosterPath: request.PosterPath,
 		RequesterAccountID: request.RequesterID, ProfileID: request.ProfileID, Status: string(request.Status), DecisionReason: request.DecisionReason,
 		DecidedByAccountID: nullableText(request.DecidedBy), DecidedAt: sqliteNullableTime(request.DecidedAt),
+		DownloadManagerItemID: request.DownloadManagerItemID, FailureReason: request.FailureReason,
 		CreatedAt: formatSQLiteTime(request.CreatedAt), UpdatedAt: formatSQLiteTime(request.UpdatedAt),
 	})
 	if err != nil {
@@ -166,6 +168,7 @@ func insertPostgresRequest(ctx context.Context, q *postgres.Queries, request cor
 		ProviderID: request.ProviderID, Title: request.Title, ReleaseYear: releaseYear, PosterPath: request.PosterPath,
 		RequesterAccountID: request.RequesterID, ProfileID: request.ProfileID, Status: string(request.Status), DecisionReason: request.DecisionReason,
 		DecidedByAccountID: nullableText(request.DecidedBy), DecidedAt: postgresNullableTime(request.DecidedAt),
+		DownloadManagerItemID: request.DownloadManagerItemID, FailureReason: request.FailureReason,
 		CreatedAt: core.NormalizeTime(request.CreatedAt), UpdatedAt: core.NormalizeTime(request.UpdatedAt),
 	})
 	if err != nil {
@@ -322,15 +325,43 @@ func (s *requests) listPostgresRequests(ctx context.Context, filter core.Request
 }
 
 func (s *requests) TransitionRequest(ctx context.Context, id string, from, to core.RequestStatus, actorID, reason string, decidedAt time.Time) (core.MediaRequest, error) {
-	if _, err := core.TransitionPermission(from, to); err != nil {
-		return core.MediaRequest{}, err
-	}
-	if !core.ValidID(id) || !core.ValidID(actorID) || core.ValidateDecisionReason(reason) != nil {
-		return core.MediaRequest{}, core.ErrInvalidArgument
-	}
-	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error { return s.transition(ctx, tx, id, from, to, actorID, reason, decidedAt) })
+	permission, err := core.TransitionPermission(from, to)
 	if err != nil {
 		return core.MediaRequest{}, err
+	}
+	actorValid := core.ValidID(actorID) || permission == core.PermissionAdminSettings && actorID == ""
+	if !core.ValidID(id) || !actorValid || core.ValidateDecisionReason(reason) != nil {
+		return core.MediaRequest{}, core.ErrInvalidArgument
+	}
+	err = withTransaction(ctx, s.pool, func(tx *sql.Tx) error { return s.transition(ctx, tx, id, from, to, actorID, reason, decidedAt) })
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	return s.GetRequest(ctx, id)
+}
+
+func (s *requests) RecordRequestDispatch(
+	ctx context.Context, id, managerItemID string, at time.Time,
+) (core.MediaRequest, error) {
+	if !core.ValidID(id) || managerItemID == "" || len(managerItemID) > 100 {
+		return core.MediaRequest{}, core.ErrInvalidArgument
+	}
+	var rows int64
+	var err error
+	if s.sqlite != nil {
+		rows, err = s.sqlite.RecordRequestDispatch(ctx, sqlite.RecordRequestDispatchParams{
+			ManagerItemID: managerItemID, UpdatedAt: formatSQLiteTime(at), ID: id,
+		})
+	} else {
+		rows, err = s.postgres.RecordRequestDispatch(ctx, postgres.RecordRequestDispatchParams{
+			ManagerItemID: managerItemID, UpdatedAt: core.NormalizeTime(at), ID: id,
+		})
+	}
+	if err != nil {
+		return core.MediaRequest{}, fmt.Errorf("record request dispatch: %w", err)
+	}
+	if rows != 1 {
+		return core.MediaRequest{}, core.ErrInvalidTransition
 	}
 	return s.GetRequest(ctx, id)
 }
@@ -384,7 +415,8 @@ func sqliteRequest(row sqlite.Request) (core.MediaRequest, error) {
 	return core.MediaRequest{
 		ID: row.ID, Kind: core.MediaKind(row.Kind), Provider: core.MetadataProviderKind(row.Provider), ProviderID: row.ProviderID,
 		Title: row.Title, Year: int(row.ReleaseYear), PosterPath: row.PosterPath, RequesterID: row.RequesterAccountID, ProfileID: row.ProfileID,
-		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
+		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, FailureReason: row.FailureReason,
+		DownloadManagerItemID: row.DownloadManagerItemID, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
 		CreatedAt: created, UpdatedAt: updated,
 	}, nil
 }
@@ -398,7 +430,8 @@ func postgresRequest(row postgres.Request) core.MediaRequest {
 	return core.MediaRequest{
 		ID: row.ID, Kind: core.MediaKind(row.Kind), Provider: core.MetadataProviderKind(row.Provider), ProviderID: row.ProviderID,
 		Title: row.Title, Year: int(row.ReleaseYear), PosterPath: row.PosterPath, RequesterID: row.RequesterAccountID, ProfileID: row.ProfileID,
-		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
+		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, FailureReason: row.FailureReason,
+		DownloadManagerItemID: row.DownloadManagerItemID, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
 		CreatedAt: core.NormalizeTime(row.CreatedAt), UpdatedAt: core.NormalizeTime(row.UpdatedAt),
 	}
 }

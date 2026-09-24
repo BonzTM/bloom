@@ -32,6 +32,9 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("movie transition and active uniqueness", func(t *testing.T) {
 		testRequestTransitionAndUniqueness(t, requestReader, requestWriter, profileWriter, account.ID, profile.ID, now)
 	})
+	t.Run("fulfilment transitions", func(t *testing.T) {
+		testFulfilmentTransitions(t, requestReader, requestWriter, account.ID, profile.ID, now)
+	})
 	t.Run("series season overlap", func(t *testing.T) {
 		testSeriesSeasonOverlap(t, requestWriter, account.ID, profile.ID, now)
 	})
@@ -41,6 +44,50 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("concurrent quota boundary", func(t *testing.T) {
 		testConcurrentRequestQuota(t, accounts, requestWriter, quotaWriter, profile.ID, now)
 	})
+}
+
+func testFulfilmentTransitions(
+	t *testing.T, reader core.RequestReader, writer core.RequestWriter, accountID, profileID string, now time.Time,
+) {
+	t.Helper()
+	dispatch, ok := writer.(core.RequestDispatchWriter)
+	if !ok {
+		t.Fatal("request store does not implement RequestDispatchWriter")
+	}
+	available := requestFixture(t, accountID, profileID, "401", now)
+	if err := writer.CreateRequest(t.Context(), available, now, true); err != nil {
+		t.Fatalf("create available fixture: %v", err)
+	}
+	if _, err := writer.TransitionRequest(t.Context(), available.ID, core.RequestPending, core.RequestApproved, accountID, "", now); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	processing, dispatchErr := dispatch.RecordRequestDispatch(t.Context(), available.ID, "77", now.Add(time.Second))
+	if dispatchErr != nil || processing.Status != core.RequestProcessing || processing.DownloadManagerItemID != "77" {
+		t.Fatalf("dispatch = %+v, %v", processing, dispatchErr)
+	}
+	finished, availableErr := writer.TransitionRequest(t.Context(), available.ID, core.RequestProcessing, core.RequestAvailable, "", "", now.Add(2*time.Second))
+	if availableErr != nil || finished.Status != core.RequestAvailable {
+		t.Fatalf("available = %+v, %v", finished, availableErr)
+	}
+
+	failed := requestFixture(t, accountID, profileID, "402", now)
+	if err := writer.CreateRequest(t.Context(), failed, now, true); err != nil {
+		t.Fatalf("create failed fixture: %v", err)
+	}
+	if _, err := writer.TransitionRequest(t.Context(), failed.ID, core.RequestPending, core.RequestApproved, accountID, "", now); err != nil {
+		t.Fatalf("approve failure fixture: %v", err)
+	}
+	failed, failureErr := writer.TransitionRequest(t.Context(), failed.ID, core.RequestApproved, core.RequestFailed, "", "dispatch failed", now.Add(time.Second))
+	if failureErr != nil || failed.FailureReason != "dispatch failed" {
+		t.Fatalf("failed = %+v, %v", failed, failureErr)
+	}
+	reapproved, reapproveErr := writer.TransitionRequest(t.Context(), failed.ID, core.RequestFailed, core.RequestApproved, accountID, "retry", now.Add(2*time.Second))
+	if reapproveErr != nil || reapproved.Status != core.RequestApproved || reapproved.FailureReason != "" {
+		t.Fatalf("reapproved = %+v, %v", reapproved, reapproveErr)
+	}
+	if _, err := reader.GetRequest(t.Context(), reapproved.ID); err != nil {
+		t.Fatalf("reload reapproved request: %v", err)
+	}
 }
 
 func requestTestAccount(t *testing.T, accounts core.AccountStore, now time.Time, prefix string) core.Account {

@@ -40,7 +40,7 @@ func (r *Registry) New(
 func (*Registry) Capabilities(kind core.MediaServerKind) (core.Capabilities, error) {
 	switch kind {
 	case core.MediaServerKindJellyfin:
-		return core.Capabilities{CreateUserWithPassword: true, SetPassword: true, QuickConnectApproval: true}, nil
+		return core.Capabilities{CreateUserWithPassword: true, SetPassword: true, QuickConnectApproval: true, ProviderIDLookup: true}, nil
 	default:
 		return core.Capabilities{}, fmt.Errorf("media server kind %q: %w", kind, core.ErrInvalidArgument)
 	}

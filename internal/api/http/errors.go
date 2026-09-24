@@ -9,6 +9,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
@@ -40,6 +42,9 @@ const (
 	codeMetadataProviderFailure = "metadata_provider_failure"
 	codeProfileInUse            = "request_profile_in_use"
 	codeInvalidTransition       = "invalid_request_transition"
+	codeDownloadManagerFailure  = "download_manager_failure"
+	codeDownloadManagerNotFound = "download_manager_not_found"
+	codeDownloadManagerInUse    = "download_manager_in_use"
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -47,6 +52,9 @@ const (
 // transport semantics; handlers do not branch on errors themselves beyond
 // calling writeError, which calls this.
 func errorClass(err error) (status int, code string) {
+	if status, code, ok := downloadManagerErrorClass(err); ok {
+		return status, code
+	}
 	switch {
 	case errors.Is(err, core.ErrQuotaExceeded):
 		return http.StatusUnprocessableEntity, codeQuotaExceeded
@@ -103,6 +111,21 @@ func errorClass(err error) (status int, code string) {
 	}
 }
 
+func downloadManagerErrorClass(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, core.ErrDownloadItemMissing), isDownloadManagerErrorKind(err, core.DownloadManagerNotFound):
+		return http.StatusNotFound, codeDownloadManagerNotFound, true
+	case errors.Is(err, core.ErrDownloadManagerInUse):
+		return http.StatusConflict, codeDownloadManagerInUse, true
+	case isDownloadManagerErrorKind(err, core.DownloadManagerUnavailable):
+		return http.StatusServiceUnavailable, codeDownloadManagerFailure, true
+	case isDownloadManagerError(err):
+		return http.StatusBadGateway, codeDownloadManagerFailure, true
+	default:
+		return 0, "", false
+	}
+}
+
 func isMediaUserNameError(err error) bool {
 	var nameErr *core.MediaUserNameError
 	return errors.As(err, &nameErr)
@@ -118,6 +141,16 @@ func isMediaServerErrorKind(err error, kind core.MediaServerErrorKind) bool {
 	return errors.As(err, &mediaErr) && mediaErr.Kind == kind
 }
 
+func isDownloadManagerError(err error) bool {
+	var managerErr *core.DownloadManagerError
+	return errors.As(err, &managerErr)
+}
+
+func isDownloadManagerErrorKind(err error, kind core.DownloadManagerErrorKind) bool {
+	var managerErr *core.DownloadManagerError
+	return errors.As(err, &managerErr) && managerErr.Kind == kind
+}
+
 // errNotReady is the transport-local sentinel behind a 503 from /readyz: the
 // readiness flag is down or the database ping failed. The underlying cause is
 // preserved in the chain for the boundary log, never for the client.
@@ -130,6 +163,7 @@ var errNotReady = errors.New("not ready")
 // a client can quote it for correlation.
 func writeError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	status, code := errorClass(err)
+	setDownloadManagerRetryAfter(w, err)
 
 	// Log once, here at the boundary, with stable fields. 5xx is the unexpected
 	// class and gets error level; client errors are info.
@@ -151,6 +185,16 @@ func writeError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 		Message:   safeMessage(status, err),
 		RequestID: requestIDFrom(r.Context()),
 	})
+}
+
+func setDownloadManagerRetryAfter(w http.ResponseWriter, err error) {
+	var managerErr *core.DownloadManagerError
+	if !errors.As(err, &managerErr) || !managerErr.Retryable || managerErr.RetryAfter <= 0 {
+		return
+	}
+	delay := min(managerErr.RetryAfter, 30*time.Second)
+	seconds := max(1, int((delay+time.Second-1)/time.Second))
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 }
 
 // safeMessage returns a client-safe human message. Client-class (4xx) errors

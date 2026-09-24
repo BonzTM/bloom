@@ -87,6 +87,11 @@ type MediaServerAdapter interface {
 	Capabilities() Capabilities
 }
 
+// MediaAvailabilityLookup is implemented by adapters that can find titles by provider id.
+type MediaAvailabilityLookup interface {
+	HasTitle(ctx context.Context, kind MediaKind, provider MetadataProviderKind, providerID string, seasons []int) (bool, []int, error)
+}
+
 // MediaServerReader reads registered server configuration.
 type MediaServerReader interface {
 	GetMediaServer(ctx context.Context, id string) (MediaServerRecord, error)

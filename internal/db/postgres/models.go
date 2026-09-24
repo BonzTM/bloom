@@ -48,6 +48,19 @@ type AccountUsernameMigrationBackup struct {
 	OriginalUsername string
 }
 
+type DownloadManager struct {
+	ID                   string
+	Kind                 string
+	Name                 string
+	NameKey              string
+	BaseUrl              string
+	AllowInsecure        bool
+	CredentialCiphertext []byte
+	KeyID                string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
 type Invite struct {
 	ID                 string
 	MediaServerID      string
@@ -108,21 +121,23 @@ type MetadataProvider struct {
 }
 
 type Request struct {
-	ID                 string
-	Kind               string
-	Provider           string
-	ProviderID         string
-	Title              string
-	ReleaseYear        int32
-	PosterPath         string
-	RequesterAccountID string
-	ProfileID          string
-	Status             string
-	DecisionReason     string
-	DecidedByAccountID sql.NullString
-	DecidedAt          sql.NullTime
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                    string
+	Kind                  string
+	Provider              string
+	ProviderID            string
+	Title                 string
+	ReleaseYear           int32
+	PosterPath            string
+	RequesterAccountID    string
+	ProfileID             string
+	Status                string
+	DecisionReason        string
+	DecidedByAccountID    sql.NullString
+	DecidedAt             sql.NullTime
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DownloadManagerItemID string
+	FailureReason         string
 }
 
 type RequestProfile struct {

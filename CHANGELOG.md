@@ -33,6 +33,12 @@ contracts) gets an entry here.
 
 - The Roles page shows and edits each role's request quota: how many movies
   and seasons its members may request in a rolling period, or no limit.
+- Radarr and Sonarr registration with probe-before-save encrypted API keys,
+  instance options, profile validation, idempotent approved-request dispatch,
+  bounded retries, live queue progress, configurable availability polling,
+  lifecycle audit/domain events, and SQLite/PostgreSQL migration `00013`.
+- Request fulfilment settings `BLOOM_REQUEST_AVAILABILITY_SOURCE` and
+  `BLOOM_REQUEST_AVAILABILITY_INTERVAL`.
 - Anyone allowed to request media can search The Movie Database from the web
   UI, browse results as a poster grid, open a movie or series, pick seasons
   and a request profile, and follow their own requests. Posters load from

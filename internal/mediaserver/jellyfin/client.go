@@ -61,8 +61,9 @@ type Client struct {
 }
 
 var (
-	_ core.MediaServerAdapter   = (*Client)(nil)
-	_ core.MediaUserProvisioner = (*Client)(nil)
+	_ core.MediaServerAdapter      = (*Client)(nil)
+	_ core.MediaUserProvisioner    = (*Client)(nil)
+	_ core.MediaAvailabilityLookup = (*Client)(nil)
 )
 
 // New validates cfg and returns a bounded Jellyfin client.
@@ -320,7 +321,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]core.PlaybackSession, erro
 
 // Capabilities returns Jellyfin's known optional-operation support.
 func (*Client) Capabilities() core.Capabilities {
-	return core.Capabilities{CreateUserWithPassword: true, SetPassword: true, QuickConnectApproval: true}
+	return core.Capabilities{CreateUserWithPassword: true, SetPassword: true, QuickConnectApproval: true, ProviderIDLookup: true}
 }
 
 // CloseIdleConnections releases pooled HTTP connections owned by this client.

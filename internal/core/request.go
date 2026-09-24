@@ -91,22 +91,24 @@ type RequestProfile struct {
 
 // MediaRequest is a metadata snapshot and its approval state.
 type MediaRequest struct {
-	ID             string
-	Kind           MediaKind
-	Provider       MetadataProviderKind
-	ProviderID     string
-	Title          string
-	Year           int
-	PosterPath     string
-	RequesterID    string
-	ProfileID      string
-	Status         RequestStatus
-	Seasons        []RequestSeason
-	DecisionReason string
-	DecidedBy      string
-	DecidedAt      *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                    string
+	Kind                  MediaKind
+	Provider              MetadataProviderKind
+	ProviderID            string
+	Title                 string
+	Year                  int
+	PosterPath            string
+	RequesterID           string
+	ProfileID             string
+	Status                RequestStatus
+	Seasons               []RequestSeason
+	DecisionReason        string
+	FailureReason         string
+	DownloadManagerItemID string
+	DecidedBy             string
+	DecidedAt             *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // RequestSeason identifies one requested series season.
@@ -187,6 +189,12 @@ const (
 	RequestEventApproved RequestEventType = "approved"
 	// RequestEventDeclined records request decline.
 	RequestEventDeclined RequestEventType = "declined"
+	// RequestEventDispatched records successful download-manager dispatch.
+	RequestEventDispatched RequestEventType = "dispatched"
+	// RequestEventAvailable records availability at the configured source.
+	RequestEventAvailable RequestEventType = "available"
+	// RequestEventFailed records terminal fulfilment failure.
+	RequestEventFailed RequestEventType = "failed"
 )
 
 // RequestEvent is the in-process lifecycle payload for later consumers.
@@ -227,6 +235,11 @@ type RequestReader interface {
 type RequestWriter interface {
 	CreateRequest(ctx context.Context, request MediaRequest, now time.Time, quotaExempt bool) error
 	TransitionRequest(ctx context.Context, id string, from, to RequestStatus, actorID, reason string, decidedAt time.Time) (MediaRequest, error)
+}
+
+// RequestDispatchWriter records a successful download-manager dispatch.
+type RequestDispatchWriter interface {
+	RecordRequestDispatch(ctx context.Context, id, managerItemID string, at time.Time) (MediaRequest, error)
 }
 
 // RequestQuotaReader retrieves role and account request quotas.
@@ -392,6 +405,7 @@ var requestTransitions = [...]RequestTransition{
 	{From: RequestProcessing, To: RequestAvailable, Permission: PermissionAdminSettings},
 	{From: RequestApproved, To: RequestFailed, Permission: PermissionAdminSettings},
 	{From: RequestProcessing, To: RequestFailed, Permission: PermissionAdminSettings},
+	{From: RequestFailed, To: RequestApproved, Permission: PermissionRequestsApprove},
 }
 
 // TransitionPermission returns the permission required by an allowed transition.

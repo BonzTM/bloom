@@ -20,6 +20,18 @@ type nopMetrics struct{}
 
 func (nopMetrics) IncMediaRequest(string, string) {}
 
+type managerResolver interface {
+	Resolve(ctx context.Context, name string) (core.DownloadManager, error)
+}
+
+type progressReader interface {
+	Progress(ctx context.Context, managerName, managerItemID string) (core.DownloadProgress, error)
+}
+
+type fulfilmentEnqueuer interface {
+	Enqueue(requestID string)
+}
+
 // Service applies request profile, ownership, approval, and quota policy.
 type Service struct {
 	profiles      core.RequestProfileReader
@@ -33,6 +45,9 @@ type Service struct {
 	clock         core.Clock
 	metrics       Metrics
 	events        core.RequestEventPublisher
+	managers      managerResolver
+	progress      progressReader
+	fulfilment    fulfilmentEnqueuer
 }
 
 // Dependencies supplies every request service boundary explicitly.
@@ -48,6 +63,9 @@ type Dependencies struct {
 	Clock         core.Clock
 	Metrics       Metrics
 	Events        core.RequestEventPublisher
+	Managers      managerResolver
+	Progress      progressReader
+	Fulfilment    fulfilmentEnqueuer
 }
 
 // NewService constructs a request service from required boundaries.
@@ -66,6 +84,7 @@ func NewService(deps Dependencies) (*Service, error) {
 		profiles: deps.Profiles, profileWriter: deps.ProfileWriter, reader: deps.Requests, writer: deps.RequestWriter,
 		quotaReader: deps.QuotaReader, quotaWriter: deps.QuotaWriter, quotaDeleter: deps.QuotaDeleter,
 		metadata: deps.Metadata, clock: deps.Clock, metrics: deps.Metrics, events: deps.Events,
+		managers: deps.Managers, progress: deps.Progress, fulfilment: deps.Fulfilment,
 	}, nil
 }
 
@@ -105,6 +124,7 @@ func (s *Service) Create(ctx context.Context, requesterID string, input CreateIn
 	s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventCreated, requesterID))
 	if autoApprove {
 		s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventApproved, requesterID))
+		s.enqueue(request.ID)
 	}
 	return request, nil
 }
@@ -182,16 +202,23 @@ func (s *Service) Get(ctx context.Context, actorID, id string, approver bool) (c
 	return request, nil
 }
 
-// Decide approves or declines a pending request.
+// Decide approves or declines a pending request, or re-approves a failed request.
 func (s *Service) Decide(ctx context.Context, actorID, id string, approve bool, reason string) (core.MediaRequest, error) {
 	if err := core.ValidateDecisionReason(reason); err != nil {
 		return core.MediaRequest{}, err
 	}
-	to := core.RequestDeclined
+	current, err := s.reader.GetRequest(ctx, id)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	from, to := current.Status, core.RequestDeclined
 	if approve {
 		to = core.RequestApproved
 	}
-	request, err := s.writer.TransitionRequest(ctx, id, core.RequestPending, to, actorID, reason, core.NormalizeTime(s.clock.Now()))
+	if from != core.RequestPending && (!approve || from != core.RequestFailed) {
+		return core.MediaRequest{}, core.ErrInvalidTransition
+	}
+	request, err := s.writer.TransitionRequest(ctx, id, from, to, actorID, reason, core.NormalizeTime(s.clock.Now()))
 	if err != nil {
 		return core.MediaRequest{}, fmt.Errorf("decide request: %w", err)
 	}
@@ -199,6 +226,7 @@ func (s *Service) Decide(ctx context.Context, actorID, id string, approve bool, 
 	eventType := core.RequestEventDeclined
 	if approve {
 		eventType = core.RequestEventApproved
+		s.enqueue(request.ID)
 	}
 	s.events.PublishRequestEvent(ctx, requestEvent(request, eventType, actorID))
 	return request, nil
@@ -212,6 +240,9 @@ func (s *Service) CreateProfile(ctx context.Context, profile core.RequestProfile
 	}
 	now := core.NormalizeTime(s.clock.Now())
 	profile.ID, profile.CreatedAt, profile.UpdatedAt = id, now, now
+	if err := s.normalizeProfileTarget(ctx, &profile); err != nil {
+		return core.RequestProfile{}, err
+	}
 	if err := s.profileWriter.CreateRequestProfile(ctx, profile); err != nil {
 		return core.RequestProfile{}, err
 	}
@@ -225,6 +256,9 @@ func (s *Service) UpdateProfile(ctx context.Context, profile core.RequestProfile
 		return core.RequestProfile{}, err
 	}
 	profile.CreatedAt, profile.UpdatedAt = existing.CreatedAt, core.NormalizeTime(s.clock.Now())
+	if err := s.normalizeProfileTarget(ctx, &profile); err != nil {
+		return core.RequestProfile{}, err
+	}
 	if err := s.profileWriter.UpdateRequestProfile(ctx, profile); err != nil {
 		return core.RequestProfile{}, err
 	}
@@ -239,6 +273,54 @@ func (s *Service) DeleteProfile(ctx context.Context, id string) error {
 // ListProfiles returns one bounded page of profiles.
 func (s *Service) ListProfiles(ctx context.Context, after string, pageSize int) ([]core.RequestProfile, error) {
 	return s.profiles.ListRequestProfiles(ctx, after, pageSize)
+}
+
+// Progress returns live queue state after applying the request read rule.
+func (s *Service) Progress(
+	ctx context.Context, actorID, id string, approver bool,
+) (core.DownloadProgress, error) {
+	request, err := s.Get(ctx, actorID, id, approver)
+	if err != nil {
+		return core.DownloadProgress{}, err
+	}
+	if request.DownloadManagerItemID == "" {
+		return core.DownloadProgress{}, core.ErrDownloadItemMissing
+	}
+	if request.Status != core.RequestProcessing || s.progress == nil {
+		return core.DownloadProgress{}, core.ErrNotFound
+	}
+	profile, err := s.profiles.GetRequestProfile(ctx, request.ProfileID)
+	if err != nil {
+		return core.DownloadProgress{}, fmt.Errorf("get request profile for progress: %w", err)
+	}
+	return s.progress.Progress(ctx, profile.DownloadManagerInstance, request.DownloadManagerItemID)
+}
+
+func (s *Service) normalizeProfileTarget(ctx context.Context, profile *core.RequestProfile) error {
+	if s.managers == nil {
+		return nil
+	}
+	manager, err := s.managers.Resolve(ctx, profile.DownloadManagerInstance)
+	if err != nil {
+		return fmt.Errorf("resolve download manager: %w", err)
+	}
+	if string(manager.Kind) != profile.DownloadManagerKind {
+		return core.ErrInvalidArgument
+	}
+	for _, kind := range profile.Kinds {
+		if !manager.Kind.Handles(kind) {
+			return core.ErrInvalidArgument
+		}
+	}
+	profile.DownloadManagerKind = string(manager.Kind)
+	profile.DownloadManagerInstance = manager.Name
+	return nil
+}
+
+func (s *Service) enqueue(id string) {
+	if s.fulfilment != nil {
+		s.fulfilment.Enqueue(id)
+	}
 }
 
 // GetRoleQuota returns one role quota.

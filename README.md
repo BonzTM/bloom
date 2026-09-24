@@ -259,10 +259,17 @@ its presence through `GET` on the same route. Removing the key disables new
 metadata searches and returns `metadata_not_configured` until another key is
 stored.
 
+Register each Radarr or Sonarr instance with `POST /api/v1/download-managers`.
+Bloom verifies the API key before storing it encrypted. Use `GET` on that
+collection to list registrations and
+`GET /api/v1/download-managers/{id}/options` to read its quality profiles, root
+folders, and tags. Bloom never returns an API key. Deletion is refused while a
+request profile references the instance.
+
 Create at least one request profile with `POST /api/v1/request-profiles`.
-Profiles select movies, series, or both and retain the download-manager kind,
-instance, quality profile, root folder, and tags needed by the later dispatch
-slice. List profiles from the collection and update a profile with
+Profiles select the kinds supported by the named instance: Radarr handles
+movies and Sonarr handles series. They also select its quality profile, root
+folder, and tags. List profiles from the collection and update a profile with
 `PUT /api/v1/request-profiles/{id}`. Delete a profile with `DELETE` on the same
 item route. Bloom refuses deletion after a request references the profile.
 
@@ -270,8 +277,15 @@ Accounts with `requests.create` can search TMDB, open movie or series details,
 and submit a movie or selected series seasons to `POST /api/v1/requests`.
 Accounts with `requests.approve` are exempt from quotas and their own requests
 are approved immediately. Other requests remain pending until an approver uses
-the request's `/approve` or `/decline` route. This slice records approval only;
-it does not send approved requests to a download manager.
+the request's `/approve` or `/decline` route. Approved requests are dispatched
+idempotently and move to `processing`; permanent failures move to `failed` and
+may be approved again. `GET /api/v1/requests/{id}/progress` reads current queue
+state for the owner or an approver.
+
+Bloom marks processing requests available from registered media servers by
+default. Set `BLOOM_REQUEST_AVAILABILITY_SOURCE=download_manager` to use the
+manager's completed-file signal instead. The poller runs only while processing
+requests exist and uses `BLOOM_REQUEST_AVAILABILITY_INTERVAL` between checks.
 
 Role quotas are managed at `/api/v1/roles/{id}/request-quota` with
 `admin.roles`, or from the Roles page in the web UI. Account overrides are managed at
@@ -360,6 +374,8 @@ this table.
 | `BLOOM_PLAYBACK_MISSED_POLLS` | int | no | `3` | no | Consecutive successful polls that may omit a session before its watch closes. Valid range: 1-100. |
 | `BLOOM_PLAYBACK_RESUME_WINDOW` | duration | no | `5m` | no | Window in which a matching stopped watch reopens. Valid range: `1s`-`24h`. |
 | `BLOOM_PLAYBACK_STORE_TIMEOUT` | duration | no | `5s` | no | Per-operation deadline for playback database loads, lookups, and saves. Valid range: `100ms`-`30s`. |
+| `BLOOM_REQUEST_AVAILABILITY_SOURCE` | `media_server` \| `download_manager` | no | `media_server` | no | Authority used to mark processing requests available. Queue progress is never the authority. |
+| `BLOOM_REQUEST_AVAILABILITY_INTERVAL` | duration | no | `5m` | no | Poll interval while processing requests exist. Valid range: `1m`-`24h`. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
 | `BLOOM_LOG_FORMAT` | `json` \| `text` | no | `json` | no | Log record format. |
 | `BLOOM_OTLP_ENDPOINT` | string | no | — | no | OTLP/HTTP trace collector `host:port`. Empty disables span export. |

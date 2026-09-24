@@ -34,28 +34,37 @@ type (
 		Status core.SeasonStatus `json:"status"`
 	}
 	requestResponse struct {
-		ID             string                    `json:"id"`
-		Kind           core.MediaKind            `json:"kind"`
-		Provider       core.MetadataProviderKind `json:"provider"`
-		ProviderID     string                    `json:"provider_id"`
-		Title          string                    `json:"title"`
-		Year           int                       `json:"year"`
-		PosterPath     string                    `json:"poster_path"`
-		RequesterID    string                    `json:"requester_account_id"`
-		ProfileID      string                    `json:"profile_id"`
-		Status         core.RequestStatus        `json:"status"`
-		Seasons        []requestSeasonResponse   `json:"seasons"`
-		DecisionReason string                    `json:"decision_reason"`
-		DecidedBy      string                    `json:"decided_by_account_id"`
-		DecidedAt      *time.Time                `json:"decided_at,omitempty"`
-		CreatedAt      time.Time                 `json:"created_at"`
-		UpdatedAt      time.Time                 `json:"updated_at"`
+		ID                    string                    `json:"id"`
+		Kind                  core.MediaKind            `json:"kind"`
+		Provider              core.MetadataProviderKind `json:"provider"`
+		ProviderID            string                    `json:"provider_id"`
+		Title                 string                    `json:"title"`
+		Year                  int                       `json:"year"`
+		PosterPath            string                    `json:"poster_path"`
+		RequesterID           string                    `json:"requester_account_id"`
+		ProfileID             string                    `json:"profile_id"`
+		Status                core.RequestStatus        `json:"status"`
+		Seasons               []requestSeasonResponse   `json:"seasons"`
+		DecisionReason        string                    `json:"decision_reason"`
+		FailureReason         string                    `json:"failure_reason"`
+		DownloadManagerItemID string                    `json:"download_manager_item_id"`
+		DecidedBy             string                    `json:"decided_by_account_id"`
+		DecidedAt             *time.Time                `json:"decided_at,omitempty"`
+		CreatedAt             time.Time                 `json:"created_at"`
+		UpdatedAt             time.Time                 `json:"updated_at"`
 	}
 )
 
 type requestsResponse struct {
 	Items      []requestResponse `json:"items"`
 	NextCursor string            `json:"next_cursor"`
+}
+
+type requestProgressResponse struct {
+	Status              string     `json:"status"`
+	Size                int64      `json:"size"`
+	SizeLeft            int64      `json:"size_left"`
+	EstimatedCompletion *time.Time `json:"estimated_completion,omitempty"`
 }
 
 func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +127,24 @@ func (s *Server) handleGetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, requestDTO(item))
+}
+
+func (s *Server) handleRequestProgress(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !core.ValidID(id) {
+		writeError(w, r, s.logger, core.ErrNotFound)
+		return
+	}
+	account, _ := accountFrom(r.Context())
+	progress, err := s.requestService.Progress(r.Context(), account.ID, id, hasPermission(r, core.PermissionRequestsApprove))
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	writeJSON(w, r, s.logger, http.StatusOK, requestProgressResponse{
+		Status: progress.Status, Size: progress.Size, SizeLeft: progress.SizeLeft,
+		EstimatedCompletion: progress.EstimatedCompletion,
+	})
 }
 
 func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +251,9 @@ func requestDTO(item core.MediaRequest) requestResponse {
 	return requestResponse{
 		ID: item.ID, Kind: item.Kind, Provider: item.Provider, ProviderID: item.ProviderID, Title: item.Title, Year: item.Year,
 		PosterPath: item.PosterPath, RequesterID: item.RequesterID, ProfileID: item.ProfileID, Status: item.Status, Seasons: seasons,
-		DecisionReason: item.DecisionReason, DecidedBy: item.DecidedBy, DecidedAt: item.DecidedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		DecisionReason: item.DecisionReason, FailureReason: item.FailureReason,
+		DownloadManagerItemID: item.DownloadManagerItemID, DecidedBy: item.DecidedBy,
+		DecidedAt: item.DecidedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 

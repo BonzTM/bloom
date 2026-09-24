@@ -83,32 +83,36 @@ const createRequest = `-- name: CreateRequest :exec
 INSERT INTO requests (
     id, kind, provider, provider_id, title, release_year, poster_path,
     requester_account_id, profile_id, status, decision_reason,
-    decided_by_account_id, decided_at, created_at, updated_at
+    decided_by_account_id, decided_at, download_manager_item_id, failure_reason,
+    created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
     $8, $9, $10,
     $11, $12,
-    $13, $14, $15
+    $13, $14, $15,
+    $16, $17
 )
 `
 
 type CreateRequestParams struct {
-	ID                 string
-	Kind               string
-	Provider           string
-	ProviderID         string
-	Title              string
-	ReleaseYear        int32
-	PosterPath         string
-	RequesterAccountID string
-	ProfileID          string
-	Status             string
-	DecisionReason     string
-	DecidedByAccountID sql.NullString
-	DecidedAt          sql.NullTime
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                    string
+	Kind                  string
+	Provider              string
+	ProviderID            string
+	Title                 string
+	ReleaseYear           int32
+	PosterPath            string
+	RequesterAccountID    string
+	ProfileID             string
+	Status                string
+	DecisionReason        string
+	DecidedByAccountID    sql.NullString
+	DecidedAt             sql.NullTime
+	DownloadManagerItemID string
+	FailureReason         string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 func (q *Queries) CreateRequest(ctx context.Context, arg CreateRequestParams) error {
@@ -126,6 +130,8 @@ func (q *Queries) CreateRequest(ctx context.Context, arg CreateRequestParams) er
 		arg.DecisionReason,
 		arg.DecidedByAccountID,
 		arg.DecidedAt,
+		arg.DownloadManagerItemID,
+		arg.FailureReason,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -301,10 +307,7 @@ func (q *Queries) GetMetadataProvider(ctx context.Context, kind string) (Metadat
 }
 
 const getRequest = `-- name: GetRequest :one
-SELECT id, kind, provider, provider_id, title, release_year, poster_path,
-       requester_account_id, profile_id, status, decision_reason,
-       decided_by_account_id, decided_at, created_at, updated_at
-FROM requests WHERE id = $1
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason FROM requests WHERE id = $1
 `
 
 func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
@@ -326,6 +329,8 @@ func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
 		&i.DecidedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DownloadManagerItemID,
+		&i.FailureReason,
 	)
 	return i, err
 }
@@ -480,10 +485,7 @@ func (q *Queries) ListRequestSeasons(ctx context.Context, requestID string) ([]L
 }
 
 const listRequests = `-- name: ListRequests :many
-SELECT id, kind, provider, provider_id, title, release_year, poster_path,
-       requester_account_id, profile_id, status, decision_reason,
-       decided_by_account_id, decided_at, created_at, updated_at
-FROM requests
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason FROM requests
 WHERE (CAST($1 AS INTEGER) = 0 OR requester_account_id = $2)
   AND (CAST($3 AS INTEGER) = 0 OR status = $4)
   AND (CAST($5 AS INTEGER) = 0
@@ -538,6 +540,8 @@ func (q *Queries) ListRequests(ctx context.Context, arg ListRequestsParams) ([]R
 			&i.DecidedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DownloadManagerItemID,
+			&i.FailureReason,
 		); err != nil {
 			return nil, err
 		}
@@ -589,10 +593,34 @@ func (q *Queries) ListRoleRequestQuotasForAccount(ctx context.Context, accountID
 	return items, nil
 }
 
+const recordRequestDispatch = `-- name: RecordRequestDispatch :execrows
+UPDATE requests SET status = 'processing', download_manager_item_id = $1,
+    failure_reason = '', updated_at = $2
+WHERE id = $3 AND status = 'approved'
+  AND (download_manager_item_id = '' OR download_manager_item_id = $1)
+`
+
+type RecordRequestDispatchParams struct {
+	ManagerItemID string
+	UpdatedAt     time.Time
+	ID            string
+}
+
+func (q *Queries) RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, recordRequestDispatch, arg.ManagerItemID, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const transitionRequest = `-- name: TransitionRequest :execrows
 UPDATE requests SET
-    status = $1, decision_reason = $2,
-    decided_by_account_id = $3, decided_at = $4,
+    status = $1,
+    decision_reason = CASE WHEN status IN ('pending', 'failed') THEN $2 ELSE decision_reason END,
+    decided_by_account_id = CASE WHEN status IN ('pending', 'failed') THEN $3 ELSE decided_by_account_id END,
+    decided_at = CASE WHEN status IN ('pending', 'failed') THEN $4 ELSE decided_at END,
+    failure_reason = CASE WHEN status = 'approved' THEN $2 ELSE '' END,
     updated_at = $5
 WHERE id = $6 AND status = $7
 `

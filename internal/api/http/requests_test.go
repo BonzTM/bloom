@@ -52,6 +52,54 @@ func TestCreateRequestAutoApprovalEmitsCreateAndApproveAudits(t *testing.T) {
 	}
 }
 
+func TestRequestProgressEnforcesOwnershipAndReturnsLiveState(t *testing.T) {
+	store := &requestHandlerStore{
+		profile: core.RequestProfile{ID: testRequestProfileID, DownloadManagerInstance: "Main Radarr"},
+		created: core.MediaRequest{
+			ID: "33333333-3333-4333-8333-333333333333", RequesterID: "99999999-9999-4999-8999-999999999999",
+			ProfileID: testRequestProfileID, Status: core.RequestProcessing, DownloadManagerItemID: "77",
+		},
+	}
+	progress := &staticProgressReader{value: core.DownloadProgress{Status: "downloading", Size: 1000, SizeLeft: 250}}
+	service := newProgressHandlerService(t, store, progress)
+	server := newRequestHandlerServer(service, &recordingAudit{})
+
+	owned := requestWithAccount(t, http.MethodGet, "/api/v1/requests/33333333-3333-4333-8333-333333333333/progress", "")
+	owned.SetPathValue("id", "33333333-3333-4333-8333-333333333333")
+	ownedRecorder := httptest.NewRecorder()
+	server.handleRequestProgress(ownedRecorder, owned)
+	if ownedRecorder.Code != http.StatusNotFound || progress.calls != 0 {
+		t.Fatalf("foreign progress = %d calls=%d", ownedRecorder.Code, progress.calls)
+	}
+
+	approved := requestWithAccount(t, http.MethodGet, owned.URL.Path, "", core.PermissionRequestsApprove)
+	approved.SetPathValue("id", "33333333-3333-4333-8333-333333333333")
+	approvedRecorder := httptest.NewRecorder()
+	server.handleRequestProgress(approvedRecorder, approved)
+	if approvedRecorder.Code != http.StatusOK || !strings.Contains(approvedRecorder.Body.String(), `"size_left":250`) || progress.calls != 1 {
+		t.Fatalf("approver progress = %d %s calls=%d", approvedRecorder.Code, approvedRecorder.Body.String(), progress.calls)
+	}
+}
+
+func TestRequestProgressWithoutManagerItemIsNotFound(t *testing.T) {
+	store := &requestHandlerStore{
+		profile: core.RequestProfile{ID: testRequestProfileID, DownloadManagerInstance: "Main Radarr"},
+		created: core.MediaRequest{
+			ID: "33333333-3333-4333-8333-333333333333", RequesterID: testRequestAccountID,
+			ProfileID: testRequestProfileID, Status: core.RequestApproved,
+		},
+	}
+	service := newProgressHandlerService(t, store, &staticProgressReader{})
+	server := newRequestHandlerServer(service, &recordingAudit{})
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/requests/33333333-3333-4333-8333-333333333333/progress", "")
+	request.SetPathValue("id", "33333333-3333-4333-8333-333333333333")
+	recorder := httptest.NewRecorder()
+	server.handleRequestProgress(recorder, request)
+	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), codeDownloadManagerNotFound) {
+		t.Fatalf("progress = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestFailedQuotaDeletionIsAudited(t *testing.T) {
 	cases := []struct {
 		name, path, action, resource string
@@ -235,6 +283,33 @@ func newHandlerRequestService(t *testing.T, provider core.MetadataProvider) *req
 	})
 	if err != nil {
 		t.Fatalf("new request service: %v", err)
+	}
+	return service
+}
+
+type staticProgressReader struct {
+	value core.DownloadProgress
+	err   error
+	calls int
+}
+
+func (r *staticProgressReader) Progress(context.Context, string, string) (core.DownloadProgress, error) {
+	r.calls++
+	return r.value, r.err
+}
+
+func newProgressHandlerService(
+	t *testing.T, store *requestHandlerStore, progress *staticProgressReader,
+) *requestapp.Service {
+	t.Helper()
+	service, err := requestapp.NewService(requestapp.Dependencies{
+		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
+		Metadata: &staticRequestMetadata{}, Clock: testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)),
+		Progress: progress,
+	})
+	if err != nil {
+		t.Fatalf("new progress request service: %v", err)
 	}
 	return service
 }

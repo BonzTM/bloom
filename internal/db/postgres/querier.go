@@ -14,6 +14,7 @@ type Querier interface {
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
+	CountRequestProfilesForDownloadManager(ctx context.Context, arg CountRequestProfilesForDownloadManagerParams) (int64, error)
 	CountRequestedMoviesSince(ctx context.Context, arg CountRequestedMoviesSinceParams) (int64, error)
 	CountRequestedSeasonsSince(ctx context.Context, arg CountRequestedSeasonsSinceParams) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
@@ -24,6 +25,8 @@ type Querier interface {
 	// engine-specific. Regenerate with: go tool sqlc generate.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
 	CreateAccountIdentity(ctx context.Context, arg CreateAccountIdentityParams) error
+	// Download-manager registration queries shared by both engines.
+	CreateDownloadManager(ctx context.Context, arg CreateDownloadManagerParams) error
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateInviteLibrary(ctx context.Context, arg CreateInviteLibraryParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
@@ -34,6 +37,7 @@ type Querier interface {
 	CreateRequestSeason(ctx context.Context, arg CreateRequestSeasonParams) error
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
 	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
+	DeleteDownloadManager(ctx context.Context, id string) (int64, error)
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
@@ -46,6 +50,8 @@ type Querier interface {
 	GetAccountIdentity(ctx context.Context, arg GetAccountIdentityParams) (GetAccountIdentityRow, error)
 	GetAccountRequestQuota(ctx context.Context, accountID string) (AccountRequestQuota, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
+	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
+	GetDownloadManagerByName(ctx context.Context, nameKey string) (GetDownloadManagerByNameRow, error)
 	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
 	GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
@@ -62,6 +68,7 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListDownloadManagers(ctx context.Context, arg ListDownloadManagersParams) ([]ListDownloadManagersRow, error)
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
@@ -78,6 +85,7 @@ type Querier interface {
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
 	LockRequestTitle(ctx context.Context, lockKey string) error
+	RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)

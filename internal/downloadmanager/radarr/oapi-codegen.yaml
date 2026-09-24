@@ -1,0 +1,16 @@
+package: radarrapi
+output: api/zz_generated.openapi.go
+generate:
+  models: true
+  client: true
+output-options:
+  include-operation-ids:
+    - GetSystemStatus
+    - ListQualityProfiles
+    - ListRootFolders
+    - ListTags
+    - ListMovies
+    - GetMovie
+    - LookupMovieByTmdbID
+    - AddMovie
+    - GetQueue

@@ -246,19 +246,20 @@ func (a *recordingAudit) last(t *testing.T) telemetry.AuditEvent {
 }
 
 type authHarness struct {
-	server        *Server
-	h             http.Handler
-	store         *authAccountStore
-	sessions      *scs.SessionManager
-	audit         *recordingAudit
-	metrics       *countingMetrics
-	clock         *testutil.FakeClock
-	logs          *strings.Builder
-	sessionStore  *controllableSessionStore
-	authorization *authAuthorization
-	mediaServers  *fakeMediaServerService
-	invites       *fakeInviteService
-	playback      *fakePlaybackReader
+	server           *Server
+	h                http.Handler
+	store            *authAccountStore
+	sessions         *scs.SessionManager
+	audit            *recordingAudit
+	metrics          *countingMetrics
+	clock            *testutil.FakeClock
+	logs             *strings.Builder
+	sessionStore     *controllableSessionStore
+	authorization    *authAuthorization
+	mediaServers     *fakeMediaServerService
+	downloadManagers *fakeDownloadManagerService
+	invites          *fakeInviteService
+	playback         *fakePlaybackReader
 }
 
 type controllableSessionStore struct {
@@ -424,6 +425,7 @@ func newAuthHarnessConfigured(
 	}
 	authorization := newAuthAuthorization()
 	mediaServers := newFakeMediaServerService()
+	downloadManagers := newFakeDownloadManagerService()
 	invites := newFakeInviteService(clock.Now())
 	playback := &fakePlaybackReader{}
 	srv := New(config.HTTPConfig{
@@ -434,6 +436,7 @@ func newAuthHarnessConfigured(
 		Web: web, Identity: identity, Accounts: store,
 		Authorizer: authorization, Roles: authorization,
 		MediaServerReader: mediaServers, MediaServerManager: mediaServers,
+		DownloadManagerReader: downloadManagers, DownloadManagerManager: downloadManagers,
 		InviteReader:   invites,
 		InviteManager:  invites,
 		PlaybackReader: playback,
@@ -443,10 +446,11 @@ func newAuthHarnessConfigured(
 	return authHarness{
 		server: srv, h: srv.Handler(), store: store, sessions: sessions, audit: audit,
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
-		authorization: authorization,
-		mediaServers:  mediaServers,
-		invites:       invites,
-		playback:      playback,
+		authorization:    authorization,
+		mediaServers:     mediaServers,
+		downloadManagers: downloadManagers,
+		invites:          invites,
+		playback:         playback,
 	}
 }
 
@@ -1180,6 +1184,9 @@ func TestCrossOriginProtectionMapsExactKnownRoutes(t *testing.T) {
 		{path: "/api/v1/media-servers", resource: auditResourceMediaServers},
 		{path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", resource: auditResourceMediaServers},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", resource: auditResourceMediaServers},
+		{path: "/api/v1/download-managers", resource: auditResourceDownloadManagers},
+		{method: http.MethodDelete, path: "/api/v1/download-managers/33333333-3333-4333-8333-333333333333", resource: auditResourceDownloadManagers},
+		{path: "/api/v1/download-managers/33333333-3333-4333-8333-333333333333/options", resource: auditResourceDownloadManagers},
 		{path: "/api/v1/invites", resource: auditResourceInvites},
 		{path: "/api/v1/invite/ABCDEFGHIJKLMNOPQRSTUVWXYZ/accept", resource: auditResourceInvitePublic},
 		{method: http.MethodPut, path: "/api/v1/metadata/providers/tmdb/key", resource: auditResourceMetadataSettings},
