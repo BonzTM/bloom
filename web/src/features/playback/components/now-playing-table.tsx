@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { AsyncStatus } from "../../../components/async-status.js";
 import type { Watch } from "../api/playback-schemas.js";
 import type { useNowPlaying } from "../hooks/playback-queries.js";
@@ -8,6 +9,8 @@ import {
   itemTitle,
   playMethodLabel,
   whereLabel,
+  streamSummary,
+  watchPath,
 } from "./watch-format.js";
 
 type NowPlayingQuery = ReturnType<typeof useNowPlaying>;
@@ -73,6 +76,8 @@ function Table({
             <th scope="col">Position</th>
             <th scope="col">Method</th>
             <th scope="col">Watched</th>
+            <th scope="col">Stream</th>
+            <th scope="col">Details</th>
           </tr>
         </thead>
         <tbody>
@@ -95,6 +100,16 @@ function Table({
               </td>
               <td>{playMethodLabel(watch.play_method)}</td>
               <td>{formatActiveTime(watch.active_seconds)}</td>
+              <td>{streamSummary(watch.stream)}</td>
+              <td>
+                <Link to={watchPath(watch.id)}>
+                  Details
+                  <span className="visually-hidden">
+                    {" "}
+                    of {itemTitle(watch)}
+                  </span>
+                </Link>
+              </td>
             </tr>
           ))}
         </tbody>

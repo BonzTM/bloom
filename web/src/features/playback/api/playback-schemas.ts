@@ -20,6 +20,24 @@ export const playMethodSchema = z.enum([
 
 export type PlayMethod = z.output<typeof playMethodSchema>;
 
+// What was being delivered at one moment: mirrors `StreamDetails`. Every
+// field is optional so a direct-play sample carries only what it knows.
+export const streamDetailsSchema = z.object({
+  container: z.string().max(64).optional(),
+  video_codec: z.string().max(64).optional(),
+  audio_codec: z.string().max(64).optional(),
+  bitrate: z.number().int().min(0).max(2_147_483_647).optional(),
+  width: z.number().int().min(0).max(65_535).optional(),
+  height: z.number().int().min(0).max(65_535).optional(),
+  framerate: z.number().min(0).max(1000).optional(),
+  audio_channels: z.number().int().min(0).max(64).optional(),
+  is_video_direct: z.boolean().optional(),
+  is_audio_direct: z.boolean().optional(),
+  transcode_reasons: z.array(z.string().min(1).max(64)).max(16).optional(),
+});
+
+export type StreamDetails = z.output<typeof streamDetailsSchema>;
+
 export const watchSchema = z.object({
   id: z.uuid(),
   media_server_id: z.uuid(),
@@ -41,9 +59,29 @@ export const watchSchema = z.object({
   active_seconds: int64(),
   started_at: z.iso.datetime({ offset: true }),
   ended_at: z.iso.datetime({ offset: true }).optional(),
+  stream: streamDetailsSchema.optional(),
 });
 
 export type Watch = z.output<typeof watchSchema>;
+
+// One sample of a watch's series, newest first from the server.
+export const playbackPositionSchema = z.object({
+  observed_at: z.iso.datetime({ offset: true }),
+  position_ms: int64(),
+  paused: z.boolean(),
+  play_method: playMethodSchema,
+  stream: streamDetailsSchema.optional(),
+});
+
+export type PlaybackPosition = z.output<typeof playbackPositionSchema>;
+
+export const playbackPositionsSchema = z.object({
+  items: z.array(playbackPositionSchema).max(512),
+});
+
+export type PlaybackPositions = z.output<typeof playbackPositionsSchema>;
+
+export const watchIdSchema = z.uuid();
 
 export const historyWatchSchema = watchSchema.extend({
   ended_at: z.iso.datetime({ offset: true }),

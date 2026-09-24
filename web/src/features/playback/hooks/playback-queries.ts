@@ -11,6 +11,8 @@ export const playbackKeys = {
   now: (accountId: string) => ["playback", "now", accountId] as const,
   history: (accountId: string, mediaServerId: string | undefined) =>
     ["playback", "history", accountId, mediaServerId ?? ""] as const,
+  positions: (accountId: string, watchId: string) =>
+    ["playback", "positions", accountId, watchId] as const,
 };
 
 // Live watches are short-lived by nature, so they are re-read on a fixed
@@ -18,6 +20,16 @@ export const playbackKeys = {
 export const NOW_PLAYING_REFRESH_MS = 10_000;
 
 const firstPage: string | undefined = undefined;
+
+export function useWatchPositions(accountId: string, watchId: string) {
+  const api = usePlaybackApi();
+  return useQuery({
+    queryKey: playbackKeys.positions(accountId, watchId),
+    queryFn: ({ signal }) => api.positions(watchId, signal),
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
 
 export function useNowPlaying(accountId: string) {
   const api = usePlaybackApi();

@@ -70,6 +70,9 @@ contracts) gets an entry here.
 - SQLite/PostgreSQL migration `00019_stream_details` adds the queryable stream
   columns to watches and watch-position samples, plus the transition-retention
   marker on position samples.
+- The playback tables show what each watch is streaming (resolution, codecs,
+  bitrate) and link to the watch's sample series, where a mid-play change
+  from direct play to a transcode appears as its own row with the reasons.
 
 - Account-to-media-user links populated by signed-in invite acceptance, exact
   username matching, or administrator assignment.

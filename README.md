@@ -445,6 +445,9 @@ same purpose. Discord webhooks do not receive an idempotency field. Discord
 embed titles, descriptions, fields, and total text are truncated rune-safely
 with an ellipsis to the provider's limits.
 
+The Playback page shows each watch's stream (resolution, codecs, bitrate)
+and links to its sample series with the transcode reasons.
+
 The web UI covers the same flow. Administrators register Radarr and Sonarr
 instances under Download managers, store the TMDB key and build profiles from
 an instance's options under Request settings, and decide pending requests,
