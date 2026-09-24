@@ -73,8 +73,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		"Total failed playback manager refresh attempts.")
 	playbackLibraryResolutions := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Name: "playback_library_resolutions_total",
-		Help: "Playback item library resolution outcomes by configured media server.",
-	}, []string{"media_server_id", "outcome"})
+		Help: "Playback item library resolution outcomes.",
+	}, []string{"outcome"})
 	statsQuerySeconds := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Name: "stats_query_duration_seconds",
 		Help: "Statistics query latency by bounded report and outcome.", Buckets: prometheus.DefBuckets,
@@ -417,15 +417,12 @@ func (m *PromMetrics) IncWatchesClosed(kind, reason string) {
 // IncPlaybackRefreshFailure records one failed media-server listing attempt.
 func (m *PromMetrics) IncPlaybackRefreshFailure() { m.playbackRefreshFailures.Inc() }
 
-// IncLibraryResolution records one resolution outcome or queue drop.
-func (m *PromMetrics) IncLibraryResolution(serverID, outcome string) {
-	if !core.ValidID(serverID) {
-		serverID = "invalid"
-	}
-	if outcome != "resolved" && outcome != "failed" && outcome != "dropped" {
+// IncLibraryResolution records one resolved, missing, failed, or dropped outcome.
+func (m *PromMetrics) IncLibraryResolution(outcome string) {
+	if outcome != "resolved" && outcome != "missing" && outcome != "failed" && outcome != "dropped" {
 		outcome = "invalid"
 	}
-	m.playbackLibraryResolutions.WithLabelValues(serverID, outcome).Inc()
+	m.playbackLibraryResolutions.WithLabelValues(outcome).Inc()
 }
 
 // ObserveStatsQuery records one statistics report query.

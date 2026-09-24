@@ -152,7 +152,7 @@ func (o *collectorObserver) IncWatchesClosed(_, reason string) {
 	o.closed[reason]++
 }
 
-func (o *collectorObserver) IncLibraryResolution(_, outcome string) {
+func (o *collectorObserver) IncLibraryResolution(outcome string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.libraries[outcome]++
@@ -164,6 +164,7 @@ type resolvingSource struct {
 	responses map[string]core.Library
 	found     map[string]bool
 	errors    []error
+	fallback  error
 	calls     []string
 	called    chan string
 }
@@ -193,7 +194,7 @@ func (s *resolvingSource) ResolveLibrary(
 	s.calls = append(s.calls, itemID)
 	index := len(s.calls) - 1
 	library, found := s.responses[itemID], s.found[itemID]
-	var err error
+	err := s.fallback
 	if index < len(s.errors) && s.errors[index] != nil {
 		err = s.errors[index]
 	}
@@ -444,17 +445,17 @@ func TestLibraryResolverCachesNotFoundAcrossBatches(t *testing.T) {
 	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
 	collector := newLibraryCollector(t, now, source, store, observer, slog.New(slog.DiscardHandler))
 	for range 2 {
-		collector.resolution.enqueue("item", true)
+		collector.resolution.enqueueForegroundID("item")
 		collector.resolution.runBatch(t.Context())
 	}
 	source.mu.Lock()
 	calls := len(source.calls)
 	source.mu.Unlock()
 	observer.mu.Lock()
-	failed := observer.libraries["failed"]
+	missing := observer.libraries["missing"]
 	observer.mu.Unlock()
-	if calls != 1 || failed != 1 {
-		t.Fatalf("not-found resolution calls = %d, failed metric = %d", calls, failed)
+	if calls != 1 || missing != 1 {
+		t.Fatalf("not-found resolution calls = %d, missing metric = %d", calls, missing)
 	}
 }
 
@@ -471,7 +472,7 @@ func TestLibraryResolverRetriesErrorsInNextBatch(t *testing.T) {
 	collector := newLibraryCollector(t, now, source, store, observer,
 		slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	for range 2 {
-		collector.resolution.enqueue("item", true)
+		collector.resolution.enqueueForegroundID("item")
 		collector.resolution.runBatch(t.Context())
 	}
 	source.mu.Lock()
@@ -483,7 +484,7 @@ func TestLibraryResolverRetriesErrorsInNextBatch(t *testing.T) {
 	}
 }
 
-func TestLibraryResolutionQueuePrioritizesForegroundAndCountsDrops(t *testing.T) {
+func TestLibraryResolutionQueueCountsNewestForegroundDrop(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
 	source := &resolvingSource{
@@ -493,20 +494,113 @@ func TestLibraryResolutionQueuePrioritizesForegroundAndCountsDrops(t *testing.T)
 	collector := newLibraryCollector(
 		t, now, source, &memoryPlaybackStore{}, observer, slog.New(slog.DiscardHandler),
 	)
-	collector.resolution.queue = newLibraryResolutionQueue(2)
-	collector.resolution.enqueue("background-a", false)
-	collector.resolution.enqueue("background-b", false)
-	collector.resolution.enqueue("background-b", true)
-	collector.resolution.enqueue("foreground", true)
-	first, firstOK := collector.resolution.queue.pop()
-	second, secondOK := collector.resolution.queue.pop()
-	_, thirdOK := collector.resolution.queue.pop()
+	collector.resolution.queue = newLibraryResolutionQueue(2, 1)
+	collector.resolution.enqueueForegroundID("foreground-a")
+	collector.resolution.enqueueForegroundID("foreground-b")
+	collector.resolution.enqueueForegroundID("foreground-c")
+	first, firstOK := collector.resolution.queue.popForeground()
+	second, secondOK := collector.resolution.queue.popForeground()
+	_, thirdOK := collector.resolution.queue.popForeground()
 	observer.mu.Lock()
 	drops := observer.libraries["dropped"]
 	observer.mu.Unlock()
-	if !firstOK || !secondOK || thirdOK || first != "foreground" || second != "background-b" || drops != 1 {
+	if !firstOK || !secondOK || thirdOK || first != "foreground-a" || second != "foreground-b" || drops != 1 {
 		t.Fatalf("queue = %q, %q, drops %d", first, second, drops)
 	}
+}
+
+func TestFullForegroundLaneDoesNotEvictPendingBackfill(t *testing.T) {
+	queue := newLibraryResolutionQueue(1, 1)
+	backfillAccepted, _ := queue.enqueueBackfill("backfill")
+	firstAccepted, _ := queue.enqueueForeground("foreground-a")
+	secondAccepted, _ := queue.enqueueForeground("foreground-b")
+	backfillID, backfillOK := queue.popBackfill()
+	foregroundID, foregroundOK := queue.popForeground()
+	if !backfillAccepted || !firstAccepted || secondAccepted || !backfillOK || !foregroundOK {
+		t.Fatalf("admission = %t, %t, %t; pop = %t, %t",
+			backfillAccepted, firstAccepted, secondAccepted, backfillOK, foregroundOK)
+	}
+	if backfillID != "backfill" || foregroundID != "foreground-a" {
+		t.Fatalf("backfill = %q, foreground = %q", backfillID, foregroundID)
+	}
+}
+
+func TestLibraryResolverPinsCursorWhenBackfillLaneIsFull(t *testing.T) {
+	collector := newLibraryCollector(t, time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
+		&resolvingSource{sequenceSource: &sequenceSource{}}, &memoryPlaybackStore{}, nil,
+		slog.New(slog.DiscardHandler))
+	collector.resolution.queue = newLibraryResolutionQueue(1, 1)
+	collector.resolution.cursor = "item-000"
+	admitted, inserted := collector.resolution.queue.enqueueBackfill("already-pending")
+	if !admitted || !inserted {
+		t.Fatal("failed to fill backfill lane")
+	}
+	collector.resolution.advanceBackfill([]string{"item-001", "item-002"})
+	if collector.resolution.cursor != "item-000" || !collector.resolution.backfillRequested.Load() {
+		t.Fatalf("cursor = %q, retry = %t", collector.resolution.cursor,
+			collector.resolution.backfillRequested.Load())
+	}
+}
+
+func TestLibraryResolverAttemptsStableForegroundAndWrapsBackfill(t *testing.T) {
+	const itemCount = libraryResolutionQueueCapacity + 44
+	mutations, itemIDs := stableLibraryMutations(itemCount)
+	source := &resolvingSource{sequenceSource: &sequenceSource{}, fallback: errors.New("unavailable")}
+	collector := newLibraryCollector(t, time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC), source,
+		&memoryPlaybackStore{unresolved: itemIDs}, nil, slog.New(slog.DiscardHandler))
+	if !runStableResolverPolls(collector.resolution, source, mutations, itemIDs) {
+		t.Fatalf("attempted %d of %d persisted ids; cursor = %q", resolutionCallCount(source), itemCount,
+			collector.resolution.cursor)
+	}
+}
+
+func stableLibraryMutations(count int) ([]core.PlaybackMutation, []string) {
+	mutations := make([]core.PlaybackMutation, 0, count)
+	itemIDs := make([]string, 0, count)
+	for index := range count {
+		itemID := fmt.Sprintf("item-%03d", index)
+		itemIDs = append(itemIDs, itemID)
+		mutations = append(mutations, core.PlaybackMutation{Watch: core.PlaybackWatch{ItemID: itemID}})
+	}
+	return mutations, itemIDs
+}
+
+func runStableResolverPolls(
+	worker *libraryResolverWorker, source *resolvingSource,
+	mutations []core.PlaybackMutation, itemIDs []string,
+) bool {
+	cursorAdvanced := false
+	for range 128 {
+		worker.enqueueForeground(mutations)
+		worker.requestBackfill()
+		worker.runBatch(context.Background())
+		cursorAdvanced = cursorAdvanced || worker.cursor != ""
+		if cursorAdvanced && worker.cursor == "" && allResolutionIDsAttempted(source, itemIDs) {
+			return true
+		}
+	}
+	return false
+}
+
+func allResolutionIDsAttempted(source *resolvingSource, itemIDs []string) bool {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	attempted := make(map[string]struct{}, len(source.calls))
+	for _, itemID := range source.calls {
+		attempted[itemID] = struct{}{}
+	}
+	for _, itemID := range itemIDs {
+		if _, ok := attempted[itemID]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func resolutionCallCount(source *resolvingSource) int {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	return len(source.calls)
 }
 
 func TestCollectorShutdownJoinsInFlightLibraryResolution(t *testing.T) {

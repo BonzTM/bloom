@@ -38,7 +38,7 @@ type Observer interface {
 	ObservePlaybackPoll(kind, outcome string, seconds float64)
 	SetOpenWatches(kind, serverID string, count int)
 	IncWatchesClosed(kind, reason string)
-	IncLibraryResolution(serverID, outcome string)
+	IncLibraryResolution(outcome string)
 }
 
 // Config is the validated collector configuration.

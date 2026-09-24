@@ -133,7 +133,7 @@ func (NopMetrics) SetOpenWatches(string, string, int) {}
 func (NopMetrics) IncWatchesClosed(string, string) {}
 
 // IncLibraryResolution does nothing.
-func (NopMetrics) IncLibraryResolution(string, string) {}
+func (NopMetrics) IncLibraryResolution(string) {}
 
 // IncPlaybackRefreshFailure does nothing.
 func (NopMetrics) IncPlaybackRefreshFailure() {}

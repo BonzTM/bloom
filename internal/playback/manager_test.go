@@ -55,7 +55,7 @@ type managerObserver struct{ refreshFailures atomic.Int32 }
 func (*managerObserver) ObservePlaybackPoll(string, string, float64) {}
 func (*managerObserver) SetOpenWatches(string, string, int)          {}
 func (*managerObserver) IncWatchesClosed(string, string)             {}
-func (*managerObserver) IncLibraryResolution(string, string)         {}
+func (*managerObserver) IncLibraryResolution(string)                 {}
 
 func (o *managerObserver) IncPlaybackRefreshFailure() {
 	o.refreshFailures.Add(1)

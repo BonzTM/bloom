@@ -2,7 +2,6 @@ package playback
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,8 +10,10 @@ import (
 )
 
 const (
-	libraryResolutionQueueCapacity = 256
-	libraryResolutionBatchTimeout  = 10 * time.Second
+	libraryResolutionQueueCapacity     = 256
+	libraryBackfillQueueCapacity       = 64
+	libraryResolutionBatchProcessLimit = libraryResolutionQueueCapacity + libraryBackfillQueueCapacity
+	libraryResolutionBatchTimeout      = 10 * time.Second
 )
 
 type libraryResolverWorker struct {
@@ -33,7 +34,7 @@ func newLibraryResolverWorker(
 	return &libraryResolverWorker{
 		server: server, config: config, deps: deps, resolver: resolver,
 		cache: newLibraryCache(deps.Clock),
-		queue: newLibraryResolutionQueue(libraryResolutionQueueCapacity),
+		queue: newLibraryResolutionQueue(libraryResolutionQueueCapacity, libraryBackfillQueueCapacity),
 		wake:  make(chan struct{}, 1),
 	}
 }
@@ -55,27 +56,54 @@ func (r *libraryResolverWorker) runBatch(ctx context.Context) {
 	if r.backfillRequested.Swap(false) {
 		r.enqueueBackfill(batchCtx)
 	}
-	for attempts, processed := 0, 0; attempts < core.MaxPlaybackLibraryBackfillItems &&
-		processed < libraryResolutionQueueCapacity && batchCtx.Err() == nil; processed++ {
-		itemID, ok := r.queue.pop()
-		if !ok {
-			break
-		}
-		if r.resolveOne(batchCtx, itemID) {
-			attempts++
-		}
-		r.queue.finish(itemID)
-	}
+	attempts, processed := r.reserveBackfillAttempt(batchCtx)
+	r.drainQueue(batchCtx, attempts, processed)
 	if r.queue.hasItems() || r.backfillRequested.Load() {
 		r.signal()
 	}
 }
 
+func (r *libraryResolverWorker) reserveBackfillAttempt(ctx context.Context) (int, int) {
+	if !r.queue.hasForeground() {
+		return 0, 0
+	}
+	for processed := 0; processed < libraryBackfillQueueCapacity && ctx.Err() == nil; processed++ {
+		itemID, ok := r.queue.popBackfill()
+		if !ok {
+			return 0, processed
+		}
+		attempted := r.resolveOne(ctx, itemID)
+		r.queue.finish(itemID)
+		if attempted {
+			return 1, processed + 1
+		}
+	}
+	return 0, libraryBackfillQueueCapacity
+}
+
+func (r *libraryResolverWorker) drainQueue(ctx context.Context, attempts, processed int) {
+	for attempts < core.MaxPlaybackLibraryBackfillItems &&
+		processed < libraryResolutionBatchProcessLimit && ctx.Err() == nil {
+		itemID, ok := r.queue.popForeground()
+		if !ok {
+			itemID, ok = r.queue.popBackfill()
+		}
+		if !ok {
+			return
+		}
+		if r.resolveOne(ctx, itemID) {
+			attempts++
+		}
+		r.queue.finish(itemID)
+		processed++
+	}
+}
+
 func (r *libraryResolverWorker) enqueueForeground(mutations []core.PlaybackMutation) {
-	for _, mutation := range slices.Backward(mutations) {
+	for _, mutation := range mutations {
 		watch := mutation.Watch
 		if watch.LibraryID == "" {
-			r.enqueue(watch.ItemID, true)
+			r.enqueueForegroundID(watch.ItemID)
 		}
 	}
 }
@@ -85,15 +113,14 @@ func (r *libraryResolverWorker) requestBackfill() {
 	r.signal()
 }
 
-func (r *libraryResolverWorker) enqueue(itemID string, foreground bool) bool {
-	accepted, dropped := r.queue.enqueue(itemID, foreground)
-	if dropped {
+func (r *libraryResolverWorker) enqueueForegroundID(itemID string) {
+	admitted, inserted := r.queue.enqueueForeground(itemID)
+	if !admitted {
 		r.observe("dropped")
 	}
-	if accepted {
+	if inserted {
 		r.signal()
 	}
-	return accepted || !dropped
 }
 
 func (r *libraryResolverWorker) enqueueBackfill(ctx context.Context) {
@@ -110,19 +137,22 @@ func (r *libraryResolverWorker) enqueueBackfill(ctx context.Context) {
 }
 
 func (r *libraryResolverWorker) advanceBackfill(items []string) {
-	completed := true
 	for _, itemID := range items {
 		if _, found, cached := r.cache.get(itemID); cached && !found {
 			r.cursor = itemID
 			continue
 		}
-		if !r.enqueue(itemID, false) {
-			completed = false
-			break
+		admitted, inserted := r.queue.enqueueBackfill(itemID)
+		if !admitted {
+			r.backfillRequested.Store(true)
+			return
+		}
+		if inserted {
+			r.signal()
 		}
 		r.cursor = itemID
 	}
-	if completed && len(items) < core.MaxPlaybackLibraryBackfillItems {
+	if len(items) < core.MaxPlaybackLibraryBackfillItems {
 		r.cursor = ""
 	}
 }
@@ -142,7 +172,7 @@ func (r *libraryResolverWorker) resolveOne(ctx context.Context, itemID string) b
 	}
 	if !found {
 		r.cache.put(itemID, core.Library{}, false)
-		r.observe("failed")
+		r.observe("missing")
 		return true
 	}
 	if !library.Valid() {
@@ -169,7 +199,7 @@ func (r *libraryResolverWorker) backfill(ctx context.Context, itemID string, lib
 
 func (r *libraryResolverWorker) observe(outcome string) {
 	if r.deps.Observer != nil {
-		r.deps.Observer.IncLibraryResolution(r.server.ID, outcome)
+		r.deps.Observer.IncLibraryResolution(outcome)
 	}
 }
 
@@ -181,70 +211,70 @@ func (r *libraryResolverWorker) signal() {
 }
 
 type libraryResolutionQueue struct {
-	mu       sync.Mutex
-	items    []string
-	present  map[string]struct{}
-	capacity int
+	mu                 sync.Mutex
+	foreground         []string
+	backfill           []string
+	present            map[string]struct{}
+	foregroundCapacity int
+	backfillCapacity   int
 }
 
-func newLibraryResolutionQueue(capacity int) *libraryResolutionQueue {
+func newLibraryResolutionQueue(foregroundCapacity, backfillCapacity int) *libraryResolutionQueue {
 	return &libraryResolutionQueue{
-		items: make([]string, 0, capacity), present: make(map[string]struct{}, capacity),
-		capacity: capacity,
+		foreground:         make([]string, 0, foregroundCapacity),
+		backfill:           make([]string, 0, backfillCapacity),
+		present:            make(map[string]struct{}, foregroundCapacity+backfillCapacity),
+		foregroundCapacity: foregroundCapacity,
+		backfillCapacity:   backfillCapacity,
 	}
 }
 
-func (q *libraryResolutionQueue) enqueue(itemID string, foreground bool) (bool, bool) {
+func (q *libraryResolutionQueue) enqueueForeground(itemID string) (bool, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if _, exists := q.present[itemID]; exists {
-		q.promote(itemID, foreground)
+		return true, false
+	}
+	if len(q.foreground) == q.foregroundCapacity {
 		return false, false
 	}
-	dropped := false
-	if len(q.present) == q.capacity {
-		if !foreground || len(q.items) == 0 {
-			return false, true
-		}
-		last := len(q.items) - 1
-		delete(q.present, q.items[last])
-		q.items = q.items[:last]
-		dropped = true
-	}
 	q.present[itemID] = struct{}{}
-	if foreground {
-		q.items = append(q.items, "")
-		copy(q.items[1:], q.items[:len(q.items)-1])
-		q.items[0] = itemID
-	} else {
-		q.items = append(q.items, itemID)
-	}
-	return true, dropped
+	q.foreground = append(q.foreground, itemID)
+	return true, true
 }
 
-func (q *libraryResolutionQueue) promote(itemID string, foreground bool) bool {
-	for index, queuedID := range q.items {
-		if queuedID != itemID {
-			continue
-		}
-		if !foreground || index == 0 {
-			return true
-		}
-		copy(q.items[1:index+1], q.items[:index])
-		q.items[0] = itemID
-		return true
-	}
-	return false
-}
-
-func (q *libraryResolutionQueue) pop() (string, bool) {
+func (q *libraryResolutionQueue) enqueueBackfill(itemID string) (bool, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 {
+	if _, exists := q.present[itemID]; exists {
+		return true, false
+	}
+	if len(q.backfill) == q.backfillCapacity {
+		return false, false
+	}
+	q.present[itemID] = struct{}{}
+	q.backfill = append(q.backfill, itemID)
+	return true, true
+}
+
+func (q *libraryResolutionQueue) popForeground() (string, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return popLibraryResolutionItem(&q.foreground)
+}
+
+func (q *libraryResolutionQueue) popBackfill() (string, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return popLibraryResolutionItem(&q.backfill)
+}
+
+func popLibraryResolutionItem(items *[]string) (string, bool) {
+	if len(*items) == 0 {
 		return "", false
 	}
-	itemID := q.items[0]
-	q.items = q.items[1:]
+	itemID := (*items)[0]
+	*items = (*items)[1:]
 	return itemID, true
 }
 
@@ -257,5 +287,11 @@ func (q *libraryResolutionQueue) finish(itemID string) {
 func (q *libraryResolutionQueue) hasItems() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.items) > 0
+	return len(q.foreground) > 0 || len(q.backfill) > 0
+}
+
+func (q *libraryResolutionQueue) hasForeground() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.foreground) > 0
 }

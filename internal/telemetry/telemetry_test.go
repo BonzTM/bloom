@@ -111,7 +111,7 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	m.ObserveOIDCDependency("jwks", "retry", 0)
 	m.ObservePlaybackPoll("jellyfin", "success", 0.03)
 	m.IncPlaybackRefreshFailure()
-	m.IncLibraryResolution("11111111-1111-4111-8111-111111111111", "resolved")
+	m.IncLibraryResolution("resolved")
 	m.ObserveStatsQuery("overview", "success", 0.04)
 	m.SetOpenWatches("jellyfin", "server-1", 2)
 	m.SetOpenWatches("jellyfin", "server-2", 3)
@@ -221,9 +221,29 @@ func assertPromMetricLabels(t *testing.T, metrics *PromMetrics) {
 		}
 	}
 	assertRetryMetricOutcomes(t, metrics.Registry())
+	assertLibraryResolutionMetric(t, metrics.Registry())
 	if loginLabels["provider"] != "local" || loginLabels["outcome"] != "success" {
 		t.Errorf("login metric labels = %v", loginLabels)
 	}
+}
+
+func assertLibraryResolutionMetric(t *testing.T, gatherer prometheus.Gatherer) {
+	t.Helper()
+	families, err := gatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather library resolution metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "bloomtest_playback_library_resolutions_total" {
+			continue
+		}
+		labels := family.GetMetric()[0].GetLabel()
+		if len(labels) != 1 || labels[0].GetName() != "outcome" || labels[0].GetValue() != "resolved" {
+			t.Fatalf("library resolution labels = %+v, want outcome=resolved", labels)
+		}
+		return
+	}
+	t.Fatal("library resolution metric family not gathered")
 }
 
 func assertRetryMetricOutcomes(t *testing.T, gatherer prometheus.Gatherer) {
