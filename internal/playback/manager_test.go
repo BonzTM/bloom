@@ -55,6 +55,7 @@ type managerObserver struct{ refreshFailures atomic.Int32 }
 func (*managerObserver) ObservePlaybackPoll(string, string, float64) {}
 func (*managerObserver) SetOpenWatches(string, string, int)          {}
 func (*managerObserver) IncWatchesClosed(string, string)             {}
+func (*managerObserver) IncLibraryResolution(string)                 {}
 
 func (o *managerObserver) IncPlaybackRefreshFailure() {
 	o.refreshFailures.Add(1)
@@ -241,7 +242,7 @@ func TestManagerStopServerWaitsForInFlightPersistenceRace(t *testing.T) {
 func newTestManager(
 	t *testing.T,
 	lister serverLister,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	refresh <-chan time.Time,
 	factory SourceFactory,
 ) *Manager {
@@ -254,7 +255,7 @@ func newTestManager(
 func newTestManagerWithTelemetry(
 	t *testing.T,
 	lister serverLister,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	refresh <-chan time.Time,
 	factory SourceFactory,
 	logger *slog.Logger,
@@ -283,7 +284,7 @@ func newTestManagerWithTelemetry(
 	return manager
 }
 
-func managerWithServer(t *testing.T, store core.PlaybackStore, source Source) *Manager {
+func managerWithServer(t *testing.T, store core.PlaybackPersistence, source Source) *Manager {
 	t.Helper()
 	lister := &managerServerLister{}
 	lister.set(managerTestServer())

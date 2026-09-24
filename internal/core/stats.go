@@ -18,6 +18,8 @@ const (
 	MaxStatsZoneBytes = 64
 	// MaxStatsMediaUserIDBytes bounds media-server user identifiers from URL paths.
 	MaxStatsMediaUserIDBytes = 256
+	// MaxStatsLibraryIDBytes matches the persisted media-server library identifier bound.
+	MaxStatsLibraryIDBytes = MaxLibraryIDBytes
 	// MaxStatsBucketRows bounds zone-dependent in-memory aggregation input.
 	MaxStatsBucketRows = 100_000
 )
@@ -39,6 +41,8 @@ const (
 	StatsReportTitles StatsReport = "titles"
 	// StatsReportUsers selects ranked media-server users.
 	StatsReportUsers StatsReport = "users"
+	// StatsReportLibraries selects ranked media-server libraries.
+	StatsReportLibraries StatsReport = "libraries"
 	// StatsReportUser selects one media-server user's drill-down.
 	StatsReportUser StatsReport = "user"
 )
@@ -99,6 +103,7 @@ type StatsQuery struct {
 	TitleKind    StatsTitleKind
 	MediaUserID  string
 	UserServerID string
+	LibraryID    string
 }
 
 // Validate enforces report-specific parameters.
@@ -109,11 +114,12 @@ func (q StatsQuery) Validate() error {
 		q.Window.End.Sub(q.Window.Start) != time.Duration(q.Window.Days)*24*time.Hour ||
 		q.Window.Zone == "" || q.Window.Zone == "Local" || len(q.Window.Zone) > MaxStatsZoneBytes ||
 		q.Window.Location.String() != q.Window.Zone ||
-		(q.Window.MediaServerID != "" && !ValidID(q.Window.MediaServerID)) {
+		(q.Window.MediaServerID != "" && !ValidID(q.Window.MediaServerID)) ||
+		(q.LibraryID != "" && (!ValidStatsLibraryID(q.LibraryID) || q.Window.MediaServerID == "")) {
 		return ErrInvalidArgument
 	}
 	switch q.Report {
-	case StatsReportOverview, StatsReportDaily, StatsReportPatterns, StatsReportUsers:
+	case StatsReportOverview, StatsReportDaily, StatsReportPatterns, StatsReportUsers, StatsReportLibraries:
 		return nil
 	case StatsReportTitles:
 		if !q.TitleKind.Valid() {
@@ -129,6 +135,9 @@ func (q StatsQuery) Validate() error {
 		return ErrInvalidArgument
 	}
 }
+
+// ValidStatsLibraryID reports whether a library filter is safe for both database engines.
+func ValidStatsLibraryID(value string) bool { return ValidLibraryID(value) }
 
 // ValidStatsMediaUserID reports whether a media-server user ID is safe for both database engines.
 func ValidStatsMediaUserID(value string) bool {
@@ -173,6 +182,18 @@ type StatsUser struct {
 	LastWatchedAt time.Time
 }
 
+// StatsLibrary is one ranked media-server library, including the unknown-library group.
+type StatsLibrary struct {
+	MediaServerID string
+	LibraryID     string
+	LibraryName   string
+	Plays         int64
+	WatchSeconds  int64
+	UniqueUsers   int64
+	UniqueTitles  int64
+	LastWatchedAt time.Time
+}
+
 // StatsBreakdown is one client, device, or play-method grouping.
 type StatsBreakdown struct {
 	Name         string
@@ -211,6 +232,7 @@ type StatsResult struct {
 	Totals      StatsTotals
 	Titles      []StatsTitle
 	Users       []StatsUser
+	Libraries   []StatsLibrary
 	Clients     []StatsBreakdown
 	Devices     []StatsBreakdown
 	PlayMethods []StatsBreakdown

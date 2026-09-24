@@ -12,6 +12,7 @@ import (
 type Querier interface {
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
+	BackfillWatchLibrary(ctx context.Context, arg BackfillWatchLibraryParams) (int64, error)
 	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
@@ -86,6 +87,7 @@ type Querier interface {
 	ListRequestsForAvailability(ctx context.Context, pageSize int32) ([]Request, error)
 	ListRoleRequestQuotasForAccount(ctx context.Context, accountID string) ([]RoleRequestQuota, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
 	LockRequestTitle(ctx context.Context, lockKey string) error
@@ -96,6 +98,7 @@ type Querier interface {
 	StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams) ([]StatsBucketRowsRow, error)
 	StatsClients(ctx context.Context, arg StatsClientsParams) ([]StatsClientsRow, error)
 	StatsDevices(ctx context.Context, arg StatsDevicesParams) ([]StatsDevicesRow, error)
+	StatsLibraries(ctx context.Context, arg StatsLibrariesParams) ([]StatsLibrariesRow, error)
 	StatsMovieTitles(ctx context.Context, arg StatsMovieTitlesParams) ([]StatsMovieTitlesRow, error)
 	StatsOtherTitles(ctx context.Context, arg StatsOtherTitlesParams) ([]StatsOtherTitlesRow, error)
 	StatsPlayMethods(ctx context.Context, arg StatsPlayMethodsParams) ([]StatsPlayMethodsRow, error)

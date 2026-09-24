@@ -24,36 +24,37 @@ import (
 // class): request IDs, user IDs, and raw paths are NEVER used as labels because
 // they would blow up the time-series cardinality.
 type PromMetrics struct {
-	registry                *prometheus.Registry
-	requests                *prometheus.CounterVec
-	requestSeconds          *prometheus.HistogramVec
-	loginAttempts           *prometheus.CounterVec
-	csrfRejections          prometheus.Counter
-	auditWriteFailures      prometheus.Counter
-	sessionCleanupFailures  prometheus.Counter
-	authorizationDenials    *prometheus.CounterVec
-	mediaServerRequests     *prometheus.CounterVec
-	mediaServerSeconds      *prometheus.HistogramVec
-	mediaServerRetries      *prometheus.CounterVec
-	oidcDependencyEvents    *prometheus.CounterVec
-	oidcDependencySeconds   *prometheus.HistogramVec
-	inviteCreations         *prometheus.CounterVec
-	inviteAcceptances       *prometheus.CounterVec
-	playbackPolls           *prometheus.CounterVec
-	playbackPollSeconds     *prometheus.HistogramVec
-	playbackOpenWatches     *prometheus.GaugeVec
-	playbackWatchesClosed   *prometheus.CounterVec
-	playbackRefreshFailures prometheus.Counter
-	statsQuerySeconds       *prometheus.HistogramVec
-	playbackMu              sync.Mutex
-	playbackOpenByServer    map[string]int
-	metadataRequests        *prometheus.CounterVec
-	metadataSeconds         *prometheus.HistogramVec
-	metadataRetries         *prometheus.CounterVec
-	mediaRequests           *prometheus.CounterVec
-	downloadManagerRequests *prometheus.CounterVec
-	downloadManagerSeconds  *prometheus.HistogramVec
-	downloadManagerRetries  *prometheus.CounterVec
+	registry                   *prometheus.Registry
+	requests                   *prometheus.CounterVec
+	requestSeconds             *prometheus.HistogramVec
+	loginAttempts              *prometheus.CounterVec
+	csrfRejections             prometheus.Counter
+	auditWriteFailures         prometheus.Counter
+	sessionCleanupFailures     prometheus.Counter
+	authorizationDenials       *prometheus.CounterVec
+	mediaServerRequests        *prometheus.CounterVec
+	mediaServerSeconds         *prometheus.HistogramVec
+	mediaServerRetries         *prometheus.CounterVec
+	oidcDependencyEvents       *prometheus.CounterVec
+	oidcDependencySeconds      *prometheus.HistogramVec
+	inviteCreations            *prometheus.CounterVec
+	inviteAcceptances          *prometheus.CounterVec
+	playbackPolls              *prometheus.CounterVec
+	playbackPollSeconds        *prometheus.HistogramVec
+	playbackOpenWatches        *prometheus.GaugeVec
+	playbackWatchesClosed      *prometheus.CounterVec
+	playbackRefreshFailures    prometheus.Counter
+	playbackLibraryResolutions *prometheus.CounterVec
+	statsQuerySeconds          *prometheus.HistogramVec
+	playbackMu                 sync.Mutex
+	playbackOpenByServer       map[string]int
+	metadataRequests           *prometheus.CounterVec
+	metadataSeconds            *prometheus.HistogramVec
+	metadataRetries            *prometheus.CounterVec
+	mediaRequests              *prometheus.CounterVec
+	downloadManagerRequests    *prometheus.CounterVec
+	downloadManagerSeconds     *prometheus.HistogramVec
+	downloadManagerRetries     *prometheus.CounterVec
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -70,6 +71,10 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	playbackCollectors := newPlaybackCollectors(namespace)
 	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
 		"Total failed playback manager refresh attempts.")
+	playbackLibraryResolutions := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "playback_library_resolutions_total",
+		Help: "Playback item library resolution outcomes.",
+	}, []string{"outcome"})
 	statsQuerySeconds := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Name: "stats_query_duration_seconds",
 		Help: "Statistics query latency by bounded report and outcome.", Buckets: prometheus.DefBuckets,
@@ -94,16 +99,17 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		inviteAcceptances:     inviteAcceptances,
 		playbackPolls:         playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
 		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
-		playbackRefreshFailures: playbackRefreshFailures,
-		statsQuerySeconds:       statsQuerySeconds,
-		playbackOpenByServer:    make(map[string]int),
-		metadataRequests:        requestCollectors.metadataRequests,
-		metadataSeconds:         requestCollectors.metadataSeconds,
-		metadataRetries:         requestCollectors.metadataRetries,
-		mediaRequests:           requestCollectors.mediaRequests,
-		downloadManagerRequests: downloadCollectors.requests,
-		downloadManagerSeconds:  downloadCollectors.seconds,
-		downloadManagerRetries:  downloadCollectors.retries,
+		playbackRefreshFailures:    playbackRefreshFailures,
+		playbackLibraryResolutions: playbackLibraryResolutions,
+		statsQuerySeconds:          statsQuerySeconds,
+		playbackOpenByServer:       make(map[string]int),
+		metadataRequests:           requestCollectors.metadataRequests,
+		metadataSeconds:            requestCollectors.metadataSeconds,
+		metadataRetries:            requestCollectors.metadataRetries,
+		mediaRequests:              requestCollectors.mediaRequests,
+		downloadManagerRequests:    downloadCollectors.requests,
+		downloadManagerSeconds:     downloadCollectors.seconds,
+		downloadManagerRetries:     downloadCollectors.retries,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -323,6 +329,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.playbackOpenWatches,
 		m.playbackWatchesClosed,
 		m.playbackRefreshFailures,
+		m.playbackLibraryResolutions,
 		m.statsQuerySeconds,
 		m.metadataRequests,
 		m.metadataSeconds,
@@ -410,10 +417,18 @@ func (m *PromMetrics) IncWatchesClosed(kind, reason string) {
 // IncPlaybackRefreshFailure records one failed media-server listing attempt.
 func (m *PromMetrics) IncPlaybackRefreshFailure() { m.playbackRefreshFailures.Inc() }
 
+// IncLibraryResolution records one resolved, missing, failed, or dropped outcome.
+func (m *PromMetrics) IncLibraryResolution(outcome string) {
+	if outcome != "resolved" && outcome != "missing" && outcome != "failed" && outcome != "dropped" {
+		outcome = "invalid"
+	}
+	m.playbackLibraryResolutions.WithLabelValues(outcome).Inc()
+}
+
 // ObserveStatsQuery records one statistics report query.
 func (m *PromMetrics) ObserveStatsQuery(report, outcome string, seconds float64) {
 	switch report {
-	case "overview", "daily", "patterns", "titles", "users", "user":
+	case "overview", "daily", "patterns", "titles", "users", "libraries", "user":
 	default:
 		report = "invalid"
 	}

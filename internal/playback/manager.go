@@ -44,7 +44,7 @@ type ManagerOptions struct {
 // Manager keeps exactly one collector running for each registered media server.
 type Manager struct {
 	servers        serverLister
-	store          core.PlaybackStore
+	store          core.PlaybackPersistence
 	config         Config
 	factory        SourceFactory
 	clock          core.Clock
@@ -69,7 +69,7 @@ type Manager struct {
 // NewManager validates dependencies and returns an idle manager.
 func NewManager(
 	servers serverLister,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	config Config,
 	factory SourceFactory,
 	clock core.Clock,

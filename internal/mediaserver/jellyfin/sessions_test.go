@@ -72,6 +72,45 @@ func TestListSessionsRetriesTransientServerFailure(t *testing.T) {
 	}
 }
 
+func TestResolveLibrarySelectsCollectionFolderAncestor(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/Items/item%2Fwith%20space/Ancestors" {
+			t.Errorf("path = %q", r.URL.EscapedPath())
+		}
+		_, _ = fmt.Fprint(w, `[{"Id":"11111111-1111-4111-8111-111111111111","Name":"Box","Type":"BoxSet"},{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movies","Type":"CollectionFolder"}]`)
+	}))
+	defer server.Close()
+	library, found, err := newTestClient(t, server, nil).ResolveLibrary(t.Context(), "item/with space")
+	if err != nil || !found || library.ID != "22222222-2222-4222-8222-222222222222" || library.Name != "Movies" {
+		t.Fatalf("ResolveLibrary = %+v, %t, %v", library, found, err)
+	}
+}
+
+func TestResolveLibraryReturnsNotFoundWithoutCollectionFolder(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `[{"Id":"11111111-1111-4111-8111-111111111111","Name":"Playlist","Type":"Playlist"}]`)
+	}))
+	defer server.Close()
+	library, found, err := newTestClient(t, server, nil).ResolveLibrary(t.Context(), "item")
+	if err != nil || found || library != (core.Library{}) {
+		t.Fatalf("ResolveLibrary = %+v, %t, %v", library, found, err)
+	}
+}
+
+func TestResolveLibraryReturnsNotFoundForDeletedItem(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "deleted item details", http.StatusNotFound)
+	}))
+	defer server.Close()
+	library, found, err := newTestClient(t, server, nil).ResolveLibrary(t.Context(), "item")
+	if err != nil || found || library != (core.Library{}) {
+		t.Fatalf("ResolveLibrary = %+v, %t, %v", library, found, err)
+	}
+}
+
 func FuzzSessionMapper(f *testing.F) {
 	f.Add([]byte(validSessionJSON))
 	f.Add([]byte(`[{"NowPlayingItem":null}]`))

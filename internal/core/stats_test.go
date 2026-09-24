@@ -70,6 +70,27 @@ func TestValidStatsMediaUserID(t *testing.T) {
 	}
 }
 
+func TestValidStatsLibraryID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value string
+		valid bool
+	}{
+		{value: "library-é", valid: true},
+		{value: "", valid: false},
+		{value: "nul\x00library", valid: false},
+		{value: "delete\x7flibrary", valid: false},
+		{value: "next\u0085line", valid: false},
+		{value: string([]byte{0xff}), valid: false},
+		{value: string(make([]byte, MaxStatsLibraryIDBytes+1)), valid: false},
+	}
+	for _, test := range tests {
+		if got := ValidStatsLibraryID(test.value); got != test.valid {
+			t.Errorf("ValidStatsLibraryID(%q) = %t, want %t", test.value, got, test.valid)
+		}
+	}
+}
+
 func TestStatsQueryValidate(t *testing.T) {
 	t.Parallel()
 	window, err := NewStatsWindow(1, "", "UTC", time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
@@ -78,6 +99,7 @@ func TestStatsQueryValidate(t *testing.T) {
 	}
 	valid := []StatsQuery{
 		{Window: window, Report: StatsReportOverview},
+		{Window: window, Report: StatsReportLibraries},
 		{Window: window, Report: StatsReportTitles, TitleKind: StatsTitleMovie},
 		{Window: window, Report: StatsReportUser, UserServerID: "11111111-1111-4111-8111-111111111111", MediaUserID: "user"},
 	}
@@ -90,6 +112,8 @@ func TestStatsQueryValidate(t *testing.T) {
 		{},
 		{Window: window, Report: StatsReportTitles},
 		{Window: window, Report: StatsReportUser, UserServerID: "bad", MediaUserID: "user"},
+		{Window: window, Report: StatsReportOverview, LibraryID: "library"},
+		{Window: window, Report: StatsReportOverview, LibraryID: "nul\x00library"},
 	}
 	for _, query := range invalid {
 		if !errors.Is(query.Validate(), ErrInvalidArgument) {

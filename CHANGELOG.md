@@ -53,6 +53,15 @@ contracts) gets an entry here.
 
 ### Added
 
+- Playback watches now retain their Jellyfin collection-folder library. A
+  bounded per-server cache and a 25-item post-poll backfill trickle resolve
+  older watches without a separate scheduler.
+- `GET /api/v1/stats/libraries` returns ranked library statistics, including an
+  unknown-library row for unresolved watches.
+- Every statistics report accepts a `library_id` filter when
+  `media_server_id` is also supplied.
+- SQLite/PostgreSQL migration `00016_watch_libraries` adds watch library
+  identity and the server-library-start index used by filtered reports.
 - The request queue shows who asked by username instead of a truncated
   account id.
 - A Statistics page for accounts with `stats.read.all`: totals, most-watched

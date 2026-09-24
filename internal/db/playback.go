@@ -13,7 +13,7 @@ import (
 const maxPlaybackPageSize = 1025
 
 // NewPlaybackStore returns the playback persistence seam for the configured engine.
-func NewPlaybackStore(pool *sql.DB, driver config.Driver) (core.PlaybackStore, error) {
+func NewPlaybackStore(pool *sql.DB, driver config.Driver) (core.PlaybackPersistence, error) {
 	switch driver {
 	case config.DriverSQLite:
 		return newSQLitePlaybackStore(pool), nil
@@ -28,6 +28,7 @@ type storedPlaybackWatch struct {
 	id, mediaServerID, mediaServerName, mediaUserID, username string
 	deviceID, deviceName, client, serverSessionID             string
 	itemID, itemName, itemType, seriesName                    string
+	libraryID, libraryName                                    string
 	seasonNumber, episodeNumber                               *int32
 	playMethod                                                core.PlayMethod
 	state                                                     core.WatchState
@@ -45,6 +46,7 @@ func (row storedPlaybackWatch) domain() core.PlaybackWatch {
 		DeviceID: row.deviceID, DeviceName: row.deviceName, Client: row.client,
 		ServerSessionID: row.serverSessionID, ItemID: row.itemID, ItemName: row.itemName,
 		ItemType: row.itemType, SeriesName: row.seriesName,
+		LibraryID: row.libraryID, LibraryName: row.libraryName,
 		SeasonNumber: row.seasonNumber, EpisodeNumber: row.episodeNumber,
 		PlayMethod: row.playMethod, State: row.state,
 		StartedAt: row.startedAt, LastSeenAt: row.lastSeenAt, EndedAt: row.endedAt,

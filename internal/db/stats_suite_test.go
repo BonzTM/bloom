@@ -27,6 +27,8 @@ func runStatsEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertStatsZoneBuckets(t, reader, fixture)
 		assertStatsUserDetail(t, reader, fixture)
 		assertStatsBinaryRanking(t, pool, driver, reader, fixture)
+		assertStatsLibraryFilter(t, reader, fixture)
+		assertStatsLibraries(t, pool, driver, reader, fixture.end)
 		assertStatsRejectsUnsafeUserIDs(t, reader, fixture)
 	})
 }
@@ -64,10 +66,10 @@ func seedStatsFixture(t *testing.T, pool *sql.DB, driver config.Driver) statsFix
 	store := newPlaybackTestStore(t, pool, driver)
 	watches := []core.PlaybackWatch{
 		statsWatch(t, fixture.serverA, fixture.userA, "alice", fixture.start.Add(-time.Microsecond), "old", "Old", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 999),
-		statsWatch(t, fixture.serverA, fixture.userA, "alice", fixture.start, "movie-1", "Film", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 100),
-		statsWatch(t, fixture.serverA, fixture.userA, "alice", time.Date(2026, 9, 23, 0, 30, 0, 0, time.UTC), "ep-1", "Pilot", "Episode", "Show", "Android", "Phone", core.PlayMethodTranscode, 200),
+		statsWatchInLibrary(t, fixture.serverA, fixture.userA, "alice", fixture.start, "movie-1", "Film", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 100, "library-a", "Movies"),
+		statsWatchInLibrary(t, fixture.serverA, fixture.userA, "alice", time.Date(2026, 9, 23, 0, 30, 0, 0, time.UTC), "ep-1", "Pilot", "Episode", "Show", "Android", "Phone", core.PlayMethodTranscode, 200, "library-b", "Shows"),
 		statsWatch(t, fixture.serverA, "stats-user-b", "bob", time.Date(2026, 9, 23, 18, 0, 0, 0, time.UTC), "ep-2", "Second", "Episode", "Show", "Web", "Laptop", core.PlayMethodDirectStream, 300),
-		statsWatch(t, fixture.serverB, "stats-user-c", "carol", time.Date(2026, 9, 24, 7, 0, 0, 0, time.UTC), "track-1", "Song", "Audio", "", "Mobile", "Phone", core.PlayMethodDirectPlay, 400),
+		statsWatchInLibrary(t, fixture.serverB, "stats-user-c", "carol", time.Date(2026, 9, 24, 7, 0, 0, 0, time.UTC), "track-1", "Song", "Audio", "", "Mobile", "Phone", core.PlayMethodDirectPlay, 400, "library-a", "Music"),
 		statsWatch(t, fixture.serverB, "stats-user-c", "carol", fixture.end, "future", "Future", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 888),
 	}
 	mutations := make([]core.PlaybackMutation, 0, len(watches))
@@ -78,6 +80,18 @@ func seedStatsFixture(t *testing.T, pool *sql.DB, driver config.Driver) statsFix
 		t.Fatalf("SaveWatches: %v", err)
 	}
 	return fixture
+}
+
+func statsWatchInLibrary(
+	t *testing.T, serverID, userID, username string, started time.Time,
+	itemID, itemName, itemType, series, client, device string,
+	method core.PlayMethod, seconds int, libraryID, libraryName string,
+) core.PlaybackWatch {
+	t.Helper()
+	watch := statsWatch(t, serverID, userID, username, started, itemID, itemName,
+		itemType, series, client, device, method, seconds)
+	watch.LibraryID, watch.LibraryName = libraryID, libraryName
+	return watch
 }
 
 func statsWatch(
@@ -191,6 +205,126 @@ func assertStatsUserDetail(t *testing.T, reader core.StatsReader, fixture statsF
 		len(result.Titles) != 2 || len(result.Watches) != 2 || len(result.Daily) == 0 {
 		t.Fatalf("user detail = %+v, %v", result, err)
 	}
+}
+
+func assertStatsLibraryFilter(t *testing.T, reader core.StatsReader, fixture statsFixture) {
+	t.Helper()
+	query := statsQuery(t, fixture, core.StatsReportOverview, "UTC")
+	query.Window.MediaServerID, query.LibraryID = fixture.serverA, "library-a"
+	result, err := reader.ReadStats(t.Context(), query)
+	if err != nil || result.Totals.Plays != 1 || result.Totals.WatchSeconds != 100 {
+		t.Fatalf("library-filtered overview = %+v, %v", result.Totals, err)
+	}
+}
+
+func assertStatsLibraries(
+	t *testing.T, pool *sql.DB, driver config.Driver, reader core.StatsReader, end time.Time,
+) {
+	t.Helper()
+	servers := seedTwoServerLibraryFixture(t, pool, driver, end)
+	for _, serverID := range servers {
+		window, err := core.NewStatsWindow(2, serverID, "UTC", end)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, readErr := reader.ReadStats(t.Context(), core.StatsQuery{
+			Window: window, Report: core.StatsReportLibraries,
+		})
+		if readErr != nil || len(result.Libraries) != 3 || result.Libraries[0].LibraryID != "" ||
+			result.Libraries[1].LibraryID != "library-a" || result.Libraries[2].LibraryID != "library-b" {
+			t.Fatalf("libraries for %s = %+v, %v", serverID, result.Libraries, readErr)
+		}
+	}
+	assertStatsLibraryBoundary(t, pool, driver, reader, end)
+}
+
+func seedTwoServerLibraryFixture(
+	t *testing.T, pool *sql.DB, driver config.Driver, end time.Time,
+) []string {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newPlaybackTestStore(t, pool, driver)
+	serverIDs := make([]string, 0, 2)
+	for serverIndex := range 2 {
+		server := mediaServerRecord(t, fmt.Sprintf("Library %d %s", serverIndex, mustID(t)),
+			fmt.Sprintf("https://library-%d.example.test", serverIndex), end)
+		if err := writer.CreateMediaServer(t.Context(), server); err != nil {
+			t.Fatal(err)
+		}
+		serverID := server.ID
+		t.Cleanup(func() {
+			if err := writer.DeleteMediaServer(context.Background(), serverID); err != nil {
+				t.Errorf("DeleteMediaServer: %v", err)
+			}
+		})
+		serverIDs = append(serverIDs, server.ID)
+		watches := libraryFixtureWatches(t, server.ID, end)
+		if err := store.SaveWatches(t.Context(), watches); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return serverIDs
+}
+
+func assertStatsLibraryBoundary(
+	t *testing.T, pool *sql.DB, driver config.Driver, reader core.StatsReader, end time.Time,
+) {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := mediaServerRecord(t, "Library boundary "+mustID(t), "https://library-boundary.example.test", end)
+	if createErr := writer.CreateMediaServer(t.Context(), server); createErr != nil {
+		t.Fatal(createErr)
+	}
+	t.Cleanup(func() {
+		if deleteErr := writer.DeleteMediaServer(context.Background(), server.ID); deleteErr != nil {
+			t.Errorf("DeleteMediaServer cleanup: %v", deleteErr)
+		}
+	})
+	mutations := make([]core.PlaybackMutation, 0, 52)
+	for index := range 52 {
+		libraryID := fmt.Sprintf("library-%02d", index)
+		watch := statsWatchInLibrary(t, server.ID, libraryID, "user", end.Add(-time.Hour),
+			"item-"+libraryID, "Item", "Movie", "", "Web", "TV",
+			core.PlayMethodDirectPlay, 10, libraryID, fmt.Sprintf("Library %02d", index))
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch})
+	}
+	if saveErr := newPlaybackTestStore(t, pool, driver).SaveWatches(t.Context(), mutations); saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	window, err := core.NewStatsWindow(2, server.ID, "UTC", end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := reader.ReadStats(t.Context(), core.StatsQuery{Window: window, Report: core.StatsReportLibraries})
+	if err != nil {
+		t.Fatalf("ReadStats(library boundary): %v", err)
+	}
+	if len(result.Libraries) != 50 {
+		t.Fatalf("library boundary rows = %d, want 50", len(result.Libraries))
+	}
+	if result.Libraries[49].LibraryID != "library-49" {
+		t.Fatalf("library boundary last = %+v", result.Libraries[49])
+	}
+}
+
+func libraryFixtureWatches(t *testing.T, serverID string, end time.Time) []core.PlaybackMutation {
+	t.Helper()
+	values := []struct{ id, name string }{{"", ""}, {"library-a", "Alpha"}, {"library-b", "Beta"}}
+	result := make([]core.PlaybackMutation, 0, len(values))
+	for index, value := range values {
+		watch := statsWatch(t, serverID, fmt.Sprintf("library-user-%d", index), "user",
+			end.Add(-time.Duration(index+1)*time.Hour), fmt.Sprintf("library-item-%d", index),
+			"Item", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 10)
+		watch.LibraryID, watch.LibraryName = value.id, value.name
+		result = append(result, core.PlaybackMutation{Watch: watch})
+	}
+	return result
 }
 
 func assertStatsBinaryRanking(

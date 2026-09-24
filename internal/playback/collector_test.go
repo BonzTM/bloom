@@ -18,16 +18,20 @@ import (
 const collectorServerID = "11111111-1111-4111-8111-111111111111"
 
 type memoryPlaybackStore struct {
-	mu        sync.Mutex
-	open      []core.PlaybackWatch
-	recent    []core.PlaybackWatch
-	mutations []core.PlaybackMutation
-	queries   []core.PlaybackQuery
-	loadErrs  []error
-	saveErrs  []error
-	loads     int
-	saves     int
-	calls     []storeContextCall
+	mu            sync.Mutex
+	open          []core.PlaybackWatch
+	recent        []core.PlaybackWatch
+	mutations     []core.PlaybackMutation
+	queries       []core.PlaybackQuery
+	loadErrs      []error
+	saveErrs      []error
+	loads         int
+	saves         int
+	calls         []storeContextCall
+	unresolved    []string
+	backfills     []core.Library
+	backfillItems []string
+	backfilled    chan string
 }
 
 type storeContextCall struct {
@@ -84,6 +88,44 @@ func (s *memoryPlaybackStore) ListWatches(
 	return append([]core.PlaybackWatch(nil), s.recent...), nil
 }
 
+func (s *memoryPlaybackStore) ListUnresolvedWatchItemIDs(
+	ctx context.Context, _, afterItemID string, limit int,
+) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordContext(ctx, "list unresolved")
+	items := make([]string, 0, min(limit, len(s.unresolved)))
+	for _, itemID := range s.unresolved {
+		if itemID > afterItemID && len(items) < limit {
+			items = append(items, itemID)
+		}
+	}
+	return items, nil
+}
+
+func (s *memoryPlaybackStore) BackfillWatchLibrary(
+	ctx context.Context, _, itemID string, library core.Library,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordContext(ctx, "backfill")
+	s.backfillItems = append(s.backfillItems, itemID)
+	s.backfills = append(s.backfills, library)
+	for index := range s.mutations {
+		if s.mutations[index].Watch.ItemID == itemID && s.mutations[index].Watch.LibraryID == "" {
+			s.mutations[index].Watch.LibraryID = library.ID
+			s.mutations[index].Watch.LibraryName = library.Name
+		}
+	}
+	if s.backfilled != nil {
+		select {
+		case s.backfilled <- itemID:
+		default:
+		}
+	}
+	return nil
+}
+
 func (s *memoryPlaybackStore) recordContext(ctx context.Context, operation string) {
 	_, hasDeadline := ctx.Deadline()
 	s.calls = append(s.calls, storeContextCall{operation: operation, hasDeadline: hasDeadline})
@@ -97,8 +139,9 @@ type sequenceSource struct {
 }
 
 type collectorObserver struct {
-	mu     sync.Mutex
-	closed map[string]int
+	mu        sync.Mutex
+	closed    map[string]int
+	libraries map[string]int
 }
 
 func (*collectorObserver) ObservePlaybackPoll(string, string, float64) {}
@@ -107,6 +150,59 @@ func (o *collectorObserver) IncWatchesClosed(_, reason string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.closed[reason]++
+}
+
+func (o *collectorObserver) IncLibraryResolution(outcome string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.libraries[outcome]++
+}
+
+type resolvingSource struct {
+	*sequenceSource
+	mu        sync.Mutex
+	responses map[string]core.Library
+	found     map[string]bool
+	errors    []error
+	fallback  error
+	calls     []string
+	called    chan string
+}
+
+type blockingLibrarySource struct {
+	*sequenceSource
+	library  core.Library
+	found    bool
+	entered  chan struct{}
+	release  chan struct{}
+	finished chan struct{}
+}
+
+func (s *blockingLibrarySource) ResolveLibrary(
+	context.Context, string,
+) (core.Library, bool, error) {
+	s.entered <- struct{}{}
+	<-s.release
+	s.finished <- struct{}{}
+	return s.library, s.found, nil
+}
+
+func (s *resolvingSource) ResolveLibrary(
+	_ context.Context, itemID string,
+) (core.Library, bool, error) {
+	s.mu.Lock()
+	s.calls = append(s.calls, itemID)
+	index := len(s.calls) - 1
+	library, found := s.responses[itemID], s.found[itemID]
+	err := s.fallback
+	if index < len(s.errors) && s.errors[index] != nil {
+		err = s.errors[index]
+	}
+	s.mu.Unlock()
+	if s.called != nil {
+		s.called <- itemID
+	}
+	return library, found, err
 }
 
 func (s *sequenceSource) ListSessions(context.Context) ([]core.PlaybackSession, error) {
@@ -126,7 +222,7 @@ func (s *sequenceSource) ListSessions(context.Context) ([]core.PlaybackSession, 
 func testCollector(
 	t *testing.T,
 	source Source,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	wait func(context.Context, time.Duration) error,
 ) (context.CancelFunc, <-chan error) {
 	t.Helper()
@@ -298,6 +394,254 @@ func TestCollectorPersistenceFailureBacksOffAndRecovers(t *testing.T) {
 	}
 }
 
+func TestCollectorPersistsBeforeSlowLibraryResolutionAndFillsLater(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	source := &blockingLibrarySource{
+		sequenceSource: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}}},
+		library:        core.Library{ID: "library-one", Name: "Movies"}, found: true,
+		entered: make(chan struct{}, 1), release: make(chan struct{}), finished: make(chan struct{}, 1),
+	}
+	store := &memoryPlaybackStore{backfilled: make(chan string, 1)}
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	collector := newLibraryCollector(t, now, source, store, observer, slog.New(slog.DiscardHandler))
+	waited := make(chan time.Duration, 1)
+	collector.deps.Wait = func(ctx context.Context, delay time.Duration) error {
+		waited <- delay
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- collector.Run(ctx) }()
+	if delay := receiveDuration(t, waited); delay != 5*time.Second {
+		t.Fatalf("poll delay = %s, want 5s", delay)
+	}
+	receiveSignal(t, source.entered)
+	store.mu.Lock()
+	if len(store.mutations) != 1 || store.mutations[0].Watch.LibraryID != "" {
+		t.Fatalf("pre-resolution mutations = %+v", store.mutations)
+	}
+	store.mu.Unlock()
+	close(source.release)
+	if itemID := receiveString(t, store.backfilled); itemID != "item" {
+		t.Fatalf("backfilled item = %q, want item", itemID)
+	}
+	cancel()
+	assertCollectorStopped(t, done)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.mutations[0].Watch.LibraryID != "library-one" {
+		t.Fatalf("post-resolution mutation = %+v", store.mutations[0])
+	}
+}
+
+func TestLibraryResolverCachesNotFoundAcrossBatches(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	source := &resolvingSource{
+		sequenceSource: &sequenceSource{},
+		responses:      make(map[string]core.Library), found: make(map[string]bool),
+	}
+	store := &memoryPlaybackStore{}
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	collector := newLibraryCollector(t, now, source, store, observer, slog.New(slog.DiscardHandler))
+	for range 2 {
+		collector.resolution.enqueueForegroundID("item")
+		collector.resolution.runBatch(t.Context())
+	}
+	source.mu.Lock()
+	calls := len(source.calls)
+	source.mu.Unlock()
+	observer.mu.Lock()
+	missing := observer.libraries["missing"]
+	observer.mu.Unlock()
+	if calls != 1 || missing != 1 {
+		t.Fatalf("not-found resolution calls = %d, missing metric = %d", calls, missing)
+	}
+}
+
+func TestLibraryResolverRetriesErrorsInNextBatch(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	source := &resolvingSource{
+		sequenceSource: &sequenceSource{},
+		responses:      map[string]core.Library{"item": {ID: "library-one", Name: "Movies"}},
+		found:          map[string]bool{"item": true}, errors: []error{errors.New("sensitive upstream detail")},
+	}
+	store := &memoryPlaybackStore{}
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	var logs strings.Builder
+	collector := newLibraryCollector(t, now, source, store, observer,
+		slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	for range 2 {
+		collector.resolution.enqueueForegroundID("item")
+		collector.resolution.runBatch(t.Context())
+	}
+	source.mu.Lock()
+	calls := len(source.calls)
+	source.mu.Unlock()
+	if calls != 2 || strings.Contains(logs.String(), "sensitive upstream detail") ||
+		!strings.Contains(logs.String(), "item_id=item") {
+		t.Fatalf("resolution calls = %d, log = %q", calls, logs.String())
+	}
+}
+
+func TestLibraryResolutionQueueCountsNewestForegroundDrop(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	observer := &collectorObserver{closed: make(map[string]int), libraries: make(map[string]int)}
+	source := &resolvingSource{
+		sequenceSource: &sequenceSource{}, responses: make(map[string]core.Library),
+		found: make(map[string]bool),
+	}
+	collector := newLibraryCollector(
+		t, now, source, &memoryPlaybackStore{}, observer, slog.New(slog.DiscardHandler),
+	)
+	collector.resolution.queue = newLibraryResolutionQueue(2, 1)
+	collector.resolution.enqueueForegroundID("foreground-a")
+	collector.resolution.enqueueForegroundID("foreground-b")
+	collector.resolution.enqueueForegroundID("foreground-c")
+	first, firstOK := collector.resolution.queue.popForeground()
+	second, secondOK := collector.resolution.queue.popForeground()
+	_, thirdOK := collector.resolution.queue.popForeground()
+	observer.mu.Lock()
+	drops := observer.libraries["dropped"]
+	observer.mu.Unlock()
+	if !firstOK || !secondOK || thirdOK || first != "foreground-a" || second != "foreground-b" || drops != 1 {
+		t.Fatalf("queue = %q, %q, drops %d", first, second, drops)
+	}
+}
+
+func TestFullForegroundLaneDoesNotEvictPendingBackfill(t *testing.T) {
+	queue := newLibraryResolutionQueue(1, 1)
+	backfillAccepted, _ := queue.enqueueBackfill("backfill")
+	firstAccepted, _ := queue.enqueueForeground("foreground-a")
+	secondAccepted, _ := queue.enqueueForeground("foreground-b")
+	backfillID, backfillOK := queue.popBackfill()
+	foregroundID, foregroundOK := queue.popForeground()
+	if !backfillAccepted || !firstAccepted || secondAccepted || !backfillOK || !foregroundOK {
+		t.Fatalf("admission = %t, %t, %t; pop = %t, %t",
+			backfillAccepted, firstAccepted, secondAccepted, backfillOK, foregroundOK)
+	}
+	if backfillID != "backfill" || foregroundID != "foreground-a" {
+		t.Fatalf("backfill = %q, foreground = %q", backfillID, foregroundID)
+	}
+}
+
+func TestLibraryResolverPinsCursorWhenBackfillLaneIsFull(t *testing.T) {
+	collector := newLibraryCollector(t, time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
+		&resolvingSource{sequenceSource: &sequenceSource{}}, &memoryPlaybackStore{}, nil,
+		slog.New(slog.DiscardHandler))
+	collector.resolution.queue = newLibraryResolutionQueue(1, 1)
+	collector.resolution.cursor = "item-000"
+	admitted, inserted := collector.resolution.queue.enqueueBackfill("already-pending")
+	if !admitted || !inserted {
+		t.Fatal("failed to fill backfill lane")
+	}
+	collector.resolution.advanceBackfill([]string{"item-001", "item-002"})
+	if collector.resolution.cursor != "item-000" || !collector.resolution.backfillRequested.Load() {
+		t.Fatalf("cursor = %q, retry = %t", collector.resolution.cursor,
+			collector.resolution.backfillRequested.Load())
+	}
+}
+
+func TestLibraryResolverAttemptsStableForegroundAndWrapsBackfill(t *testing.T) {
+	const itemCount = libraryResolutionQueueCapacity + 44
+	mutations, itemIDs := stableLibraryMutations(itemCount)
+	source := &resolvingSource{sequenceSource: &sequenceSource{}, fallback: errors.New("unavailable")}
+	collector := newLibraryCollector(t, time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC), source,
+		&memoryPlaybackStore{unresolved: itemIDs}, nil, slog.New(slog.DiscardHandler))
+	if !runStableResolverPolls(collector.resolution, source, mutations, itemIDs) {
+		t.Fatalf("attempted %d of %d persisted ids; cursor = %q", resolutionCallCount(source), itemCount,
+			collector.resolution.cursor)
+	}
+}
+
+func stableLibraryMutations(count int) ([]core.PlaybackMutation, []string) {
+	mutations := make([]core.PlaybackMutation, 0, count)
+	itemIDs := make([]string, 0, count)
+	for index := range count {
+		itemID := fmt.Sprintf("item-%03d", index)
+		itemIDs = append(itemIDs, itemID)
+		mutations = append(mutations, core.PlaybackMutation{Watch: core.PlaybackWatch{ItemID: itemID}})
+	}
+	return mutations, itemIDs
+}
+
+func runStableResolverPolls(
+	worker *libraryResolverWorker, source *resolvingSource,
+	mutations []core.PlaybackMutation, itemIDs []string,
+) bool {
+	cursorAdvanced := false
+	for range 128 {
+		worker.enqueueForeground(mutations)
+		worker.requestBackfill()
+		worker.runBatch(context.Background())
+		cursorAdvanced = cursorAdvanced || worker.cursor != ""
+		if cursorAdvanced && worker.cursor == "" && allResolutionIDsAttempted(source, itemIDs) {
+			return true
+		}
+	}
+	return false
+}
+
+func allResolutionIDsAttempted(source *resolvingSource, itemIDs []string) bool {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	attempted := make(map[string]struct{}, len(source.calls))
+	for _, itemID := range source.calls {
+		attempted[itemID] = struct{}{}
+	}
+	for _, itemID := range itemIDs {
+		if _, ok := attempted[itemID]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func resolutionCallCount(source *resolvingSource) int {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	return len(source.calls)
+}
+
+func TestCollectorShutdownJoinsInFlightLibraryResolution(t *testing.T) {
+	source := &blockingLibrarySource{
+		sequenceSource: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}}},
+		entered:        make(chan struct{}, 1), release: make(chan struct{}), finished: make(chan struct{}, 1),
+	}
+	cancel, done := testCollector(t, source, &memoryPlaybackStore{}, nil)
+	receiveSignal(t, source.entered)
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("collector returned before resolver finished: %v", err)
+	default:
+	}
+	close(source.release)
+	receiveSignal(t, source.finished)
+	assertCollectorStopped(t, done)
+}
+
+func newLibraryCollector(
+	t *testing.T, now time.Time, source Source, store core.PlaybackPersistence,
+	observer Observer, logger *slog.Logger,
+) *Collector {
+	t.Helper()
+	collector, err := NewCollector(managerTestServer(), Config{
+		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
+		MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+	}, Dependencies{
+		Store: store, Source: source, Clock: testutil.NewFakeClock(now), Logger: logger,
+		Observer: observer, RandomInt64: func(upper int64) int64 { return (upper - 1) / 2 },
+		NewID: func() (string, error) {
+			return "00000000-0000-4000-8000-000000000001", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewCollector: %v", err)
+	}
+	return collector
+}
+
 func TestCollectorObserveFailureDoesNotLoseEarlierStartTransition(t *testing.T) {
 	first := collectorSession()
 	first.MediaUserID = "user-a"
@@ -462,7 +806,7 @@ func TestCollectorShutdownJoinsBlockedStoreCall(t *testing.T) {
 func testCollectorWithTimeout(
 	t *testing.T,
 	source Source,
-	store core.PlaybackStore,
+	store core.PlaybackPersistence,
 	delays chan<- time.Duration,
 	release <-chan struct{},
 ) (context.CancelFunc, <-chan error) {
@@ -614,6 +958,17 @@ func receiveSignal(t *testing.T, values <-chan struct{}) {
 	case <-values:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for collector signal")
+	}
+}
+
+func receiveString(t *testing.T, values <-chan string) string {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for collector value")
+		return ""
 	}
 }
 

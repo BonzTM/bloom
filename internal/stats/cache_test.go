@@ -71,3 +71,17 @@ func TestResultCacheKeyIncludesExactWindowBounds(t *testing.T) {
 		t.Fatalf("cache keys collide: %+v", firstKey)
 	}
 }
+
+func TestResultCacheKeySeparatesLibraries(t *testing.T) {
+	t.Parallel()
+	window, err := core.NewStatsWindow(30, "11111111-1111-4111-8111-111111111111", "UTC",
+		time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := resultCacheKey(core.StatsQuery{Window: window, Report: core.StatsReportOverview, LibraryID: "one"})
+	second := resultCacheKey(core.StatsQuery{Window: window, Report: core.StatsReportOverview, LibraryID: "two"})
+	if first == second {
+		t.Fatalf("library cache keys collide: %+v", first)
+	}
+}

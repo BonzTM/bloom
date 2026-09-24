@@ -68,6 +68,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/stats/patterns", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsPatterns},
 	{method: http.MethodGet, path: "/api/v1/stats/titles", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsTitles},
 	{method: http.MethodGet, path: "/api/v1/stats/users", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsUsers},
+	{method: http.MethodGet, path: "/api/v1/stats/libraries", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsLibraries},
 	{method: http.MethodGet, path: "/api/v1/stats/users/{media_server_id}/{media_user_id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsUser},
 	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSearch},
 	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataMovie},

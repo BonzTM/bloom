@@ -21,6 +21,7 @@ type statsAggregateBackend interface {
 	totals(context.Context, core.StatsQuery) (core.StatsTotals, error)
 	titles(context.Context, core.StatsQuery, core.StatsTitleKind, int32) ([]core.StatsTitle, error)
 	users(context.Context, core.StatsQuery, int32) ([]core.StatsUser, error)
+	libraries(context.Context, core.StatsQuery, int32) ([]core.StatsLibrary, error)
 }
 
 type statsBreakdownBackend interface {
@@ -89,6 +90,8 @@ func (s *statsStore) ReadStats(ctx context.Context, query core.StatsQuery) (core
 		result.Titles, err = s.aggregates.titles(ctx, query, query.TitleKind, statsListLimit)
 	case core.StatsReportUsers:
 		result.Users, err = s.aggregates.users(ctx, query, statsListLimit)
+	case core.StatsReportLibraries:
+		result.Libraries, err = s.aggregates.libraries(ctx, query, statsListLimit)
 	case core.StatsReportUser:
 		err = s.readUser(ctx, query, &result)
 	default:
@@ -247,6 +250,23 @@ func statsValueTime(value any) (time.Time, error) {
 	default:
 		return time.Time{}, fmt.Errorf("unexpected statistics timestamp %T", value)
 	}
+}
+
+func mapStatsLibrary(
+	serverID, libraryID string, libraryName any, plays int64, watchSeconds any,
+	uniqueUsers, uniqueTitles int64, lastWatched any,
+) (core.StatsLibrary, error) {
+	name, nameErr := statsValueString(libraryName)
+	seconds, secondsErr := statsValueInt64(watchSeconds)
+	watched, timeErr := statsValueTime(lastWatched)
+	if nameErr != nil || secondsErr != nil || timeErr != nil {
+		return core.StatsLibrary{}, errors.Join(nameErr, secondsErr, timeErr)
+	}
+	return core.StatsLibrary{
+		MediaServerID: serverID, LibraryID: libraryID, LibraryName: name,
+		Plays: plays, WatchSeconds: seconds, UniqueUsers: uniqueUsers,
+		UniqueTitles: uniqueTitles, LastWatchedAt: watched,
+	}, nil
 }
 
 func statsStoreError(operation string, err error) error {

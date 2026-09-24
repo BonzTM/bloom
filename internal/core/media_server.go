@@ -25,6 +25,10 @@ const (
 	MaxMediaServerBaseURLBytes = 2048
 	// MaxMediaServerLibraries bounds the unpaginated Jellyfin library response.
 	MaxMediaServerLibraries = 256
+	// MaxLibraryIDBytes matches the persisted invite and watch library identifier bound.
+	MaxLibraryIDBytes = 128
+	// MaxLibraryNameBytes bounds an upstream library display name before persistence.
+	MaxLibraryNameBytes = 500
 )
 
 // MediaServerKind is a closed adapter identifier.
@@ -65,6 +69,18 @@ type Library struct {
 	Type string
 }
 
+// Valid reports whether the library is safe to persist on both database engines.
+func (l Library) Valid() bool {
+	return ValidLibraryID(l.ID) && l.Name != "" && len(l.Name) <= MaxLibraryNameBytes &&
+		utf8.ValidString(l.Name) && strings.IndexFunc(l.Name, unicode.IsControl) < 0
+}
+
+// ValidLibraryID reports whether an upstream library identifier is safe to persist.
+func ValidLibraryID(value string) bool {
+	return value != "" && len(value) <= MaxLibraryIDBytes && utf8.ValidString(value) &&
+		strings.IndexFunc(value, unicode.IsControl) < 0
+}
+
 // Capabilities describes optional operations supported by an adapter kind.
 type Capabilities struct {
 	CreateUserWithPassword bool
@@ -90,6 +106,11 @@ type MediaServerAdapter interface {
 // MediaAvailabilityLookup is implemented by adapters that can find titles by provider id.
 type MediaAvailabilityLookup interface {
 	HasTitle(ctx context.Context, kind MediaKind, provider MetadataProviderKind, providerID string, seasons []int) (bool, []int, error)
+}
+
+// LibraryResolver is an optional adapter capability for mapping an item to its collection folder.
+type LibraryResolver interface {
+	ResolveLibrary(ctx context.Context, itemID string) (Library, bool, error)
 }
 
 // MediaServerReader reads registered server configuration.

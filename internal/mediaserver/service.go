@@ -279,6 +279,28 @@ func (s *Service) ListSessions(ctx context.Context, id string) ([]core.PlaybackS
 	return sessions, nil
 }
 
+// ResolveLibrary maps one item to its collection folder when the adapter supports it.
+func (s *Service) ResolveLibrary(
+	ctx context.Context, id, itemID string,
+) (core.Library, bool, error) {
+	call, err := s.adapter(ctx, id, "resolve_library")
+	if err != nil {
+		return core.Library{}, false, err
+	}
+	defer call.release()
+	resolver, ok := call.entry.adapter.(core.LibraryResolver)
+	if !ok {
+		return core.Library{}, false, nil
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	library, found, err := resolver.ResolveLibrary(callCtx, itemID)
+	if err != nil {
+		return core.Library{}, false, fmt.Errorf("resolve media server library: %w", err)
+	}
+	return library, found, nil
+}
+
 // HasTitle checks every registered provider-id-capable server until one reports the title.
 func (s *Service) HasTitle(
 	ctx context.Context, kind core.MediaKind, provider core.MetadataProviderKind,

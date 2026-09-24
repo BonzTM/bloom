@@ -18,16 +18,19 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 ORDER BY w.started_at, w.id
-LIMIT ?6
+LIMIT ?7
 `
 
 type StatsBucketRowsParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 	RowLimit          int64
@@ -43,6 +46,7 @@ func (q *Queries) StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 		arg.RowLimit,
@@ -77,8 +81,10 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 GROUP BY w.client
 ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 1024
@@ -88,6 +94,7 @@ type StatsClientsParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 }
@@ -103,6 +110,7 @@ func (q *Queries) StatsClients(ctx context.Context, arg StatsClientsParams) ([]S
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 	)
@@ -136,8 +144,10 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 GROUP BY w.device_name
 ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 1024
@@ -147,6 +157,7 @@ type StatsDevicesParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 }
@@ -162,6 +173,7 @@ func (q *Queries) StatsDevices(ctx context.Context, arg StatsDevicesParams) ([]S
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 	)
@@ -186,6 +198,87 @@ func (q *Queries) StatsDevices(ctx context.Context, arg StatsDevicesParams) ([]S
 	return items, nil
 }
 
+const statsLibraries = `-- name: StatsLibraries :many
+SELECT w.media_server_id, w.library_id, MAX(w.library_name) AS library_name,
+       COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+       COUNT(DISTINCT w.media_user_id) AS unique_users,
+       COUNT(DISTINCT (
+           CASE
+               WHEN LOWER(w.item_type) = 'movie' THEN 'movie:' || w.item_id
+               WHEN w.series_name <> '' THEN 'series:' || w.series_name
+               ELSE 'other:' || w.item_type
+           END
+       )) AS unique_titles,
+       MAX(w.started_at) AS last_watched_at
+FROM watches w
+WHERE w.started_at >= ?1
+  AND w.started_at < ?2
+  AND (CAST(?3 AS TEXT) = ''
+       OR w.media_server_id = CAST(?3 AS TEXT))
+  AND (CAST(?4 AS TEXT) = ''
+       OR w.library_id = CAST(?4 AS TEXT))
+GROUP BY w.media_server_id, w.library_id
+ORDER BY plays DESC, watch_seconds DESC, library_name ASC, w.library_id ASC, w.media_server_id ASC
+LIMIT ?5
+`
+
+type StatsLibrariesParams struct {
+	WindowStart       string
+	WindowEnd         string
+	MediaServerFilter string
+	LibraryFilter     string
+	RowLimit          int64
+}
+
+type StatsLibrariesRow struct {
+	MediaServerID string
+	LibraryID     string
+	LibraryName   interface{}
+	Plays         int64
+	WatchSeconds  interface{}
+	UniqueUsers   int64
+	UniqueTitles  int64
+	LastWatchedAt interface{}
+}
+
+func (q *Queries) StatsLibraries(ctx context.Context, arg StatsLibrariesParams) ([]StatsLibrariesRow, error) {
+	rows, err := q.db.QueryContext(ctx, statsLibraries,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.MediaServerFilter,
+		arg.LibraryFilter,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StatsLibrariesRow{}
+	for rows.Next() {
+		var i StatsLibrariesRow
+		if err := rows.Scan(
+			&i.MediaServerID,
+			&i.LibraryID,
+			&i.LibraryName,
+			&i.Plays,
+			&i.WatchSeconds,
+			&i.UniqueUsers,
+			&i.UniqueTitles,
+			&i.LastWatchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const statsMovieTitles = `-- name: StatsMovieTitles :many
 SELECT w.media_server_id, w.item_id AS title_key, MAX(w.item_name) AS title_name,
        COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
@@ -197,17 +290,20 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 GROUP BY w.media_server_id, w.item_id
 ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
-LIMIT ?6
+LIMIT ?7
 `
 
 type StatsMovieTitlesParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 	RowLimit          int64
@@ -227,6 +323,7 @@ func (q *Queries) StatsMovieTitles(ctx context.Context, arg StatsMovieTitlesPara
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 		arg.RowLimit,
@@ -271,17 +368,20 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 GROUP BY w.media_server_id, w.item_type
 ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
-LIMIT ?6
+LIMIT ?7
 `
 
 type StatsOtherTitlesParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 	RowLimit          int64
@@ -301,6 +401,7 @@ func (q *Queries) StatsOtherTitles(ctx context.Context, arg StatsOtherTitlesPara
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 		arg.RowLimit,
@@ -342,8 +443,10 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 GROUP BY w.play_method
 ORDER BY plays DESC, watch_seconds DESC, name ASC
 LIMIT 8
@@ -353,6 +456,7 @@ type StatsPlayMethodsParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 }
@@ -368,6 +472,7 @@ func (q *Queries) StatsPlayMethods(ctx context.Context, arg StatsPlayMethodsPara
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 	)
@@ -404,17 +509,20 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 GROUP BY w.media_server_id, w.series_name
 ORDER BY plays DESC, watch_seconds DESC, title_key ASC, w.media_server_id ASC
-LIMIT ?6
+LIMIT ?7
 `
 
 type StatsSeriesTitlesParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 	RowLimit          int64
@@ -434,6 +542,7 @@ func (q *Queries) StatsSeriesTitles(ctx context.Context, arg StatsSeriesTitlesPa
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 		arg.RowLimit,
@@ -486,14 +595,17 @@ WHERE w.started_at >= ?1
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
   AND (CAST(?4 AS TEXT) = ''
-       OR (w.media_server_id = CAST(?4 AS TEXT)
-           AND w.media_user_id = CAST(?5 AS TEXT)))
+       OR w.library_id = CAST(?4 AS TEXT))
+  AND (CAST(?5 AS TEXT) = ''
+       OR (w.media_server_id = CAST(?5 AS TEXT)
+           AND w.media_user_id = CAST(?6 AS TEXT)))
 `
 
 type StatsTotalsParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	UserServerFilter  string
 	MediaUserFilter   string
 }
@@ -511,6 +623,7 @@ func (q *Queries) StatsTotals(ctx context.Context, arg StatsTotalsParams) (Stats
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.UserServerFilter,
 		arg.MediaUserFilter,
 	)
@@ -525,22 +638,25 @@ func (q *Queries) StatsTotals(ctx context.Context, arg StatsTotalsParams) (Stats
 }
 
 const statsUserRecentWatches = `-- name: StatsUserRecentWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at >= ?1
   AND w.started_at < ?2
   AND w.media_server_id = ?3
   AND w.media_user_id = ?4
+  AND (CAST(?5 AS TEXT) = ''
+       OR w.library_id = CAST(?5 AS TEXT))
 ORDER BY w.started_at DESC, w.id DESC
 LIMIT 20
 `
 
 type StatsUserRecentWatchesParams struct {
-	WindowStart  string
-	WindowEnd    string
-	UserServerID string
-	MediaUserID  string
+	WindowStart   string
+	WindowEnd     string
+	UserServerID  string
+	MediaUserID   string
+	LibraryFilter string
 }
 
 type StatsUserRecentWatchesRow struct {
@@ -568,6 +684,8 @@ type StatsUserRecentWatchesRow struct {
 	Source          string
 	CreatedAt       string
 	UpdatedAt       string
+	LibraryID       string
+	LibraryName     string
 	MediaServerName string
 }
 
@@ -577,6 +695,7 @@ func (q *Queries) StatsUserRecentWatches(ctx context.Context, arg StatsUserRecen
 		arg.WindowEnd,
 		arg.UserServerID,
 		arg.MediaUserID,
+		arg.LibraryFilter,
 	)
 	if err != nil {
 		return nil, err
@@ -610,6 +729,8 @@ func (q *Queries) StatsUserRecentWatches(ctx context.Context, arg StatsUserRecen
 			&i.Source,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LibraryID,
+			&i.LibraryName,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -634,15 +755,18 @@ WHERE w.started_at >= ?1
   AND w.started_at < ?2
   AND (CAST(?3 AS TEXT) = ''
        OR w.media_server_id = CAST(?3 AS TEXT))
+  AND (CAST(?4 AS TEXT) = ''
+       OR w.library_id = CAST(?4 AS TEXT))
 GROUP BY w.media_server_id, w.media_user_id
 ORDER BY plays DESC, watch_seconds DESC, w.media_user_id ASC, w.media_server_id ASC
-LIMIT ?4
+LIMIT ?5
 `
 
 type StatsUsersParams struct {
 	WindowStart       string
 	WindowEnd         string
 	MediaServerFilter string
+	LibraryFilter     string
 	RowLimit          int64
 }
 
@@ -660,6 +784,7 @@ func (q *Queries) StatsUsers(ctx context.Context, arg StatsUsersParams) ([]Stats
 		arg.WindowStart,
 		arg.WindowEnd,
 		arg.MediaServerFilter,
+		arg.LibraryFilter,
 		arg.RowLimit,
 	)
 	if err != nil {

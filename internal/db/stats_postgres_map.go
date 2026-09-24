@@ -97,6 +97,7 @@ func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) core.PlaybackWat
 		MediaUserID: row.MediaUserID, Username: row.Username, DeviceID: row.DeviceID,
 		DeviceName: row.DeviceName, Client: row.Client, ServerSessionID: row.ServerSessionID,
 		ItemID: row.ItemID, ItemName: row.ItemName, ItemType: row.ItemType, SeriesName: row.SeriesName,
+		LibraryID: row.LibraryID, LibraryName: row.LibraryName,
 		SeasonNumber: int32FromNull(row.SeasonNumber), EpisodeNumber: int32FromNull(row.EpisodeNumber),
 		PlayMethod: core.PlayMethod(row.PlayMethod), State: core.WatchState(row.State),
 		StartedAt: core.NormalizeTime(row.StartedAt), LastSeenAt: core.NormalizeTime(row.LastSeenAt),

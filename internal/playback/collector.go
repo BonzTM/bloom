@@ -38,6 +38,7 @@ type Observer interface {
 	ObservePlaybackPoll(kind, outcome string, seconds float64)
 	SetOpenWatches(kind, serverID string, count int)
 	IncWatchesClosed(kind, reason string)
+	IncLibraryResolution(outcome string)
 }
 
 // Config is the validated collector configuration.
@@ -51,7 +52,7 @@ type Config struct {
 
 // Dependencies are injected so polling tests need no wall-clock sleeps.
 type Dependencies struct {
-	Store       core.PlaybackStore
+	Store       core.PlaybackPersistence
 	Source      Source
 	Clock       core.Clock
 	Logger      *slog.Logger
@@ -63,10 +64,11 @@ type Dependencies struct {
 
 // Collector polls and persists playback for one media server.
 type Collector struct {
-	server  core.MediaServer
-	config  Config
-	deps    Dependencies
-	tracker *core.PlaybackTracker
+	server     core.MediaServer
+	config     Config
+	deps       Dependencies
+	tracker    *core.PlaybackTracker
+	resolution *libraryResolverWorker
 }
 
 // NewCollector validates dependencies and returns one per-server collector.
@@ -84,7 +86,11 @@ func NewCollector(server core.MediaServer, config Config, deps Dependencies) (*C
 	if deps.NewID == nil {
 		deps.NewID = core.NewID
 	}
-	return &Collector{server: server, config: config, deps: deps}, nil
+	collector := &Collector{server: server, config: config, deps: deps}
+	if resolver, ok := deps.Source.(core.LibraryResolver); ok {
+		collector.resolution = newLibraryResolverWorker(server, config, deps, resolver)
+	}
+	return collector, nil
 }
 
 func validConfig(config Config) bool {
@@ -96,8 +102,32 @@ func validConfig(config Config) bool {
 		config.StoreTimeout >= minStoreTimeout && config.StoreTimeout <= maxStoreTimeout
 }
 
-// Run initializes persisted state, polls sequentially, and exits on cancellation.
+// Run owns library resolution, polls sequentially, and joins all work on exit.
 func (c *Collector) Run(ctx context.Context) error {
+	cancelResolver, resolverDone := c.startResolver(ctx)
+	if cancelResolver != nil {
+		defer func() {
+			cancelResolver()
+			<-resolverDone
+		}()
+	}
+	return c.runPollLoop(ctx)
+}
+
+func (c *Collector) startResolver(ctx context.Context) (context.CancelFunc, <-chan struct{}) {
+	if c.resolution == nil {
+		return nil, nil
+	}
+	resolverCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.resolution.run(resolverCtx)
+	}()
+	return cancel, done
+}
+
+func (c *Collector) runPollLoop(ctx context.Context) error {
 	if c.deps.Observer != nil {
 		defer c.deps.Observer.SetOpenWatches(string(c.server.Kind), c.server.ID, 0)
 	}
@@ -196,6 +226,10 @@ func (c *Collector) poll(ctx context.Context) (string, error) {
 	}
 	c.observePoll("success", started)
 	c.observeOpen()
+	if c.resolution != nil {
+		c.resolution.enqueueForeground(mutations)
+		c.resolution.requestBackfill()
+	}
 	return "success", nil
 }
 

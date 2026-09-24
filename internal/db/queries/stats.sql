@@ -18,6 +18,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)));
@@ -32,6 +34,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND LOWER(w.item_type) = 'movie'
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -50,6 +54,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.series_name <> ''
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -68,6 +74,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.series_name = ''
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -84,8 +92,33 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
 GROUP BY w.media_server_id, w.media_user_id
 ORDER BY plays DESC, watch_seconds DESC, w.media_user_id ASC, w.media_server_id ASC
+LIMIT sqlc.arg(row_limit);
+
+-- name: StatsLibraries :many
+SELECT w.media_server_id, w.library_id, MAX(w.library_name) AS library_name,
+       COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+       COUNT(DISTINCT w.media_user_id) AS unique_users,
+       COUNT(DISTINCT (
+           CASE
+               WHEN LOWER(w.item_type) = 'movie' THEN 'movie:' || w.item_id
+               WHEN w.series_name <> '' THEN 'series:' || w.series_name
+               ELSE 'other:' || w.item_type
+           END
+       )) AS unique_titles,
+       MAX(w.started_at) AS last_watched_at
+FROM watches w
+WHERE w.started_at >= sqlc.arg(window_start)
+  AND w.started_at < sqlc.arg(window_end)
+  AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
+       OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
+GROUP BY w.media_server_id, w.library_id
+ORDER BY plays DESC, watch_seconds DESC, library_name ASC, w.library_id ASC, w.media_server_id ASC
 LIMIT sqlc.arg(row_limit);
 
 -- name: StatsClients :many
@@ -96,6 +129,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -111,6 +146,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -126,6 +163,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -140,6 +179,8 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND (CAST(sqlc.arg(media_server_filter) AS TEXT) = ''
        OR w.media_server_id = CAST(sqlc.arg(media_server_filter) AS TEXT))
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
   AND (CAST(sqlc.arg(user_server_filter) AS TEXT) = ''
        OR (w.media_server_id = CAST(sqlc.arg(user_server_filter) AS TEXT)
            AND w.media_user_id = CAST(sqlc.arg(media_user_filter) AS TEXT)))
@@ -154,5 +195,7 @@ WHERE w.started_at >= sqlc.arg(window_start)
   AND w.started_at < sqlc.arg(window_end)
   AND w.media_server_id = sqlc.arg(user_server_id)
   AND w.media_user_id = sqlc.arg(media_user_id)
+  AND (CAST(sqlc.arg(library_filter) AS TEXT) = ''
+       OR w.library_id = CAST(sqlc.arg(library_filter) AS TEXT))
 ORDER BY w.started_at DESC, w.id DESC
 LIMIT 20;
