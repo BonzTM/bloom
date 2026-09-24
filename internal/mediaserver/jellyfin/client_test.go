@@ -223,6 +223,45 @@ func TestClientCreateUserFindsUserAfterResponseLoss(t *testing.T) {
 	}
 }
 
+func TestClientFindUserByNameAndID(t *testing.T) {
+	const userID = "44444444-4444-4444-8444-444444444444"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/Users" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `[{"Id":"`+userID+`","Name":"alice"}]`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	byName, found, err := client.FindUserByName(context.Background(), "alice")
+	if err != nil || !found || byName.ID != userID {
+		t.Fatalf("FindUserByName = %+v, %t, %v", byName, found, err)
+	}
+	byID, found, err := client.FindUserByID(context.Background(), userID)
+	if err != nil || !found || byID.Name != "alice" {
+		t.Fatalf("FindUserByID = %+v, %t, %v", byID, found, err)
+	}
+}
+
+func TestClientFindUserByNameRejectsAmbiguousExactMatches(t *testing.T) {
+	const firstUserID = "44444444-4444-4444-8444-444444444444"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `[{"Id":"`+firstUserID+`","Name":"alice"},`+
+			`{"Id":"55555555-5555-4555-8555-555555555555","Name":"alice"}]`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	user, found, err := client.FindUserByName(context.Background(), "alice")
+	if !errors.Is(err, core.ErrMediaUserAmbiguous) || found || user != (core.MediaUser{}) {
+		t.Fatalf("FindUserByName = %+v, %t, %v", user, found, err)
+	}
+	user, found, err = client.FindUserByID(context.Background(), firstUserID)
+	if err != nil || !found || user.ID != firstUserID {
+		t.Fatalf("FindUserByID = %+v, %t, %v", user, found, err)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

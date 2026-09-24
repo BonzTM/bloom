@@ -127,14 +127,16 @@ func (s *postgresInvites) RevokeInvite(ctx context.Context, id string, revokedAt
 
 func (s *postgresInvites) RedeemInvite(
 	ctx context.Context, hash [sha256.Size]byte, clock core.Clock, redeem core.InviteRedeemFunc,
-) error {
+) (bool, error) {
 	if clock == nil || redeem == nil {
-		return core.ErrInvalidArgument
+		return false, core.ErrInvalidArgument
 	}
 	var provisioningErr error
+	var linkCreated bool
 	txErr := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
 		q := postgres.New(tx)
-		redeemErr := s.redeemLocked(ctx, q, hash, clock, redeem)
+		created, redeemErr := s.redeemLocked(ctx, q, hash, clock, redeem)
+		linkCreated = created
 		pending, ok := errors.AsType[*core.InviteProvisioningError](redeemErr)
 		if !ok || pending == nil {
 			return redeemErr
@@ -142,35 +144,61 @@ func (s *postgresInvites) RedeemInvite(
 		provisioningErr = redeemErr
 		return insertPostgresProvisioningFailure(ctx, q, pending.Failure)
 	})
-	return errors.Join(provisioningErr, txErr)
+	return linkCreated, errors.Join(provisioningErr, txErr)
 }
 
 func (s *postgresInvites) redeemLocked(
 	ctx context.Context, q *postgres.Queries, hash [sha256.Size]byte, clock core.Clock, redeem core.InviteRedeemFunc,
-) error {
+) (bool, error) {
 	invite, err := s.lockedInvite(ctx, q, hash)
 	if err != nil {
-		return err
+		return false, err
 	}
 	now := core.NormalizeTime(clock.Now())
 	if availabilityErr := inviteAvailable(invite, now); availabilityErr != nil {
-		return availabilityErr
+		return false, availabilityErr
 	}
 	redemption, err := redeem(ctx, invite)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if validationErr := validateRedemption(invite, redemption); validationErr != nil {
-		return fmt.Errorf("validate invite redemption: %w", validationErr)
+		return false, fmt.Errorf("validate invite redemption: %w", validationErr)
 	}
 	if insertErr := insertPostgresRedemption(ctx, q, redemption); insertErr != nil {
-		return insertErr
+		return false, insertErr
+	}
+	linkCreated, err := insertPostgresInviteLink(ctx, q, redemption)
+	if err != nil {
+		return false, err
 	}
 	rows, err := q.IncrementInviteUse(ctx, postgres.IncrementInviteUseParams{ID: invite.ID, UpdatedAt: core.NormalizeTime(now)})
 	if err != nil || rows != 1 {
-		return fmt.Errorf("increment invite use: %w", errors.Join(err, core.ErrNotFound))
+		return false, fmt.Errorf("increment invite use: %w", errors.Join(err, core.ErrNotFound))
 	}
-	return nil
+	return linkCreated, nil
+}
+
+func insertPostgresInviteLink(
+	ctx context.Context, q *postgres.Queries, redemption core.InviteRedemption,
+) (bool, error) {
+	if redemption.AccountID == "" {
+		return false, nil
+	}
+	link := core.AccountMediaUser{
+		AccountID: redemption.AccountID, MediaServerID: redemption.MediaServerID,
+		MediaUserID: redemption.MediaUserID, Username: redemption.Username,
+		Source: core.AccountMediaUserSourceInvite, CreatedAt: redemption.RedeemedAt, UpdatedAt: redemption.RedeemedAt,
+	}
+	if err := core.ValidateAccountMediaUser(link); err != nil {
+		return false, fmt.Errorf("validate invite account media user: %w", err)
+	}
+	rows, err := q.CreateAccountMediaUserIfAbsent(ctx,
+		postgres.CreateAccountMediaUserIfAbsentParams(postgresAccountMediaUserParams(link)))
+	if err != nil {
+		return false, fmt.Errorf("insert invite account media user: %w", err)
+	}
+	return rows == 1, nil
 }
 
 func (s *postgresInvites) RecordInviteProvisioningFailure(

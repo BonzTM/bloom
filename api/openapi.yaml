@@ -979,7 +979,7 @@ paths:
       tags: [invites]
       operationId: acceptInvite
       summary: Create a Jellyfin user and apply this invite's library access.
-      security: []
+      security: [{}, { sessionCookie: [] }]
       parameters:
         - $ref: "#/components/parameters/InviteCode"
       requestBody:
@@ -989,15 +989,16 @@ paths:
             schema: { $ref: "#/components/schemas/AcceptInviteRequest" }
       responses:
         "201": { $ref: "#/components/responses/InviteAccepted" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PublicForbidden" }
-        "404": { $ref: "#/components/responses/PublicInviteNotFound" }
-        "409": { $ref: "#/components/responses/PublicConflict" }
-        "415": { $ref: "#/components/responses/PublicUnsupportedMediaType" }
-        "422": { $ref: "#/components/responses/PublicValidationFailed" }
-        "429": { $ref: "#/components/responses/PublicInviteRateLimited" }
-        "500": { $ref: "#/components/responses/PublicInternalError" }
-        "502": { $ref: "#/components/responses/PublicMediaServerFailure" }
-        "503": { $ref: "#/components/responses/PublicMediaServerBusy" }
+        "404": { $ref: "#/components/responses/InviteAcceptanceNotFound" }
+        "409": { $ref: "#/components/responses/InviteAcceptanceConflict" }
+        "415": { $ref: "#/components/responses/InviteAcceptanceUnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InviteAcceptanceValidationFailed" }
+        "429": { $ref: "#/components/responses/InviteAcceptanceRateLimited" }
+        "500": { $ref: "#/components/responses/InviteAcceptanceInternalError" }
+        "502": { $ref: "#/components/responses/InviteAcceptanceMediaServerFailure" }
+        "503": { $ref: "#/components/responses/InviteAcceptanceMediaServerBusy" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedPost" }
   /api/v1/playback/now:
     get:
@@ -1394,6 +1395,91 @@ paths:
       responses:
         <<: *StatsOverviewResponses
         "200": { $ref: "#/components/responses/StatsUserReturned" }
+  /api/v1/stats/me:
+    get:
+      tags: [stats]
+      operationId: getOwnStats
+      summary: Return the caller's linked media-user dashboard.
+      security: [{ sessionCookie: [] }]
+      parameters: *StatsWindowParameters
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsUserReturned" }
+        "404": { $ref: "#/components/responses/MediaUserNotLinked" }
+  /api/v1/me/media-users:
+    get:
+      tags: [stats]
+      operationId: listOwnMediaUsers
+      summary: Return the caller's links after bounded on-demand username matching.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/AccountMediaUsersReturned" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/accounts/{id}/media-users:
+    get:
+      tags: [admin]
+      operationId: listAccountMediaUsers
+      summary: Return one account's media-user links.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+        - name: include_suppressed
+          in: query
+          description: Include links suppressed by an administrator.
+          schema: { type: boolean, default: false }
+      responses:
+        "200": { $ref: "#/components/responses/AccountMediaUsersReturned" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/accounts/{id}/media-users/{media_server_id}:
+    put:
+      tags: [admin]
+      operationId: setAccountMediaUser
+      summary: Set one administrator-managed media-user link.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+        - { $ref: "#/components/parameters/AccountMediaServerID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetAccountMediaUserRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/AccountMediaUserReturned" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    delete:
+      tags: [admin]
+      operationId: deleteAccountMediaUser
+      summary: Suppress one account-to-media-user link from own-data use and automatic matching.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+        - { $ref: "#/components/parameters/AccountMediaServerID" }
+      responses:
+        "204": { description: Link deleted., headers: { Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }, Set-Cookie: { $ref: "#/components/headers/SetCookie" }, Vary: { $ref: "#/components/headers/VaryCookie" }, X-Request-ID: { $ref: "#/components/headers/XRequestID" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
 components:
   parameters:
     StatsDays:
@@ -1429,6 +1515,11 @@ components:
       in: path
       required: true
       schema: { type: string, minLength: 1, x-max-bytes: 256, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+    AccountMediaServerID:
+      name: media_server_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     MediaServerID:
       name: id
       in: path
@@ -1526,10 +1617,54 @@ components:
           schema: { $ref: "#/components/schemas/PublicInviteResponse" }
     InviteAccepted:
       description: Jellyfin user created and library access applied.
-      headers: *PublicHeaders
+      headers: &OptionalSessionHeaders
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/AcceptInviteResponse" }
+    InviteAcceptanceNotFound:
+      description: Opaque response for an unknown, expired, exhausted, or revoked invite.
+      headers: *OptionalSessionHeaders
+      content: &OptionalSessionErrorContent
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    InviteAcceptanceConflict:
+      description: The requested Jellyfin username is unavailable.
+      headers: *OptionalSessionHeaders
+      content: *OptionalSessionErrorContent
+    InviteAcceptanceUnsupportedMediaType:
+      description: The acceptance request is not JSON.
+      headers: *OptionalSessionHeaders
+      content: *OptionalSessionErrorContent
+    InviteAcceptanceValidationFailed:
+      description: The acceptance body or fields are invalid.
+      headers: *OptionalSessionHeaders
+      content: *OptionalSessionErrorContent
+    InviteAcceptanceRateLimited:
+      description: The client-IP or invite-code rate limit was exceeded.
+      headers:
+        <<: *OptionalSessionHeaders
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content: *OptionalSessionErrorContent
+    InviteAcceptanceInternalError:
+      description: Opaque internal failure.
+      headers: *OptionalSessionHeaders
+      content: *OptionalSessionErrorContent
+    InviteAcceptanceMediaServerFailure:
+      description: Opaque Jellyfin failure. Transient failures may include Retry-After.
+      headers:
+        <<: *OptionalSessionHeaders
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content: *OptionalSessionErrorContent
+    InviteAcceptanceMediaServerBusy:
+      description: The outbound or acceptance concurrency limit is full.
+      headers:
+        <<: *OptionalSessionHeaders
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content: *OptionalSessionErrorContent
     PublicInviteNotFound:
       description: Opaque response for an unknown, expired, exhausted, or revoked invite.
       headers: *PublicHeaders
@@ -1682,6 +1817,18 @@ components:
       description: One media-server user's dashboard and at most 20 latest watches.
       headers: *AuthenticatedHeaders
       content: { application/json: { schema: { $ref: "#/components/schemas/StatsUserResponse" } } }
+    AccountMediaUserReturned:
+      description: The stored account-to-media-user link.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/AccountMediaUser" } } }
+    AccountMediaUsersReturned:
+      description: At most 100 links ordered by media-server name and identifier.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/AccountMediaUsersResponse" } } }
+    MediaUserNotLinked:
+      description: The caller has no linked media user after bounded on-demand matching. The error code is `media_user_not_linked`.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } }
     Unauthorized:
       description: No live authenticated session.
       headers:
@@ -2676,6 +2823,11 @@ components:
           oneOf:
             - { type: string, const: "" }
             - { type: string, format: uuid }
+        media_user_id:
+          type: string
+          minLength: 1
+          x-max-bytes: 128
+          pattern: '^[^\x00-\x1F\x7F-\x9F]+$'
         time_zone: { type: string, minLength: 1, x-max-bytes: 64 }
     StatsTotals:
       type: object
@@ -2814,6 +2966,32 @@ components:
         play_methods: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/StatsBreakdown" } }
         daily: { type: array, maxItems: 367, items: { $ref: "#/components/schemas/StatsDailyBucket" } }
         watches: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/PlaybackWatch" } }
+    AccountMediaUser:
+      type: object
+      required: [account_id, media_server_id, media_server_name, media_user_id, username, source, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        account_id: { type: string, format: uuid }
+        media_server_id: { type: string, format: uuid }
+        media_server_name: { type: string, minLength: 1, x-max-bytes: 100 }
+        media_user_id: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+        username: { type: string, minLength: 1, x-max-bytes: 64, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+        source: { type: string, enum: [invite, match, admin] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        suppressed_at: { type: string, format: date-time, description: Present when an administrator suppressed the link. }
+    AccountMediaUsersResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/AccountMediaUser" } }
+    SetAccountMediaUserRequest:
+      type: object
+      required: [media_user_id]
+      additionalProperties: false
+      properties:
+        media_user_id: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
     LoginRequest:
       type: object
       required: [username, password]
@@ -3015,6 +3193,7 @@ components:
         - download_manager_not_found
         - download_manager_in_use
         - notification_channel_failure
+        - media_user_not_linked
     OIDCCallbackErrorCode:
       type: string
       description: Closed browser-facing OIDC callback failure code set.

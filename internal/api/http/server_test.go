@@ -233,7 +233,8 @@ func TestVersionContract(t *testing.T) {
 }
 
 func expectedAPIRoutes() []apiRoute {
-	return []apiRoute{
+	routes := make([]apiRoute, 0, len(apiRouteInventory))
+	routes = append(routes, []apiRoute{
 		{method: http.MethodGet, path: "/api/v1/version", access: routePublic},
 		{method: http.MethodGet, path: "/api/v1/auth/permissions", access: routePublic},
 		{method: http.MethodGet, path: "/api/v1/auth/providers", access: routePublic},
@@ -265,7 +266,7 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
 		{method: http.MethodDelete, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/invite/{code}", access: routePublic},
-		{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic},
+		{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, sessions: true, authRequired: true, optionalAccount: true},
 		{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/overview", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
@@ -275,6 +276,17 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodGet, path: "/api/v1/stats/users", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/libraries", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/stats/users/{media_server_id}/{media_user_id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/stats/me", access: routePermission, permission: core.PermissionStatsReadOwn, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/me/media-users", access: routePermission, permission: core.PermissionStatsReadOwn, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/accounts/{id}/media-users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodPut, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodDelete, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+	}...)
+	return append(routes, expectedRequestAPIRoutes()...)
+}
+
+func expectedRequestAPIRoutes() []apiRoute {
+	return []apiRoute{
 		{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
@@ -309,7 +321,8 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		got := apiRouteInventory[index]
 		if got.method != expected.method || got.path != expected.path || got.access != expected.access ||
 			got.permission != expected.permission || !slices.Equal(got.anyPermissions, expected.anyPermissions) || got.sessions != expected.sessions ||
-			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot || got.oidc != expected.oidc {
+			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot || got.oidc != expected.oidc ||
+			got.optionalAccount != expected.optionalAccount {
 			t.Errorf("route %d = %+v, want %+v", index, got, expected)
 		}
 		if got.access != routePublic && !got.usesSessionAccount() {

@@ -327,8 +327,11 @@ func routeResource(r *http.Request) string {
 		return auditResourcePlayback
 	case "/api/v1/stats/overview", "/api/v1/stats/daily", "/api/v1/stats/patterns",
 		"/api/v1/stats/titles", "/api/v1/stats/users", "/api/v1/stats/libraries",
-		"/api/v1/stats/users/{media_server_id}/{media_user_id}":
+		"/api/v1/stats/users/{media_server_id}/{media_user_id}", "/api/v1/stats/me",
+		"/api/v1/me/media-users":
 		return auditResourceStats
+	case "/api/v1/accounts/{id}/media-users", "/api/v1/accounts/{id}/media-users/{media_server_id}":
+		return auditResourceMediaServers
 	case "/api/v1/metadata/search", "/api/v1/metadata/movies/{id}", "/api/v1/metadata/series/{id}":
 		return auditResourceMetadata
 	case "/api/v1/metadata/providers/tmdb/key":

@@ -77,6 +77,7 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteRolePermissionColumns, expectedRolePermissionColumns)
 	assertColumns(t, pool, sqliteAccountRoleColumns, expectedAccountRoleColumns)
 	assertColumns(t, pool, sqliteMediaServerColumns, expectedMediaServerColumns)
+	assertColumns(t, pool, sqliteAccountMediaUserColumns, expectedAccountMediaUserColumns)
 	assertColumns(t, pool, sqliteIdentityColumns, expectedIdentityColumns)
 	assertColumns(t, pool, sqliteInviteColumns, expectedInviteColumns)
 	assertColumns(t, pool, sqliteInviteLibraryColumns, expectedInviteLibraryColumns)
@@ -97,6 +98,7 @@ var (
 	expectedRolePermissionColumns            = []string{"permission", "role_id"}
 	expectedAccountRoleColumns               = []string{"account_id", "role_id", "source"}
 	expectedMediaServerColumns               = []string{"allow_insecure", "base_url", "created_at", "credential_ciphertext", "id", "kind", "name", "name_key", "updated_at"}
+	expectedAccountMediaUserColumns          = []string{"account_id", "created_at", "media_server_id", "media_user_id", "source", "suppressed_at", "updated_at", "username"}
 	expectedIdentityColumns                  = []string{"account_id", "created_at", "issuer", "last_login_at", "mapped_roles", "provider", "subject", "username_claim"}
 	expectedInviteColumns                    = []string{"code_hash", "created_at", "created_by_account_id", "expires_at", "id", "label", "max_uses", "media_server_id", "revoked_at", "updated_at", "use_count"}
 	expectedInviteLibraryColumns             = []string{"invite_id", "library_id"}
@@ -216,6 +218,10 @@ func sqliteSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 
 func sqliteInviteColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return sqliteTableColumns(ctx, pool, "invites")
+}
+
+func sqliteAccountMediaUserColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "account_media_users")
 }
 
 func sqliteRequestColumns(ctx context.Context, pool *sql.DB) ([]string, error) {

@@ -24,15 +24,16 @@ const (
 type apiHandler func(*Server, http.ResponseWriter, *http.Request)
 
 type apiRoute struct {
-	method, path   string
-	access         routeAccess
-	permission     core.Permission
-	anyPermissions []core.Permission
-	sessions       bool
-	authRequired   bool
-	snapshot       bool
-	oidc           bool
-	handler        apiHandler
+	method, path    string
+	access          routeAccess
+	permission      core.Permission
+	anyPermissions  []core.Permission
+	sessions        bool
+	authRequired    bool
+	snapshot        bool
+	oidc            bool
+	optionalAccount bool
+	handler         apiHandler
 }
 
 var apiRouteInventory = []apiRoute{
@@ -67,7 +68,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleGetInvite},
 	{method: http.MethodDelete, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleRevokeInvite},
 	{method: http.MethodGet, path: "/api/v1/invite/{code}", access: routePublic, handler: (*Server).handlePreviewInvite},
-	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, handler: (*Server).handleAcceptInvite},
+	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, sessions: true, authRequired: true, optionalAccount: true, handler: (*Server).handleAcceptInvite},
 	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
 	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
 	{method: http.MethodGet, path: "/api/v1/stats/overview", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsOverview},
@@ -77,6 +78,11 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/stats/users", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsUsers},
 	{method: http.MethodGet, path: "/api/v1/stats/libraries", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsLibraries},
 	{method: http.MethodGet, path: "/api/v1/stats/users/{media_server_id}/{media_user_id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsUser},
+	{method: http.MethodGet, path: "/api/v1/stats/me", access: routePermission, permission: core.PermissionStatsReadOwn, authRequired: true, handler: (*Server).handleStatsMe},
+	{method: http.MethodGet, path: "/api/v1/me/media-users", access: routePermission, permission: core.PermissionStatsReadOwn, authRequired: true, handler: (*Server).handleMyMediaUsers},
+	{method: http.MethodGet, path: "/api/v1/accounts/{id}/media-users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleAccountMediaUsers},
+	{method: http.MethodPut, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetAccountMediaUser},
+	{method: http.MethodDelete, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteAccountMediaUser},
 	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSearch},
 	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataMovie},
 	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSeries},
@@ -135,6 +141,9 @@ func (r apiRoute) validate() (core.CatalogPermission, error) {
 	if r.sessions && (r.access != routePublic || !r.authRequired) {
 		return core.CatalogPermission{}, fmt.Errorf("session route %q is not public and auth-enabled", r.path)
 	}
+	if r.optionalAccount && !r.sessions {
+		return core.CatalogPermission{}, fmt.Errorf("optional account route %q has no session", r.path)
+	}
 	if r.snapshot && !r.usesSessionAccount() {
 		return core.CatalogPermission{}, fmt.Errorf("permission-loading route %q is not authenticated", r.path)
 	}
@@ -176,6 +185,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/stats") && s.statsReader == nil {
+			continue
+		}
+		if (route.path == "/api/v1/stats/me" || strings.Contains(route.path, "/media-users")) && s.accountMediaUsers == nil {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/metadata") && (s.metadataReader == nil || s.metadataManager == nil) {
@@ -239,6 +251,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 	if route.usesSessionAccount() {
 		handler = s.sessionHandler(handler, true)
 	} else if route.sessions {
+		if route.optionalAccount {
+			handler = s.optionalSessionAccountMiddleware(handler)
+		}
 		handler = s.sessionHandler(handler, false)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/media-servers") {

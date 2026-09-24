@@ -90,6 +90,11 @@ type InviteMetrics interface {
 	IncInviteAcceptance(outcome string)
 }
 
+// MediaUserMatchMetrics records bounded username-match outcomes.
+type MediaUserMatchMetrics interface {
+	IncMediaUserMatch(outcome string)
+}
+
 // NopMetrics is the default no-op metrics implementation.
 type NopMetrics struct{}
 
@@ -113,6 +118,9 @@ func (NopMetrics) IncInviteCreation(string) {}
 
 // IncInviteAcceptance does nothing.
 func (NopMetrics) IncInviteAcceptance(string) {}
+
+// IncMediaUserMatch does nothing.
+func (NopMetrics) IncMediaUserMatch(string) {}
 
 // IncSessionCleanupFailure does nothing.
 func (NopMetrics) IncSessionCleanupFailure() {}

@@ -29,6 +29,17 @@ type AccountIdentity struct {
 	LastLoginAt   time.Time
 }
 
+type AccountMediaUser struct {
+	AccountID     string
+	MediaServerID string
+	MediaUserID   string
+	Username      string
+	Source        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	SuppressedAt  sql.NullTime
+}
+
 type AccountRequestQuota struct {
 	AccountID           string
 	MovieLimit          int32

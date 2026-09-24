@@ -259,6 +259,44 @@ func (s *Service) AcquireUserProvisioner(
 	return provisioner, call.release, nil
 }
 
+// FindUserByName resolves one exact username when the adapter supports lookup.
+func (s *Service) FindUserByName(
+	ctx context.Context, id, name string,
+) (core.MediaUser, bool, bool, error) {
+	call, err := s.adapter(ctx, id, "find_user_by_name")
+	if err != nil {
+		return core.MediaUser{}, false, false, err
+	}
+	defer call.release()
+	lookup, ok := call.entry.adapter.(core.MediaUserLookup)
+	if !ok {
+		return core.MediaUser{}, false, false, nil
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	user, found, err := lookup.FindUserByName(callCtx, name)
+	return user, found, true, err
+}
+
+// FindUserByID verifies one media-user identifier when the adapter supports it.
+func (s *Service) FindUserByID(
+	ctx context.Context, id, mediaUserID string,
+) (core.MediaUser, bool, bool, error) {
+	call, err := s.adapter(ctx, id, "find_user_by_id")
+	if err != nil {
+		return core.MediaUser{}, false, false, err
+	}
+	defer call.release()
+	lookup, ok := call.entry.adapter.(core.MediaUserIDLookup)
+	if !ok {
+		return core.MediaUser{}, false, false, nil
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	user, found, err := lookup.FindUserByID(callCtx, mediaUserID)
+	return user, found, true, err
+}
+
 // ListSessions returns active playback through the configured adapter.
 func (s *Service) ListSessions(ctx context.Context, id string) ([]core.PlaybackSession, error) {
 	call, err := s.adapter(ctx, id, "list_sessions")

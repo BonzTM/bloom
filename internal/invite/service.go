@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -30,6 +31,7 @@ type Service struct {
 	servers      mediaServers
 	provisioners provisionerAcquirer
 	clock        core.Clock
+	logger       *slog.Logger
 }
 
 // CreateInput is the validated intent for one invite.
@@ -70,12 +72,12 @@ func (*LibrarySelectionError) Unwrap() error { return core.ErrInvalidArgument }
 // NewService constructs an invite application service.
 func NewService(
 	reader core.InviteReader, store core.InviteStore, servers mediaServers,
-	provisioners provisionerAcquirer, clock core.Clock,
+	provisioners provisionerAcquirer, clock core.Clock, logger *slog.Logger,
 ) (*Service, error) {
-	if reader == nil || store == nil || servers == nil || provisioners == nil || clock == nil {
+	if reader == nil || store == nil || servers == nil || provisioners == nil || clock == nil || logger == nil {
 		return nil, errors.New("invite service: all dependencies are required")
 	}
-	return &Service{reader: reader, store: store, servers: servers, provisioners: provisioners, clock: clock}, nil
+	return &Service{reader: reader, store: store, servers: servers, provisioners: provisioners, clock: clock, logger: logger}, nil
 }
 
 // Create validates server libraries and persists a freshly generated code hash.
@@ -197,7 +199,10 @@ func opaqueInviteError(err error) error {
 }
 
 // Accept provisions one media user and records the use under the store's lock.
-func (s *Service) Accept(ctx context.Context, code, username, password string) (Accepted, error) {
+func (s *Service) Accept(ctx context.Context, accountID, code, username, password string) (Accepted, error) {
+	if accountID != "" && !core.ValidID(accountID) {
+		return Accepted{}, core.ErrInvalidArgument
+	}
 	if err := validateAcceptance(username, password); err != nil {
 		return Accepted{}, err
 	}
@@ -215,16 +220,21 @@ func (s *Service) Accept(ctx context.Context, code, username, password string) (
 		return Accepted{}, err
 	}
 	state := acceptanceState{
-		service: s, provisioner: provisioner, username: username, password: password, failureID: failureID,
+		service: s, provisioner: provisioner, accountID: accountID,
+		username: username, password: password, failureID: failureID,
 	}
 	defer state.clearPassword()
-	err = s.store.RedeemInvite(ctx, hash, s.clock, state.redeem)
+	linkCreated, err := s.store.RedeemInvite(ctx, hash, s.clock, state.redeem)
 	if err != nil {
 		if provisioningErr, ok := errors.AsType[*core.InviteProvisioningError](err); ok && provisioningErr != nil {
 			return Accepted{}, err
 		}
 		err = state.compensate(ctx, err)
 		return Accepted{}, state.persistPending(ctx, err)
+	}
+	if accountID != "" && !linkCreated {
+		s.logger.InfoContext(ctx, "invite media user link kept existing mapping",
+			"account_id", accountID, "media_server_id", preview.Invite.MediaServerID)
 	}
 	state.cleanup = false
 	return Accepted{InviteID: preview.Invite.ID, MediaServerName: preview.MediaServerName, Username: username}, nil
@@ -251,6 +261,7 @@ func (s *Service) acceptancePreview(
 type acceptanceState struct {
 	service     *Service
 	provisioner core.MediaUserProvisioner
+	accountID   string
 	username    string
 	password    string
 	failureID   string
@@ -282,7 +293,7 @@ func (s *acceptanceState) redeem(ctx context.Context, invite core.Invite) (core.
 		return core.InviteRedemption{}, s.finishProvisioningFailure(ctx, err, 1)
 	}
 	return core.InviteRedemption{
-		ID: id, InviteID: invite.ID, MediaServerID: invite.MediaServerID,
+		ID: id, InviteID: invite.ID, AccountID: s.accountID, MediaServerID: invite.MediaServerID,
 		MediaUserID: user.ID, Username: s.username, RedeemedAt: core.NormalizeTime(s.service.clock.Now()),
 	}, nil
 }

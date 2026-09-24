@@ -50,6 +50,7 @@ const (
 	codeDownloadManagerNotFound = "download_manager_not_found"
 	codeDownloadManagerInUse    = "download_manager_in_use"
 	codeNotificationFailure     = "notification_channel_failure"
+	codeMediaUserNotLinked      = "media_user_not_linked"
 	oidcFailureClassification   = "OpenID Connect callback failure"
 	maxLoggedErrorBytes         = 512
 )
@@ -63,7 +64,7 @@ func errorClass(err error) (status int, code string) {
 	if errors.As(err, &notificationErr) || errors.Is(err, core.ErrNotificationChannelFailure) {
 		return http.StatusBadGateway, codeNotificationFailure
 	}
-	if status, code, ok := downloadManagerErrorClass(err); ok {
+	if status, code, ok := specializedErrorClass(err); ok {
 		return status, code
 	}
 	switch {
@@ -120,6 +121,13 @@ func errorClass(err error) (status int, code string) {
 	default:
 		return http.StatusInternalServerError, codeInternal
 	}
+}
+
+func specializedErrorClass(err error) (int, string, bool) {
+	if errors.Is(err, core.ErrMediaUserNotLinked) {
+		return http.StatusNotFound, codeMediaUserNotLinked, true
+	}
+	return downloadManagerErrorClass(err)
 }
 
 func downloadManagerErrorClass(err error) (int, string, bool) {

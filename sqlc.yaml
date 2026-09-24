@@ -19,6 +19,7 @@ sql:
       - internal/db/queries/accounts_sqlite.sql
       - internal/db/queries/authorization.sql
       - internal/db/queries/media_servers.sql
+      - internal/db/queries/account_media_users.sql
       - internal/db/queries/download_managers.sql
       - internal/db/queries/notifications.sql
       - internal/db/queries/notifications_sqlite.sql
@@ -47,6 +48,7 @@ sql:
       - internal/db/queries/accounts_postgres.sql
       - internal/db/queries/authorization.sql
       - internal/db/queries/media_servers.sql
+      - internal/db/queries/account_media_users.sql
       - internal/db/queries/download_managers.sql
       - internal/db/queries/notifications.sql
       - internal/db/queries/notifications_postgres.sql

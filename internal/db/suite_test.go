@@ -53,6 +53,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		testOIDCIdentityStore(t, pool, driver, store, adminStore, authorizer)
 	})
 	runMediaServerEngineTests(t, pool, driver)
+	runAccountMediaUserEngineTests(t, pool, driver, store)
 	runInviteEngineTests(t, pool, driver, store)
 	runPlaybackEngineTests(t, pool, driver)
 	runStatsEngineTests(t, pool, driver)
@@ -169,6 +170,12 @@ func runInviteEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acco
 	t.Run("round trip status and revocation", func(t *testing.T) {
 		testInviteRoundTrip(t, reader, store, account.ID, server.ID, now)
 	})
+	t.Run("signed-in redemption links atomically and keeps conflicts", func(t *testing.T) {
+		testInviteAccountLink(t, pool, driver, store, account.ID, server.ID, now)
+	})
+	t.Run("redemption rejects unsafe media user ids", func(t *testing.T) {
+		testInviteRejectsUnsafeMediaUserIDs(t, reader, store, account.ID, server.ID, now)
+	})
 	t.Run("concurrent last use", func(t *testing.T) {
 		testConcurrentInviteLastUse(t, reader, store, account.ID, server.ID, now)
 	})
@@ -184,6 +191,62 @@ func runInviteEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acco
 	t.Run("provisioning failure insert error rolls back", func(t *testing.T) {
 		testInviteProvisioningFailureInsertError(t, pool, reader, store, account.ID, server.ID, now)
 	})
+}
+
+func testInviteRejectsUnsafeMediaUserIDs(
+	t *testing.T, reader core.InviteReader, store core.InviteStore,
+	accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	invalidIDs := []string{"control\x00id", string([]byte{0xff})}
+	for index, mediaUserID := range invalidIDs {
+		invite, hash := createInviteFixture(t, store, accountID, serverID,
+			fmt.Sprintf("Invalid media user %d", index), now.Add(time.Duration(index+40)*time.Second))
+		redeem := func(context.Context, core.Invite) (core.InviteRedemption, error) {
+			return core.InviteRedemption{
+				ID: mustID(t), InviteID: invite.ID, AccountID: accountID, MediaServerID: serverID,
+				MediaUserID: mediaUserID, Username: "invite-user", RedeemedAt: now.Add(time.Minute),
+			}, nil
+		}
+		created, err := store.RedeemInvite(t.Context(), hash, testutil.NewFakeClock(now.Add(time.Minute)), redeem)
+		if created || !errors.Is(err, core.ErrInvalidArgument) {
+			t.Fatalf("RedeemInvite invalid id %d = %t, %v", index, created, err)
+		}
+		stored, getErr := reader.GetInvite(t.Context(), invite.ID)
+		if getErr != nil || stored.UseCount != 0 {
+			t.Fatalf("invite after invalid id %d = %+v, %v", index, stored, getErr)
+		}
+	}
+}
+
+func testInviteAccountLink(
+	t *testing.T, pool *sql.DB, driver config.Driver, store core.InviteStore,
+	accountID, serverID string, now time.Time,
+) {
+	t.Helper()
+	linkReader, _, err := db.NewAccountMediaUserStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewAccountMediaUserStores: %v", err)
+	}
+	for index := range 2 {
+		invite, hash := createInviteFixture(t, store, accountID, serverID,
+			fmt.Sprintf("Linked redemption %d", index), now.Add(time.Duration(index+20)*time.Second))
+		mediaUserID := fmt.Sprintf("media-user-%d", index)
+		redeem := func(context.Context, core.Invite) (core.InviteRedemption, error) {
+			return core.InviteRedemption{
+				ID: mustID(t), InviteID: invite.ID, AccountID: accountID, MediaServerID: serverID,
+				MediaUserID: mediaUserID, Username: fmt.Sprintf("invite-user-%d", index), RedeemedAt: now.Add(time.Minute),
+			}, nil
+		}
+		created, redeemErr := store.RedeemInvite(t.Context(), hash, testutil.NewFakeClock(now.Add(time.Minute)), redeem)
+		if redeemErr != nil || created != (index == 0) {
+			t.Fatalf("RedeemInvite %d = %t, %v", index, created, redeemErr)
+		}
+	}
+	link, err := linkReader.GetAccountMediaUser(t.Context(), accountID, serverID)
+	if err != nil || link.MediaUserID != "media-user-0" || link.Source != core.AccountMediaUserSourceInvite {
+		t.Fatalf("invite link = %+v, %v", link, err)
+	}
 }
 
 func testInviteRoundTrip(
@@ -251,9 +314,9 @@ func testConcurrentInviteLastUse(
 		}, nil
 	}
 	clock := testutil.NewFakeClock(now.Add(2 * time.Second))
-	go func() { results <- store.RedeemInvite(context.Background(), hash, clock, redeem) }()
+	go func() { _, err := store.RedeemInvite(context.Background(), hash, clock, redeem); results <- err }()
 	<-entered
-	go func() { results <- store.RedeemInvite(context.Background(), hash, clock, redeem) }()
+	go func() { _, err := store.RedeemInvite(context.Background(), hash, clock, redeem); results <- err }()
 	close(release)
 	first, second := <-results, <-results
 	if (first == nil) == (second == nil) || (!errors.Is(first, core.ErrInviteUnavailable) && !errors.Is(second, core.ErrInviteUnavailable)) {
@@ -290,11 +353,12 @@ func testInviteExpiryAtLock(
 	secondStarted := make(chan struct{})
 	firstRedeem := redemptionCallback(t, now, entered, release)
 	secondRedeem := redemptionCallback(t, now, nil, nil)
-	go func() { firstDone <- store.RedeemInvite(t.Context(), hash, clock, firstRedeem) }()
+	go func() { _, err := store.RedeemInvite(t.Context(), hash, clock, firstRedeem); firstDone <- err }()
 	<-entered
 	go func() {
 		close(secondStarted)
-		secondDone <- store.RedeemInvite(t.Context(), hash, clock, secondRedeem)
+		_, err := store.RedeemInvite(t.Context(), hash, clock, secondRedeem)
+		secondDone <- err
 	}()
 	<-secondStarted
 	clock.Set(expires)
@@ -387,11 +451,12 @@ func testInviteProvisioningFailureBlocksWaiter(
 		return core.InviteRedemption{}, &core.InviteProvisioningError{Failure: failure, Err: cause}
 	}
 	clock := testutil.NewFakeClock(now.Add(5 * time.Second))
-	go func() { firstDone <- store.RedeemInvite(t.Context(), hash, clock, redeem) }()
+	go func() { _, err := store.RedeemInvite(t.Context(), hash, clock, redeem); firstDone <- err }()
 	<-entered
 	go func() {
 		close(secondStarted)
-		secondDone <- store.RedeemInvite(t.Context(), hash, clock, redeem)
+		_, err := store.RedeemInvite(t.Context(), hash, clock, redeem)
+		secondDone <- err
 	}()
 	<-secondStarted
 	close(release)
@@ -424,7 +489,7 @@ func testInviteProvisioningFailureInsertError(
 		duplicate.ID = failure.ID
 		return core.InviteRedemption{}, &core.InviteProvisioningError{Failure: duplicate, Err: cause}
 	}
-	err := store.RedeemInvite(t.Context(), hash, testutil.NewFakeClock(now.Add(9*time.Second)), redeem)
+	_, err := store.RedeemInvite(t.Context(), hash, testutil.NewFakeClock(now.Add(9*time.Second)), redeem)
 	if !errors.Is(err, core.ErrInviteProvisioningFailureRecord) || !errors.Is(err, cause) {
 		t.Fatalf("acceptance error = %v, want provisioning and record failures", err)
 	}
@@ -1112,6 +1177,8 @@ ORDER BY tc.table_name, kcu.column_name`
 	}
 	want := []string{
 		"account_identities:account_id:accounts:id:CASCADE",
+		"account_media_users:account_id:accounts:id:CASCADE",
+		"account_media_users:media_server_id:media_servers:id:CASCADE",
 		"account_request_quotas:account_id:accounts:id:CASCADE",
 		"account_roles:account_id:accounts:id:CASCADE",
 		"account_roles:role_id:roles:id:CASCADE",
@@ -1191,7 +1258,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 16)
+	assertMigrationVersion(t, pool, 17)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -1312,7 +1379,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 16)
+	assertMigrationVersion(t, pool, 17)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}
