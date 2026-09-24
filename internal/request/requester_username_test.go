@@ -85,6 +85,24 @@ func TestRequestUsernameLookupIsBoundedAndPropagatesFailures(t *testing.T) {
 	}
 }
 
+func TestDecideResolvesRequesterBeforeTransition(t *testing.T) {
+	const actorID = "11111111-1111-4111-8111-111111111111"
+	store := &requesterUsernameStore{
+		requests: []core.MediaRequest{{
+			ID: "33333333-3333-4333-8333-333333333333", RequesterID: actorID, Status: core.RequestPending,
+		}},
+		err: errors.New("lookup failed"),
+	}
+	store.request = store.requests[0]
+	service := newRequesterUsernameService(t, store)
+	if _, err := service.Decide(t.Context(), actorID, store.request.ID, true, ""); err == nil {
+		t.Fatal("Decide accepted a failed username lookup")
+	}
+	if store.request.Status != core.RequestPending {
+		t.Fatalf("request status = %q, want pending after lookup failure", store.request.Status)
+	}
+}
+
 func newRequesterUsernameService(t *testing.T, store *requesterUsernameStore) *Service {
 	t.Helper()
 	service, err := NewService(Dependencies{

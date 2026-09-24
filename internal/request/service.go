@@ -107,8 +107,8 @@ type CreateInput struct {
 }
 
 // Create resolves metadata and inserts one request under its rolling quota.
-func (s *Service) Create(ctx context.Context, requesterID string, input CreateInput, autoApprove bool) (core.MediaRequest, error) {
-	if !core.ValidID(requesterID) || !input.Kind.Valid() || core.ValidateProviderID(input.ProviderID) != nil || !core.ValidID(input.ProfileID) {
+func (s *Service) Create(ctx context.Context, requester core.Account, input CreateInput, autoApprove bool) (core.MediaRequest, error) {
+	if !core.ValidID(requester.ID) || !input.Kind.Valid() || core.ValidateProviderID(input.ProviderID) != nil || !core.ValidID(input.ProfileID) {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
 	profile, err := s.profiles.GetRequestProfile(ctx, input.ProfileID)
@@ -122,7 +122,7 @@ func (s *Service) Create(ctx context.Context, requesterID string, input CreateIn
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
-	request, err := s.newRequest(requesterID, profile.ID, title, seasons, autoApprove)
+	request, err := s.newRequest(requester, profile.ID, title, seasons, autoApprove)
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
@@ -131,9 +131,9 @@ func (s *Service) Create(ctx context.Context, requesterID string, input CreateIn
 		return core.MediaRequest{}, fmt.Errorf("create request: %w", err)
 	}
 	s.metrics.IncMediaRequest(string(request.Kind), string(request.Status))
-	s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventCreated, requesterID))
+	s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventCreated, requester.ID))
 	if autoApprove {
-		s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventApproved, requesterID))
+		s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventApproved, requester.ID))
 		s.enqueue(request.ID)
 	}
 	return request, nil
@@ -168,7 +168,7 @@ func (s *Service) resolveMetadata(ctx context.Context, input CreateInput) (core.
 	return series.MetadataTitle, seasons, nil
 }
 
-func (s *Service) newRequest(requesterID, profileID string, title core.MetadataTitle, seasons []core.RequestSeason, autoApprove bool) (core.MediaRequest, error) {
+func (s *Service) newRequest(requester core.Account, profileID string, title core.MetadataTitle, seasons []core.RequestSeason, autoApprove bool) (core.MediaRequest, error) {
 	id, err := core.NewID()
 	if err != nil {
 		return core.MediaRequest{}, err
@@ -178,7 +178,7 @@ func (s *Service) newRequest(requesterID, profileID string, title core.MetadataT
 	decidedBy := ""
 	var decidedAt *time.Time
 	if autoApprove {
-		status, decidedBy = core.RequestApproved, requesterID
+		status, decidedBy = core.RequestApproved, requester.ID
 		decidedAt = &now
 		for index := range seasons {
 			seasons[index].Status = core.SeasonApproved
@@ -186,7 +186,8 @@ func (s *Service) newRequest(requesterID, profileID string, title core.MetadataT
 	}
 	return core.MediaRequest{
 		ID: id, Kind: title.Kind, Provider: title.Provider, ProviderID: title.ProviderID,
-		Title: title.Title, Year: title.Year, PosterPath: title.PosterPath, RequesterID: requesterID, ProfileID: profileID,
+		Title: title.Title, Year: title.Year, PosterPath: title.PosterPath,
+		RequesterID: requester.ID, RequesterUsername: requester.Username, ProfileID: profileID,
 		Status: status, Seasons: seasons, DecidedBy: decidedBy, DecidedAt: decidedAt, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -259,6 +260,12 @@ func (s *Service) Decide(ctx context.Context, actorID, id string, approve bool, 
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
+	requests := []core.MediaRequest{current}
+	err = s.resolveRequesterUsernames(ctx, requests)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	current = requests[0]
 	from, to := current.Status, core.RequestDeclined
 	if approve {
 		to = core.RequestApproved
@@ -270,6 +277,7 @@ func (s *Service) Decide(ctx context.Context, actorID, id string, approve bool, 
 	if err != nil {
 		return core.MediaRequest{}, fmt.Errorf("decide request: %w", err)
 	}
+	request.RequesterUsername = current.RequesterUsername
 	s.metrics.IncMediaRequest(string(request.Kind), string(to))
 	eventType := core.RequestEventDeclined
 	if approve {

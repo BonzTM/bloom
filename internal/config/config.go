@@ -759,7 +759,7 @@ func (o OIDCConfig) validate(publicURL *url.URL) error {
 
 func (o OIDCConfig) validateIssuer() error {
 	issuer, err := url.Parse(o.IssuerURL)
-	if err != nil || issuer.Host == "" || issuer.User != nil || issuer.Opaque != "" || issuer.ForceQuery ||
+	if err != nil || issuer.Hostname() == "" || issuer.User != nil || issuer.Opaque != "" || issuer.ForceQuery ||
 		issuer.RawQuery != "" || issuer.Fragment != "" || issuer.RawFragment != "" || issuer.String() != o.IssuerURL {
 		return errors.New("config: BLOOM_OIDC_ISSUER_URL must be an absolute canonical issuer URL without query or fragment")
 	}

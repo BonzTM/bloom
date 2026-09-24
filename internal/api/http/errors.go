@@ -49,6 +49,7 @@ const (
 	codeDownloadManagerFailure  = "download_manager_failure"
 	codeDownloadManagerNotFound = "download_manager_not_found"
 	codeDownloadManagerInUse    = "download_manager_in_use"
+	oidcFailureClassification   = "OpenID Connect callback failure"
 	maxLoggedErrorBytes         = 512
 )
 
@@ -177,6 +178,21 @@ func writeError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 }
 
 func logRequestError(r *http.Request, logger *slog.Logger, err error) (int, string) {
+	return logRequestErrorWithAttrs(r, logger, err, safeErrorLogAttrs(err))
+}
+
+func writeOIDCError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
+	status, code := logOIDCRequestError(r, logger, err)
+	writeJSON(w, r, logger, status, httputil.ErrorResponse{
+		Code: code, Message: safeMessage(status, err), RequestID: requestIDFrom(r.Context()),
+	})
+}
+
+func logOIDCRequestError(r *http.Request, logger *slog.Logger, err error) (int, string) {
+	return logRequestErrorWithAttrs(r, logger, err, safeOIDCErrorLogAttrs(err))
+}
+
+func logRequestErrorWithAttrs(r *http.Request, logger *slog.Logger, err error, errorAttrs []any) (int, string) {
 	status, code := errorClass(err)
 	// Log once, here at the boundary, with stable fields. 5xx is the unexpected
 	// class and gets error level; client errors are info.
@@ -187,13 +203,29 @@ func logRequestError(r *http.Request, logger *slog.Logger, err error) (int, stri
 		"status", status,
 		"code", code,
 	)
-	attrs = append(attrs, safeErrorLogAttrs(err)...)
+	attrs = append(attrs, errorAttrs...)
 	if status >= http.StatusInternalServerError {
 		logger.ErrorContext(r.Context(), "request failed", attrs...)
 	} else {
 		logger.InfoContext(r.Context(), "request rejected", attrs...)
 	}
 	return status, code
+}
+
+func safeOIDCErrorLogAttrs(err error) []any {
+	attrs := make([]any, 0, 8)
+	attrs = append(attrs,
+		"error_type", fmt.Sprintf("%T", err),
+		"error", oidcFailureClassification,
+	)
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		return attrs
+	}
+	return append(attrs,
+		"cause_type", fmt.Sprintf("%T", cause),
+		"cause_message", "[redacted]",
+	)
 }
 
 func safeErrorLogAttrs(err error) []any {

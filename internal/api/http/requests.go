@@ -84,7 +84,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	account, _ := accountFrom(r.Context())
-	created, err := s.requestService.Create(r.Context(), account.ID, requestapp.CreateInput{Kind: body.Kind, ProviderID: body.ProviderID, ProfileID: body.ProfileID, Seasons: body.Seasons}, hasPermission(r, core.PermissionRequestsApprove))
+	created, err := s.requestService.Create(r.Context(), account, requestapp.CreateInput{Kind: body.Kind, ProviderID: body.ProviderID, ProfileID: body.ProfileID, Seasons: body.Seasons}, hasPermission(r, core.PermissionRequestsApprove))
 	if err != nil {
 		s.emitRequestAudit(r, "request.create", "request:unresolved", body.Kind, "", telemetry.AuditFailure)
 		s.writeRequestError(w, r, err)

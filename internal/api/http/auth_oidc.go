@@ -443,22 +443,22 @@ func (s *Server) writeOIDCCallbackFailure(
 	s.metrics.IncLoginAttempt("oidc", reason)
 	s.emitOIDCAudit(r, "anonymous", routeResource(r), telemetry.AuditFailure, reason)
 	if acceptsHTML(r.Header.Get("Accept")) {
-		logRequestError(r, s.logger, err)
+		logOIDCRequestError(r, s.logger, err)
 		s.writeOIDCBrowserRedirect(w, browserCode)
 		return
 	}
-	writeError(w, r, s.logger, err)
+	writeOIDCError(w, r, s.logger, err)
 }
 
 func (s *Server) writeOIDCInternalError(w http.ResponseWriter, r *http.Request, err error) {
 	s.metrics.IncLoginAttempt("oidc", "internal_error")
 	s.emitOIDCAudit(r, "anonymous", routeResource(r), telemetry.AuditFailure, "internal_error")
 	if acceptsHTML(r.Header.Get("Accept")) {
-		logRequestError(r, s.logger, err)
+		logOIDCRequestError(r, s.logger, err)
 		s.writeOIDCBrowserRedirect(w, oidcErrorInternal)
 		return
 	}
-	writeError(w, r, s.logger, err)
+	writeOIDCError(w, r, s.logger, err)
 }
 
 func (s *Server) writeOIDCRateLimited(w http.ResponseWriter, r *http.Request, retry time.Duration) {

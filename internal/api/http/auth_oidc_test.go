@@ -436,6 +436,28 @@ func TestOIDCProviderRejectionIsOpaque(t *testing.T) {
 	}
 }
 
+func TestOIDCProviderDescriptionIsRedacted(t *testing.T) {
+	h, provider, _ := newOIDCHarness(t, nil)
+	cookie, state := startOIDC(t, h, "/")
+	description := "quiet-denial"
+	provider.err = &core.OIDCRejection{Stage: "token exchange", Err: &oauth2.RetrieveError{
+		Response:  &http.Response{StatusCode: http.StatusBadRequest, Status: "400 Bad Request"},
+		ErrorCode: "invalid_grant", ErrorDescription: description,
+	}}
+	recorder := callbackOIDC(t, h, cookie, state)
+	logs := h.logs.String()
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("provider rejection = %d body %q", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(logs, description) {
+		t.Fatalf("provider error_description reached logs: %s", logs)
+	}
+	if !strings.Contains(logs, `"cause_type":"*oauth2.RetrieveError"`) ||
+		!strings.Contains(logs, `"cause_message":"[redacted]"`) {
+		t.Fatalf("provider rejection lacks redacted cause metadata: %s", logs)
+	}
+}
+
 func TestOIDCExchangeFailureIsLoggedOnceWithRedactedCause(t *testing.T) {
 	h, provider, _ := newOIDCHarness(t, nil)
 	cookie, state := startOIDC(t, h, "/")

@@ -118,7 +118,7 @@ func TestAutoApprovalAndFailedReapprovalPublishAndEnqueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
-	created, err := service.Create(t.Context(), actorID, CreateInput{
+	created, err := service.Create(t.Context(), core.Account{ID: actorID, Username: "alice"}, CreateInput{
 		Kind: core.MediaKindMovie, ProviderID: "10", ProfileID: profileID,
 	}, true)
 	if err != nil || created.Status != core.RequestApproved || len(recorder.enqueued) != 1 ||
