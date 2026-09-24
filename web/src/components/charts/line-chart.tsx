@@ -121,11 +121,15 @@ function AxisLabels({
   step,
 }: Readonly<{ data: readonly ChartPoint[]; step: number }>): ReactNode {
   const every = Math.max(1, Math.ceil(data.length / 6));
+  const lastIndex = data.length - 1;
   return (
     <>
       {data.map((point, index) => {
-        const last = index === data.length - 1;
-        if (index % every !== 0 && !last) {
+        const last = index === lastIndex;
+        // The last label always shows; a periodic one too close to it is
+        // dropped so the two never overlap.
+        const periodic = index % every === 0 && lastIndex - index >= every / 2;
+        if (!periodic && !last) {
           return null;
         }
         return (
@@ -136,10 +140,15 @@ function AxisLabels({
             className="chart-label"
             textAnchor={index === 0 ? "start" : last ? "end" : "middle"}
           >
-            {point.label.length > 10 ? point.label.slice(5) : point.label}
+            {shortDate(point.label)}
           </text>
         );
       })}
     </>
   );
+}
+
+// An ISO date shows as month and day; anything else as itself.
+function shortDate(label: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(label) ? label.slice(5) : label;
 }

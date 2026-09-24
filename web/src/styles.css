@@ -625,6 +625,60 @@ button:disabled {
   resize: vertical;
 }
 
+/* ---------- statistics ---------- */
+
+.stats-controls {
+  flex-wrap: wrap;
+}
+
+.stat-cards {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.stat-card {
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.stat-card-label {
+  color: var(--text-muted);
+  display: block;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+}
+
+.stat-card-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-top: var(--space-1);
+}
+
+.chart-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+
+.chart-grid-3 {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.user-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
 /* ---------- charts ---------- */
 
 .chart {
@@ -641,6 +695,10 @@ button:disabled {
   height: auto;
   max-width: 100%;
   width: 100%;
+}
+
+.chart-svg-horizontal {
+  max-width: 28rem;
 }
 
 .chart-bar {

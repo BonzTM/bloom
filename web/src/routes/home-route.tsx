@@ -25,8 +25,8 @@ const areas: readonly Area[] = [
     heading: "Statistics",
     summary:
       "See who is watching now, browse playback history, and explore per-user and per-library dashboards.",
-    to: "/admin/playback",
-    action: "Open playback",
+    to: "/admin/statistics",
+    action: "Open statistics",
   },
   {
     id: "requests",

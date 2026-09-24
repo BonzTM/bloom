@@ -243,6 +243,12 @@ carry a library identifier. Own-statistics access for non-administrator
 accounts is also later because Bloom accounts are not yet linked to
 media-server users.
 
+The web UI shows the same reports under Statistics in the administration
+area: totals, most-watched titles, most active people, breakdowns, plays and
+watch time per day, and plays by weekday and hour in the viewer's own time
+zone, with each person linking to their own dashboard. Every chart offers its
+numbers as a table.
+
 ### Invites
 
 An account with `users.invite` can create an invite with
