@@ -28,6 +28,16 @@ type AccountIdentity struct {
 	LastLoginAt   string
 }
 
+type AccountMediaUser struct {
+	AccountID     string
+	MediaServerID string
+	MediaUserID   string
+	Username      string
+	Source        string
+	CreatedAt     string
+	UpdatedAt     string
+}
+
 type AccountRequestQuota struct {
 	AccountID           string
 	MovieLimit          int64

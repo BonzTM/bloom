@@ -53,6 +53,14 @@ contracts) gets an entry here.
 
 ### Added
 
+- Account-to-media-user links populated by signed-in invite acceptance, exact
+  username matching, or administrator assignment.
+- `GET /api/v1/stats/me` and `GET /api/v1/me/media-users` for accounts with
+  `stats.read.own`.
+- Administrator account-link routes at
+  `/api/v1/accounts/{id}/media-users` and
+  `/api/v1/accounts/{id}/media-users/{media_server_id}`.
+- SQLite/PostgreSQL migration `00017_account_media_users`.
 - Playback watches now retain their Jellyfin collection-folder library. A
   bounded per-server cache and a 25-item post-poll backfill trickle resolve
   older watches without a separate scheduler.

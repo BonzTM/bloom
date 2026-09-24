@@ -59,6 +59,26 @@ func (s *Server) sessionAccountMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) optionalSessionAccountMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.sessions.GetString(r.Context(), sessionAccountIDKey) == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		account, reason, err := s.loadSessionAccount(r.Context())
+		if err != nil {
+			if reason != "internal_error" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, r, s.logger, err)
+			return
+		}
+		ctx := context.WithValue(r.Context(), accountKey, account)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func (s *Server) permissionSetMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		account, ok := accountFrom(r.Context())

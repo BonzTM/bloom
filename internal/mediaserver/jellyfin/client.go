@@ -63,6 +63,8 @@ type Client struct {
 var (
 	_ core.MediaServerAdapter      = (*Client)(nil)
 	_ core.MediaUserProvisioner    = (*Client)(nil)
+	_ core.MediaUserLookup         = (*Client)(nil)
+	_ core.MediaUserIDLookup       = (*Client)(nil)
 	_ core.MediaAvailabilityLookup = (*Client)(nil)
 	_ core.LibraryResolver         = (*Client)(nil)
 )
@@ -184,7 +186,7 @@ func (c *Client) reconcileAmbiguousCreate(ctx context.Context, name string, crea
 	}
 	lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.callTimeout)
 	defer cancel()
-	user, found, err := c.findUserByName(lookupCtx, name)
+	user, found, err := c.FindUserByName(lookupCtx, name)
 	if err != nil {
 		return core.MediaUser{}, errors.Join(core.ErrMediaUserCreateAmbiguous, createErr, err)
 	}
@@ -200,7 +202,23 @@ func ambiguousCreateError(err error) bool {
 		(mediaErr.Kind == core.MediaServerUnavailable || mediaErr.Kind == core.MediaServerMalformed)
 }
 
-func (c *Client) findUserByName(ctx context.Context, name string) (core.MediaUser, bool, error) {
+// FindUserByName returns the exact-case Jellyfin user with name.
+func (c *Client) FindUserByName(ctx context.Context, name string) (core.MediaUser, bool, error) {
+	if name == "" || len(name) > core.MaxMediaUsernameBytes {
+		return core.MediaUser{}, false, core.ErrInvalidArgument
+	}
+	return c.findUser(ctx, func(user core.MediaUser) bool { return user.Name == name })
+}
+
+// FindUserByID verifies one Jellyfin user identifier and returns its current username.
+func (c *Client) FindUserByID(ctx context.Context, id string) (core.MediaUser, bool, error) {
+	if !core.ValidAccountMediaUserID(id) {
+		return core.MediaUser{}, false, core.ErrInvalidArgument
+	}
+	return c.findUser(ctx, func(user core.MediaUser) bool { return user.ID == id })
+}
+
+func (c *Client) findUser(ctx context.Context, matches func(core.MediaUser) bool) (core.MediaUser, bool, error) {
 	var users []jellyfinapi.UserDto
 	started, err := c.getJSON(ctx, "list_users", "/Users", &users)
 	if err != nil {
@@ -211,15 +229,19 @@ func (c *Client) findUserByName(ctx context.Context, name string) (core.MediaUse
 		return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("user count exceeds limit"))
 	}
 	for _, user := range users {
-		if user.Name == nil || *user.Name != name {
+		if user.Name == nil || user.Id == nil {
 			continue
 		}
-		if user.Id == nil || !core.ValidID(user.Id.String()) {
+		candidate := core.MediaUser{ID: user.Id.String(), Name: *user.Name}
+		if !matches(candidate) {
+			continue
+		}
+		if !core.ValidAccountMediaUserID(candidate.ID) || !core.ValidMediaUsername(candidate.Name) {
 			c.observe("list_users", "malformed", started)
 			return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("missing user identity"))
 		}
 		c.observe("list_users", "success", started)
-		return core.MediaUser{ID: user.Id.String(), Name: *user.Name}, true, nil
+		return candidate, true, nil
 	}
 	c.observe("list_users", "success", started)
 	return core.MediaUser{}, false, nil

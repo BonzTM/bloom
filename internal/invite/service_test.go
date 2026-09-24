@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"log/slog"
 	"slices"
 	"testing"
 	"time"
@@ -36,20 +37,20 @@ func (s *fakeStore) RevokeInvite(_ context.Context, _ string, at time.Time) (cor
 
 func (s *fakeStore) RedeemInvite(
 	ctx context.Context, _ [sha256.Size]byte, _ core.Clock, redeem core.InviteRedeemFunc,
-) error {
+) (bool, error) {
 	if s.redeemErr != nil {
-		return s.redeemErr
+		return false, s.redeemErr
 	}
 	redemption, err := redeem(ctx, s.invite)
 	if err != nil {
 		if provisioningErr, ok := errors.AsType[*core.InviteProvisioningError](err); ok && provisioningErr != nil {
 			s.failures = append(s.failures, provisioningErr.Failure)
-			return errors.Join(err, s.failureErr)
+			return false, errors.Join(err, s.failureErr)
 		}
-		return err
+		return false, err
 	}
 	s.redemptions = append(s.redemptions, redemption)
-	return s.failCommit
+	return redemption.AccountID != "", s.failCommit
 }
 
 func (s *fakeStore) RecordInviteProvisioningFailure(
@@ -159,7 +160,7 @@ func TestAcceptCompensatesPolicyAndCommitFailures(t *testing.T) {
 			} else {
 				defer cancel()
 			}
-			accepted, err := service.Accept(ctx, validCode(t), "new-user", "Th1s-is-a-unique-password!")
+			accepted, err := service.Accept(ctx, "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
 			wantErr := testCase.policyErr != nil || testCase.commitErr != nil
 			if (err != nil) != wantErr {
 				t.Fatalf("Accept = %+v, %v; wantErr=%t", accepted, err, wantErr)
@@ -180,7 +181,7 @@ func TestAcceptRecordsDeleteExhaustionWithoutConsumingInvite(t *testing.T) {
 	provisioner := &fakeProvisioner{policyErr: errors.New("policy failed"), deleteErr: errors.New("delete exhausted")}
 	service := newService(t, store, defaultServers(), provisioner, now)
 
-	_, err := service.Accept(context.Background(), validCode(t), "new-user", "Th1s-is-a-unique-password!")
+	_, err := service.Accept(context.Background(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
 	if !errors.Is(err, core.ErrInviteProvisioningPending) {
 		t.Fatalf("Accept error = %v, want ErrInviteProvisioningPending", err)
 	}
@@ -204,7 +205,7 @@ func TestAcceptSurfacesProvisioningFailureInsertError(t *testing.T) {
 	provisioner := &fakeProvisioner{policyErr: errors.New("policy failed"), deleteErr: errors.New("delete exhausted")}
 	service := newService(t, store, defaultServers(), provisioner, now)
 
-	_, err := service.Accept(context.Background(), validCode(t), "new-user", "Th1s-is-a-unique-password!")
+	_, err := service.Accept(context.Background(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
 	if !errors.Is(err, recordErr) || !errors.Is(err, core.ErrInviteProvisioningPending) {
 		t.Fatalf("Accept error = %v, want pending and record failure", err)
 	}
@@ -216,7 +217,7 @@ func TestAcceptDeletesUserFoundAfterAmbiguousCreate(t *testing.T) {
 	provisioner := &fakeProvisioner{createErr: core.ErrMediaUserCreateAmbiguous}
 	service := newService(t, store, defaultServers(), provisioner, now)
 
-	_, err := service.Accept(context.Background(), validCode(t), "new-user", "Th1s-is-a-unique-password!")
+	_, err := service.Accept(context.Background(), "", validCode(t), "new-user", "Th1s-is-a-unique-password!")
 	if !errors.Is(err, core.ErrMediaUserCreateAmbiguous) {
 		t.Fatalf("Accept error = %v, want ambiguous create", err)
 	}
@@ -232,7 +233,7 @@ func TestPreviewUsesFakeClockForExpiry(t *testing.T) {
 	store := &fakeStore{invite: activeInvite(now)}
 	store.invite.ExpiresAt = &expires
 	clock := testutil.NewFakeClock(now)
-	service, err := invite.NewService(store, store, defaultServers(), fakeAcquirer{&fakeProvisioner{}}, clock)
+	service, err := invite.NewService(store, store, defaultServers(), fakeAcquirer{&fakeProvisioner{}}, clock, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ func newService(
 	t *testing.T, store *fakeStore, servers fakeServers, provisioner *fakeProvisioner, now time.Time,
 ) *invite.Service {
 	t.Helper()
-	service, err := invite.NewService(store, store, servers, fakeAcquirer{provisioner}, testutil.NewFakeClock(now))
+	service, err := invite.NewService(store, store, servers, fakeAcquirer{provisioner}, testutil.NewFakeClock(now), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

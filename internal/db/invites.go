@@ -59,6 +59,9 @@ func validateRedemption(invite core.Invite, redemption core.InviteRedemption) er
 		len(redemption.MediaUserID) > 128 || redemption.RedeemedAt.IsZero() {
 		return core.ErrInvalidArgument
 	}
+	if redemption.AccountID != "" && !core.ValidID(redemption.AccountID) {
+		return core.ErrInvalidArgument
+	}
 	return core.ValidateJellyfinUsername(redemption.Username)
 }
 

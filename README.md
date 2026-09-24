@@ -103,7 +103,8 @@ added, but existing identifiers are never renamed or removed. The public,
 cacheable catalog is available from `GET /api/v1/auth/permissions`.
 
 The built-in `owner` role has every permission and cannot be edited or deleted.
-The built-in `member` role can read its own request and statistics data and can
+The built-in `member` role has `requests.read.own`, `requests.create`, and
+`stats.read.own`. The role can read its own request and statistics data and can
 create requests. Accounts may hold multiple roles; their effective permission
 set is the union of those roles. Bloom reads that set from the database for each
 authenticated request. It does not cache authorization decisions.
@@ -245,9 +246,28 @@ disabled, it is rounded down to the second.
 `BLOOM_STATS_CACHE_TTL=0` disables it. Cache expiry is the invalidation policy,
 so a dashboard can trail a newly recorded watch by at most the configured TTL.
 
+Bloom links an account to at most one media user on each server. A link is
+created from a signed-in invite acceptance, an exact username match during an
+own-data request, or an administrator assignment. Anonymous invite acceptance
+does not create an account link. A media user can belong to at most one Bloom
+account on a server.
+
+An account with `stats.read.own` can list its links with
+`GET /api/v1/me/media-users` and read its per-user dashboard with
+`GET /api/v1/stats/me`. Both routes try an exact username match on each
+unlinked server before responding. The statistics route accepts the same
+`days`, `tz`, `media_server_id`, and server-scoped `library_id` parameters as
+the administrator reports. Without `media_server_id`, it uses the account's
+only link or the first link ordered by media-server name. The response window
+identifies the selected `media_server_id` and `media_user_id`.
+
+An account with `admin.settings` can inspect links with
+`GET /api/v1/accounts/{id}/media-users`, assign one with
+`PUT /api/v1/accounts/{id}/media-users/{media_server_id}`, and remove one with
+`DELETE` on that item route. The `PUT` body is `{"media_user_id":"..."}`.
+
 The Statistics page shows the library ranking and filters every report by
-one library. Own-statistics access for non-administrator accounts remains
-later because Bloom accounts are not yet linked to media-server users.
+one library.
 
 The web UI shows the same reports under Statistics in the administration
 area: totals, most-watched titles, most active people, breakdowns, plays and
@@ -534,6 +554,10 @@ that index.
 Migration `00016_watch_libraries` adds the library identity columns and the
 server-library-start index used by filtered statistics on both engines. Its
 down migration removes the index and both columns.
+
+Migration `00017_account_media_users` adds account-to-media-user links on both
+engines. Deleting an account or media server cascades to its links. Its down
+migration removes the link table.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

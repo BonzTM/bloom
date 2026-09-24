@@ -39,6 +39,7 @@ type PromMetrics struct {
 	oidcDependencySeconds      *prometheus.HistogramVec
 	inviteCreations            *prometheus.CounterVec
 	inviteAcceptances          *prometheus.CounterVec
+	mediaUserMatches           *prometheus.CounterVec
 	playbackPolls              *prometheus.CounterVec
 	playbackPollSeconds        *prometheus.HistogramVec
 	playbackOpenWatches        *prometheus.GaugeVec
@@ -70,6 +71,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	oidcCollectors := newOIDCCollectors(namespace)
 	inviteCreations := newOutcomeCounter(namespace, "invite_creations_total", "Total invite creation attempts by finite outcome.")
 	inviteAcceptances := newOutcomeCounter(namespace, "invite_acceptances_total", "Total invite acceptance attempts by finite outcome.")
+	mediaUserMatches := newOutcomeCounter(namespace, "media_user_matches_total", "On-demand account media-user match outcomes.")
 	playbackCollectors := newPlaybackCollectors(namespace)
 	playbackRefreshFailures := newCounter(namespace, "playback_refresh_failures_total",
 		"Total failed playback manager refresh attempts.")
@@ -107,6 +109,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		oidcDependencySeconds: oidcCollectors.seconds,
 		inviteCreations:       inviteCreations,
 		inviteAcceptances:     inviteAcceptances,
+		mediaUserMatches:      mediaUserMatches,
 		playbackPolls:         playbackCollectors.polls, playbackPollSeconds: playbackCollectors.seconds,
 		playbackOpenWatches: playbackCollectors.open, playbackWatchesClosed: playbackCollectors.closed,
 		playbackRefreshFailures:    playbackRefreshFailures,
@@ -336,6 +339,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.oidcDependencySeconds,
 		m.inviteCreations,
 		m.inviteAcceptances,
+		m.mediaUserMatches,
 		m.playbackPolls,
 		m.playbackPollSeconds,
 		m.playbackOpenWatches,
@@ -408,6 +412,16 @@ func (m *PromMetrics) IncInviteCreation(outcome string) {
 // IncInviteAcceptance records one invite acceptance outcome.
 func (m *PromMetrics) IncInviteAcceptance(outcome string) {
 	m.inviteAcceptances.WithLabelValues(outcome).Inc()
+}
+
+// IncMediaUserMatch records one bounded on-demand match outcome.
+func (m *PromMetrics) IncMediaUserMatch(outcome string) {
+	switch outcome {
+	case "found", "not_found", "error", "unsupported", "conflict":
+	default:
+		outcome = "invalid"
+	}
+	m.mediaUserMatches.WithLabelValues(outcome).Inc()
 }
 
 // ObservePlaybackPoll records one completed collector poll.

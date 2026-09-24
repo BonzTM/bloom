@@ -32,6 +32,7 @@ type Querier interface {
 	// engine-specific. Regenerate with: go tool sqlc generate.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) error
 	CreateAccountIdentity(ctx context.Context, arg CreateAccountIdentityParams) error
+	CreateAccountMediaUserIfAbsent(ctx context.Context, arg CreateAccountMediaUserIfAbsentParams) (int64, error)
 	// Download-manager registration queries shared by both engines.
 	CreateDownloadManager(ctx context.Context, arg CreateDownloadManagerParams) error
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
@@ -47,6 +48,7 @@ type Querier interface {
 	CreateRequestProfileTag(ctx context.Context, arg CreateRequestProfileTagParams) error
 	CreateRequestSeason(ctx context.Context, arg CreateRequestSeasonParams) error
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
+	DeleteAccountMediaUser(ctx context.Context, arg DeleteAccountMediaUserParams) (int64, error)
 	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
 	DeleteDownloadManager(ctx context.Context, id string) (int64, error)
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
@@ -65,6 +67,7 @@ type Querier interface {
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
 	// OIDC identity queries are shared by SQLite and PostgreSQL.
 	GetAccountIdentity(ctx context.Context, arg GetAccountIdentityParams) (GetAccountIdentityRow, error)
+	GetAccountMediaUser(ctx context.Context, arg GetAccountMediaUserParams) (GetAccountMediaUserRow, error)
 	GetAccountRequestQuota(ctx context.Context, accountID string) (AccountRequestQuota, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
 	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
@@ -85,6 +88,7 @@ type Querier interface {
 	InsertInviteProvisioningFailure(ctx context.Context, arg InsertInviteProvisioningFailureParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
 	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
+	ListAccountMediaUsers(ctx context.Context, arg ListAccountMediaUsersParams) ([]ListAccountMediaUsersRow, error)
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
@@ -124,6 +128,7 @@ type Querier interface {
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RescheduleNotificationOutbox(ctx context.Context, arg RescheduleNotificationOutboxParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
+	SetAccountMediaUser(ctx context.Context, arg SetAccountMediaUserParams) error
 	StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error)
 	StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams) ([]StatsBucketRowsRow, error)
 	StatsClients(ctx context.Context, arg StatsClientsParams) ([]StatsClientsRow, error)

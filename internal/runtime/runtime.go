@@ -19,6 +19,7 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/BonzTM/bloom/internal/accountmedia"
 	httpapi "github.com/BonzTM/bloom/internal/api/http"
 	"github.com/BonzTM/bloom/internal/api/web"
 	"github.com/BonzTM/bloom/internal/buildinfo"
@@ -143,6 +144,7 @@ func runService(
 		cfg, auditSink, logger, metrics, pool,
 		wiring.accounts, wiring.localIdentities, wiring.authorizer, wiring.roles, wiring.sessions,
 		wiring.mediaServers, wiring.invites, wiring.playbackStore, wiring.stats, clock,
+		wiring.accountMediaUsers,
 		wiring.metadata, wiring.requests,
 		wiring.downloadManagers,
 		wiring.notifications,
@@ -182,6 +184,7 @@ type serviceWiring struct {
 	playbackStore      core.PlaybackStore
 	playbackManager    *playback.Manager
 	stats              *statsapp.Service
+	accountMediaUsers  *accountmedia.Service
 	oidcProvider       oidcLifecycle
 	oidcAccounts       core.OIDCAccountStore
 	oidcFlows          core.OIDCFlowStore
@@ -200,6 +203,10 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	ownership.media = mediaServers
+	accountMediaUsers, err := accountMediaDependencies(pool, cfg, accounts, mediaServers, deps.Clock, logger, metrics)
+	if err != nil {
+		return serviceWiring{}, err
+	}
 	requesterUsernames, ok := accounts.(requestapp.RequesterUsernameReader)
 	if !ok {
 		return serviceWiring{}, errors.New("build request service: account username reader is unavailable")
@@ -217,7 +224,7 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	ownership.media = connectionGroup{mediaServers, metadataService, downloadManagers}
-	invites, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock)
+	invites, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock, logger)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -225,13 +232,9 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	statsReader, err := db.NewStatsReader(pool, cfg.Database.Driver)
+	statsService, err := statsDependencies(pool, cfg, deps.Clock, metrics)
 	if err != nil {
-		return serviceWiring{}, fmt.Errorf("build statistics reader: %w", err)
-	}
-	statsService, err := statsapp.NewService(statsReader, deps.Clock, cfg.Stats.CacheTTL, metrics)
-	if err != nil {
-		return serviceWiring{}, fmt.Errorf("build statistics service: %w", err)
+		return serviceWiring{}, err
 	}
 	ownership.playback = playbackManager
 	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
@@ -246,11 +249,26 @@ func wireServiceDependencies(
 		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, invites: invites,
 		playbackStore: playbackStore, playbackManager: playbackManager, stats: statsService,
-		metadata: metadataService, requests: requestService,
+		accountMediaUsers: accountMediaUsers,
+		metadata:          metadataService, requests: requestService,
 		downloadManagers: downloadManagers, fulfilment: fulfilmentManager,
 		notifications: notifications, notificationWorker: notificationWorker,
 		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
 	}, nil
+}
+
+func statsDependencies(
+	pool *sql.DB, cfg config.Config, clock core.Clock, metrics *telemetry.PromMetrics,
+) (*statsapp.Service, error) {
+	reader, err := db.NewStatsReader(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build statistics reader: %w", err)
+	}
+	service, err := statsapp.NewService(reader, clock, cfg.Stats.CacheTTL, metrics)
+	if err != nil {
+		return nil, fmt.Errorf("build statistics service: %w", err)
+	}
+	return service, nil
 }
 
 type startupOwnership struct {
@@ -379,6 +397,7 @@ func assembleHTTPServer(
 	playbackStore core.PlaybackStore,
 	statsReader core.StatsReader,
 	clock core.Clock,
+	accountMediaUsers *accountmedia.Service,
 	metadataService *metadata.Service,
 	requestService *requestapp.Service,
 	downloadManagers *downloadmanager.Service,
@@ -406,6 +425,7 @@ func assembleHTTPServer(
 		MediaServerManager:     mediaServers,
 		InviteReader:           invites,
 		InviteManager:          invites,
+		AccountMediaUsers:      accountMediaUsers,
 		PlaybackReader:         playbackStore,
 		StatsReader:            statsReader,
 		MetadataReader:         metadataService,
@@ -599,15 +619,33 @@ func buildFulfilmentManager(
 }
 
 func inviteDependencies(
-	pool *sql.DB, cfg config.Config, mediaServers *mediaserver.Service, clock core.Clock,
+	pool *sql.DB, cfg config.Config, mediaServers *mediaserver.Service, clock core.Clock, logger *slog.Logger,
 ) (*inviteapp.Service, error) {
 	reader, store, err := db.NewInviteStores(pool, cfg.Database.Driver)
 	if err != nil {
 		return nil, fmt.Errorf("build invite stores: %w", err)
 	}
-	service, err := inviteapp.NewService(reader, store, mediaServers, mediaServers, clock)
+	service, err := inviteapp.NewService(reader, store, mediaServers, mediaServers, clock, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build invite service: %w", err)
+	}
+	return service, nil
+}
+
+func accountMediaDependencies(
+	pool *sql.DB, cfg config.Config, accounts core.AccountStore, mediaServers *mediaserver.Service,
+	clock core.Clock, logger *slog.Logger, metrics *telemetry.PromMetrics,
+) (*accountmedia.Service, error) {
+	reader, writer, err := db.NewAccountMediaUserStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build account media user stores: %w", err)
+	}
+	service, err := accountmedia.NewService(accountmedia.Dependencies{
+		Reader: reader, Writer: writer, Accounts: accounts, Servers: mediaServers,
+		Clock: clock, Logger: logger, Metrics: metrics,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build account media user service: %w", err)
 	}
 	return service, nil
 }

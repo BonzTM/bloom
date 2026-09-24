@@ -73,6 +73,7 @@ type InviteCursor struct {
 type InviteRedemption struct {
 	ID            string
 	InviteID      string
+	AccountID     string
 	MediaServerID string
 	MediaUserID   string
 	Username      string
@@ -129,7 +130,7 @@ type InviteReader interface {
 type InviteStore interface {
 	CreateInvite(ctx context.Context, invite Invite, codeHash [sha256.Size]byte) error
 	RevokeInvite(ctx context.Context, id string, revokedAt time.Time) (Invite, error)
-	RedeemInvite(ctx context.Context, codeHash [sha256.Size]byte, clock Clock, redeem InviteRedeemFunc) error
+	RedeemInvite(ctx context.Context, codeHash [sha256.Size]byte, clock Clock, redeem InviteRedeemFunc) (bool, error)
 	RecordInviteProvisioningFailure(ctx context.Context, failure InviteProvisioningFailure) error
 }
 

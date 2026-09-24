@@ -62,7 +62,14 @@ type inviteReader interface {
 type inviteManager interface {
 	Create(ctx context.Context, input inviteapp.CreateInput) (inviteapp.Created, error)
 	Revoke(ctx context.Context, id string) (core.Invite, error)
-	Accept(ctx context.Context, code, username, password string) (inviteapp.Accepted, error)
+	Accept(ctx context.Context, accountID, code, username, password string) (inviteapp.Accepted, error)
+}
+
+type accountMediaUserManager interface {
+	EnsureLinks(ctx context.Context, account core.Account, mediaServerID string) ([]core.AccountMediaUser, error)
+	List(ctx context.Context, accountID string) ([]core.AccountMediaUser, error)
+	Set(ctx context.Context, accountID, mediaServerID, mediaUserID string) (core.AccountMediaUser, error)
+	Delete(ctx context.Context, accountID, mediaServerID string) error
 }
 
 type playbackReader interface {
@@ -134,6 +141,7 @@ type Server struct {
 	inviteLimiter          *loginLimiter
 	inviteAcceptances      chan struct{}
 	inviteMetrics          telemetry.InviteMetrics
+	accountMediaUsers      accountMediaUserManager
 	playbackReader         playbackReader
 	statsReader            core.StatsReader
 	metadataReader         metadataReader
@@ -186,6 +194,8 @@ type Deps struct {
 	InviteReader inviteReader
 	// InviteManager supplies invite creation, revocation, and acceptance.
 	InviteManager inviteManager
+	// AccountMediaUsers resolves and administers account-to-media-user links.
+	AccountMediaUsers accountMediaUserManager
 	// PlaybackReader supplies now-playing and history reads.
 	PlaybackReader playbackReader
 	// StatsReader supplies cached statistics dashboard reports.
@@ -327,6 +337,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		inviteReader:           deps.InviteReader,
 		inviteManager:          deps.InviteManager,
 		inviteMetrics:          telemetry.NopMetrics{},
+		accountMediaUsers:      deps.AccountMediaUsers,
 		playbackReader:         deps.PlaybackReader,
 		statsReader:            deps.StatsReader,
 		metadataReader:         deps.MetadataReader,
@@ -520,6 +531,8 @@ func csrfAuditResource(path string) string {
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
 		return auditResourceInvitePublic
+	case "/api/v1/accounts/{id}/media-users/{media_server_id}":
+		return auditResourceMediaServers
 	case "/api/v1/metadata/providers/tmdb/key":
 		return auditResourceMetadataSettings
 	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
@@ -544,20 +557,23 @@ func inventoryPattern(path string) string {
 }
 
 func routePathMatches(pattern, path string) bool {
-	open := strings.IndexByte(pattern, '{')
-	close := strings.IndexByte(pattern, '}')
-	if open < 0 || close < open {
-		return path == pattern
-	}
-	prefix, suffix, found := strings.Cut(pattern, pattern[open:close+1])
-	if !found {
-		return path == pattern
-	}
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+	const maxRouteSegments = 16
+	patternParts := strings.Split(strings.Trim(pattern, "/"), "/")
+	pathParts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(patternParts) != len(pathParts) || len(patternParts) > maxRouteSegments {
 		return false
 	}
-	value := path[len(prefix) : len(path)-len(suffix)]
-	return value != "" && !strings.Contains(value, "/")
+	for index := range maxRouteSegments {
+		if index >= len(patternParts) {
+			return true
+		}
+		part := patternParts[index]
+		placeholder := strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}")
+		if pathParts[index] == "" || (!placeholder && part != pathParts[index]) {
+			return false
+		}
+	}
+	return false
 }
 
 // ListenAndServe starts serving and blocks until the server is shut down. It

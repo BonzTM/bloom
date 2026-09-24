@@ -19,7 +19,50 @@ type statsWindowResponse struct {
 	Start         time.Time `json:"start"`
 	End           time.Time `json:"end"`
 	MediaServerID string    `json:"media_server_id"`
+	MediaUserID   string    `json:"media_user_id,omitzero"`
 	TimeZone      string    `json:"time_zone"`
+}
+
+func (s *Server) handleStatsMe(w http.ResponseWriter, r *http.Request) {
+	values, fields := statsQueryValues(r.URL.RawQuery)
+	days, fields := statsDays(values["days"], fields)
+	serverID, fields := statsServer(values["media_server_id"], fields)
+	libraryID, fields := statsLibrary(values["library_id"], serverID, fields)
+	zone, fields := statsZone(values["tz"], fields)
+	window, err := core.NewStatsWindow(days, serverID, zone, s.clock.Now())
+	if err != nil && len(fields) == 0 {
+		fields = append(fields, httputil.FieldError{
+			Field: "tz", Code: "invalid", Message: "must be one IANA time-zone name of at most 64 bytes",
+		})
+	}
+	if len(fields) > 0 {
+		s.writeValidation(w, r, fields)
+		return
+	}
+	account, _ := accountFrom(r.Context())
+	links, err := s.accountMediaUsers.EnsureLinks(r.Context(), account, serverID)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	if len(links) == 0 {
+		writeError(w, r, s.logger, core.ErrMediaUserNotLinked)
+		return
+	}
+	link := links[0]
+	window.MediaServerID = link.MediaServerID
+	query := core.StatsQuery{
+		Window: window, Report: core.StatsReportUser, UserServerID: link.MediaServerID,
+		MediaUserID: link.MediaUserID, LibraryID: libraryID,
+	}
+	result, err := s.statsReader.ReadStats(r.Context(), query)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	responseWindow := statsWindowDTO(result.Window)
+	responseWindow.MediaUserID = link.MediaUserID
+	writeJSON(w, r, s.logger, http.StatusOK, statsUserDetailDTO(responseWindow, result))
 }
 
 type statsTotalsResponse struct {

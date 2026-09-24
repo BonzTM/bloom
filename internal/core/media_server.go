@@ -108,6 +108,16 @@ type MediaAvailabilityLookup interface {
 	HasTitle(ctx context.Context, kind MediaKind, provider MetadataProviderKind, providerID string, seasons []int) (bool, []int, error)
 }
 
+// MediaUserLookup is an optional adapter capability for resolving a user by current username.
+type MediaUserLookup interface {
+	FindUserByName(ctx context.Context, name string) (MediaUser, bool, error)
+}
+
+// MediaUserIDLookup is an optional adapter capability for verifying a user identifier.
+type MediaUserIDLookup interface {
+	FindUserByID(ctx context.Context, id string) (MediaUser, bool, error)
+}
+
 // LibraryResolver is an optional adapter capability for mapping an item to its collection folder.
 type LibraryResolver interface {
 	ResolveLibrary(ctx context.Context, itemID string) (Library, bool, error)

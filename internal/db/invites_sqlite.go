@@ -139,14 +139,16 @@ func (s *sqliteInvites) RevokeInvite(ctx context.Context, id string, revokedAt t
 
 func (s *sqliteInvites) RedeemInvite(
 	ctx context.Context, hash [sha256.Size]byte, clock core.Clock, redeem core.InviteRedeemFunc,
-) error {
+) (bool, error) {
 	if clock == nil || redeem == nil {
-		return core.ErrInvalidArgument
+		return false, core.ErrInvalidArgument
 	}
 	var provisioningErr error
+	var linkCreated bool
 	txErr := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
 		q := sqlite.New(conn)
-		redeemErr := s.redeemLocked(ctx, q, hash, clock, redeem)
+		created, redeemErr := s.redeemLocked(ctx, q, hash, clock, redeem)
+		linkCreated = created
 		pending, ok := errors.AsType[*core.InviteProvisioningError](redeemErr)
 		if !ok || pending == nil {
 			return redeemErr
@@ -154,35 +156,58 @@ func (s *sqliteInvites) RedeemInvite(
 		provisioningErr = redeemErr
 		return insertSQLiteProvisioningFailure(ctx, q, pending.Failure)
 	})
-	return errors.Join(provisioningErr, txErr)
+	return linkCreated, errors.Join(provisioningErr, txErr)
 }
 
 func (s *sqliteInvites) redeemLocked(
 	ctx context.Context, q *sqlite.Queries, hash [sha256.Size]byte, clock core.Clock, redeem core.InviteRedeemFunc,
-) error {
+) (bool, error) {
 	invite, err := s.lockedInvite(ctx, q, hash)
 	if err != nil {
-		return err
+		return false, err
 	}
 	now := core.NormalizeTime(clock.Now())
 	if availabilityErr := inviteAvailable(invite, now); availabilityErr != nil {
-		return availabilityErr
+		return false, availabilityErr
 	}
 	redemption, err := redeem(ctx, invite)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if validationErr := validateRedemption(invite, redemption); validationErr != nil {
-		return fmt.Errorf("validate invite redemption: %w", validationErr)
+		return false, fmt.Errorf("validate invite redemption: %w", validationErr)
 	}
 	if insertErr := insertSQLiteRedemption(ctx, q, redemption); insertErr != nil {
-		return insertErr
+		return false, insertErr
+	}
+	linkCreated, err := insertSQLiteInviteLink(ctx, q, redemption)
+	if err != nil {
+		return false, err
 	}
 	rows, err := q.IncrementInviteUse(ctx, sqlite.IncrementInviteUseParams{ID: invite.ID, UpdatedAt: formatSQLiteTime(now)})
 	if err != nil || rows != 1 {
-		return fmt.Errorf("increment invite use: %w", errors.Join(err, core.ErrNotFound))
+		return false, fmt.Errorf("increment invite use: %w", errors.Join(err, core.ErrNotFound))
 	}
-	return nil
+	return linkCreated, nil
+}
+
+func insertSQLiteInviteLink(
+	ctx context.Context, q *sqlite.Queries, redemption core.InviteRedemption,
+) (bool, error) {
+	if redemption.AccountID == "" {
+		return false, nil
+	}
+	link := core.AccountMediaUser{
+		AccountID: redemption.AccountID, MediaServerID: redemption.MediaServerID,
+		MediaUserID: redemption.MediaUserID, Username: redemption.Username,
+		Source: core.AccountMediaUserSourceInvite, CreatedAt: redemption.RedeemedAt, UpdatedAt: redemption.RedeemedAt,
+	}
+	rows, err := q.CreateAccountMediaUserIfAbsent(ctx,
+		sqlite.CreateAccountMediaUserIfAbsentParams(sqliteAccountMediaUserParams(link)))
+	if err != nil {
+		return false, fmt.Errorf("insert invite account media user: %w", err)
+	}
+	return rows == 1, nil
 }
 
 func (s *sqliteInvites) RecordInviteProvisioningFailure(

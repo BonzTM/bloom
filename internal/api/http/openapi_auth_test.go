@@ -508,6 +508,8 @@ func assertResponseSchema(
 		statsDailySchema, statsPatternsSchema, statsTitlesSchema,
 		statsUsersSchema, statsLibrariesSchema, statsUserSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
+	case accountMediaUserSchema, accountMediaUsersSchema:
+		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)
 	}

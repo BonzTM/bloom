@@ -223,7 +223,8 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	defer s.releaseInviteAcceptance()
 	ctx, cancel := context.WithTimeout(r.Context(), s.mediaOperationTimeout)
 	defer cancel()
-	accepted, err := s.inviteManager.Accept(ctx, code, request.Username, request.Password)
+	account, _ := accountFrom(r.Context())
+	accepted, err := s.inviteManager.Accept(ctx, account.ID, code, request.Username, request.Password)
 	if err != nil {
 		s.recordInviteAcceptFailure(r, inviteFailureReason(err))
 		s.writeMediaServerError(w, r, err)
@@ -316,7 +317,8 @@ func (s *Server) recordInviteAcceptResource(
 	r *http.Request, resource string, result telemetry.AuditResult, reason string,
 ) {
 	s.inviteMetrics.IncInviteAcceptance(reason)
-	s.emitInviteAudit(r, "invite.accept", resource, result, reason, false)
+	_, authenticated := accountFrom(r.Context())
+	s.emitInviteAudit(r, "invite.accept", resource, result, reason, authenticated)
 }
 
 func (s *Server) emitInviteAudit(

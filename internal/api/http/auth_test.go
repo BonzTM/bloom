@@ -246,21 +246,22 @@ func (a *recordingAudit) last(t *testing.T) telemetry.AuditEvent {
 }
 
 type authHarness struct {
-	server           *Server
-	h                http.Handler
-	store            *authAccountStore
-	sessions         *scs.SessionManager
-	audit            *recordingAudit
-	metrics          *countingMetrics
-	clock            *testutil.FakeClock
-	logs             *strings.Builder
-	sessionStore     *controllableSessionStore
-	authorization    *authAuthorization
-	mediaServers     *fakeMediaServerService
-	downloadManagers *fakeDownloadManagerService
-	invites          *fakeInviteService
-	playback         *fakePlaybackReader
-	stats            *fakeStatsReader
+	server            *Server
+	h                 http.Handler
+	store             *authAccountStore
+	sessions          *scs.SessionManager
+	audit             *recordingAudit
+	metrics           *countingMetrics
+	clock             *testutil.FakeClock
+	logs              *strings.Builder
+	sessionStore      *controllableSessionStore
+	authorization     *authAuthorization
+	mediaServers      *fakeMediaServerService
+	downloadManagers  *fakeDownloadManagerService
+	invites           *fakeInviteService
+	playback          *fakePlaybackReader
+	stats             *fakeStatsReader
+	accountMediaUsers *fakeAccountMediaUsers
 }
 
 type controllableSessionStore struct {
@@ -397,22 +398,8 @@ func newAuthHarnessConfigured(
 	identity core.IdentityProvider,
 ) authHarness {
 	t.Helper()
-	hash, err := core.HashPassword("secret-password")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	store := &authAccountStore{accounts: map[string]core.Account{
-		"alice":    {ID: "11111111-1111-4111-8111-111111111111", Username: "alice", PasswordHash: &hash},
-		"disabled": {ID: "22222222-2222-4222-8222-222222222222", Username: "disabled", PasswordHash: &hash, Disabled: true},
-	}}
-	authCfg := config.AuthConfig{
-		SessionCookieSecure: true, SessionLifetime: time.Hour, SessionIdleTimeout: 15 * time.Minute,
-		LoginRateRefillInterval: time.Minute, LoginRateBurst: 20, LoginRateMaxKeys: 100,
-		LoginMaxConcurrent: 4,
-	}
-	if mutate != nil {
-		mutate(&authCfg)
-	}
+	store := newAuthHarnessAccountStore(t)
+	authCfg := newAuthHarnessConfig(mutate)
 	if sessionStore == nil {
 		sessionStore = &controllableSessionStore{base: memstore.NewWithCleanupInterval(0)}
 	}
@@ -430,6 +417,7 @@ func newAuthHarnessConfigured(
 	invites := newFakeInviteService(clock.Now())
 	playback := &fakePlaybackReader{}
 	stats := &fakeStatsReader{}
+	accountMediaUsers := &fakeAccountMediaUsers{}
 	srv := New(config.HTTPConfig{
 		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 8192,
 	}, Deps{
@@ -439,23 +427,40 @@ func newAuthHarnessConfigured(
 		Authorizer: authorization, Roles: authorization,
 		MediaServerReader: mediaServers, MediaServerManager: mediaServers,
 		DownloadManagerReader: downloadManagers, DownloadManagerManager: downloadManagers,
-		InviteReader:   invites,
-		InviteManager:  invites,
-		PlaybackReader: playback,
-		StatsReader:    stats,
-		Sessions:       sessions, Audit: audit, Clock: clock, Auth: authCfg,
+		InviteReader: invites, InviteManager: invites, PlaybackReader: playback, StatsReader: stats,
+		AccountMediaUsers: accountMediaUsers, Sessions: sessions, Audit: audit, Clock: clock, Auth: authCfg,
 		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	return authHarness{
 		server: srv, h: srv.Handler(), store: store, sessions: sessions, audit: audit,
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
-		authorization:    authorization,
-		mediaServers:     mediaServers,
-		downloadManagers: downloadManagers,
-		invites:          invites,
-		playback:         playback,
-		stats:            stats,
+		authorization: authorization, mediaServers: mediaServers, downloadManagers: downloadManagers,
+		invites: invites, playback: playback, stats: stats, accountMediaUsers: accountMediaUsers,
 	}
+}
+
+func newAuthHarnessAccountStore(t *testing.T) *authAccountStore {
+	t.Helper()
+	hash, err := core.HashPassword("secret-password")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	return &authAccountStore{accounts: map[string]core.Account{
+		"alice":    {ID: "11111111-1111-4111-8111-111111111111", Username: "alice", PasswordHash: &hash},
+		"disabled": {ID: "22222222-2222-4222-8222-222222222222", Username: "disabled", PasswordHash: &hash, Disabled: true},
+	}}
+}
+
+func newAuthHarnessConfig(mutate func(*config.AuthConfig)) config.AuthConfig {
+	authCfg := config.AuthConfig{
+		SessionCookieSecure: true, SessionLifetime: time.Hour, SessionIdleTimeout: 15 * time.Minute,
+		LoginRateRefillInterval: time.Minute, LoginRateBurst: 20, LoginRateMaxKeys: 100,
+		LoginMaxConcurrent: 4,
+	}
+	if mutate != nil {
+		mutate(&authCfg)
+	}
+	return authCfg
 }
 
 func newAuthAuthorization() *authAuthorization {

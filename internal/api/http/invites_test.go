@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -34,6 +35,7 @@ type fakeInviteService struct {
 	previewed int
 	accepted  int
 	deadline  bool
+	accountID string
 }
 
 type serviceBackedInviteStore struct{ invite core.Invite }
@@ -51,8 +53,8 @@ func (s *serviceBackedInviteStore) RevokeInvite(context.Context, string, time.Ti
 
 func (*serviceBackedInviteStore) RedeemInvite(
 	context.Context, [sha256.Size]byte, core.Clock, core.InviteRedeemFunc,
-) error {
-	return nil
+) (bool, error) {
+	return false, nil
 }
 
 func (*serviceBackedInviteStore) RecordInviteProvisioningFailure(
@@ -139,12 +141,29 @@ func (f *fakeInviteService) Preview(_ context.Context, _ string) (inviteapp.Prev
 	return inviteapp.Preview{Invite: f.invite, MediaServerName: "Home"}, f.err
 }
 
-func (f *fakeInviteService) Accept(ctx context.Context, _, username, _ string) (inviteapp.Accepted, error) {
+func (f *fakeInviteService) Accept(ctx context.Context, accountID, _, username, _ string) (inviteapp.Accepted, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.accepted++
+	f.accountID = accountID
 	_, f.deadline = ctx.Deadline()
 	return inviteapp.Accepted{InviteID: f.invite.ID, MediaServerName: "Home", Username: username}, f.err
+}
+
+func TestSignedInInviteAcceptancePassesAccount(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	response := h.requestWithContentType(t, http.MethodPost, "/api/v1/invite/"+testInviteCode+"/accept",
+		`{"username":"new-user","password":"Th1s-is-a-unique-password!"}`, cookie, "application/json")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("accept = %d: %s", response.Code, response.Body.String())
+	}
+	h.invites.mu.Lock()
+	accountID := h.invites.accountID
+	h.invites.mu.Unlock()
+	if want := h.store.accounts["alice"].ID; accountID != want {
+		t.Fatalf("accept account ID = %q, want %q", accountID, want)
+	}
 }
 
 func TestInviteAuditMetricsAndAcceptanceDeadline(t *testing.T) {
@@ -469,7 +488,7 @@ func newServiceBackedInviteHarness(t *testing.T) authHarness {
 	t.Helper()
 	h := newAuthHarness(t, nil)
 	store := &serviceBackedInviteStore{}
-	service, err := inviteapp.NewService(store, store, serviceBackedInviteServers{}, unusedInviteProvisioners{}, h.clock)
+	service, err := inviteapp.NewService(store, store, serviceBackedInviteServers{}, unusedInviteProvisioners{}, h.clock, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
