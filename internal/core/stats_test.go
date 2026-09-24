@@ -58,6 +58,8 @@ func TestValidStatsMediaUserID(t *testing.T) {
 		{value: "", valid: false},
 		{value: "nul\x00user", valid: false},
 		{value: "delete\x7fuser", valid: false},
+		{value: "next\u0085line", valid: false},
+		{value: "shift\u008euser", valid: false},
 		{value: string([]byte{0xff}), valid: false},
 		{value: string(make([]byte, MaxStatsMediaUserIDBytes+1)), valid: false},
 	}

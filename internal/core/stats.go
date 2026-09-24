@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -135,7 +136,8 @@ func ValidStatsMediaUserID(value string) bool {
 		return false
 	}
 	for _, character := range value {
-		if character < ' ' || character == '\u007f' {
+		// C0 and C1 controls and DEL; unicode.IsControl covers all three.
+		if unicode.IsControl(character) {
 			return false
 		}
 	}

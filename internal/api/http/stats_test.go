@@ -99,7 +99,7 @@ func TestStatsRoutesRejectBadParameters(t *testing.T) {
 
 func TestStatsUserRejectsUnsafeMediaUserIDBeforeStore(t *testing.T) {
 	t.Parallel()
-	for _, encodedID := range []string{"user%00id", "user%7Fid", "user%FFid"} {
+	for _, encodedID := range []string{"user%00id", "user%7Fid", "user%C2%85id", "user%FFid"} {
 		t.Run(encodedID, func(t *testing.T) {
 			t.Parallel()
 			h := newAuthHarness(t, nil)
