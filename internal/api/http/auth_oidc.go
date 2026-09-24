@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -109,7 +110,11 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeOIDCStartForm(r *http.Request) (string, []httputil.FieldError, error) {
-	if r.ContentLength == 0 {
+	empty, err := requestBodyEmpty(r)
+	if err != nil {
+		return "", nil, fmt.Errorf("read OIDC start form: %w", core.ErrInvalidArgument)
+	}
+	if empty {
 		return "", nil, nil
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -135,6 +140,21 @@ func decodeOIDCStartForm(r *http.Request) (string, []httputil.FieldError, error)
 		return "", []httputil.FieldError{{Field: "return_to", Code: "too_long", Message: "return path is too long"}}, nil
 	}
 	return values[0], nil, nil
+}
+
+func requestBodyEmpty(r *http.Request) (bool, error) {
+	prefix, err := io.ReadAll(io.LimitReader(r.Body, 1))
+	if err != nil {
+		return false, err
+	}
+	if len(prefix) == 0 {
+		return true, nil
+	}
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{Reader: io.MultiReader(strings.NewReader(string(prefix)), r.Body), Closer: r.Body}
+	return false, nil
 }
 
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
@@ -295,18 +315,16 @@ func (s *Server) exchangeOIDCClaims(
 	defer s.releaseOIDCExchange()
 	claims, err := s.oidcProvider.Exchange(r.Context(), code, flow.verifier, flow.nonce)
 	if err != nil {
-		s.logger.WarnContext(r.Context(), "OIDC provider callback rejected",
-			"provider", "oidc", "stage", "exchange", "error_type", fmt.Sprintf("%T", err))
 		if errors.Is(err, core.ErrOIDCProviderUnavailable) {
 			w.Header().Set("Retry-After", strconv.Itoa(int(oidcRetryAfter/time.Second)))
 			s.writeOIDCCallbackFailure(w, r, oidcErrorProviderUnavailable, "provider_unavailable", err)
 			return core.OIDCClaims{}, false
 		}
 		if errors.Is(err, core.ErrOIDCRejected) {
-			s.writeOIDCCallbackFailure(w, r, oidcErrorTokenInvalid, "token_invalid", core.ErrOIDCRejected)
+			s.writeOIDCCallbackFailure(w, r, oidcErrorTokenInvalid, "token_invalid", err)
 			return core.OIDCClaims{}, false
 		}
-		s.writeOIDCInternalError(w, r, errors.New("OpenID Connect token exchange failed"))
+		s.writeOIDCInternalError(w, r, fmt.Errorf("OpenID Connect token exchange failed: %w", err))
 		return core.OIDCClaims{}, false
 	}
 	return claims, true
@@ -425,6 +443,7 @@ func (s *Server) writeOIDCCallbackFailure(
 	s.metrics.IncLoginAttempt("oidc", reason)
 	s.emitOIDCAudit(r, "anonymous", routeResource(r), telemetry.AuditFailure, reason)
 	if acceptsHTML(r.Header.Get("Accept")) {
+		logRequestError(r, s.logger, err)
 		s.writeOIDCBrowserRedirect(w, browserCode)
 		return
 	}
@@ -435,6 +454,7 @@ func (s *Server) writeOIDCInternalError(w http.ResponseWriter, r *http.Request, 
 	s.metrics.IncLoginAttempt("oidc", "internal_error")
 	s.emitOIDCAudit(r, "anonymous", routeResource(r), telemetry.AuditFailure, "internal_error")
 	if acceptsHTML(r.Header.Get("Accept")) {
+		logRequestError(r, s.logger, err)
 		s.writeOIDCBrowserRedirect(w, oidcErrorInternal)
 		return
 	}

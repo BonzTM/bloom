@@ -115,6 +115,8 @@ type Querier interface {
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
 	UpsertRoleRequestQuota(ctx context.Context, arg UpsertRoleRequestQuotaParams) error
 	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error
+	// SQLite account queries whose parameter syntax is engine-specific.
+	UsernamesByAccountIDs(ctx context.Context, accountIdsJson string) ([]UsernamesByAccountIDsRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

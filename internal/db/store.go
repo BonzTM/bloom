@@ -2,11 +2,14 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 )
+
+const maxAccountUsernameLookup = 101
 
 // NewAccountStores returns the two consumer-owned account persistence
 // boundaries for the configured
@@ -26,4 +29,15 @@ func NewAccountStores(pool *sql.DB, d config.Driver) (core.AccountStore, core.Lo
 	default:
 		return nil, nil, fmt.Errorf("unsupported database driver %q", d)
 	}
+}
+
+func accountIDsJSON(accountIDs []string) (string, error) {
+	if len(accountIDs) > maxAccountUsernameLookup {
+		return "", core.ErrInvalidArgument
+	}
+	encoded, err := json.Marshal(accountIDs)
+	if err != nil {
+		return "", fmt.Errorf("encode account ids: %w", err)
+	}
+	return string(encoded), nil
 }

@@ -207,7 +207,7 @@ func newQuotaHandlerService(t *testing.T, store *requestHandlerStore) *requestap
 	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
 	service, err := requestapp.NewService(requestapp.Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
 		Metadata: &staticRequestMetadata{movie: validRequestMovie()}, Clock: clock,
 	})
@@ -292,7 +292,7 @@ func newHandlerRequestService(t *testing.T, provider core.MetadataProvider) *req
 	store := &requestHandlerStore{profile: core.RequestProfile{ID: testRequestProfileID, Kinds: []core.MediaKind{core.MediaKindMovie}}}
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
 	service, err := requestapp.NewService(requestapp.Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store, Metadata: provider, Clock: clock,
 	})
 	if err != nil {
@@ -319,7 +319,7 @@ func newProgressHandlerService(
 ) *requestapp.Service {
 	t.Helper()
 	service, err := requestapp.NewService(requestapp.Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
 		Metadata: &staticRequestMetadata{}, Clock: testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)),
 		Progress: progress,
@@ -386,6 +386,10 @@ func (s *requestHandlerStore) GetRequest(context.Context, string) (core.MediaReq
 
 func (*requestHandlerStore) ListRequests(context.Context, core.RequestListFilter) ([]core.MediaRequest, error) {
 	return nil, nil
+}
+
+func (*requestHandlerStore) UsernamesByAccountIDs(context.Context, []string) (map[string]string, error) {
+	return map[string]string{testRequestAccountID: "alice"}, nil
 }
 
 func (s *requestHandlerStore) CreateRequest(_ context.Context, request core.MediaRequest, _ time.Time, _ bool) error {

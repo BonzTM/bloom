@@ -42,6 +42,7 @@ type (
 		Year                    int                       `json:"year"`
 		PosterPath              string                    `json:"poster_path"`
 		RequesterID             string                    `json:"requester_account_id"`
+		RequesterUsername       string                    `json:"requester_username"`
 		ProfileID               string                    `json:"profile_id"`
 		Status                  core.RequestStatus        `json:"status"`
 		Seasons                 []requestSeasonResponse   `json:"seasons"`
@@ -257,7 +258,8 @@ func requestDTO(item core.MediaRequest) requestResponse {
 	}
 	return requestResponse{
 		ID: item.ID, Kind: item.Kind, Provider: item.Provider, ProviderID: item.ProviderID, Title: item.Title, Year: item.Year,
-		PosterPath: item.PosterPath, RequesterID: item.RequesterID, ProfileID: item.ProfileID, Status: item.Status, Seasons: seasons,
+		PosterPath: item.PosterPath, RequesterID: item.RequesterID, RequesterUsername: item.RequesterUsername,
+		ProfileID: item.ProfileID, Status: item.Status, Seasons: seasons,
 		DecisionReason: item.DecisionReason, FailureReason: item.FailureReason,
 		DownloadManagerID: item.DownloadManagerID, DownloadManagerItemID: item.DownloadManagerItemID,
 		DispatchQualityProfile: item.DispatchQualityProfile, DispatchRootFolder: item.DispatchRootFolder,

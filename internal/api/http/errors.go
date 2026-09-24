@@ -7,10 +7,14 @@ package http
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
@@ -45,6 +49,7 @@ const (
 	codeDownloadManagerFailure  = "download_manager_failure"
 	codeDownloadManagerNotFound = "download_manager_not_found"
 	codeDownloadManagerInUse    = "download_manager_in_use"
+	maxLoggedErrorBytes         = 512
 )
 
 // errorClass is the boundary mapping from a domain error to its documented
@@ -162,29 +167,90 @@ var errNotReady = errors.New("not ready")
 // do not leak. The request_id is echoed into the body (not only the header) so
 // a client can quote it for correlation.
 func writeError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
-	status, code := errorClass(err)
+	status, code := logRequestError(r, logger, err)
 	setDownloadManagerRetryAfter(w, err)
-
-	// Log once, here at the boundary, with stable fields. 5xx is the unexpected
-	// class and gets error level; client errors are info.
-	attrs := []any{
-		"method", r.Method,
-		"route", routePattern(r),
-		"status", status,
-		"code", code,
-		"error", err.Error(),
-	}
-	if status >= http.StatusInternalServerError {
-		logger.ErrorContext(r.Context(), "request failed", attrs...)
-	} else {
-		logger.InfoContext(r.Context(), "request rejected", attrs...)
-	}
-
 	writeJSON(w, r, logger, status, httputil.ErrorResponse{
 		Code:      code,
 		Message:   safeMessage(status, err),
 		RequestID: requestIDFrom(r.Context()),
 	})
+}
+
+func logRequestError(r *http.Request, logger *slog.Logger, err error) (int, string) {
+	status, code := errorClass(err)
+	// Log once, here at the boundary, with stable fields. 5xx is the unexpected
+	// class and gets error level; client errors are info.
+	attrs := make([]any, 0, 12)
+	attrs = append(attrs,
+		"method", r.Method,
+		"route", routePattern(r),
+		"status", status,
+		"code", code,
+	)
+	attrs = append(attrs, safeErrorLogAttrs(err)...)
+	if status >= http.StatusInternalServerError {
+		logger.ErrorContext(r.Context(), "request failed", attrs...)
+	} else {
+		logger.InfoContext(r.Context(), "request rejected", attrs...)
+	}
+	return status, code
+}
+
+func safeErrorLogAttrs(err error) []any {
+	attrs := make([]any, 0, 8)
+	attrs = append(attrs,
+		"error_type", fmt.Sprintf("%T", err),
+		"error", safeErrorLogMessage(err.Error()),
+	)
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		return attrs
+	}
+	return append(attrs,
+		"cause_type", fmt.Sprintf("%T", cause),
+		"cause_message", safeErrorLogMessage(cause.Error()),
+	)
+}
+
+func safeErrorLogMessage(message string) string {
+	if !utf8.ValidString(message) {
+		return "[invalid error text]"
+	}
+	if sensitiveErrorText(message) {
+		return "[redacted]"
+	}
+	var clean strings.Builder
+	clean.Grow(min(len(message), maxLoggedErrorBytes))
+	for _, char := range message {
+		if unicode.IsControl(char) {
+			if clean.Len() == maxLoggedErrorBytes {
+				break
+			}
+			clean.WriteByte(' ')
+		} else {
+			if clean.Len()+utf8.RuneLen(char) > maxLoggedErrorBytes {
+				break
+			}
+			clean.WriteRune(char)
+		}
+	}
+	return clean.String()
+}
+
+func sensitiveErrorText(message string) bool {
+	lower := strings.ToLower(message)
+	for _, marker := range []string{"token", "secret", "password", "credential", "authorization", "assertion", "response:"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for word := range strings.FieldsSeq(message) {
+		word = strings.Trim(word, `"'()[]{}<>,;:`)
+		if len(word) >= 32 || (len(word) >= 16 && strings.Count(word, ".") >= 2) {
+			return true
+		}
+	}
+	return false
 }
 
 func setDownloadManagerRetryAfter(w http.ResponseWriter, err error) {

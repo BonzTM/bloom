@@ -436,6 +436,36 @@ func TestOIDCProviderRejectionIsOpaque(t *testing.T) {
 	}
 }
 
+func TestOIDCExchangeFailureIsLoggedOnceWithRedactedCause(t *testing.T) {
+	h, provider, _ := newOIDCHarness(t, nil)
+	cookie, state := startOIDC(t, h, "/")
+	token := strings.Repeat("a1", 32)
+	provider.err = errors.New("provider token " + token)
+	recorder := callbackOIDC(t, h, cookie, state)
+	logs := h.logs.String()
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("exchange status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if got := strings.Count(logs, `"msg":"request failed"`); got != 1 {
+		t.Fatalf("request failure log count = %d, want 1; logs %s", got, logs)
+	}
+	if strings.Contains(logs, token) {
+		t.Fatalf("exchange log contains token-like cause: %s", logs)
+	}
+	if !strings.Contains(logs, `"cause_type":`) || !strings.Contains(logs, `"cause_message":"[redacted]"`) {
+		t.Fatalf("exchange log lacks safe cause classification: %s", logs)
+	}
+
+	h, provider, _ = newOIDCHarness(t, nil)
+	cookie, state = startOIDC(t, h, "/")
+	provider.err = errors.New("provider token " + token)
+	redirect := callbackOIDCHTML(h, cookie, state)
+	logs = h.logs.String()
+	if redirect.Code != http.StatusSeeOther || strings.Count(logs, `"msg":"request failed"`) != 1 || strings.Contains(logs, token) {
+		t.Fatalf("browser exchange failure = %d logs %s", redirect.Code, logs)
+	}
+}
+
 func TestOIDCTokenExchangeFailureContract(t *testing.T) {
 	tests := []struct {
 		name, browserCode, reason, jsonCode string
@@ -656,6 +686,31 @@ func TestOIDCStartAcceptsOptionalBodyAndRejectsUnknownFields(t *testing.T) {
 		"return_to=%2Frequests&unexpected=value", nil, "application/x-www-form-urlencoded")
 	if unknown.Code != http.StatusUnprocessableEntity || !strings.Contains(unknown.Body.String(), `"field":"unexpected"`) {
 		t.Fatalf("unknown start field = %d body %s", unknown.Code, unknown.Body.String())
+	}
+}
+
+func TestOIDCStartAcceptsEmptyChunkedBody(t *testing.T) {
+	h, _, _ := newOIDCHarness(t, nil)
+	request := httptest.NewRequest(http.MethodPost, "https://bloom.test/api/v1/auth/oidc/start", strings.NewReader(""))
+	request.ContentLength = -1
+	request.TransferEncoding = []string{"chunked"}
+	request.RemoteAddr = "192.0.2.10:4321"
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	empty := httptest.NewRecorder()
+	h.h.ServeHTTP(empty, request)
+	if empty.Code != http.StatusSeeOther {
+		t.Fatalf("empty chunked start = %d body %s", empty.Code, empty.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "https://bloom.test/api/v1/auth/oidc/start", strings.NewReader("x"))
+	request.ContentLength = -1
+	request.TransferEncoding = []string{"chunked"}
+	request.RemoteAddr = "192.0.2.11:4321"
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	nonempty := httptest.NewRecorder()
+	h.h.ServeHTTP(nonempty, request)
+	if nonempty.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("non-empty chunked start = %d body %s", nonempty.Code, nonempty.Body.String())
 	}
 }
 

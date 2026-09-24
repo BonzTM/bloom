@@ -99,6 +99,7 @@ type MediaRequest struct {
 	Year                    int
 	PosterPath              string
 	RequesterID             string
+	RequesterUsername       string
 	ProfileID               string
 	Status                  RequestStatus
 	Seasons                 []RequestSeason

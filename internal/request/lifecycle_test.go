@@ -36,6 +36,10 @@ func (s *lifecycleStore) ListRequests(context.Context, core.RequestListFilter) (
 	return []core.MediaRequest{s.request}, nil
 }
 
+func (*lifecycleStore) UsernamesByAccountIDs(context.Context, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func (s *lifecycleStore) CreateRequest(_ context.Context, request core.MediaRequest, _ time.Time, _ bool) error {
 	s.request = request
 	return nil
@@ -103,7 +107,7 @@ func TestAutoApprovalAndFailedReapprovalPublishAndEnqueue(t *testing.T) {
 	}}
 	recorder := &lifecycleRecorder{}
 	service, err := NewService(Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
 		Metadata: &lifecycleMetadata{movie: core.MetadataTitle{
 			Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "10", Title: "Film", Year: 2026,

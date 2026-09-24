@@ -32,11 +32,19 @@ type fulfilmentEnqueuer interface {
 	Enqueue(requestID string)
 }
 
+// RequesterUsernameReader resolves current account display names in one batch.
+type RequesterUsernameReader interface {
+	UsernamesByAccountIDs(ctx context.Context, accountIDs []string) (map[string]string, error)
+}
+
+const maxRequesterUsernameBatchSize = 101
+
 // Service applies request profile, ownership, approval, and quota policy.
 type Service struct {
 	profiles      core.RequestProfileReader
 	profileWriter core.RequestProfileWriter
 	reader        core.RequestReader
+	usernames     RequesterUsernameReader
 	writer        core.RequestWriter
 	quotaReader   core.RequestQuotaReader
 	quotaWriter   core.RequestQuotaWriter
@@ -55,6 +63,7 @@ type Dependencies struct {
 	Profiles      core.RequestProfileReader
 	ProfileWriter core.RequestProfileWriter
 	Requests      core.RequestReader
+	Usernames     RequesterUsernameReader
 	RequestWriter core.RequestWriter
 	QuotaReader   core.RequestQuotaReader
 	QuotaWriter   core.RequestQuotaWriter
@@ -70,7 +79,7 @@ type Dependencies struct {
 
 // NewService constructs a request service from required boundaries.
 func NewService(deps Dependencies) (*Service, error) {
-	if deps.Profiles == nil || deps.ProfileWriter == nil || deps.Requests == nil || deps.RequestWriter == nil ||
+	if deps.Profiles == nil || deps.ProfileWriter == nil || deps.Requests == nil || deps.Usernames == nil || deps.RequestWriter == nil ||
 		deps.QuotaReader == nil || deps.QuotaWriter == nil || deps.QuotaDeleter == nil || deps.Metadata == nil || deps.Clock == nil {
 		return nil, errors.New("request service: all dependencies are required")
 	}
@@ -81,7 +90,8 @@ func NewService(deps Dependencies) (*Service, error) {
 		deps.Events = nopEvents{}
 	}
 	return &Service{
-		profiles: deps.Profiles, profileWriter: deps.ProfileWriter, reader: deps.Requests, writer: deps.RequestWriter,
+		profiles: deps.Profiles, profileWriter: deps.ProfileWriter, reader: deps.Requests, usernames: deps.Usernames,
+		writer:      deps.RequestWriter,
 		quotaReader: deps.QuotaReader, quotaWriter: deps.QuotaWriter, quotaDeleter: deps.QuotaDeleter,
 		metadata: deps.Metadata, clock: deps.Clock, metrics: deps.Metrics, events: deps.Events,
 		managers: deps.Managers, progress: deps.Progress, fulfilment: deps.Fulfilment,
@@ -187,7 +197,14 @@ func (s *Service) List(ctx context.Context, actorID string, approver bool, filte
 	if err != nil {
 		return nil, err
 	}
-	return s.reader.ListRequests(ctx, filter)
+	requests, err := s.reader.ListRequests(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.resolveRequesterUsernames(ctx, requests); err != nil {
+		return nil, err
+	}
+	return requests, nil
 }
 
 // Get returns one request when the actor owns it or is an approver.
@@ -199,7 +216,38 @@ func (s *Service) Get(ctx context.Context, actorID, id string, approver bool) (c
 	if err := core.AuthorizeRequestRead(actorID, approver, request); err != nil {
 		return core.MediaRequest{}, err
 	}
+	requests := []core.MediaRequest{request}
+	if err := s.resolveRequesterUsernames(ctx, requests); err != nil {
+		return core.MediaRequest{}, err
+	}
+	request = requests[0]
 	return request, nil
+}
+
+func (s *Service) resolveRequesterUsernames(ctx context.Context, requests []core.MediaRequest) error {
+	if len(requests) == 0 {
+		return nil
+	}
+	if len(requests) > maxRequesterUsernameBatchSize {
+		return core.ErrInvalidArgument
+	}
+	ids := make([]string, 0, len(requests))
+	seen := make(map[string]struct{}, len(requests))
+	for _, request := range requests {
+		if _, exists := seen[request.RequesterID]; exists {
+			continue
+		}
+		seen[request.RequesterID] = struct{}{}
+		ids = append(ids, request.RequesterID)
+	}
+	usernames, err := s.usernames.UsernamesByAccountIDs(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("resolve requester usernames: %w", err)
+	}
+	for index := range requests {
+		requests[index].RequesterUsername = usernames[requests[index].RequesterID]
+	}
+	return nil
 }
 
 // Decide approves or declines a pending request, or re-approves a failed request.

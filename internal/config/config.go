@@ -263,6 +263,12 @@ const (
 	defaultOIDCTimeout                 = 5 * time.Second
 	minOIDCTimeout                     = 100 * time.Millisecond
 	maxOIDCTimeout                     = 30 * time.Second
+	maxPublicURLBytes                  = 2048
+	maxOIDCClientIDBytes               = 512
+	maxOIDCClientSecretBytes           = 4096
+	maxOIDCScopeBytes                  = 512
+	maxOIDCClaimNameBytes              = 512
+	maxOIDCRoleMapClaimBytes           = 512
 	defaultPlaybackPollActive          = 5 * time.Second
 	defaultPlaybackPollIdle            = 30 * time.Second
 	defaultPlaybackMissedPolls         = 3
@@ -589,7 +595,7 @@ func parseOIDCRoleMap(raw string) (map[string]string, error) {
 	for _, part := range parts {
 		claim, role, ok := strings.Cut(part, "=")
 		claim, role = strings.TrimSpace(claim), strings.TrimSpace(role)
-		if !ok || claim == "" || !coreRoleName(role) {
+		if !ok || validateConfigText(claim, maxOIDCRoleMapClaimBytes) != nil || !core.ValidRoleName(role) {
 			return nil, fmt.Errorf("config: BLOOM_OIDC_ROLE_MAP contains invalid mapping %q", part)
 		}
 		if _, exists := result[claim]; exists {
@@ -598,11 +604,6 @@ func parseOIDCRoleMap(raw string) (map[string]string, error) {
 		result[claim] = role
 	}
 	return result, nil
-}
-
-func coreRoleName(role string) bool {
-	return role != "" && len(role) <= 64 && utf8.ValidString(role) && role == strings.TrimSpace(role) &&
-		strings.IndexFunc(role, unicode.IsControl) == -1
 }
 
 func parseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
@@ -715,6 +716,9 @@ func (b BootstrapConfig) validate() error {
 }
 
 func validatePublicURL(raw string) (*url.URL, error) {
+	if err := validateConfigText(raw, maxPublicURLBytes); err != nil {
+		return nil, fmt.Errorf("config: BLOOM_PUBLIC_URL must contain 1-%d valid bytes without control characters", maxPublicURLBytes)
+	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil ||
 		parsed.Opaque != "" || parsed.Path != "" || parsed.RawPath != "" || parsed.ForceQuery ||
@@ -732,22 +736,40 @@ func (o OIDCConfig) validate(publicURL *url.URL) error {
 	if o.DisplayName == "" || len(o.DisplayName) > 80 {
 		return errors.New("config: BLOOM_OIDC_DISPLAY_NAME must contain 1-80 bytes")
 	}
-	if len(o.IssuerURL) > core.MaxOIDCIssuerBytes {
-		return fmt.Errorf("config: BLOOM_OIDC_ISSUER_URL must not exceed %d bytes", core.MaxOIDCIssuerBytes)
+	if validateConfigText(o.IssuerURL, core.MaxOIDCIssuerBytes) != nil {
+		return fmt.Errorf("config: BLOOM_OIDC_ISSUER_URL must contain 1-%d valid bytes without control characters", core.MaxOIDCIssuerBytes)
 	}
+	if err := o.validateIssuer(); err != nil {
+		return err
+	}
+	if err := validateConfigText(o.ClientID, maxOIDCClientIDBytes); err != nil {
+		return fmt.Errorf("config: BLOOM_OIDC_CLIENT_ID must contain 1-%d valid bytes without control characters", maxOIDCClientIDBytes)
+	}
+	if validateConfigText(string(o.ClientSecret.Bytes()), maxOIDCClientSecretBytes) != nil {
+		return fmt.Errorf("config: BLOOM_OIDC_CLIENT_SECRET must contain 1-%d valid bytes without control characters", maxOIDCClientSecretBytes)
+	}
+	if err := o.validateRedirect(publicURL); err != nil {
+		return err
+	}
+	if err := o.validateClaims(); err != nil {
+		return err
+	}
+	return o.validateTimeouts()
+}
+
+func (o OIDCConfig) validateIssuer() error {
 	issuer, err := url.Parse(o.IssuerURL)
-	if err != nil || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
-		return errors.New("config: BLOOM_OIDC_ISSUER_URL must be an absolute issuer URL")
+	if err != nil || issuer.Host == "" || issuer.User != nil || issuer.Opaque != "" || issuer.ForceQuery ||
+		issuer.RawQuery != "" || issuer.Fragment != "" || issuer.RawFragment != "" || issuer.String() != o.IssuerURL {
+		return errors.New("config: BLOOM_OIDC_ISSUER_URL must be an absolute canonical issuer URL without query or fragment")
 	}
 	if issuer.Scheme != "https" && (!o.AllowInsecureIssuer || issuer.Scheme != "http" || !loopbackHost(issuer.Hostname())) {
 		return errors.New("config: BLOOM_OIDC_ISSUER_URL must use HTTPS; HTTP is allowed only on loopback with BLOOM_OIDC_ALLOW_INSECURE_ISSUER=true")
 	}
-	if o.ClientID == "" {
-		return errors.New("config: BLOOM_OIDC_CLIENT_ID must not be empty")
-	}
-	if o.ClientSecret.Len() == 0 {
-		return errors.New("config: BLOOM_OIDC_CLIENT_SECRET must not be empty")
-	}
+	return nil
+}
+
+func (o OIDCConfig) validateRedirect(publicURL *url.URL) error {
 	redirect, err := url.Parse(o.RedirectURL)
 	expectedRedirect := *publicURL
 	expectedRedirect.Path = "/api/v1/auth/oidc/callback"
@@ -759,19 +781,39 @@ func (o OIDCConfig) validate(publicURL *url.URL) error {
 	if redirect.Scheme != "https" && (!o.AllowInsecureIssuer || redirect.Scheme != "http" || !loopbackHost(redirect.Hostname())) {
 		return errors.New("config: BLOOM_OIDC_REDIRECT_URL must use HTTPS; HTTP is allowed only on loopback with BLOOM_OIDC_ALLOW_INSECURE_ISSUER=true")
 	}
+	return nil
+}
+
+func (o OIDCConfig) validateClaims() error {
 	if len(o.Scopes) == 0 || len(o.Scopes) > 16 || !slices.Contains(o.Scopes, "openid") {
 		return errors.New("config: BLOOM_OIDC_SCOPES must contain openid and at most 16 scopes")
 	}
-	if o.UsernameClaim == "" || len(o.UsernameClaim) > 128 {
-		return errors.New("config: BLOOM_OIDC_USERNAME_CLAIM must contain 1-128 bytes")
+	for _, scope := range o.Scopes {
+		if validateConfigText(scope, maxOIDCScopeBytes) != nil {
+			return fmt.Errorf("config: BLOOM_OIDC_SCOPES entries must contain 1-%d valid bytes without control characters", maxOIDCScopeBytes)
+		}
+	}
+	if validateConfigText(o.UsernameClaim, maxOIDCClaimNameBytes) != nil {
+		return fmt.Errorf("config: BLOOM_OIDC_USERNAME_CLAIM must contain 1-%d valid bytes without control characters", maxOIDCClaimNameBytes)
+	}
+	if o.RoleClaim != "" && validateConfigText(o.RoleClaim, maxOIDCClaimNameBytes) != nil {
+		return fmt.Errorf("config: BLOOM_OIDC_ROLE_CLAIM must not exceed %d valid bytes or contain control characters", maxOIDCClaimNameBytes)
 	}
 	if len(o.RoleMap) > 0 && o.RoleClaim == "" {
 		return errors.New("config: BLOOM_OIDC_ROLE_MAP requires BLOOM_OIDC_ROLE_CLAIM")
 	}
-	if o.DefaultRole != "" && !coreRoleName(o.DefaultRole) {
+	if o.DefaultRole != "" && !core.ValidRoleName(o.DefaultRole) {
 		return errors.New("config: BLOOM_OIDC_DEFAULT_ROLE is not a valid role name")
 	}
-	return o.validateTimeouts()
+	return nil
+}
+
+func validateConfigText(value string, maximum int) error {
+	if value == "" || len(value) > maximum || !utf8.ValidString(value) ||
+		strings.IndexFunc(value, unicode.IsControl) != -1 {
+		return core.ErrInvalidText
+	}
+	return nil
 }
 
 func (o OIDCConfig) validateTimeouts() error {

@@ -6,6 +6,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 )
 
 type Querier interface {
@@ -115,6 +116,8 @@ type Querier interface {
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
 	UpsertRoleRequestQuota(ctx context.Context, arg UpsertRoleRequestQuotaParams) error
 	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error
+	// PostgreSQL account queries whose parameter syntax is engine-specific.
+	UsernamesByAccountIDs(ctx context.Context, accountIdsJson json.RawMessage) ([]UsernamesByAccountIDsRow, error)
 }
 
 var _ Querier = (*Queries)(nil)
