@@ -164,9 +164,15 @@ function RequestRow({
       <td>{kindLabel(request.kind)}</td>
       <td>{profileName ?? "Unknown profile"}</td>
       <td>
-        <code title={request.requester_account_id}>
-          {shortId(request.requester_account_id)}
-        </code>
+        {request.requester_username === "" ? (
+          <code title={request.requester_account_id}>
+            {shortId(request.requester_account_id)}
+          </code>
+        ) : (
+          <span title={request.requester_account_id}>
+            {request.requester_username}
+          </span>
+        )}
       </td>
       <td>
         <span className={statusBadgeClass(request.status)}>
