@@ -1733,13 +1733,15 @@ function statsWindow(url: URL) {
   const daysRaw = url.searchParams.get("days") ?? "30";
   const tz = url.searchParams.get("tz") ?? "UTC";
   const serverId = url.searchParams.get("media_server_id") ?? "";
+  const libraryId = url.searchParams.get("library_id") ?? "";
   if (
     !/^[0-9]{1,3}$/.test(daysRaw) ||
     Number(daysRaw) < 1 ||
     Number(daysRaw) > 365 ||
     tz === "" ||
     new TextEncoder().encode(tz).length > STATS_ZONE_MAX_BYTES ||
-    (serverId !== "" && !z.uuid().safeParse(serverId).success)
+    (serverId !== "" && !z.uuid().safeParse(serverId).success) ||
+    (libraryId !== "" && (serverId === "" || libraryId.length > 128))
   ) {
     return undefined;
   }
@@ -1855,7 +1857,55 @@ function statsReport(
   return HttpResponse.json(build(window));
 }
 
+export const statsLibraries = [
+  {
+    media_server_id: CABIN,
+    library_id: "lib-movies",
+    library_name: "Movies",
+    plays: 12,
+    watch_seconds: 61_200,
+    unique_users: 2,
+    unique_titles: 2,
+    last_watched_at: "2026-09-23T21:44:00Z",
+  },
+  {
+    media_server_id: LIVING_ROOM,
+    library_id: "lib-shows",
+    library_name: "Shows",
+    plays: 8,
+    watch_seconds: 39_600,
+    unique_users: 1,
+    unique_titles: 1,
+    last_watched_at: "2026-09-22T20:10:00Z",
+  },
+  {
+    media_server_id: CABIN,
+    library_id: "",
+    library_name: "",
+    plays: 3,
+    watch_seconds: 3_720,
+    unique_users: 1,
+    unique_titles: 1,
+    last_watched_at: "2026-09-01T09:00:00Z",
+  },
+] as const;
+
 const statsHandlers = [
+  http.get(
+    "*/api/v1/stats/libraries",
+    jsonApi(
+      ({ request }) =>
+        statsDenial() ??
+        statsReport(new URL(request.url), (window) => ({
+          window,
+          items: statsLibraries.filter(
+            (library) =>
+              window.media_server_id === "" ||
+              library.media_server_id === window.media_server_id,
+          ),
+        })),
+    ),
+  ),
   http.get(
     "*/api/v1/stats/overview",
     jsonApi(

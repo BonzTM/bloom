@@ -19,6 +19,7 @@ export const statsKeys = {
       accountId,
       params.days,
       params.mediaServerId ?? "",
+      params.libraryId ?? "",
       params.timeZone,
       extra,
     ] as const,
@@ -65,6 +66,16 @@ export function useStatsTitles(
   return useQuery({
     queryKey: statsKeys.report(accountId, "titles", params, kind),
     queryFn: ({ signal }) => api.statsTitles(params, kind, signal),
+    staleTime: STALE_MS,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useStatsLibraries(accountId: string, params: StatsParams) {
+  const api = usePlaybackApi();
+  return useQuery({
+    queryKey: statsKeys.report(accountId, "libraries", params),
+    queryFn: ({ signal }) => api.statsLibraries(params, signal),
     staleTime: STALE_MS,
     meta: { sessionScoped: true },
   });

@@ -9,11 +9,13 @@ import type { StatsParams } from "../features/playback/api/stats-schemas.js";
 import {
   browserTimeZone,
   StatsControls,
+  type LibraryFilter,
   type WindowDays,
 } from "../features/playback/components/stats-controls.js";
 import {
   BreakdownCharts,
   DailyCharts,
+  LibrariesChart,
   PatternCharts,
   ReportFailed,
   TitleCharts,
@@ -23,6 +25,7 @@ import {
 import { useMediaServers } from "../features/media-servers/hooks/media-servers-queries.js";
 import {
   useStatsDaily,
+  useStatsLibraries,
   useStatsOverview,
   useStatsPatterns,
 } from "../features/playback/hooks/stats-queries.js";
@@ -57,8 +60,23 @@ function StatisticsPage({
 }: Readonly<{ accountId: string; canListServers: boolean }>): ReactNode {
   const [days, setDays] = useState<WindowDays>(30);
   const [serverId, setServerId] = useState<string | undefined>(undefined);
+  const [library, setLibrary] = useState<LibraryFilter | undefined>(undefined);
   const timeZone = useMemo(() => browserTimeZone(), []);
   const params: StatsParams = useMemo(
+    () => ({
+      days,
+      timeZone,
+      ...(library === undefined
+        ? serverId === undefined
+          ? {}
+          : { mediaServerId: serverId }
+        : { mediaServerId: library.serverId, libraryId: library.id }),
+    }),
+    [days, library, serverId, timeZone],
+  );
+  // The library ranking is never filtered by library: it is the list the
+  // filter chooses from and shows how the chosen one compares.
+  const libraryParams: StatsParams = useMemo(
     () => ({
       days,
       timeZone,
@@ -69,17 +87,20 @@ function StatisticsPage({
   const overview = useStatsOverview(accountId, params);
   const daily = useStatsDaily(accountId, params);
   const patterns = useStatsPatterns(accountId, params);
+  const libraries = useStatsLibraries(accountId, libraryParams);
   const servers = useMediaServers(canListServers ? accountId : undefined);
   const denial =
     accessDenial(overview.error) ??
     accessDenial(daily.error) ??
-    accessDenial(patterns.error);
+    accessDenial(patterns.error) ??
+    accessDenial(libraries.error);
   useSessionRecheck(
     denial !== undefined,
     Math.max(
       overview.errorUpdatedAt,
       daily.errorUpdatedAt,
       patterns.errorUpdatedAt,
+      libraries.errorUpdatedAt,
     ),
   );
   if (denial === "forbidden") {
@@ -88,6 +109,13 @@ function StatisticsPage({
   const serverOptions = (servers.data?.pages ?? []).flatMap((page) =>
     page.items.map((s) => ({ id: s.id, name: s.name })),
   );
+  const libraryChoices = (libraries.data?.items ?? [])
+    .filter((item) => item.library_id !== "")
+    .map((item) => ({
+      serverId: item.media_server_id,
+      id: item.library_id,
+      name: item.library_name,
+    }));
   return (
     <>
       <h1>Statistics</h1>
@@ -101,7 +129,18 @@ function StatisticsPage({
         onDaysChange={setDays}
         servers={serverOptions}
         serverId={serverId}
-        onServerChange={setServerId}
+        onServerChange={(id) => {
+          setServerId(id);
+          setLibrary(undefined);
+        }}
+        libraries={libraryChoices}
+        library={library}
+        onLibraryChange={(next) => {
+          setLibrary(next);
+          if (next !== undefined) {
+            setServerId(next.serverId);
+          }
+        }}
         timeZone={timeZone}
       />
       {denial === "unauthenticated" ? (
@@ -128,6 +167,16 @@ function StatisticsPage({
                   playMethods={overview.data.play_methods}
                 />
               </>
+            )}
+          </section>
+          <section aria-labelledby="libraries-heading" className="card">
+            <h2 id="libraries-heading">Libraries</h2>
+            {libraries.status === "pending" ? (
+              <AsyncStatus>Loading libraries…</AsyncStatus>
+            ) : libraries.status === "error" ? (
+              <ReportFailed what="Libraries" onRetry={libraries.refetch} />
+            ) : (
+              <LibrariesChart libraries={libraries.data.items} />
             )}
           </section>
           <section aria-labelledby="daily-heading" className="card">

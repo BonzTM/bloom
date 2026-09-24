@@ -101,6 +101,9 @@ function UserStatsPage({
         servers={[]}
         serverId={undefined}
         onServerChange={() => undefined}
+        libraries={[]}
+        library={undefined}
+        onLibraryChange={() => undefined}
         timeZone={timeZone}
       />
       {user.status === "pending" ? (

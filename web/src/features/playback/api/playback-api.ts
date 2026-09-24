@@ -3,6 +3,8 @@ import {
   mediaUserIdSchema,
   statsDailySchema,
   statsDaysSchema,
+  statsLibrariesSchema,
+  statsLibraryIdSchema,
   statsOverviewSchema,
   statsPatternsSchema,
   statsTitleKindSchema,
@@ -11,6 +13,7 @@ import {
   statsUsersSchema,
   statsZoneSchema,
   type StatsDaily,
+  type StatsLibraries,
   type StatsOverview,
   type StatsParams,
   type StatsPatterns,
@@ -106,6 +109,17 @@ export class PlaybackApi {
     );
   }
 
+  statsLibraries(
+    params: StatsParams,
+    signal: AbortSignal,
+  ): Promise<StatsLibraries> {
+    return this.#client.requestJson(
+      statsPath("libraries", params),
+      statsLibrariesSchema,
+      { signal },
+    );
+  }
+
   statsUsers(params: StatsParams, signal: AbortSignal): Promise<StatsUsers> {
     return this.#client.requestJson(
       statsPath("users", params),
@@ -144,6 +158,12 @@ function statsPath(
       "media_server_id",
       mediaServerIdSchema.parse(params.mediaServerId),
     );
+  }
+  if (params.libraryId !== undefined) {
+    if (params.mediaServerId === undefined) {
+      throw new Error("a library filter needs its media server");
+    }
+    query.set("library_id", statsLibraryIdSchema.parse(params.libraryId));
   }
   return `${STATS_PATH}/${report}?${query.toString()}`;
 }
