@@ -48,17 +48,22 @@ func NewRequestStores(pool *sql.DB, driver config.Driver) (core.RequestReader, c
 	return store, store, store, store, store, nil
 }
 
-func (s *requests) CreateRequest(ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool) error {
-	if err := core.ValidateMediaRequest(request); err != nil {
+func (s *requests) CreateRequest(
+	ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool, events ...core.RequestEvent,
+) error {
+	events, err := requestCreationEvents(request, events)
+	if err != nil {
 		return err
 	}
 	if s.sqlite != nil {
-		return s.createSQLiteRequest(ctx, request, now, quotaExempt)
+		return s.createSQLiteRequest(ctx, request, now, quotaExempt, events)
 	}
-	return s.createPostgresRequest(ctx, request, now, quotaExempt)
+	return s.createPostgresRequest(ctx, request, now, quotaExempt, events)
 }
 
-func (s *requests) createSQLiteRequest(ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool) error {
+func (s *requests) createSQLiteRequest(
+	ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool, events []core.RequestEvent,
+) error {
 	return withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
 		q := sqlite.New(conn)
 		if !quotaExempt {
@@ -69,11 +74,16 @@ func (s *requests) createSQLiteRequest(ctx context.Context, request core.MediaRe
 		if err := checkSQLiteSeasonOverlap(ctx, q, request); err != nil {
 			return err
 		}
-		return insertSQLiteRequest(ctx, q, request)
+		if err := insertSQLiteRequest(ctx, q, request); err != nil {
+			return err
+		}
+		return insertSQLiteNotificationEvents(ctx, q, events)
 	})
 }
 
-func (s *requests) createPostgresRequest(ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool) error {
+func (s *requests) createPostgresRequest(
+	ctx context.Context, request core.MediaRequest, now time.Time, quotaExempt bool, events []core.RequestEvent,
+) error {
 	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
 		q := s.postgres.WithTx(tx)
 		if err := q.LockRequestTitle(ctx, requestTitleLockKey(request)); err != nil {
@@ -90,7 +100,10 @@ func (s *requests) createPostgresRequest(ctx context.Context, request core.Media
 		if err := checkPostgresSeasonOverlap(ctx, q, request); err != nil {
 			return err
 		}
-		return insertPostgresRequest(ctx, q, request)
+		if err := insertPostgresRequest(ctx, q, request); err != nil {
+			return err
+		}
+		return insertPostgresNotificationEvents(ctx, q, events)
 	})
 }
 
@@ -332,16 +345,28 @@ func (s *requests) listPostgresRequests(ctx context.Context, filter core.Request
 	return result, nil
 }
 
-func (s *requests) TransitionRequest(ctx context.Context, id string, from, to core.RequestStatus, actorID, reason string, decidedAt time.Time) (core.MediaRequest, error) {
+func (s *requests) TransitionRequest(
+	ctx context.Context, id string, from, to core.RequestStatus, actorID, reason string, decidedAt time.Time,
+	events ...core.RequestEvent,
+) (core.MediaRequest, error) {
 	permission, err := core.TransitionPermission(from, to)
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
 	actorValid := core.ValidID(actorID) || permission == core.PermissionAdminSettings && actorID == ""
-	if !core.ValidID(id) || !actorValid || core.ValidateDecisionReason(reason) != nil {
+	if !core.ValidID(id) || !actorValid || core.ValidateDecisionReason(reason) != nil || len(events) > 1 {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
-	err = withTransaction(ctx, s.pool, func(tx *sql.Tx) error { return s.transition(ctx, tx, id, from, to, actorID, reason, decidedAt) })
+	err = withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		if transitionErr := s.transition(ctx, tx, id, from, to, actorID, reason, decidedAt); transitionErr != nil {
+			return transitionErr
+		}
+		event, eventErr := s.requestTransitionEvent(ctx, tx, id, to, actorID, reason, decidedAt, events)
+		if eventErr != nil {
+			return eventErr
+		}
+		return s.insertNotificationEvent(ctx, tx, event)
+	})
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
@@ -349,13 +374,22 @@ func (s *requests) TransitionRequest(ctx context.Context, id string, from, to co
 }
 
 func (s *requests) RecordRequestDispatch(
-	ctx context.Context, id, leaseToken, managerItemID string, at time.Time,
+	ctx context.Context, id, leaseToken, managerItemID string, at time.Time, events ...core.RequestEvent,
 ) (core.MediaRequest, error) {
-	if !core.ValidID(id) || !core.ValidID(leaseToken) || managerItemID == "" || len(managerItemID) > 100 {
+	if !core.ValidID(id) || !core.ValidID(leaseToken) || managerItemID == "" || len(managerItemID) > 100 || len(events) > 1 {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
 	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
-		return s.recordDispatch(ctx, tx, id, leaseToken, managerItemID, at)
+		if dispatchErr := s.recordDispatch(ctx, tx, id, leaseToken, managerItemID, at); dispatchErr != nil {
+			return dispatchErr
+		}
+		event, eventErr := s.requestTransitionEvent(
+			ctx, tx, id, core.RequestProcessing, "system", "", at, events,
+		)
+		if eventErr != nil {
+			return eventErr
+		}
+		return s.insertNotificationEvent(ctx, tx, event)
 	})
 	if err != nil {
 		return core.MediaRequest{}, err
@@ -446,13 +480,20 @@ func (s *requests) claimRequestDispatch(
 }
 
 func (s *requests) FailRequestDispatch(
-	ctx context.Context, id, leaseToken, reason string, at time.Time,
+	ctx context.Context, id, leaseToken, reason string, at time.Time, events ...core.RequestEvent,
 ) (core.MediaRequest, error) {
-	if !core.ValidID(id) || !core.ValidID(leaseToken) || core.ValidateDecisionReason(reason) != nil {
+	if !core.ValidID(id) || !core.ValidID(leaseToken) || core.ValidateDecisionReason(reason) != nil || len(events) > 1 {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
 	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
-		return s.failRequestDispatch(ctx, tx, id, leaseToken, reason, at)
+		if dispatchErr := s.failRequestDispatch(ctx, tx, id, leaseToken, reason, at); dispatchErr != nil {
+			return dispatchErr
+		}
+		event, eventErr := s.requestTransitionEvent(ctx, tx, id, core.RequestFailed, "system", reason, at, events)
+		if eventErr != nil {
+			return eventErr
+		}
+		return s.insertNotificationEvent(ctx, tx, event)
 	})
 	if err != nil {
 		return core.MediaRequest{}, err

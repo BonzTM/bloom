@@ -67,6 +67,16 @@ contracts) gets an entry here.
 - The Statistics page ranks libraries by plays, groups watches recorded
   before their library was known under one unknown row, and filters every
   report by one library.
+- Webhook, Discord, and SMTP notification channels with encrypted credentials,
+  request-event subscriptions, validated templates, probe-before-save and test
+  sends, request events committed in the request transaction, idempotent
+  fan-out, at-least-once leased delivery with the delivery id as a receiver
+  deduplication key, bounded retries with transient-failure classification,
+  lease-safe disabling and tombstone deletion, degraded-channel state, delivery
+  metrics and history, and SQLite/PostgreSQL migration `00015`.
+- Notification retention and worker interval settings:
+  `BLOOM_NOTIFY_RETENTION` and `BLOOM_NOTIFY_WORKER_INTERVAL`.
+
 - A Statistics page for accounts with `stats.read.all`: totals, most-watched
   movies and series, most active people, client, device, and play-method
   breakdowns, plays and watch time per day, and plays by weekday and hour in

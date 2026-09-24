@@ -281,6 +281,7 @@ const (
 	auditResourceRoles            = "route:roles"
 	auditResourceMediaServers     = "route:media_servers"
 	auditResourceDownloadManagers = "route:download_managers"
+	auditResourceNotifications    = "route:notification_channels"
 	auditResourceInvites          = "route:invites"
 	auditResourceInvitePublic     = "route:invite_public"
 	auditResourcePlayback         = "route:playback"
@@ -315,6 +316,9 @@ func routeResource(r *http.Request) string {
 		return auditResourceMediaServers
 	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
 		return auditResourceDownloadManagers
+	case "/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
+		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries":
+		return auditResourceNotifications
 	case "/api/v1/invites", "/api/v1/invites/{id}":
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":

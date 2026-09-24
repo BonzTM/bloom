@@ -229,6 +229,39 @@ func TestRequestFulfilmentConfigurationRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestLoadNotificationConfiguration(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load defaults: %v", err)
+	}
+	if cfg.Notifications.Retention != 30*24*time.Hour || cfg.Notifications.WorkerInterval != 5*time.Second {
+		t.Fatalf("notification defaults = %+v", cfg.Notifications)
+	}
+	t.Setenv("BLOOM_NOTIFY_RETENTION", "48h")
+	t.Setenv("BLOOM_NOTIFY_WORKER_INTERVAL", "2s")
+	cfg, err = Load(nil)
+	if err != nil || cfg.Notifications.Retention != 48*time.Hour || cfg.Notifications.WorkerInterval != 2*time.Second {
+		t.Fatalf("notification settings = %+v, %v", cfg.Notifications, err)
+	}
+}
+
+func TestNotificationConfigurationRejectsInvalidValues(t *testing.T) {
+	for _, testCase := range []struct{ key, value string }{
+		{key: "BLOOM_NOTIFY_RETENTION", value: "0s"},
+		{key: "BLOOM_NOTIFY_WORKER_INTERVAL", value: "999ms"},
+		{key: "BLOOM_NOTIFY_WORKER_INTERVAL", value: "61m"},
+	} {
+		t.Run(testCase.key+"="+testCase.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(testCase.key, testCase.value)
+			if _, err := Load(nil); err == nil {
+				t.Fatal("Load accepted invalid notification configuration")
+			}
+		})
+	}
+}
+
 func TestOIDCValidation(t *testing.T) {
 	base := func(t *testing.T) {
 		t.Helper()

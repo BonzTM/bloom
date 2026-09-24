@@ -55,6 +55,13 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListDownloadManagers},
 	{method: http.MethodDelete, path: "/api/v1/download-managers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteDownloadManager},
 	{method: http.MethodGet, path: "/api/v1/download-managers/{id}/options", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDownloadManagerOptions},
+	{method: http.MethodPost, path: "/api/v1/notification-channels", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateNotificationChannel},
+	{method: http.MethodGet, path: "/api/v1/notification-channels", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListNotificationChannels},
+	{method: http.MethodGet, path: "/api/v1/notification-channels/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetNotificationChannel},
+	{method: http.MethodPut, path: "/api/v1/notification-channels/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleUpdateNotificationChannel},
+	{method: http.MethodDelete, path: "/api/v1/notification-channels/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteNotificationChannel},
+	{method: http.MethodPost, path: "/api/v1/notification-channels/{id}/test", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleTestNotificationChannel},
+	{method: http.MethodGet, path: "/api/v1/notification-channels/{id}/deliveries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListNotificationDeliveries},
 	{method: http.MethodPost, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleCreateInvite},
 	{method: http.MethodGet, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleListInvites},
 	{method: http.MethodGet, path: "/api/v1/invites/{id}", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleGetInvite},
@@ -157,6 +164,10 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		if strings.HasPrefix(route.path, "/api/v1/download-managers") && (s.downloadManagerReader == nil || s.downloadManagerManager == nil) {
 			continue
 		}
+		if strings.HasPrefix(route.path, "/api/v1/notification-channels") &&
+			(s.notificationReader == nil || s.notificationManager == nil || s.notificationTester == nil) {
+			continue
+		}
 		if strings.HasPrefix(route.path, "/api/v1/invite") &&
 			(s.inviteReader == nil || s.inviteManager == nil) {
 			continue
@@ -234,6 +245,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/download-managers") || strings.HasSuffix(route.path, "/progress") {
+		handler = s.mediaServerOperationMiddleware(handler)
+	}
+	if strings.HasPrefix(route.path, "/api/v1/notification-channels") {
 		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/invite") {

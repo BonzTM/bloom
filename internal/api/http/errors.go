@@ -49,6 +49,7 @@ const (
 	codeDownloadManagerFailure  = "download_manager_failure"
 	codeDownloadManagerNotFound = "download_manager_not_found"
 	codeDownloadManagerInUse    = "download_manager_in_use"
+	codeNotificationFailure     = "notification_channel_failure"
 	oidcFailureClassification   = "OpenID Connect callback failure"
 	maxLoggedErrorBytes         = 512
 )
@@ -58,6 +59,10 @@ const (
 // transport semantics; handlers do not branch on errors themselves beyond
 // calling writeError, which calls this.
 func errorClass(err error) (status int, code string) {
+	var notificationErr *core.NotificationError
+	if errors.As(err, &notificationErr) || errors.Is(err, core.ErrNotificationChannelFailure) {
+		return http.StatusBadGateway, codeNotificationFailure
+	}
 	if status, code, ok := downloadManagerErrorClass(err); ok {
 		return status, code
 	}

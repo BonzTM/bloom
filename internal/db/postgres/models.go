@@ -120,6 +120,62 @@ type MetadataProvider struct {
 	UpdatedAt            time.Time
 }
 
+type NotificationChannel struct {
+	ID                  string
+	Kind                string
+	Name                string
+	NameKey             string
+	Target              string
+	SettingsJson        string
+	SecretCiphertext    []byte
+	KeyID               string
+	Enabled             bool
+	DegradedAt          sql.NullTime
+	ConsecutiveFailures int32
+	DeletedAt           sql.NullTime
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+type NotificationChannelSubscription struct {
+	ChannelID string
+	EventType string
+}
+
+type NotificationEvent struct {
+	ID            string
+	EventType     string
+	RequestID     string
+	RequesterID   string
+	ActorID       string
+	MediaKind     string
+	Title         string
+	RequestStatus string
+	Reason        string
+	EventSequence int32
+	OccurredAt    time.Time
+	FannedAt      sql.NullTime
+	CreatedAt     time.Time
+}
+
+type NotificationOutbox struct {
+	ID             string
+	EventID        string
+	ChannelID      string
+	ChannelKind    string
+	EventType      string
+	PayloadJson    string
+	Status         string
+	Attempts       int32
+	NextAttemptAt  time.Time
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	LastError      string
+	SentAt         sql.NullTime
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Request struct {
 	ID                      string
 	Kind                    string

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -219,14 +220,37 @@ const (
 	RequestEventFailed RequestEventType = "failed"
 )
 
+// Valid reports whether the event belongs to the closed lifecycle set.
+func (t RequestEventType) Valid() bool {
+	return t == RequestEventCreated || t == RequestEventApproved || t == RequestEventDeclined ||
+		t == RequestEventDispatched || t == RequestEventAvailable || t == RequestEventFailed
+}
+
 // RequestEvent is the in-process lifecycle payload for later consumers.
 type RequestEvent struct {
-	Type      RequestEventType
-	RequestID string
-	ActorID   string
-	Kind      MediaKind
-	Title     string
-	At        time.Time
+	Type        RequestEventType
+	RequestID   string
+	RequesterID string
+	ActorID     string
+	Kind        MediaKind
+	Title       string
+	Status      RequestStatus
+	Reason      string
+	At          time.Time
+}
+
+// ValidateRequestEvent checks the durable lifecycle facts recorded with a request mutation.
+func ValidateRequestEvent(event RequestEvent) error {
+	actorValid := event.ActorID == "" || event.ActorID == "system" || ValidID(event.ActorID)
+	if !event.Type.Valid() || !ValidID(event.RequestID) || !ValidID(event.RequesterID) || !actorValid ||
+		!event.Kind.Valid() || !event.Status.Valid() || event.At.IsZero() {
+		return ErrInvalidArgument
+	}
+	if !boundedText(event.Title, MaxNotificationTemplateBytes) ||
+		len(event.Reason) > MaxNotificationTemplateBytes || !utf8.ValidString(event.Reason) {
+		return ErrInvalidArgument
+	}
+	return nil
 }
 
 // RequestEventPublisher publishes lifecycle changes to in-process consumers.
@@ -255,15 +279,15 @@ type RequestReader interface {
 
 // RequestWriter creates and transitions media requests transactionally.
 type RequestWriter interface {
-	CreateRequest(ctx context.Context, request MediaRequest, now time.Time, quotaExempt bool) error
-	TransitionRequest(ctx context.Context, id string, from, to RequestStatus, actorID, reason string, decidedAt time.Time) (MediaRequest, error)
+	CreateRequest(ctx context.Context, request MediaRequest, now time.Time, quotaExempt bool, events ...RequestEvent) error
+	TransitionRequest(ctx context.Context, id string, from, to RequestStatus, actorID, reason string, decidedAt time.Time, events ...RequestEvent) (MediaRequest, error)
 }
 
 // RequestDispatchWriter records a successful download-manager dispatch.
 type RequestDispatchWriter interface {
 	ClaimRequestDispatch(ctx context.Context, id string, snapshot RequestDispatchSnapshot, lease RequestDispatchLease, at time.Time) (MediaRequest, error)
-	RecordRequestDispatch(ctx context.Context, id, leaseToken, managerItemID string, at time.Time) (MediaRequest, error)
-	FailRequestDispatch(ctx context.Context, id, leaseToken, reason string, at time.Time) (MediaRequest, error)
+	RecordRequestDispatch(ctx context.Context, id, leaseToken, managerItemID string, at time.Time, events ...RequestEvent) (MediaRequest, error)
+	FailRequestDispatch(ctx context.Context, id, leaseToken, reason string, at time.Time, events ...RequestEvent) (MediaRequest, error)
 }
 
 // RequestAvailabilityClaimer atomically selects and stamps the fairest processing batch.

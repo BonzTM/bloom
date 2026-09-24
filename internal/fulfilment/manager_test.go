@@ -61,7 +61,7 @@ func (f *managerFixture) ListRequestProfiles(context.Context, string, int) ([]co
 }
 
 func (f *managerFixture) TransitionRequest(
-	_ context.Context, id string, from, to core.RequestStatus, _, reason string, at time.Time,
+	_ context.Context, id string, from, to core.RequestStatus, _, reason string, at time.Time, _ ...core.RequestEvent,
 ) (core.MediaRequest, error) {
 	for index := range f.requests {
 		if f.requests[index].ID == id && f.requests[index].Status == from {
@@ -77,7 +77,7 @@ func (f *managerFixture) TransitionRequest(
 }
 
 func (f *managerFixture) RecordRequestDispatch(
-	_ context.Context, id, leaseToken, itemID string, at time.Time,
+	_ context.Context, id, leaseToken, itemID string, at time.Time, _ ...core.RequestEvent,
 ) (core.MediaRequest, error) {
 	for index := range f.requests {
 		if f.requests[index].ID == id && f.requests[index].Status == core.RequestApproved &&
@@ -115,7 +115,7 @@ func (f *managerFixture) ClaimRequestDispatch(
 }
 
 func (f *managerFixture) FailRequestDispatch(
-	_ context.Context, id, leaseToken, reason string, at time.Time,
+	_ context.Context, id, leaseToken, reason string, at time.Time, _ ...core.RequestEvent,
 ) (core.MediaRequest, error) {
 	for index := range f.requests {
 		request := &f.requests[index]

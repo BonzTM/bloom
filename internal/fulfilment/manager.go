@@ -39,7 +39,10 @@ type Audit interface {
 
 // RequestWriter performs fulfilment-owned state transitions.
 type RequestWriter interface {
-	TransitionRequest(ctx context.Context, id string, from, to core.RequestStatus, actorID, reason string, decidedAt time.Time) (core.MediaRequest, error)
+	TransitionRequest(
+		ctx context.Context, id string, from, to core.RequestStatus, actorID, reason string,
+		decidedAt time.Time, events ...core.RequestEvent,
+	) (core.MediaRequest, error)
 }
 
 // Config bounds dispatch batches, retries, and polling.
@@ -159,13 +162,13 @@ func (m *Manager) dispatch(ctx context.Context, request core.MediaRequest) error
 	if err != nil {
 		return m.failDispatch(ctx, request, "download manager dispatch failed", err)
 	}
-	updated, err := m.deps.Dispatch.RecordRequestDispatch(
-		ctx, request.ID, request.DispatchLeaseToken, itemID, core.NormalizeTime(m.deps.Clock.Now()),
-	)
+	at := core.NormalizeTime(m.deps.Clock.Now())
+	event := lifecycleEvent(request, core.RequestEventDispatched, core.RequestProcessing, "", at)
+	updated, err := m.deps.Dispatch.RecordRequestDispatch(ctx, request.ID, request.DispatchLeaseToken, itemID, at, event)
 	if err != nil {
 		return fmt.Errorf("record dispatched request %s: %w", request.ID, err)
 	}
-	m.publish(ctx, updated, core.RequestEventDispatched)
+	m.deps.Events.PublishRequestEvent(ctx, event)
 	m.audit(ctx, updated, "request.dispatch", telemetry.AuditSuccess, "")
 	return nil
 }
@@ -256,13 +259,15 @@ func (m *Manager) handleAvailabilityError(
 }
 
 func (m *Manager) available(ctx context.Context, request core.MediaRequest) error {
+	at := core.NormalizeTime(m.deps.Clock.Now())
+	event := lifecycleEvent(request, core.RequestEventAvailable, core.RequestAvailable, "", at)
 	updated, err := m.deps.Writer.TransitionRequest(
-		ctx, request.ID, core.RequestProcessing, core.RequestAvailable, "", "", core.NormalizeTime(m.deps.Clock.Now()),
+		ctx, request.ID, core.RequestProcessing, core.RequestAvailable, "", "", at, event,
 	)
 	if err != nil {
 		return fmt.Errorf("mark request available: %w", err)
 	}
-	m.publish(ctx, updated, core.RequestEventAvailable)
+	m.deps.Events.PublishRequestEvent(ctx, event)
 	m.audit(ctx, updated, "request.available", telemetry.AuditSuccess, "")
 	return nil
 }
@@ -273,13 +278,15 @@ func (m *Manager) fail(
 	if len(reason) > maxFailureReason {
 		reason = reason[:maxFailureReason]
 	}
+	at := core.NormalizeTime(m.deps.Clock.Now())
+	event := lifecycleEvent(request, core.RequestEventFailed, core.RequestFailed, reason, at)
 	updated, err := m.deps.Writer.TransitionRequest(
-		ctx, request.ID, from, core.RequestFailed, "", reason, core.NormalizeTime(m.deps.Clock.Now()),
+		ctx, request.ID, from, core.RequestFailed, "", reason, at, event,
 	)
 	if err != nil {
 		return errors.Join(cause, fmt.Errorf("mark request failed: %w", err))
 	}
-	m.publish(ctx, updated, core.RequestEventFailed)
+	m.deps.Events.PublishRequestEvent(ctx, event)
 	m.audit(ctx, updated, "request.fail", telemetry.AuditFailure, auditReason)
 	return fmt.Errorf("fail request %s: %w", request.ID, cause)
 }
@@ -290,22 +297,27 @@ func (m *Manager) failDispatch(
 	if len(reason) > maxFailureReason {
 		reason = reason[:maxFailureReason]
 	}
+	at := core.NormalizeTime(m.deps.Clock.Now())
+	event := lifecycleEvent(request, core.RequestEventFailed, core.RequestFailed, reason, at)
 	updated, err := m.deps.Dispatch.FailRequestDispatch(
-		ctx, request.ID, request.DispatchLeaseToken, reason, core.NormalizeTime(m.deps.Clock.Now()),
+		ctx, request.ID, request.DispatchLeaseToken, reason, at, event,
 	)
 	if err != nil {
 		return errors.Join(cause, fmt.Errorf("mark request dispatch failed: %w", err))
 	}
-	m.publish(ctx, updated, core.RequestEventFailed)
+	m.deps.Events.PublishRequestEvent(ctx, event)
 	m.audit(ctx, updated, "request.fail", telemetry.AuditFailure, "dispatch")
 	return fmt.Errorf("fail request %s: %w", request.ID, cause)
 }
 
-func (m *Manager) publish(ctx context.Context, request core.MediaRequest, eventType core.RequestEventType) {
-	m.deps.Events.PublishRequestEvent(ctx, core.RequestEvent{
-		Type: eventType, RequestID: request.ID, ActorID: "system", Kind: request.Kind,
-		Title: request.Title, At: request.UpdatedAt,
-	})
+func lifecycleEvent(
+	request core.MediaRequest, eventType core.RequestEventType, status core.RequestStatus, reason string, at time.Time,
+) core.RequestEvent {
+	return core.RequestEvent{
+		Type: eventType, RequestID: request.ID, RequesterID: request.RequesterID,
+		ActorID: "system", Kind: request.Kind, Title: request.Title, Status: status,
+		Reason: reason, At: at,
+	}
 }
 
 func (m *Manager) audit(

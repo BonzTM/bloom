@@ -445,7 +445,9 @@ func (*requestHandlerStore) UsernamesByAccountIDs(context.Context, []string) (ma
 	return map[string]string{testRequestAccountID: "alice"}, nil
 }
 
-func (s *requestHandlerStore) CreateRequest(_ context.Context, request core.MediaRequest, _ time.Time, _ bool) error {
+func (s *requestHandlerStore) CreateRequest(
+	_ context.Context, request core.MediaRequest, _ time.Time, _ bool, _ ...core.RequestEvent,
+) error {
 	if err := core.ValidateMediaRequest(request); err != nil {
 		return err
 	}
@@ -454,7 +456,7 @@ func (s *requestHandlerStore) CreateRequest(_ context.Context, request core.Medi
 }
 
 func (s *requestHandlerStore) TransitionRequest(
-	_ context.Context, _ string, from, to core.RequestStatus, actorID, reason string, at time.Time,
+	_ context.Context, _ string, from, to core.RequestStatus, actorID, reason string, at time.Time, _ ...core.RequestEvent,
 ) (core.MediaRequest, error) {
 	if s.created.Status != from {
 		return core.MediaRequest{}, errors.New("unexpected request transition")

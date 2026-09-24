@@ -350,6 +350,63 @@ first. Every request response includes `requester_account_id` and the account's
 current display name in `requester_username`. The username is empty if the
 account no longer exists; Bloom does not copy usernames into request records.
 
+### Notifications
+
+An account with `admin.settings` can register webhook, Discord, and email
+channels through `/api/v1/notification-channels`. Bloom sends a test before it
+stores a new or enabled replacement configuration. Disabling a channel skips
+the connectivity test and terminally fails pending deliveries that do not have
+a live lease. A delivery already being sent records its natural outcome.
+Deleting a channel hides and disables it immediately, then removes its rows
+after any live lease finishes or expires. Delivery claims and tombstone reaping
+serialize on the channel row, and eligibility is re-checked after that lock.
+Webhook deliveries are JSON request
+event payloads signed with HMAC-SHA256 in `X-Bloom-Signature`; Discord uses one
+embed; email uses plain text over authenticated STARTTLS or implicit TLS. A
+channel may opt in to private
+destination ranges. Loopback, unspecified, multicast, link-local, and
+cloud-metadata destinations remain denied even with that opt-in, and redirects
+remain disabled.
+
+Each channel subscribes to one or more request events: `created`, `approved`,
+`declined`, `dispatched`, `available`, or `failed`. Credentials and full
+webhook URLs are encrypted under `BLOOM_SECRET_KEY`. Read routes return only
+credential-presence flags. Creating a channel requires its kind-specific
+credentials: a webhook URL and shared secret, a Discord webhook URL, or an SMTP
+password. Updating a channel without those credentials retains the stored
+values. The `/test` route sends immediately and records an audit event.
+
+Subject and body templates may use only `Title`, `Kind`, `Status`, `Requester`,
+`Actor`, `Reason`, `RequestID`, and `OccurredAt`. Each template is limited to
+4096 bytes and is parsed before storage. Bloom supplies defaults for every
+event. Every Discord embed title, description, field name, and field value is
+Markdown-escaped before provider limits are applied. Email and generic webhooks
+receive plain text or the structured event payload.
+
+Every request create and state transition commits a durable event in the same
+database transaction as the request mutation. The in-process bus only wakes a
+supervised worker, which enriches unfanned events and atomically creates one
+delivery row for every enabled subscribed channel. Missing account display
+names become empty payload fields and never discard an event. The request path
+performs no notification network call. The worker claims deliveries with
+expiring leases and retries transient failures with capped exponential backoff
+for at most eight attempts. An expired eighth claim is terminally failed so it
+cannot block later work. Three consecutive terminal failures mark a channel
+degraded; the next successful delivery clears that state. The `/deliveries`
+route exposes safe recent status, attempt, and timestamp fields. Delivery
+counters and outbox depth are exported as metrics.
+Sent and terminally failed rows, followed by their fully fanned event rows, are
+pruned in bounded batches after `BLOOM_NOTIFY_RETENTION`.
+
+Delivery is at-least-once. A process failure after an external provider accepts
+a message but before Bloom records completion can cause the same delivery to be
+sent again. Webhooks include the delivery UUID in the signed `delivery_id`
+field and in both `X-Bloom-Delivery-ID` and `Idempotency-Key`; receivers should
+deduplicate on that value. Email sets `Message-ID: <delivery-id@bloom>` for the
+same purpose. Discord webhooks do not receive an idempotency field. Discord
+embed titles, descriptions, fields, and total text are truncated rune-safely
+with an ellipsis to the provider's limits.
+
 The web UI covers the same flow. Administrators register Radarr and Sonarr
 instances under Download managers, store the TMDB key and build profiles from
 an instance's options under Request settings, and decide pending requests,
@@ -430,6 +487,8 @@ this table.
 | `BLOOM_STATS_CACHE_TTL` | duration | no | `30s` | no | TTL for the bounded in-process statistics result cache. Must be at least `0`; `0` disables caching. |
 | `BLOOM_REQUEST_AVAILABILITY_SOURCE` | `media_server` \| `download_manager` | no | `media_server` | no | Authority used to mark processing requests available. Queue progress is never the authority. |
 | `BLOOM_REQUEST_AVAILABILITY_INTERVAL` | duration | no | `5m` | no | Poll interval while processing requests exist. Valid range: `1m`-`24h`. |
+| `BLOOM_NOTIFY_RETENTION` | duration | no | `720h` | no | Retention for sent and terminally failed notification delivery rows. Must be positive. |
+| `BLOOM_NOTIFY_WORKER_INTERVAL` | duration | no | `5s` | no | Interval between notification outbox scans. Valid range: `1s`-`1h`. |
 | `BLOOM_LOG_LEVEL` | string | no | `info` | no | `slog` level: `debug`, `info`, `warn`, `error`. |
 | `BLOOM_LOG_FORMAT` | `json` \| `text` | no | `json` | no | Log record format. |
 | `BLOOM_OTLP_ENDPOINT` | string | no | — | no | OTLP/HTTP trace collector `host:port`. Empty disables span export. |

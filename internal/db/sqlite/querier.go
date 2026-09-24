@@ -9,11 +9,14 @@ import (
 )
 
 type Querier interface {
+	AddNotificationSubscription(ctx context.Context, arg AddNotificationSubscriptionParams) error
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	BackfillWatchLibrary(ctx context.Context, arg BackfillWatchLibraryParams) (int64, error)
+	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (NotificationOutbox, error)
 	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
+	CompleteNotificationOutbox(ctx context.Context, arg CompleteNotificationOutboxParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
 	CountRequestProfilesForDownloadManager(ctx context.Context, arg CountRequestProfilesForDownloadManagerParams) (int64, error)
@@ -33,6 +36,10 @@ type Querier interface {
 	CreateInviteLibrary(ctx context.Context, arg CreateInviteLibraryParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
 	CreateMediaServer(ctx context.Context, arg CreateMediaServerParams) error
+	// Notification channel and durable outbox queries shared by both engines.
+	CreateNotificationChannel(ctx context.Context, arg CreateNotificationChannelParams) error
+	CreateNotificationEvent(ctx context.Context, arg CreateNotificationEventParams) error
+	CreateNotificationOutbox(ctx context.Context, arg CreateNotificationOutboxParams) error
 	CreateRequest(ctx context.Context, arg CreateRequestParams) error
 	CreateRequestProfile(ctx context.Context, arg CreateRequestProfileParams) error
 	CreateRequestProfileTag(ctx context.Context, arg CreateRequestProfileTagParams) error
@@ -42,9 +49,14 @@ type Querier interface {
 	DeleteDownloadManager(ctx context.Context, id string) (int64, error)
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
+	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
+	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
 	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
 	DeleteRequestProfileTags(ctx context.Context, profileID string) error
 	DeleteRoleRequestQuota(ctx context.Context, roleID string) (int64, error)
+	DeleteTombstonedNotificationChannel(ctx context.Context, arg DeleteTombstonedNotificationChannelParams) (int64, error)
+	FailExpiredExhaustedNotificationOutbox(ctx context.Context, updatedAt string) (int64, error)
+	FailPendingNotificationDeliveriesForChannel(ctx context.Context, arg FailPendingNotificationDeliveriesForChannelParams) (int64, error)
 	FailRequestDispatch(ctx context.Context, arg FailRequestDispatchParams) (int64, error)
 	FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPlaybackWatchParams) (FindRecentPlaybackWatchRow, error)
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
@@ -60,10 +72,13 @@ type Querier interface {
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
 	// Metadata, request profile, request, and quota queries shared by both engines.
 	GetMetadataProvider(ctx context.Context, kind string) (MetadataProvider, error)
+	GetNotificationChannel(ctx context.Context, id string) (GetNotificationChannelRow, error)
+	GetNotificationSubscriptions(ctx context.Context, channelID string) ([]string, error)
 	GetRequest(ctx context.Context, id string) (Request, error)
 	GetRequestProfile(ctx context.Context, id string) (RequestProfile, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
 	GetRoleRequestQuota(ctx context.Context, roleID string) (RoleRequestQuota, error)
+	GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error)
 	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
 	InsertInviteProvisioningFailure(ctx context.Context, arg InsertInviteProvisioningFailureParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
@@ -75,6 +90,8 @@ type Querier interface {
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
+	ListNotificationChannels(ctx context.Context, arg ListNotificationChannelsParams) ([]ListNotificationChannelsRow, error)
+	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]NotificationOutbox, error)
 	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
@@ -86,12 +103,24 @@ type Querier interface {
 	ListRequestsForAvailability(ctx context.Context, pageSize int64) ([]Request, error)
 	ListRoleRequestQuotasForAccount(ctx context.Context, accountID string) ([]RoleRequestQuota, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	ListSubscribedNotificationChannels(ctx context.Context, arg ListSubscribedNotificationChannelsParams) ([]ListSubscribedNotificationChannelsRow, error)
 	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (LockInviteByCodeHashRow, error)
+	// SQLite notification candidate selection. BEGIN IMMEDIATE already serializes
+	// the write transaction; these names match the PostgreSQL row-lock queries.
+	LockNotificationChannelForClaim(ctx context.Context, dueAt string) (string, error)
 	LockRequestTitle(ctx context.Context, lockKey interface{}) error
+	LockTombstonedNotificationChannels(ctx context.Context, arg LockTombstonedNotificationChannelsParams) ([]string, error)
+	MarkNotificationEventFanned(ctx context.Context, arg MarkNotificationEventFannedParams) (int64, error)
+	NotificationOutboxDepth(ctx context.Context) (int64, error)
+	PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error)
+	PruneNotificationOutbox(ctx context.Context, arg PruneNotificationOutboxParams) (int64, error)
+	RecordNotificationChannelSuccess(ctx context.Context, arg RecordNotificationChannelSuccessParams) (int64, error)
+	RecordNotificationChannelTerminalFailure(ctx context.Context, arg RecordNotificationChannelTerminalFailureParams) (int64, error)
 	RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
+	RescheduleNotificationOutbox(ctx context.Context, arg RescheduleNotificationOutboxParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error)
 	StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams) ([]StatsBucketRowsRow, error)
@@ -111,6 +140,7 @@ type Querier interface {
 	TrimWatchPositions(ctx context.Context, watchID string) error
 	UpdateAccountIdentityLogin(ctx context.Context, arg UpdateAccountIdentityLoginParams) (int64, error)
 	UpdateAccountPasswordHash(ctx context.Context, arg UpdateAccountPasswordHashParams) (int64, error)
+	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (int64, error)
 	UpdateRequestProfile(ctx context.Context, arg UpdateRequestProfileParams) (int64, error)
 	UpsertAccountRequestQuota(ctx context.Context, arg UpsertAccountRequestQuotaParams) error
 	UpsertMetadataProvider(ctx context.Context, arg UpsertMetadataProviderParams) error

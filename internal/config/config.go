@@ -70,6 +70,8 @@ type Config struct {
 	Stats StatsConfig
 	// Requests configures fulfilment availability polling.
 	Requests RequestFulfilmentConfig
+	// Notifications configures durable notification delivery and retention.
+	Notifications NotificationConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -140,6 +142,12 @@ const (
 type RequestFulfilmentConfig struct {
 	AvailabilityInterval time.Duration
 	AvailabilitySource   AvailabilitySource
+}
+
+// NotificationConfig bounds the delivery worker and retained delivery history.
+type NotificationConfig struct {
+	Retention      time.Duration
+	WorkerInterval time.Duration
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -287,6 +295,10 @@ const (
 	defaultRequestAvailabilityInterval = 5 * time.Minute
 	minRequestAvailabilityInterval     = time.Minute
 	maxRequestAvailabilityInterval     = 24 * time.Hour
+	defaultNotificationRetention       = 30 * 24 * time.Hour
+	defaultNotificationWorkerInterval  = 5 * time.Second
+	minNotificationWorkerInterval      = time.Second
+	maxNotificationWorkerInterval      = time.Hour
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -338,6 +350,7 @@ type rawFlags struct {
 	playback                                                        playbackRawFlags
 	stats                                                           statsRawFlags
 	requests                                                        requestRawFlags
+	notifications                                                   notificationRawFlags
 }
 
 type authRawFlags struct {
@@ -370,6 +383,10 @@ type requestRawFlags struct {
 }
 
 type statsRawFlags struct{ cacheTTL *time.Duration }
+
+type notificationRawFlags struct {
+	retention, workerInterval *time.Duration
+}
 
 // bindFlags declares every flag with its env-seeded default.
 func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
@@ -405,11 +422,21 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		playback:         bindPlaybackFlags(fs, env),
 		stats:            bindStatsFlags(fs, env),
 		requests:         bindRequestFlags(fs, env),
+		notifications:    bindNotificationFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
+	}
+}
+
+func bindNotificationFlags(fs *flag.FlagSet, env *envReader) notificationRawFlags {
+	return notificationRawFlags{
+		retention: fs.Duration("notify-retention", env.duration(
+			"BLOOM_NOTIFY_RETENTION", defaultNotificationRetention), "notification delivery history retention"),
+		workerInterval: fs.Duration("notify-worker-interval", env.duration(
+			"BLOOM_NOTIFY_WORKER_INTERVAL", defaultNotificationWorkerInterval), "notification worker interval"),
 	}
 }
 
@@ -495,16 +522,19 @@ func (r rawFlags) build() (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		HTTP:          r.httpConfig(),
-		Database:      r.databaseConfig(),
-		Telemetry:     r.telemetryConfig(level),
-		Auth:          r.authConfig(trustedProxyCIDRs),
-		Bootstrap:     bootstrap,
-		PublicURL:     *r.publicURL,
-		OIDC:          r.oidcConfig(roleMap),
-		Playback:      r.playbackConfig(),
-		Stats:         StatsConfig{CacheTTL: *r.stats.cacheTTL},
-		Requests:      r.requestConfig(),
+		HTTP:      r.httpConfig(),
+		Database:  r.databaseConfig(),
+		Telemetry: r.telemetryConfig(level),
+		Auth:      r.authConfig(trustedProxyCIDRs),
+		Bootstrap: bootstrap,
+		PublicURL: *r.publicURL,
+		OIDC:      r.oidcConfig(roleMap),
+		Playback:  r.playbackConfig(),
+		Stats:     StatsConfig{CacheTTL: *r.stats.cacheTTL},
+		Requests:  r.requestConfig(),
+		Notifications: NotificationConfig{
+			Retention: *r.notifications.retention, WorkerInterval: *r.notifications.workerInterval,
+		},
 		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
@@ -650,6 +680,9 @@ func (c Config) Validate() error {
 	if err := c.Requests.validate(); err != nil {
 		return err
 	}
+	if err := c.Notifications.validate(); err != nil {
+		return err
+	}
 	if err := c.Bootstrap.validate(); err != nil {
 		return err
 	}
@@ -667,6 +700,19 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownGrace <= 0 {
 		return fmt.Errorf("config: BLOOM_SHUTDOWN_GRACE must be positive, got %s", c.ShutdownGrace)
+	}
+	return nil
+}
+
+func (n NotificationConfig) validate() error {
+	if n.Retention == 0 && n.WorkerInterval == 0 {
+		return nil
+	}
+	if n.Retention <= 0 {
+		return fmt.Errorf("config: BLOOM_NOTIFY_RETENTION must be positive, got %s", n.Retention)
+	}
+	if n.WorkerInterval < minNotificationWorkerInterval || n.WorkerInterval > maxNotificationWorkerInterval {
+		return fmt.Errorf("config: BLOOM_NOTIFY_WORKER_INTERVAL must be between %s and %s", minNotificationWorkerInterval, maxNotificationWorkerInterval)
 	}
 	return nil
 }
