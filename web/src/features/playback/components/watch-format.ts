@@ -1,4 +1,8 @@
-import type { PlayMethod, Watch } from "../api/playback-schemas.js";
+import type {
+  PlayMethod,
+  StreamDetails,
+  Watch,
+} from "../api/playback-schemas.js";
 
 const PLAY_METHOD_LABELS: Readonly<Record<PlayMethod, string>> = {
   direct_play: "Direct play",
@@ -64,4 +68,37 @@ export function whereLabel(watch: Watch): string {
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
+}
+
+// "1080p · h264/aac · 8.2 Mbit/s", or the parts that are known; an empty
+// string when nothing is known. Transcode reasons are listed separately.
+export function streamSummary(stream: StreamDetails | undefined): string {
+  if (stream === undefined) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (stream.height !== undefined && stream.height > 0) {
+    parts.push(`${String(stream.height)}p`);
+  }
+  const codecs = [stream.video_codec, stream.audio_codec].filter(
+    (codec): codec is string => codec !== undefined && codec !== "",
+  );
+  if (codecs.length > 0) {
+    parts.push(codecs.join("/"));
+  }
+  if (stream.bitrate !== undefined && stream.bitrate > 0) {
+    parts.push(`${(stream.bitrate / 1_000_000).toFixed(1)} Mbit/s`);
+  }
+  return parts.join(" · ");
+}
+
+export function transcodeReasonsLabel(
+  stream: StreamDetails | undefined,
+): string {
+  const reasons = stream?.transcode_reasons ?? [];
+  return reasons.join(", ");
+}
+
+export function watchPath(watchId: string): string {
+  return `/admin/playback/watches/${encodeURIComponent(watchId)}`;
 }

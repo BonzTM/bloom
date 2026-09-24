@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { AsyncStatus } from "../../../components/async-status.js";
 import type { HistoryWatch } from "../api/playback-schemas.js";
 import type { usePlaybackHistory } from "../hooks/playback-queries.js";
@@ -6,6 +7,8 @@ import {
   formatActiveTime,
   itemTitle,
   playMethodLabel,
+  streamSummary,
+  watchPath,
   whereLabel,
 } from "./watch-format.js";
 
@@ -77,6 +80,8 @@ function Table({
             <th scope="col">Started</th>
             <th scope="col">Watched</th>
             <th scope="col">Method</th>
+            <th scope="col">Stream</th>
+            <th scope="col">Details</th>
           </tr>
         </thead>
         <tbody>
@@ -93,6 +98,16 @@ function Table({
               </td>
               <td>{formatActiveTime(watch.active_seconds)}</td>
               <td>{playMethodLabel(watch.play_method)}</td>
+              <td>{streamSummary(watch.stream)}</td>
+              <td>
+                <Link to={watchPath(watch.id)}>
+                  Details
+                  <span className="visually-hidden">
+                    {" "}
+                    of {itemTitle(watch)}
+                  </span>
+                </Link>
+              </td>
             </tr>
           ))}
         </tbody>

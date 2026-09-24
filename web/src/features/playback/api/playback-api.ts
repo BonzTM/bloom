@@ -29,8 +29,11 @@ import {
   historyPageSchema,
   mediaServerIdSchema,
   nowPlayingSchema,
+  playbackPositionsSchema,
+  watchIdSchema,
   type HistoryPage,
   type NowPlaying,
+  type PlaybackPositions,
 } from "./playback-schemas.js";
 
 const NOW_PATH = "api/v1/playback/now";
@@ -47,6 +50,16 @@ export class PlaybackApi {
   }
 
   // Every open watch across every server, newest first.
+  // The bounded sample series of one watch, newest first.
+  positions(watchId: string, signal: AbortSignal): Promise<PlaybackPositions> {
+    const id = encodeURIComponent(watchIdSchema.parse(watchId));
+    return this.#client.requestJson(
+      `api/v1/playback/watches/${id}/positions`,
+      playbackPositionsSchema,
+      { signal },
+    );
+  }
+
   now(signal: AbortSignal): Promise<NowPlaying> {
     return this.#client.requestJson(NOW_PATH, nowPlayingSchema, { signal });
   }

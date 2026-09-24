@@ -21,6 +21,8 @@ import {
 } from "../features/invites/api/invites-schemas.js";
 import type {
   HistoryWatch,
+  PlaybackPosition,
+  StreamDetails,
   Watch,
 } from "../features/playback/api/playback-schemas.js";
 import {
@@ -791,8 +793,70 @@ function watch(patch: Partial<Watch> & Pick<Watch, "id">): Watch {
     play_method: "direct_play",
     active_seconds: 754,
     started_at: "2026-09-24T19:00:00Z",
+    stream: directStream,
     ...patch,
   };
+}
+
+const directStream: StreamDetails = {
+  container: "mkv",
+  video_codec: "h264",
+  audio_codec: "aac",
+  bitrate: 8_200_000,
+  width: 1920,
+  height: 1080,
+  framerate: 23.98,
+  audio_channels: 6,
+  is_video_direct: true,
+  is_audio_direct: true,
+  transcode_reasons: [],
+};
+
+export const transcodeStream: StreamDetails = {
+  container: "ts",
+  video_codec: "h264",
+  audio_codec: "aac",
+  bitrate: 4_000_000,
+  width: 1280,
+  height: 720,
+  framerate: 23.98,
+  audio_channels: 2,
+  is_video_direct: false,
+  is_audio_direct: false,
+  transcode_reasons: ["ContainerNotSupported", "AudioCodecNotSupported"],
+};
+
+// The sample series of the first now-playing watch: direct play that turned
+// into a transcode mid-way; other known watches have one sample.
+export const WATCH_WITH_SERIES = "7b2c3d4e-0000-4000-8000-000000000001";
+
+function watchPositions(id: string): readonly PlaybackPosition[] | undefined {
+  const known = [...mockNowPlaying, ...mockPlaybackHistory].find(
+    (candidate) => candidate.id === id,
+  );
+  if (known === undefined) {
+    return undefined;
+  }
+  const latest: PlaybackPosition = {
+    observed_at: "2026-09-24T19:12:34Z",
+    position_ms: known.position_ms,
+    paused: known.paused,
+    play_method: known.play_method,
+    ...(known.stream === undefined ? {} : { stream: known.stream }),
+  };
+  if (id !== WATCH_WITH_SERIES) {
+    return [latest];
+  }
+  return [
+    { ...latest, play_method: "transcode", stream: transcodeStream },
+    {
+      observed_at: "2026-09-24T19:05:00Z",
+      position_ms: 300_000,
+      paused: false,
+      play_method: "direct_play",
+      stream: directStream,
+    },
+  ];
 }
 
 export const mockNowPlaying: readonly Watch[] = [
@@ -2424,6 +2488,26 @@ export const handlers = [
   ...statsHandlers,
   ...requestHandlers,
   ...roleQuotaHandlers,
+  http.get(
+    "*/api/v1/playback/watches/:id/positions",
+    jsonApi(({ params }) => {
+      const denied = playbackDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (
+        typeof params.id !== "string" ||
+        !z.uuid().safeParse(params.id).success
+      ) {
+        return envelope(422, "validation_failed", "invalid id");
+      }
+      const items = watchPositions(params.id);
+      if (items === undefined) {
+        return envelope(404, "not_found", "watch not found");
+      }
+      return HttpResponse.json({ items });
+    }),
+  ),
   http.get(
     "*/api/v1/playback/now",
     jsonApi(
