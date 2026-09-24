@@ -98,6 +98,8 @@ export const mediaRequestSchema = z.object({
     .string()
     .refine((value) => utf8Length(value) <= MAX_FIELD_BYTES),
   requester_account_id: z.uuid(),
+  // The requester's current username, empty when the account is gone.
+  requester_username: z.string(),
   profile_id: z.uuid(),
   status: requestStatusSchema,
   seasons: z.array(requestSeasonSchema),

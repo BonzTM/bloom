@@ -100,6 +100,7 @@ describe("mediaRequestSchema", () => {
     year: 1995,
     poster_path: "/heat.jpg",
     requester_account_id: "0b6c3d2e-1111-4a2b-9c3d-000000000002",
+    requester_username: "alice",
     profile_id: "9c1d2e3f-0000-4000-8000-000000000001",
     status: "pending",
     seasons: [],

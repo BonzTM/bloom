@@ -53,6 +53,8 @@ contracts) gets an entry here.
 
 ### Added
 
+- The request queue shows who asked by username instead of a truncated
+  account id.
 - A Statistics page for accounts with `stats.read.all`: totals, most-watched
   movies and series, most active people, client, device, and play-method
   breakdowns, plays and watch time per day, and plays by weekday and hour in

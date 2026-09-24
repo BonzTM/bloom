@@ -58,7 +58,7 @@ it("shows pending requests first, with seasons, profile, and requester", async (
   expect(arrival).toHaveTextContent("Seasons 1 and 2");
   expect(arrival).toHaveTextContent("Series");
   expect(arrival).toHaveTextContent("Series");
-  expect(arrival).toHaveTextContent("0b6c3d2e");
+  expect(arrival).toHaveTextContent("bob");
   expect(arrival).toHaveTextContent("Pending");
   expect(arrival).toHaveTextContent("2026-09-23");
   expect(
