@@ -14,14 +14,14 @@ const profileMessages: Messages = {
   403: "You no longer have permission to manage request profiles.",
   404: "That profile no longer exists.",
   409: "Another profile already uses that name, or requests still reference this one.",
-  422: "Check the profile fields and try again.",
+  422: "Check the profile fields; the instance must exist and accept this kind of media.",
 };
 
 const decisionMessages: Messages = {
   401: SIGN_IN_AGAIN,
   403: "You no longer have permission to decide requests.",
   404: "That request no longer exists.",
-  409: "That request was already decided.",
+  409: "That request cannot be changed from its current state.",
   422: "Check the reason and try again.",
 };
 
@@ -69,6 +69,24 @@ export function describeCreateError(error: unknown): string | undefined {
     return "Requesting needs a TMDB key, which no administrator has set yet.";
   }
   return describe(error, createMessages, "The request could not be created.");
+}
+
+const managerMessages: Messages = {
+  401: SIGN_IN_AGAIN,
+  403: "You no longer have permission to manage download managers.",
+  404: "That download manager no longer exists.",
+  409: "Another instance already uses that name, or a request profile still references this one.",
+  422: "Check the instance fields and try again.",
+  502: "The instance could not be reached or refused the API key.",
+  503: "The instance is busy. Try again in a moment.",
+};
+
+export function describeManagerError(error: unknown): string | undefined {
+  return describe(
+    error,
+    managerMessages,
+    "The download manager could not be changed.",
+  );
 }
 
 export function describeProfileError(error: unknown): string | undefined {

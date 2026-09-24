@@ -104,6 +104,8 @@ describe("mediaRequestSchema", () => {
     status: "pending",
     seasons: [],
     decision_reason: "",
+    failure_reason: "",
+    download_manager_item_id: "",
     decided_by_account_id: "",
     created_at: "2026-09-22T09:00:00Z",
     updated_at: "2026-09-22T09:00:00Z",

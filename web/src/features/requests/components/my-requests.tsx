@@ -5,6 +5,7 @@ import type { MediaRequest } from "../api/requests-schemas.js";
 import type { useRequests } from "../hooks/requests-queries.js";
 import { LoadFailed, Pager, RefreshFailed } from "./list-states.js";
 import { Poster } from "./poster.js";
+import { RequestProgress } from "./request-progress.js";
 import {
   seasonsLabel,
   statusBadgeClass,
@@ -15,10 +16,11 @@ import { titlePath } from "./title-grid.js";
 
 type MyRequestsProps = Readonly<{
   query: ReturnType<typeof useRequests>;
+  accountId: string;
 }>;
 
 // The signed-in account's own requests, newest first, as a list of cards.
-export function MyRequests({ query }: MyRequestsProps): ReactNode {
+export function MyRequests({ query, accountId }: MyRequestsProps): ReactNode {
   if (query.status === "pending") {
     return <AsyncStatus>Loading your requests…</AsyncStatus>;
   }
@@ -41,7 +43,11 @@ export function MyRequests({ query }: MyRequestsProps): ReactNode {
       ) : (
         <ul className="request-list" aria-label="Your requests, newest first">
           {items.map((request) => (
-            <RequestCard key={request.id} request={request} />
+            <RequestCard
+              key={request.id}
+              request={request}
+              accountId={accountId}
+            />
           ))}
         </ul>
       )}
@@ -58,7 +64,8 @@ export function MyRequests({ query }: MyRequestsProps): ReactNode {
 
 function RequestCard({
   request,
-}: Readonly<{ request: MediaRequest }>): ReactNode {
+  accountId,
+}: Readonly<{ request: MediaRequest; accountId: string }>): ReactNode {
   const seasons = seasonsLabel(request);
   return (
     <li className="request-card">
@@ -85,6 +92,18 @@ function RequestCard({
         {request.decision_reason === "" ? null : (
           <p className="row-detail">{request.decision_reason}</p>
         )}
+        {request.failure_reason === "" ? null : (
+          <p className="row-detail failure-reason">{request.failure_reason}</p>
+        )}
+        {request.status === "processing" ? (
+          <p>
+            <RequestProgress
+              accountId={accountId}
+              requestId={request.id}
+              title={titleWithYear(request)}
+            />
+          </p>
+        ) : null}
       </div>
     </li>
   );

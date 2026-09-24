@@ -104,6 +104,10 @@ export const mediaRequestSchema = z.object({
   decision_reason: z
     .string()
     .refine((value) => utf8Length(value) <= MAX_REASON_BYTES),
+  failure_reason: z
+    .string()
+    .refine((value) => utf8Length(value) <= MAX_REASON_BYTES),
+  download_manager_item_id: z.string().max(128),
   decided_by_account_id: z.string(),
   decided_at: z.iso.datetime({ offset: true }).optional(),
   created_at: z.iso.datetime({ offset: true }),

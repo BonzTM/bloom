@@ -43,6 +43,16 @@ export default function AdminRoute(): ReactNode {
               <p>Set the TMDB key and where approved requests go.</p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.adminSettings]}>
+            <li className="card">
+              <h2>
+                <Link to="/admin/download-managers">Download managers</Link>
+              </h2>
+              <p>
+                Connect the Radarr and Sonarr instances that fetch requests.
+              </p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.statsReadAll]}>
             <li className="card">
               <h2>

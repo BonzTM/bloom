@@ -311,9 +311,11 @@ Accounts with `requests.read.own` see their own requests. Approvers see all
 requests and can filter by status or requester. Lists are cursor-paged newest
 first.
 
-The web UI covers the same flow. Administrators store the TMDB key and manage
-profiles under Request settings, and decide pending requests under Requests in
-the administration area. Anyone who may request media searches, browses
+The web UI covers the same flow. Administrators register Radarr and Sonarr
+instances under Download managers, store the TMDB key and build profiles from
+an instance's options under Request settings, and decide pending requests,
+retry failed ones, and read queue progress under Requests in the
+administration area. Anyone who may request media searches, browses
 posters, picks seasons, and follows their own requests under Requests in the
 main navigation. Posters load from `image.tmdb.org`, the only third-party
 origin the page allows for images.

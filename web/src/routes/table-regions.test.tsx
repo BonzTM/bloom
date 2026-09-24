@@ -22,6 +22,11 @@ it.each([
   ],
   ["/admin/requests", "Requests table", "Requests, newest first"],
   [
+    "/admin/download-managers",
+    "Download managers table",
+    "Download managers, ordered by name",
+  ],
+  [
     "/admin/request-profiles",
     "Request profiles table",
     "Request profiles, ordered by name",

@@ -24,6 +24,11 @@ import type {
   Watch,
 } from "../features/playback/api/playback-schemas.js";
 import {
+  registerDownloadManagerRequestSchema,
+  type DownloadManager,
+  type DownloadManagerOptions,
+} from "../features/requests/api/download-manager-schemas.js";
+import {
   createMediaRequestSchema,
   type MetadataSeries,
   type MetadataTitle,
@@ -190,6 +195,9 @@ export const errorCodeSchema = z.enum([
   "request_quota_exceeded",
   "request_profile_in_use",
   "invalid_request_transition",
+  "download_manager_failure",
+  "download_manager_not_found",
+  "download_manager_in_use",
 ]);
 
 export type ErrorCode = z.output<typeof errorCodeSchema>;
@@ -880,6 +888,8 @@ export const REQUESTER_BOB = "0b6c3d2e-1111-4a2b-9c3d-000000000003";
 export const PROFILE_MOVIES = "9c1d2e3f-0000-4000-8000-000000000001";
 export const PROFILE_SERIES = "9c1d2e3f-0000-4000-8000-000000000002";
 export const INVALID_TMDB_KEY = "rejected-key";
+export const PROCESSING_REQUEST_ID = "5e4d3c2b-0000-4000-8000-000000000005";
+export const FAILED_REQUEST_ID = "5e4d3c2b-0000-4000-8000-000000000006";
 
 export const mockRequestProfiles: readonly RequestProfile[] = [
   {
@@ -922,6 +932,8 @@ function mediaRequest(overrides: Partial<MediaRequest>): MediaRequest {
     status: "pending",
     seasons: [],
     decision_reason: "",
+    failure_reason: "",
+    download_manager_item_id: "",
     decided_by_account_id: "",
     created_at: "2026-09-22T09:00:00Z",
     updated_at: "2026-09-22T09:00:00Z",
@@ -963,6 +975,34 @@ export const mockRequests: readonly MediaRequest[] = [
     updated_at: "2026-09-21T12:00:00Z",
   }),
   mediaRequest({
+    id: PROCESSING_REQUEST_ID,
+    provider_id: "603",
+    title: "The Matrix",
+    year: 1999,
+    poster_path: "",
+    requester_account_id: mockAccount.id,
+    status: "processing",
+    download_manager_item_id: "radarr:42",
+    decided_by_account_id: mockAccount.id,
+    decided_at: "2026-09-21T15:00:00Z",
+    created_at: "2026-09-21T14:00:00Z",
+    updated_at: "2026-09-21T15:00:00Z",
+  }),
+  mediaRequest({
+    id: FAILED_REQUEST_ID,
+    provider_id: "680",
+    title: "Pulp Fiction",
+    year: 1994,
+    poster_path: "",
+    requester_account_id: REQUESTER_BOB,
+    status: "failed",
+    failure_reason: "radarr-main refused the request: root folder missing.",
+    decided_by_account_id: mockAccount.id,
+    decided_at: "2026-09-21T13:00:00Z",
+    created_at: "2026-09-21T12:00:00Z",
+    updated_at: "2026-09-21T13:30:00Z",
+  }),
+  mediaRequest({
     id: "5e4d3c2b-0000-4000-8000-000000000004",
     provider_id: "27205",
     title: "Inception",
@@ -982,6 +1022,7 @@ let tmdbKeyConfigured = false;
 let createdProfiles = 0;
 
 export function resetMockRequests(): void {
+  resetMockDownloadManagers();
   requestProfiles = [...mockRequestProfiles];
   requests = [...mockRequests];
   tmdbKeyConfigured = false;
@@ -1123,8 +1164,13 @@ async function decideRequest(
   if (existing === undefined) {
     return envelope(404, "not_found", "request not found");
   }
-  if (existing.status !== "pending") {
-    return envelope(409, "already_exists", "request already decided");
+  const reapproval = existing.status === "failed" && verb === "approve";
+  if (existing.status !== "pending" && !reapproval) {
+    return envelope(
+      409,
+      "invalid_request_transition",
+      "request already decided",
+    );
   }
   const status = verb === "approve" ? "approved" : "declined";
   const decided: MediaRequest = {
@@ -1132,6 +1178,10 @@ async function decideRequest(
     status,
     seasons: existing.seasons.map((season) => ({ ...season, status })),
     decision_reason: input.data.reason ?? "",
+    failure_reason: "",
+    download_manager_item_id: reapproval
+      ? existing.download_manager_item_id
+      : "",
     decided_by_account_id: mockAccount.id,
     decided_at: "2026-09-23T12:00:00Z",
     updated_at: "2026-09-23T12:00:00Z",
@@ -1336,6 +1386,8 @@ async function createRequest(request: Request) {
     status,
     seasons: input.data.seasons.map((number) => ({ number, status })),
     decision_reason: "",
+    failure_reason: "",
+    download_manager_item_id: "",
     decided_by_account_id: status === "approved" ? mockAccount.id : "",
     ...(status === "approved" ? { decided_at: "2026-09-23T12:00:00Z" } : {}),
     created_at: "2026-09-23T12:00:00Z",
@@ -1345,7 +1397,201 @@ async function createRequest(request: Request) {
   return HttpResponse.json(created, { status: 201 });
 }
 
+// Download managers the mock server starts with, ordered by name. The
+// hostname below exercises a failed probe.
+export const UNREACHABLE_MANAGER_HOST = "unreachable.example";
+export const MANAGER_RADARR_ID = "7d8e9f0a-0000-4000-8000-000000000001";
+export const MANAGER_SONARR_ID = "7d8e9f0a-0000-4000-8000-000000000002";
+const MAX_MANAGER_CURSOR_LENGTH = 400;
+
+export const mockDownloadManagers: readonly DownloadManager[] = [
+  {
+    id: MANAGER_RADARR_ID,
+    kind: "radarr",
+    name: "radarr-main",
+    base_url: "https://radarr.example",
+    allow_insecure: false,
+    created_at: "2026-09-14T10:00:00Z",
+    updated_at: "2026-09-14T10:00:00Z",
+  },
+  {
+    id: MANAGER_SONARR_ID,
+    kind: "sonarr",
+    name: "sonarr-main",
+    base_url: "http://10.0.0.7:8989",
+    allow_insecure: true,
+    created_at: "2026-09-14T10:00:00Z",
+    updated_at: "2026-09-14T10:00:00Z",
+  },
+];
+
+const mockManagerOptions: Readonly<Record<string, DownloadManagerOptions>> = {
+  [MANAGER_RADARR_ID]: {
+    quality_profiles: [
+      { id: "1", name: "HD-1080p" },
+      { id: "2", name: "Ultra-HD" },
+    ],
+    root_folders: [
+      { id: "/data/movies", name: "/data/movies" },
+      { id: "/data/movies4k", name: "/data/movies4k" },
+    ],
+    tags: [
+      { id: "1", name: "bloom" },
+      { id: "2", name: "4k" },
+    ],
+  },
+  [MANAGER_SONARR_ID]: {
+    quality_profiles: [{ id: "1", name: "Any" }],
+    root_folders: [{ id: "/data/tv", name: "/data/tv" }],
+    tags: [],
+  },
+};
+
+let downloadManagers: DownloadManager[] = [...mockDownloadManagers];
+let registeredManagers = 0;
+
+export function resetMockDownloadManagers(): void {
+  downloadManagers = [...mockDownloadManagers];
+  registeredManagers = 0;
+}
+
+const managersQuerySchema = pageQuerySchema(MAX_MANAGER_CURSOR_LENGTH);
+
+async function registerManager(request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = registerDownloadManagerRequestSchema.safeParse(
+    await request.json(),
+  );
+  if (
+    !input.success ||
+    input.data.base_url.startsWith("http://") !== input.data.allow_insecure
+  ) {
+    return envelope(422, "validation_failed", "invalid download manager");
+  }
+  const name = input.data.name.toLowerCase();
+  if (downloadManagers.some((m) => m.name.toLowerCase() === name)) {
+    return envelope(409, "already_exists", "a download manager uses that name");
+  }
+  if (new URL(input.data.base_url).hostname === UNREACHABLE_MANAGER_HOST) {
+    return envelope(502, "download_manager_failure", "probe failed");
+  }
+  registeredManagers += 1;
+  const ordinal = String(registeredManagers).padStart(2, "0");
+  const manager: DownloadManager = {
+    id: `7d8e9f0a-0000-4000-8000-0000000001${ordinal}`,
+    kind: input.data.kind,
+    name: input.data.name,
+    base_url: input.data.base_url.replace(/\/+$/u, ""),
+    allow_insecure: input.data.allow_insecure,
+    created_at: "2026-09-23T12:00:00Z",
+    updated_at: "2026-09-23T12:00:00Z",
+  };
+  downloadManagers = [...downloadManagers, manager].sort((a, b) =>
+    a.name.localeCompare(b.name, "en"),
+  );
+  const kind = input.data.kind === "radarr" ? "movie" : "series";
+  return HttpResponse.json(
+    {
+      manager,
+      info: {
+        name: input.data.kind === "radarr" ? "Radarr" : "Sonarr",
+        version: "5.0.0",
+        capabilities: { kinds: [kind] },
+      },
+    },
+    { status: 201 },
+  );
+}
+
+function removeManager(id: string | readonly string[] | undefined) {
+  if (typeof id !== "string" || !z.uuid().safeParse(id).success) {
+    return envelope(422, "validation_failed", "invalid id");
+  }
+  const manager = downloadManagers.find((m) => m.id === id);
+  if (manager === undefined) {
+    return envelope(404, "not_found", "download manager not found");
+  }
+  if (
+    requestProfiles.some(
+      (profile) => profile.download_manager_instance === manager.name,
+    )
+  ) {
+    return envelope(409, "download_manager_in_use", "profiles reference it");
+  }
+  downloadManagers = downloadManagers.filter((m) => m.id !== id);
+  return new HttpResponse(null, { status: 204 });
+}
+
+function managerOptions(id: string | readonly string[] | undefined) {
+  if (typeof id !== "string" || !downloadManagers.some((m) => m.id === id)) {
+    return envelope(404, "not_found", "download manager not found");
+  }
+  const options = mockManagerOptions[id];
+  return HttpResponse.json(
+    options ?? { quality_profiles: [], root_folders: [], tags: [] },
+  );
+}
+
+function requestProgress(id: string | readonly string[] | undefined) {
+  const request = requests.find((candidate) => candidate.id === id);
+  if (request === undefined) {
+    return envelope(404, "not_found", "request not found");
+  }
+  if (request.download_manager_item_id === "") {
+    return envelope(404, "download_manager_not_found", "not dispatched");
+  }
+  return HttpResponse.json({
+    status: "downloading",
+    size: 4_000_000_000,
+    size_left: 1_000_000_000,
+    estimated_completion: "2026-09-23T13:30:00Z",
+  });
+}
+
+const downloadManagerHandlers = [
+  http.get(
+    "*/api/v1/download-managers",
+    jsonApi(
+      ({ request }) =>
+        permissionDenial("admin.settings") ??
+        pagedItems(new URL(request.url), managersQuerySchema, downloadManagers),
+    ),
+  ),
+  http.post(
+    "*/api/v1/download-managers",
+    jsonApi(
+      async ({ request }) =>
+        permissionDenial("admin.settings") ?? (await registerManager(request)),
+    ),
+  ),
+  http.delete(
+    "*/api/v1/download-managers/:id",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("admin.settings") ?? removeManager(params.id),
+    ),
+  ),
+  http.get(
+    "*/api/v1/download-managers/:id/options",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("admin.settings") ?? managerOptions(params.id),
+    ),
+  ),
+  http.get(
+    "*/api/v1/requests/:id/progress",
+    jsonApi(
+      ({ params }) =>
+        anyPermissionDenial(["requests.read.own", "requests.approve"]) ??
+        requestProgress(params.id),
+    ),
+  ),
+];
+
 const requestHandlers = [
+  ...downloadManagerHandlers,
   http.get(
     "*/api/v1/request-profiles",
     jsonApi(

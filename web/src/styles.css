@@ -774,6 +774,10 @@ button:disabled {
   margin: 0;
 }
 
+.failure-reason {
+  color: var(--danger);
+}
+
 .key-presence {
   margin-block: var(--space-2);
 }

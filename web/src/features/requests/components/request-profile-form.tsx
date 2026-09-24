@@ -7,22 +7,30 @@ import {
   type RefObject,
   type SyntheticEvent,
 } from "react";
+import { Link } from "react-router-dom";
+import { AsyncStatus } from "../../../components/async-status.js";
 import { FieldError, fieldErrorId } from "../../auth/components/field-error.js";
-import {
-  mediaKindSchema,
-  type RequestProfile,
-  type RequestProfileInput,
+import type {
+  DownloadManager,
+  DownloadManagerOption,
+} from "../api/download-manager-schemas.js";
+import type {
+  RequestProfile,
+  RequestProfileInput,
 } from "../api/requests-schemas.js";
+import { useDownloadManagerOptions } from "../hooks/requests-queries.js";
+import { managerKindLabel } from "./download-managers-table.js";
 import {
   firstInvalidProfileField,
   readProfileInput,
   type ProfileField,
   type ProfileFieldErrors,
 } from "./profile-input.js";
-import { kindLabel } from "./request-format.js";
 import { describeProfileError } from "./request-errors.js";
 
 type RequestProfileFormProps = Readonly<{
+  accountId: string;
+  managers: readonly DownloadManager[];
   // The profile being edited; absent when creating a new one.
   profile: RequestProfile | undefined;
   pending: boolean;
@@ -31,15 +39,13 @@ type RequestProfileFormProps = Readonly<{
   onCancel: (() => void) | undefined;
 }>;
 
-const DOWNLOAD_MANAGER_KINDS = [
-  { value: "radarr", label: "Radarr" },
-  { value: "sonarr", label: "Sonarr" },
-] as const;
-
-// Uncontrolled on purpose: the browser keeps the typed values, so a rejected
-// submit never loses input. The route remounts the form after a success or
-// when a different profile is chosen for editing.
+// A profile names a registered instance; its quality profile, root folder,
+// and tags are chosen from what that instance offers. Text fields stay
+// uncontrolled so a rejected submit never loses input; the instance choice
+// is controlled because it decides which options are shown.
 export function RequestProfileForm({
+  accountId,
+  managers,
   profile,
   pending,
   serverError,
@@ -48,8 +54,11 @@ export function RequestProfileForm({
 }: RequestProfileFormProps): ReactNode {
   const formId = useId();
   const summaryRef = useRef<HTMLParagraphElement>(null);
-  const refs = useFieldRefs();
+  const fieldRefs = useFieldRefs();
   const [errors, setErrors] = useState<ProfileFieldErrors>({});
+  const [managerId, setManagerId] = useState(
+    () => managerFor(profile, managers)?.id ?? "",
+  );
   const summary = describeProfileError(serverError);
   const editing = profile !== undefined;
 
@@ -64,16 +73,27 @@ export function RequestProfileForm({
     if (pending) {
       return;
     }
-    const result = readProfileInput(new FormData(event.currentTarget));
+    const result = readProfileInput(
+      new FormData(event.currentTarget),
+      managers,
+    );
     if (result.errors !== undefined) {
       setErrors(result.errors);
-      focusFirstInvalid(result.errors, refs);
+      focusFirstInvalid(result.errors, fieldRefs);
       return;
     }
     setErrors({});
     onSubmit(result.input);
   }
 
+  if (managers.length === 0) {
+    return (
+      <p>
+        No download manager is registered yet, so no profile can be created.{" "}
+        <Link to="/admin/download-managers">Register one first.</Link>
+      </p>
+    );
+  }
   const summaryId = `${formId}-summary`;
   return (
     <form
@@ -88,64 +108,40 @@ export function RequestProfileForm({
           {summary}
         </p>
       )}
-      <TextField
+      <NameField
         formId={formId}
-        name="name"
-        label="Name"
         defaultValue={profile?.name}
         error={errors.name}
-        inputRef={refs.name}
+        inputRef={fieldRefs.name}
       />
-      <KindsField
+      <ManagerSelect
         formId={formId}
-        defaultKinds={profile?.kinds ?? []}
-        error={errors.kinds}
-        inputRef={refs.kinds}
+        managers={managers}
+        value={managerId}
+        onChange={setManagerId}
+        error={errors.download_manager}
+        selectRef={fieldRefs.download_manager}
       />
-      <ManagerKindField
-        formId={formId}
-        defaultValue={profile?.download_manager_kind}
-        error={errors.download_manager_kind}
-        selectRef={refs.download_manager_kind}
-      />
-      <TextField
-        formId={formId}
-        name="download_manager_instance"
-        label="Download manager instance"
-        hint="The name of the Radarr or Sonarr instance that receives approved requests."
-        defaultValue={profile?.download_manager_instance}
-        error={errors.download_manager_instance}
-        inputRef={refs.download_manager_instance}
-      />
-      <TextField
-        formId={formId}
-        name="quality_profile"
-        label="Quality profile"
-        defaultValue={profile?.quality_profile}
-        error={errors.quality_profile}
-        inputRef={refs.quality_profile}
-      />
-      <TextField
-        formId={formId}
-        name="root_folder"
-        label="Root folder"
-        defaultValue={profile?.root_folder}
-        error={errors.root_folder}
-        inputRef={refs.root_folder}
-      />
-      <TextField
-        formId={formId}
-        name="tags"
-        label="Tags"
-        hint="Comma-separated. Optional."
-        required={false}
-        defaultValue={profile?.tags.join(", ")}
-        error={errors.tags}
-        inputRef={refs.tags}
-      />
+      {managerId === "" ? (
+        <p className="field-hint">
+          Choose an instance to pick its quality profile and root folder.
+        </p>
+      ) : (
+        <OptionFields
+          key={managerId}
+          formId={formId}
+          accountId={accountId}
+          managerId={managerId}
+          profile={profile}
+          errors={errors}
+          qualityRef={fieldRefs.quality_profile}
+          rootRef={fieldRefs.root_folder}
+          tagsRef={fieldRefs.tags}
+        />
+      )}
       <div className="form-actions">
         <button type="submit" className="btn-primary" disabled={pending}>
-          {submitLabel(editing, pending)}
+          {pending ? "Saving…" : editing ? "Save profile" : "Create profile"}
         </button>
         {onCancel === undefined ? null : (
           <button type="button" className="btn-ghost" onClick={onCancel}>
@@ -158,180 +154,285 @@ export function RequestProfileForm({
   );
 }
 
-function submitLabel(editing: boolean, pending: boolean): string {
-  if (pending) {
-    return "Saving…";
-  }
-  return editing ? "Save profile" : "Create profile";
-}
-
-type FieldRefs = Readonly<{
-  name: RefObject<HTMLInputElement | null>;
-  kinds: RefObject<HTMLInputElement | null>;
-  download_manager_kind: RefObject<HTMLSelectElement | null>;
-  download_manager_instance: RefObject<HTMLInputElement | null>;
-  quality_profile: RefObject<HTMLInputElement | null>;
-  root_folder: RefObject<HTMLInputElement | null>;
-  tags: RefObject<HTMLInputElement | null>;
-}>;
-
-function useFieldRefs(): FieldRefs {
-  return {
-    name: useRef<HTMLInputElement>(null),
-    kinds: useRef<HTMLInputElement>(null),
-    download_manager_kind: useRef<HTMLSelectElement>(null),
-    download_manager_instance: useRef<HTMLInputElement>(null),
-    quality_profile: useRef<HTMLInputElement>(null),
-    root_folder: useRef<HTMLInputElement>(null),
-    tags: useRef<HTMLInputElement>(null),
-  };
-}
-
-// A rejected submit moves focus to the first control that needs attention,
-// in the order the fields appear on screen.
-function focusFirstInvalid(errors: ProfileFieldErrors, refs: FieldRefs): void {
-  const first: ProfileField | undefined = firstInvalidProfileField(errors);
-  if (first !== undefined) {
-    refs[first].current?.focus();
-  }
-}
-
-type TextFieldProps = Readonly<{
-  formId: string;
-  name: Exclude<ProfileField, "kinds" | "download_manager_kind">;
-  label: string;
-  hint?: string;
-  required?: boolean;
-  defaultValue: string | undefined;
-  error: string | undefined;
-  inputRef: RefObject<HTMLInputElement | null>;
-}>;
-
-function TextField({
+function NameField({
   formId,
-  name,
-  label,
-  hint,
-  required = true,
   defaultValue,
   error,
   inputRef,
-}: TextFieldProps): ReactNode {
-  const id = `${formId}-${name}`;
-  const hintId = `${id}-hint`;
-  const describedBy =
-    hint === undefined
-      ? fieldErrorId(formId, name)
-      : `${hintId} ${fieldErrorId(formId, name)}`;
+}: Readonly<{
+  formId: string;
+  defaultValue: string | undefined;
+  error: string | undefined;
+  inputRef: RefObject<HTMLInputElement | null>;
+}>): ReactNode {
+  const id = `${formId}-name`;
   return (
     <div>
-      <label htmlFor={id}>{label}</label>
-      {hint === undefined ? null : (
-        <p id={hintId} className="field-hint">
-          {hint}
-        </p>
-      )}
+      <label htmlFor={id}>Name</label>
       <input
         ref={inputRef}
         id={id}
-        name={name}
+        name="name"
         type="text"
         autoComplete="off"
         spellCheck={false}
-        required={required}
+        required
         defaultValue={defaultValue}
         aria-invalid={error !== undefined}
-        aria-describedby={describedBy}
+        aria-describedby={fieldErrorId(formId, "name")}
       />
-      <FieldError formId={formId} field={name} message={error} />
+      <FieldError formId={formId} field="name" message={error} />
     </div>
   );
 }
 
-type KindsFieldProps = Readonly<{
-  formId: string;
-  defaultKinds: readonly string[];
-  error: string | undefined;
-  inputRef: RefObject<HTMLInputElement | null>;
-}>;
-
-// One checkbox per media kind; the first one carries the focus target for a
-// rejected submit.
-function KindsField({
+function ManagerSelect({
   formId,
-  defaultKinds,
-  error,
-  inputRef,
-}: KindsFieldProps): ReactNode {
-  const errorId = fieldErrorId(formId, "kinds");
-  return (
-    <fieldset
-      className="checkbox-group"
-      aria-invalid={error !== undefined}
-      aria-describedby={errorId}
-    >
-      <legend>Media kinds</legend>
-      {mediaKindSchema.options.map((kind, index) => {
-        const id = `${formId}-kinds-${kind}`;
-        return (
-          <div key={kind} className="checkbox-field">
-            <label htmlFor={id}>
-              <input
-                ref={index === 0 ? inputRef : undefined}
-                id={id}
-                name="kinds"
-                type="checkbox"
-                value={kind}
-                defaultChecked={defaultKinds.includes(kind)}
-              />{" "}
-              {kindLabel(kind)}
-            </label>
-          </div>
-        );
-      })}
-      <FieldError formId={formId} field="kinds" message={error} />
-    </fieldset>
-  );
-}
-
-type ManagerKindFieldProps = Readonly<{
-  formId: string;
-  defaultValue: string | undefined;
-  error: string | undefined;
-  selectRef: RefObject<HTMLSelectElement | null>;
-}>;
-
-function ManagerKindField({
-  formId,
-  defaultValue,
+  managers,
+  value,
+  onChange,
   error,
   selectRef,
-}: ManagerKindFieldProps): ReactNode {
-  const id = `${formId}-download_manager_kind`;
+}: Readonly<{
+  formId: string;
+  managers: readonly DownloadManager[];
+  value: string;
+  onChange: (value: string) => void;
+  error: string | undefined;
+  selectRef: RefObject<HTMLSelectElement | null>;
+}>): ReactNode {
+  const id = `${formId}-download_manager`;
   return (
     <div>
       <label htmlFor={id}>Download manager</label>
       <select
         ref={selectRef}
         id={id}
-        name="download_manager_kind"
+        name="download_manager"
         required
-        defaultValue={defaultValue ?? ""}
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
         aria-invalid={error !== undefined}
-        aria-describedby={fieldErrorId(formId, "download_manager_kind")}
+        aria-describedby={fieldErrorId(formId, "download_manager")}
       >
-        <option value="">Choose a download manager</option>
-        {DOWNLOAD_MANAGER_KINDS.map((choice) => (
-          <option key={choice.value} value={choice.value}>
-            {choice.label}
+        <option value="">Choose an instance</option>
+        {managers.map((manager) => (
+          <option key={manager.id} value={manager.id}>
+            {manager.name} ({managerKindLabel(manager.kind)})
           </option>
         ))}
       </select>
-      <FieldError
-        formId={formId}
-        field="download_manager_kind"
-        message={error}
-      />
+      <FieldError formId={formId} field="download_manager" message={error} />
     </div>
+  );
+}
+
+function managerFor(
+  profile: RequestProfile | undefined,
+  managers: readonly DownloadManager[],
+): DownloadManager | undefined {
+  if (profile === undefined) {
+    return undefined;
+  }
+  return managers.find(
+    (manager) =>
+      manager.name === profile.download_manager_instance &&
+      manager.kind === profile.download_manager_kind,
+  );
+}
+
+type FieldRefs = Readonly<{
+  name: RefObject<HTMLInputElement | null>;
+  download_manager: RefObject<HTMLSelectElement | null>;
+  quality_profile: RefObject<HTMLSelectElement | null>;
+  root_folder: RefObject<HTMLSelectElement | null>;
+  tags: RefObject<HTMLInputElement | null>;
+}>;
+
+function useFieldRefs(): FieldRefs {
+  return {
+    name: useRef<HTMLInputElement>(null),
+    download_manager: useRef<HTMLSelectElement>(null),
+    quality_profile: useRef<HTMLSelectElement>(null),
+    root_folder: useRef<HTMLSelectElement>(null),
+    tags: useRef<HTMLInputElement>(null),
+  };
+}
+
+function focusFirstInvalid(
+  errors: ProfileFieldErrors,
+  fieldRefs: FieldRefs,
+): void {
+  const first: ProfileField | undefined = firstInvalidProfileField(errors);
+  if (first !== undefined) {
+    fieldRefs[first].current?.focus();
+  }
+}
+
+type OptionFieldsProps = Readonly<{
+  formId: string;
+  accountId: string;
+  managerId: string;
+  profile: RequestProfile | undefined;
+  errors: ProfileFieldErrors;
+  qualityRef: RefObject<HTMLSelectElement | null>;
+  rootRef: RefObject<HTMLSelectElement | null>;
+  tagsRef: RefObject<HTMLInputElement | null>;
+}>;
+
+// The choices the chosen instance offers. Mounted per instance, so a
+// change of instance starts the selects over.
+function OptionFields({
+  formId,
+  accountId,
+  managerId,
+  profile,
+  errors,
+  qualityRef,
+  rootRef,
+  tagsRef,
+}: OptionFieldsProps): ReactNode {
+  const options = useDownloadManagerOptions(accountId, managerId);
+  if (options.status === "pending") {
+    return <AsyncStatus>Loading the instance's options…</AsyncStatus>;
+  }
+  if (options.status === "error") {
+    return (
+      <>
+        <AsyncStatus kind="alert">
+          The instance's options could not be loaded, so the profile cannot be
+          filled in yet.
+        </AsyncStatus>
+        <button
+          type="button"
+          onClick={() => {
+            void options.refetch();
+          }}
+        >
+          Retry
+        </button>
+      </>
+    );
+  }
+  return (
+    <>
+      <OptionSelect
+        formId={formId}
+        name="quality_profile"
+        label="Quality profile"
+        choices={options.data.quality_profiles}
+        defaultValue={profile?.quality_profile}
+        error={errors.quality_profile}
+        selectRef={qualityRef}
+      />
+      <OptionSelect
+        formId={formId}
+        name="root_folder"
+        label="Root folder"
+        choices={options.data.root_folders}
+        defaultValue={profile?.root_folder}
+        error={errors.root_folder}
+        selectRef={rootRef}
+      />
+      <TagsField
+        formId={formId}
+        choices={options.data.tags}
+        defaultTags={profile?.tags ?? []}
+        error={errors.tags}
+        inputRef={tagsRef}
+      />
+    </>
+  );
+}
+
+function OptionSelect({
+  formId,
+  name,
+  label,
+  choices,
+  defaultValue,
+  error,
+  selectRef,
+}: Readonly<{
+  formId: string;
+  name: "quality_profile" | "root_folder";
+  label: string;
+  choices: readonly DownloadManagerOption[];
+  defaultValue: string | undefined;
+  error: string | undefined;
+  selectRef: RefObject<HTMLSelectElement | null>;
+}>): ReactNode {
+  const id = `${formId}-${name}`;
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <select
+        ref={selectRef}
+        id={id}
+        name={name}
+        required
+        defaultValue={
+          defaultValue ?? (choices.length === 1 ? choices[0]?.name : "")
+        }
+        aria-invalid={error !== undefined}
+        aria-describedby={fieldErrorId(formId, name)}
+      >
+        {choices.length === 1 ? null : <option value="">Choose one</option>}
+        {choices.map((choice) => (
+          <option key={choice.id} value={choice.name}>
+            {choice.name}
+          </option>
+        ))}
+      </select>
+      <FieldError formId={formId} field={name} message={error} />
+    </div>
+  );
+}
+
+function TagsField({
+  formId,
+  choices,
+  defaultTags,
+  error,
+  inputRef,
+}: Readonly<{
+  formId: string;
+  choices: readonly DownloadManagerOption[];
+  defaultTags: readonly string[];
+  error: string | undefined;
+  inputRef: RefObject<HTMLInputElement | null>;
+}>): ReactNode {
+  if (choices.length === 0) {
+    return <p className="field-hint">This instance has no tags.</p>;
+  }
+  return (
+    <fieldset
+      className="checkbox-group"
+      aria-invalid={error !== undefined}
+      aria-describedby={fieldErrorId(formId, "tags")}
+    >
+      <legend>Tags</legend>
+      {choices.map((choice, index) => {
+        const id = `${formId}-tag-${choice.id}`;
+        return (
+          <div key={choice.id} className="checkbox-field">
+            <label htmlFor={id}>
+              <input
+                ref={index === 0 ? inputRef : undefined}
+                id={id}
+                name="tags"
+                type="checkbox"
+                value={choice.name}
+                defaultChecked={defaultTags.includes(choice.name)}
+              />{" "}
+              {choice.name}
+            </label>
+          </div>
+        );
+      })}
+      <FieldError formId={formId} field="tags" message={error} />
+    </fieldset>
   );
 }
