@@ -207,7 +207,7 @@ func (c *Client) FindUserByName(ctx context.Context, name string) (core.MediaUse
 	if name == "" || len(name) > core.MaxMediaUsernameBytes {
 		return core.MediaUser{}, false, core.ErrInvalidArgument
 	}
-	return c.findUser(ctx, func(user core.MediaUser) bool { return user.Name == name })
+	return c.findUser(ctx, func(user core.MediaUser) bool { return user.Name == name }, true)
 }
 
 // FindUserByID verifies one Jellyfin user identifier and returns its current username.
@@ -215,10 +215,12 @@ func (c *Client) FindUserByID(ctx context.Context, id string) (core.MediaUser, b
 	if !core.ValidAccountMediaUserID(id) {
 		return core.MediaUser{}, false, core.ErrInvalidArgument
 	}
-	return c.findUser(ctx, func(user core.MediaUser) bool { return user.ID == id })
+	return c.findUser(ctx, func(user core.MediaUser) bool { return user.ID == id }, false)
 }
 
-func (c *Client) findUser(ctx context.Context, matches func(core.MediaUser) bool) (core.MediaUser, bool, error) {
+func (c *Client) findUser(
+	ctx context.Context, matches func(core.MediaUser) bool, rejectAmbiguous bool,
+) (core.MediaUser, bool, error) {
 	var users []jellyfinapi.UserDto
 	started, err := c.getJSON(ctx, "list_users", "/Users", &users)
 	if err != nil {
@@ -228,6 +230,9 @@ func (c *Client) findUser(ctx context.Context, matches func(core.MediaUser) bool
 		c.observe("list_users", "malformed", started)
 		return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("user count exceeds limit"))
 	}
+	var match core.MediaUser
+	found := false
+	ambiguous := false
 	for _, user := range users {
 		if user.Name == nil || user.Id == nil {
 			continue
@@ -240,11 +245,20 @@ func (c *Client) findUser(ctx context.Context, matches func(core.MediaUser) bool
 			c.observe("list_users", "malformed", started)
 			return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("missing user identity"))
 		}
-		c.observe("list_users", "success", started)
-		return candidate, true, nil
+		if found && rejectAmbiguous {
+			ambiguous = true
+			continue
+		}
+		if !found {
+			match, found = candidate, true
+		}
+	}
+	if ambiguous {
+		c.observe("list_users", "malformed", started)
+		return core.MediaUser{}, false, core.ErrMediaUserAmbiguous
 	}
 	c.observe("list_users", "success", started)
-	return core.MediaUser{}, false, nil
+	return match, found, nil
 }
 
 // SetLibraryAccess reads the current whole policy, changes only folder access,

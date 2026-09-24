@@ -114,8 +114,13 @@ func (s *Service) tryMatch(ctx context.Context, account core.Account, serverID s
 }
 
 func (s *Service) observeLookupFailure(ctx context.Context, serverID string, err error) {
-	s.deps.Metrics.IncMediaUserMatch("error")
-	s.deps.Logger.DebugContext(ctx, "media user username lookup failed", "media_server_id", serverID, "error", err)
+	outcome := "error"
+	if errors.Is(err, core.ErrMediaUserAmbiguous) {
+		outcome = "ambiguous"
+	}
+	s.deps.Metrics.IncMediaUserMatch(outcome)
+	s.deps.Logger.DebugContext(ctx, "media user username lookup failed",
+		"media_server_id", serverID, "outcome", outcome, "error", err)
 }
 
 func matchOutcome(supported, found bool) string {

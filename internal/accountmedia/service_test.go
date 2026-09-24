@@ -184,6 +184,20 @@ func TestEnsureLinksPersistsMatchAndAdminSetVerifiesUser(t *testing.T) {
 	}
 }
 
+func TestEnsureLinksLeavesAmbiguousUsernameUnlinked(t *testing.T) {
+	service, store, servers, metrics := newService(t)
+	serverID := testID(1)
+	servers.servers = []core.MediaServerConnection{{Server: core.MediaServer{ID: serverID, Name: "Home"}}}
+	servers.lookupErr = core.ErrMediaUserAmbiguous
+	links, err := service.EnsureLinks(context.Background(), core.Account{ID: testID(20), Username: "alice"}, serverID)
+	if err != nil || len(links) != 0 || len(store.links) != 0 {
+		t.Fatalf("EnsureLinks = %+v, %v; stored %+v", links, err, store.links)
+	}
+	if !slices.Equal(metrics.outcomes, []string{"ambiguous"}) {
+		t.Fatalf("match outcomes = %v, want [ambiguous]", metrics.outcomes)
+	}
+}
+
 func newService(t *testing.T) (*accountmedia.Service, *linkStore, *mediaServers, *matchMetrics) {
 	t.Helper()
 	store := &linkStore{}

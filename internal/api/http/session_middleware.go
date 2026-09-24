@@ -6,12 +6,19 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/telemetry"
+)
+
+const (
+	// Scan limits bound malformed raw headers; exhaustion fails closed as an inbound cookie.
+	maxSessionCookieHeaderValues = 100
+	maxSessionCookiePairs        = 4096
 )
 
 type sessionRequestState struct {
@@ -76,7 +83,11 @@ func (s *Server) loadAndSaveSessions(next http.Handler) http.Handler {
 
 func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (context.Context, *sessionRequestState, bool) {
 	cookie, cookieErr := r.Cookie(s.sessions.Cookie.Name)
-	inbound := cookieErr == nil
+	inbound := cookieErr == nil || rawCookieNamePresent(r.Header, s.sessions.Cookie.Name)
+	if cookieErr != nil && inbound {
+		s.writeSessionLoadFailure(w, r, true, errAuthenticationRequired)
+		return nil, nil, false
+	}
 	token := ""
 	if inbound {
 		token = cookie.Value
@@ -91,6 +102,25 @@ func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (context.Co
 	state := &sessionRequestState{inbound: inbound, resolved: s.sessions.Token(ctx) != ""}
 	ctx = context.WithValue(ctx, sessionStateKey, state)
 	return ctx, state, true
+}
+
+func rawCookieNamePresent(header http.Header, name string) bool {
+	values := header.Values("Cookie")
+	for valueIndex := 0; valueIndex < len(values) && valueIndex < maxSessionCookieHeaderValues; valueIndex++ {
+		line := values[valueIndex]
+		for pairIndex := 0; line != "" && pairIndex < maxSessionCookiePairs; pairIndex++ {
+			var pair string
+			pair, line, _ = strings.Cut(line, ";")
+			cookieName, _, hasValue := strings.Cut(pair, "=")
+			if hasValue && strings.Trim(cookieName, " \t") == name {
+				return true
+			}
+		}
+		if line != "" {
+			return true
+		}
+	}
+	return len(values) > maxSessionCookieHeaderValues
 }
 
 func (s *Server) sessionLoader(r *http.Request) *scs.SessionManager {

@@ -196,6 +196,31 @@ func TestInviteAcceptanceRejectsInvalidInboundSessions(t *testing.T) {
 	}
 }
 
+func TestInviteAcceptanceRejectsUnparseableSessionCookieHeaders(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{name: "unterminated quoted value", header: `bloom_session="unterminated`},
+		{name: "cookie count limit", header: strings.Repeat("decoy=1;", 3000) + "bloom_session=unknown"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			h := newAuthHarness(t, nil)
+			response := acceptInviteRequestWithRawCookie(t, h, testCase.header)
+			h.invites.mu.Lock()
+			accepted := h.invites.accepted
+			h.invites.mu.Unlock()
+			if response.Code != http.StatusUnauthorized || accepted != 0 {
+				t.Fatalf("accept = %d, calls = %d: %s", response.Code, accepted, response.Body.String())
+			}
+			if cleared := sessionCookie(t, response); cleared.MaxAge >= 0 {
+				t.Fatalf("cleared cookie MaxAge = %d", cleared.MaxAge)
+			}
+		})
+	}
+}
+
 func expiredInviteSession(t *testing.T, h authHarness) *http.Cookie {
 	t.Helper()
 	data, err := h.sessions.Codec.Encode(expiredSessionInstant(), map[string]any{
@@ -230,6 +255,19 @@ func acceptInviteRequestWithCookie(
 	t.Helper()
 	return h.requestWithContentType(t, http.MethodPost, "/api/v1/invite/"+testInviteCode+"/accept",
 		`{"username":"new-user","password":"Th1s-is-a-unique-password!"}`, cookie, "application/json")
+}
+
+func acceptInviteRequestWithRawCookie(t *testing.T, h authHarness, cookieHeader string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "https://bloom.test/api/v1/invite/"+testInviteCode+"/accept",
+		strings.NewReader(`{"username":"new-user","password":"Th1s-is-a-unique-password!"}`))
+	request.RemoteAddr = "192.0.2.10:4321"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Cookie", cookieHeader)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response := httptest.NewRecorder()
+	h.h.ServeHTTP(response, request)
+	return response
 }
 
 func TestInviteAuditMetricsAndAcceptanceDeadline(t *testing.T) {

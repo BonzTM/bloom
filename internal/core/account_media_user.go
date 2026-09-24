@@ -9,8 +9,12 @@ import (
 	"unicode/utf8"
 )
 
-// ErrMediaUserNotLinked reports that an account has no usable media-user link.
-var ErrMediaUserNotLinked = errors.New("media user not linked")
+var (
+	// ErrMediaUserNotLinked reports that an account has no usable media-user link.
+	ErrMediaUserNotLinked = errors.New("media user not linked")
+	// ErrMediaUserAmbiguous reports multiple exact upstream username matches.
+	ErrMediaUserAmbiguous = errors.New("media user lookup is ambiguous")
+)
 
 const (
 	// MaxAccountMediaUserIDBytes bounds an upstream media-user identifier.
