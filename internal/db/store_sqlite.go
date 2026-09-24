@@ -82,6 +82,26 @@ func (s *sqliteAccounts) GetAccountByUsername(ctx context.Context, username stri
 	return sqliteAccountFromRow(row.ID, row.Username, row.PasswordHash, row.Disabled, row.CreatedAt, err, "select account by username")
 }
 
+// UsernamesByAccountIDs resolves current display usernames for one bounded request page.
+func (s *sqliteAccounts) UsernamesByAccountIDs(ctx context.Context, accountIDs []string) (map[string]string, error) {
+	if len(accountIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	encoded, err := accountIDsJSON(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.UsernamesByAccountIDs(ctx, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("select account usernames: %w", err)
+	}
+	usernames := make(map[string]string, len(rows))
+	for _, row := range rows {
+		usernames[row.ID] = row.Username
+	}
+	return usernames, nil
+}
+
 // UpdateAccountPasswordHash replaces the local credential after a successful legacy-profile login.
 func (s *sqliteAccounts) UpdateAccountPasswordHash(ctx context.Context, id, hash string) error {
 	rows, err := s.q.UpdateAccountPasswordHash(ctx, sqlite.UpdateAccountPasswordHashParams{PasswordHash: sql.NullString{String: hash, Valid: true}, ID: id})

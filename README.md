@@ -340,7 +340,9 @@ it; an account override replaces the role calculation.
 
 Accounts with `requests.read.own` see their own requests. Approvers see all
 requests and can filter by status or requester. Lists are cursor-paged newest
-first.
+first. Every request response includes `requester_account_id` and the account's
+current display name in `requester_username`. The username is empty if the
+account no longer exists; Bloom does not copy usernames into request records.
 
 The web UI covers the same flow. Administrators register Radarr and Sonarr
 instances under Download managers, store the TMDB key and build profiles from
@@ -380,7 +382,7 @@ this table.
 | `BLOOM_HTTP_WRITE_TIMEOUT` | duration | no | `15s` | no | Bound on writing a response. |
 | `BLOOM_HTTP_IDLE_TIMEOUT` | duration | no | `60s` | no | Idle keep-alive connection lifetime. |
 | `BLOOM_HTTP_MAX_BODY_BYTES` | int | no | `1048576` | no | Cap on non-streaming request bodies. |
-| `BLOOM_PUBLIC_URL` | HTTP(S) origin | no | `http://localhost:8080` | no | Externally visible Bloom origin used for callback-error redirects and OIDC redirect validation. |
+| `BLOOM_PUBLIC_URL` | HTTP(S) origin | no | `http://localhost:8080` | no | Externally visible Bloom origin used for callback-error redirects and OIDC redirect validation. Limited to 2,048 valid UTF-8 bytes with no control characters. |
 | `BLOOM_DB_DRIVER` | `sqlite` \| `postgres` | no | `sqlite` | no | Database engine. Anything else fails startup. |
 | `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. For compatibility, startup supplies `_pragma=foreign_keys(1)` when a configured SQLite DSN omits a foreign-key pragma; an explicit disable still fails startup. |
 | `BLOOM_DB_MAX_OPEN_CONNS` | int | no | `25` | no | Pool cap on open connections. |
@@ -401,14 +403,14 @@ this table.
 | `BLOOM_TRUSTED_PROXY_CIDRS` | comma-separated CIDRs | no | — | no | Trust `X-Forwarded-For` only when the direct peer is in this allowlist. Empty disables forwarded addresses. |
 | `BLOOM_OIDC_ENABLED` | bool | no | `false` | no | Enable one generic OpenID Connect provider. Discovery runs at startup and startup fails if it cannot complete. |
 | `BLOOM_OIDC_DISPLAY_NAME` | string | OIDC: yes | `OpenID Connect` | no | Sign-in method label returned by `GET /api/v1/auth/providers`. |
-| `BLOOM_OIDC_ISSUER_URL` | URL | OIDC: yes | — | no | OIDC issuer, limited to 2,048 bytes. HTTPS is required except loopback HTTP with the development flag. |
-| `BLOOM_OIDC_CLIENT_ID` | string | OIDC: yes | — | no | OAuth client identifier. |
-| `BLOOM_OIDC_CLIENT_SECRET` | string | OIDC: yes | — | **yes** | Environment-only OAuth client secret. It is wrapped in `config.Secret`, never rendered or logged, and never accepted as a flag. Rotate it with a rolling restart. |
+| `BLOOM_OIDC_ISSUER_URL` | URL | OIDC: yes | — | no | Canonical OIDC issuer without a query or fragment, limited to 2,048 bytes. HTTPS is required except loopback HTTP with the development flag. |
+| `BLOOM_OIDC_CLIENT_ID` | string | OIDC: yes | — | no | OAuth client identifier, limited to 512 valid UTF-8 bytes with no control characters. |
+| `BLOOM_OIDC_CLIENT_SECRET` | string | OIDC: yes | — | **yes** | Environment-only OAuth client secret, limited to 4,096 valid UTF-8 bytes with no control characters. It is wrapped in `config.Secret`, never rendered or logged, and never accepted as a flag. Rotate it with a rolling restart. |
 | `BLOOM_OIDC_REDIRECT_URL` | URL | OIDC: yes | — | no | Exact callback URL: `BLOOM_PUBLIC_URL` plus `/api/v1/auth/oidc/callback`, with no query or fragment. HTTPS is required except loopback HTTP in explicit development mode. |
-| `BLOOM_OIDC_SCOPES` | space-separated strings | no | `openid profile email` | no | Requested scopes. `openid` is required; at most 16 values are accepted. |
-| `BLOOM_OIDC_USERNAME_CLAIM` | string | no | `preferred_username` | no | Verified ID-token claim used to derive the canonical Bloom username. |
-| `BLOOM_OIDC_ROLE_CLAIM` | string | no | — | no | Optional verified claim containing one role value or an array of role values. |
-| `BLOOM_OIDC_ROLE_MAP` | comma-separated mappings | no | — | no | Claim-value-to-Bloom-role mappings such as `bloom-admins=owner,bloom-users=member`. Requires a role claim. |
+| `BLOOM_OIDC_SCOPES` | space-separated strings | no | `openid profile email` | no | Requested scopes. `openid` is required; at most 16 values of up to 512 valid UTF-8 bytes each are accepted, with no control characters. |
+| `BLOOM_OIDC_USERNAME_CLAIM` | string | no | `preferred_username` | no | Verified ID-token claim used to derive the canonical Bloom username. Limited to 512 valid UTF-8 bytes with no control characters. |
+| `BLOOM_OIDC_ROLE_CLAIM` | string | no | — | no | Optional verified claim containing one role value or an array of role values. Limited to 512 valid UTF-8 bytes with no control characters. |
+| `BLOOM_OIDC_ROLE_MAP` | comma-separated mappings | no | — | no | Up to 64 claim-value-to-Bloom-role mappings such as `bloom-admins=owner,bloom-users=member`. Claim keys are limited to 512 valid UTF-8 bytes with no control characters. Requires a role claim. |
 | `BLOOM_OIDC_DEFAULT_ROLE` | role name | no | — | no | Explicit opt-in to JIT provisioning. The role is assigned when no mapped role applies; empty keeps unknown identities denied. |
 | `BLOOM_OIDC_ALLOW_INSECURE_ISSUER` | bool | no | `false` | no | Development-only opt-in for an HTTP issuer and callback on `localhost` or a loopback IP. |
 | `BLOOM_OIDC_DISCOVERY_TIMEOUT` | duration | no | `5s` | no | Per-attempt and total client bound for startup discovery. Valid range: `100ms`-`30s`. |

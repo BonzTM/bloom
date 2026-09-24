@@ -1961,7 +1961,7 @@ components:
         status: { $ref: "#/components/schemas/SeasonStatus" }
     MediaRequest:
       type: object
-      required: [id, kind, provider, provider_id, title, year, poster_path, requester_account_id, profile_id, status, seasons, decision_reason, failure_reason, download_manager_id, download_manager_item_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, decided_by_account_id, created_at, updated_at]
+      required: [id, kind, provider, provider_id, title, year, poster_path, requester_account_id, requester_username, profile_id, status, seasons, decision_reason, failure_reason, download_manager_id, download_manager_item_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, decided_by_account_id, created_at, updated_at]
       additionalProperties: false
       properties:
         id: { type: string, format: uuid }
@@ -1972,6 +1972,10 @@ components:
         year: { type: integer, minimum: 0, maximum: 9999 }
         poster_path: { type: string, x-max-bytes: 500 }
         requester_account_id: { type: string, format: uuid }
+        requester_username:
+          type: string
+          x-max-bytes: 256
+          description: Current display username resolved when the request is read; empty when the account no longer exists.
         profile_id: { type: string, format: uuid }
         status: { $ref: "#/components/schemas/RequestStatus" }
         seasons:

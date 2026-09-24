@@ -37,13 +37,14 @@ func TestCreateRequestAutoApprovalEmitsCreateAndApproveAudits(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	var created struct {
-		Status    string `json:"status"`
-		DecidedBy string `json:"decided_by_account_id"`
+		Status            string `json:"status"`
+		RequesterUsername string `json:"requester_username"`
+		DecidedBy         string `json:"decided_by_account_id"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if created.Status != "approved" || created.DecidedBy != testRequestAccountID {
+	if created.Status != "approved" || created.RequesterUsername != "alice" || created.DecidedBy != testRequestAccountID {
 		t.Fatalf("decided request = %+v, want approved by %s", created, testRequestAccountID)
 	}
 	events := audit.snapshot()
@@ -59,6 +60,46 @@ func TestCreateRequestAutoApprovalEmitsCreateAndApproveAudits(t *testing.T) {
 	if events[0].RequestID != "request-1" || events[1].RequestID != "request-1" ||
 		events[0].Result != telemetry.AuditSuccess || events[1].Result != telemetry.AuditSuccess {
 		t.Fatalf("audit results = %+v", events)
+	}
+}
+
+func TestRequestDecisionResponsesIncludeRequesterUsername(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		approve    bool
+		wantStatus core.RequestStatus
+	}{
+		{name: "approve", approve: true, wantStatus: core.RequestApproved},
+		{name: "decline", approve: false, wantStatus: core.RequestDeclined},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := &requestHandlerStore{created: pendingHandlerRequest()}
+			server := newRequestHandlerServer(newHandlerRequestServiceWithStore(t, store), &recordingAudit{})
+			request := requestWithAccount(t, http.MethodPost, "/api/v1/requests/"+store.created.ID+"/"+testCase.name, "{}", core.PermissionRequestsApprove)
+			request.SetPathValue("id", store.created.ID)
+			recorder := httptest.NewRecorder()
+			server.handleDecision(recorder, request, testCase.approve)
+			assertDecisionResponse(t, recorder, testCase.wantStatus)
+		})
+	}
+}
+
+func pendingHandlerRequest() core.MediaRequest {
+	return core.MediaRequest{
+		ID: "33333333-3333-4333-8333-333333333333", Kind: core.MediaKindMovie,
+		Provider: core.MetadataProviderTMDB, ProviderID: "11", Title: "Film",
+		RequesterID: testRequestAccountID, ProfileID: testRequestProfileID, Status: core.RequestPending,
+	}
+}
+
+func assertDecisionResponse(t *testing.T, recorder *httptest.ResponseRecorder, wantStatus core.RequestStatus) {
+	t.Helper()
+	var response requestResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode decision response: %v", err)
+	}
+	if recorder.Code != http.StatusOK || response.Status != wantStatus || response.RequesterUsername != "alice" {
+		t.Fatalf("decision response = %d %+v, want status %q and requester alice", recorder.Code, response, wantStatus)
 	}
 }
 
@@ -207,7 +248,7 @@ func newQuotaHandlerService(t *testing.T, store *requestHandlerStore) *requestap
 	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
 	service, err := requestapp.NewService(requestapp.Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
 		Metadata: &staticRequestMetadata{movie: validRequestMovie()}, Clock: clock,
 	})
@@ -274,7 +315,7 @@ func requestWithAccount(t *testing.T, method, path, body string, permissions ...
 	t.Helper()
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	ctx := context.WithValue(request.Context(), accountKey, core.Account{ID: testRequestAccountID})
+	ctx := context.WithValue(request.Context(), accountKey, core.Account{ID: testRequestAccountID, Username: "alice"})
 	ctx = context.WithValue(ctx, permissionsKey, permissions)
 	ctx = context.WithValue(ctx, requestIDKey, "request-1")
 	return request.WithContext(ctx)
@@ -290,9 +331,21 @@ func newRequestHandlerServer(service *requestapp.Service, audit *recordingAudit)
 func newHandlerRequestService(t *testing.T, provider core.MetadataProvider) *requestapp.Service {
 	t.Helper()
 	store := &requestHandlerStore{profile: core.RequestProfile{ID: testRequestProfileID, Kinds: []core.MediaKind{core.MediaKindMovie}}}
+	return newHandlerRequestServiceWithDependencies(t, store, provider)
+}
+
+func newHandlerRequestServiceWithStore(t *testing.T, store *requestHandlerStore) *requestapp.Service {
+	t.Helper()
+	return newHandlerRequestServiceWithDependencies(t, store, &staticRequestMetadata{movie: validRequestMovie()})
+}
+
+func newHandlerRequestServiceWithDependencies(
+	t *testing.T, store *requestHandlerStore, provider core.MetadataProvider,
+) *requestapp.Service {
+	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
 	service, err := requestapp.NewService(requestapp.Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store, Metadata: provider, Clock: clock,
 	})
 	if err != nil {
@@ -319,7 +372,7 @@ func newProgressHandlerService(
 ) *requestapp.Service {
 	t.Helper()
 	service, err := requestapp.NewService(requestapp.Dependencies{
-		Profiles: store, ProfileWriter: store, Requests: store, RequestWriter: store,
+		Profiles: store, ProfileWriter: store, Requests: store, Usernames: store, RequestWriter: store,
 		QuotaReader: store, QuotaWriter: store, QuotaDeleter: store,
 		Metadata: &staticRequestMetadata{}, Clock: testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)),
 		Progress: progress,
@@ -388,6 +441,10 @@ func (*requestHandlerStore) ListRequests(context.Context, core.RequestListFilter
 	return nil, nil
 }
 
+func (*requestHandlerStore) UsernamesByAccountIDs(context.Context, []string) (map[string]string, error) {
+	return map[string]string{testRequestAccountID: "alice"}, nil
+}
+
 func (s *requestHandlerStore) CreateRequest(_ context.Context, request core.MediaRequest, _ time.Time, _ bool) error {
 	if err := core.ValidateMediaRequest(request); err != nil {
 		return err
@@ -396,10 +453,15 @@ func (s *requestHandlerStore) CreateRequest(_ context.Context, request core.Medi
 	return nil
 }
 
-func (*requestHandlerStore) TransitionRequest(
-	context.Context, string, core.RequestStatus, core.RequestStatus, string, string, time.Time,
+func (s *requestHandlerStore) TransitionRequest(
+	_ context.Context, _ string, from, to core.RequestStatus, actorID, reason string, at time.Time,
 ) (core.MediaRequest, error) {
-	return core.MediaRequest{}, errors.New("unexpected request transition")
+	if s.created.Status != from {
+		return core.MediaRequest{}, errors.New("unexpected request transition")
+	}
+	s.created.Status, s.created.DecidedBy = to, actorID
+	s.created.DecisionReason, s.created.UpdatedAt = reason, at
+	return s.created, nil
 }
 
 func (*requestHandlerStore) GetRoleRequestQuota(context.Context, string) (core.RoleRequestQuota, error) {

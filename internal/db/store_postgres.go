@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -78,6 +79,26 @@ func (s *postgresAccounts) GetAccountByUsername(ctx context.Context, username st
 	}
 	row, err := s.q.GetAccountByUsername(ctx, key)
 	return postgresAccountFromRow(row.ID, row.Username, row.PasswordHash, row.Disabled, row.CreatedAt, err, "select account by username")
+}
+
+// UsernamesByAccountIDs resolves current display usernames for one bounded request page.
+func (s *postgresAccounts) UsernamesByAccountIDs(ctx context.Context, accountIDs []string) (map[string]string, error) {
+	if len(accountIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	encoded, err := accountIDsJSON(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.UsernamesByAccountIDs(ctx, json.RawMessage(encoded))
+	if err != nil {
+		return nil, fmt.Errorf("select account usernames: %w", err)
+	}
+	usernames := make(map[string]string, len(rows))
+	for _, row := range rows {
+		usernames[row.ID] = row.Username
+	}
+	return usernames, nil
 }
 
 // UpdateAccountPasswordHash replaces the local credential after a successful legacy-profile login.

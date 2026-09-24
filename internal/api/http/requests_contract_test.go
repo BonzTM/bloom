@@ -3,9 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,10 +153,23 @@ func TestRequestSliceResponseSchemasAcceptWireFixtures(t *testing.T) {
 	fixtures := map[string]string{
 		"#/components/schemas/MetadataSeries": `{"kind":"series","provider":"tmdb","provider_id":"12","title":"Show","year":2026,"overview":"Plot","poster_path":"/show.jpg","seasons":[{"number":1,"name":"Season 1","episode_count":8,"air_date":"2026-01-02T00:00:00Z"}]}`,
 		"#/components/schemas/RequestProfile": `{"id":"33333333-3333-4333-8333-333333333333","name":"Default","kinds":["movie"],"download_manager_kind":"radarr","download_manager_instance":"main","quality_profile":"Any","root_folder":"/media","tags":[],"created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
-		"#/components/schemas/MediaRequest":   `{"id":"33333333-3333-4333-8333-333333333333","kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"poster_path":"/film.jpg","requester_account_id":"11111111-1111-4111-8111-111111111111","profile_id":"22222222-2222-4222-8222-222222222222","status":"pending","seasons":[],"decision_reason":"","failure_reason":"","download_manager_id":"","download_manager_item_id":"","dispatch_quality_profile":"","dispatch_root_folder":"","dispatch_tags":[],"decided_by_account_id":"","created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
+		"#/components/schemas/MediaRequest":   `{"id":"33333333-3333-4333-8333-333333333333","kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"poster_path":"/film.jpg","requester_account_id":"11111111-1111-4111-8111-111111111111","requester_username":"alice","profile_id":"22222222-2222-4222-8222-222222222222","status":"pending","seasons":[],"decision_reason":"","failure_reason":"","download_manager_id":"","download_manager_item_id":"","dispatch_quality_profile":"","dispatch_root_folder":"","dispatch_tags":[],"decided_by_account_id":"","created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
 		"#/components/schemas/RequestQuota":   `{"scope_id":"33333333-3333-4333-8333-333333333333","movie_limit":5,"movie_period_days":30,"season_limit":10,"season_period_days":30}`,
 	}
 	for schema, fixture := range fixtures {
 		assertJSONMatchesSchema(t, document, []byte(fixture), schema)
+	}
+}
+
+func TestMediaRequestContractRequiresBoundedRequesterUsername(t *testing.T) {
+	document := loadOpenAPI(t)
+	schema := document.validator.Components.Schemas["MediaRequest"].Value
+	required := slices.Contains(schema.Required, "requester_username")
+	property := schema.Properties["requester_username"].Value
+	if !required || property == nil {
+		t.Fatal("MediaRequest requester_username is not required")
+	}
+	if got := fmt.Sprint(property.Extensions["x-max-bytes"]); got != "256" {
+		t.Fatalf("requester_username x-max-bytes = %s, want 256", got)
 	}
 }

@@ -16,6 +16,19 @@ contracts) gets an entry here.
 
 ### Changed
 
+- OIDC configuration now bounds client identifiers, client secrets, scopes,
+  claim names, role-map claim keys, and the public URL, and rejects malformed
+  text before it reaches protocol or claim-lookup boundaries.
+- OIDC issuer configuration now requires its exact canonical URL form and
+  rejects queries, fragments, opaque URLs, and empty query or fragment
+  delimiters.
+- OIDC exchange failures now retain their wrapped cause and produce one
+  bounded boundary log classification with sensitive provider detail redacted.
+- Empty chunked requests to `POST /api/v1/auth/oidc/start` now behave like
+  other requests with an omitted optional body.
+- Media-request responses now include the requester's current display username
+  without copying it into request storage; the field is empty if the account
+  no longer exists.
 - Fulfilment now snapshots each request's manager and dispatch options, polls
   processing requests fairly, uses expiring exclusive dispatch leases, treats
   only authoritative Radarr or complete per-season Sonarr file state as

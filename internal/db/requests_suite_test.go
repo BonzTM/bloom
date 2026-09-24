@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"slices"
@@ -26,6 +27,9 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	now := core.NormalizeTime(time.Date(2026, 9, 23, 18, 0, 0, 123456789, time.UTC))
 	account := requestTestAccount(t, accounts, now, "requester")
 	profile := requestTestProfile(t, profileWriter, now)
+	t.Run("requester username batch", func(t *testing.T) {
+		testRequesterUsernameBatch(t, accounts, account)
+	})
 	t.Run("profile round trip", func(t *testing.T) {
 		testRequestProfileRoundTrip(t, profileReader, profileWriter, profile)
 	})
@@ -53,6 +57,24 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("concurrent quota boundary", func(t *testing.T) {
 		testConcurrentRequestQuota(t, accounts, requestWriter, quotaWriter, profile.ID, now)
 	})
+}
+
+func testRequesterUsernameBatch(t *testing.T, accounts core.AccountStore, account core.Account) {
+	t.Helper()
+	reader, ok := accounts.(interface {
+		UsernamesByAccountIDs(context.Context, []string) (map[string]string, error)
+	})
+	if !ok {
+		t.Fatal("account store does not implement requester username lookup")
+	}
+	missingID := mustID(t)
+	usernames, err := reader.UsernamesByAccountIDs(t.Context(), []string{missingID, account.ID})
+	if err != nil {
+		t.Fatalf("UsernamesByAccountIDs: %v", err)
+	}
+	if usernames[account.ID] != account.Username || usernames[missingID] != "" || len(usernames) != 1 {
+		t.Fatalf("account usernames = %v, want only %s=%q", usernames, account.ID, account.Username)
+	}
 }
 
 func testFulfilmentTransitions(

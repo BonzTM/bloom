@@ -183,12 +183,10 @@ type serviceWiring struct {
 }
 
 func wireServiceDependencies(
-	ctx context.Context, pool *sql.DB, cfg config.Config, auditSink io.Writer, logger *slog.Logger,
-	metrics *telemetry.PromMetrics, deps Dependencies, ownership *startupOwnership,
+	ctx context.Context, pool *sql.DB, cfg config.Config, auditSink io.Writer, logger *slog.Logger, metrics *telemetry.PromMetrics,
+	deps Dependencies, ownership *startupOwnership,
 ) (serviceWiring, error) {
-	accounts, identities, authorizer, roles, sessions, err := authDependencies(
-		pool, cfg, metrics, logger, deps.Clock,
-	)
+	accounts, identities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, deps.Clock)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -197,8 +195,12 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	ownership.media = mediaServers
+	requesterUsernames, ok := accounts.(requestapp.RequesterUsernameReader)
+	if !ok {
+		return serviceWiring{}, errors.New("build request service: account username reader is unavailable")
+	}
 	metadataService, requestService, downloadManagers, fulfilmentManager, err := requestDependencies(
-		pool, cfg, metrics, deps.Clock, mediaServers, telemetry.NewAuditLogger(auditSink, deps.Clock), logger,
+		pool, cfg, metrics, deps.Clock, mediaServers, requesterUsernames, telemetry.NewAuditLogger(auditSink, deps.Clock), logger,
 	)
 	if err != nil {
 		return serviceWiring{}, err
@@ -208,9 +210,7 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	playbackStore, playbackManager, err := playbackDependencies(
-		pool, cfg, mediaServers, metrics, logger, deps.Clock, deps.newPlaybackManager,
-	)
+	playbackStore, playbackManager, err := playbackDependencies(pool, cfg, mediaServers, metrics, logger, deps.Clock, deps.newPlaybackManager)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -234,8 +234,7 @@ func wireServiceDependencies(
 	return serviceWiring{
 		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, invites: invites,
-		playbackStore: playbackStore, playbackManager: playbackManager,
-		stats:    statsService,
+		playbackStore: playbackStore, playbackManager: playbackManager, stats: statsService,
 		metadata: metadataService, requests: requestService,
 		downloadManagers: downloadManagers, fulfilment: fulfilmentManager,
 		oidcProvider: provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
@@ -353,27 +352,13 @@ func bootstrapFirstAdmin(
 }
 
 func assembleHTTPServer(
-	cfg config.Config,
-	auditSink io.Writer,
-	logger *slog.Logger,
-	metrics *telemetry.PromMetrics,
-	pool *sql.DB,
-	accounts core.AccountStore,
-	localIdentities core.LocalIdentityStore,
-	authorizer core.Authorizer,
-	roles core.RoleReader,
-	sessions *scs.SessionManager,
-	mediaServers *mediaserver.Service,
-	invites *inviteapp.Service,
-	playbackStore core.PlaybackStore,
-	statsReader core.StatsReader,
-	clock core.Clock,
-	metadataService *metadata.Service,
-	requestService *requestapp.Service,
-	downloadManagers *downloadmanager.Service,
-	oidcProvider core.OIDCProvider,
-	oidcAccounts core.OIDCAccountStore,
-	oidcFlows core.OIDCFlowStore,
+	cfg config.Config, auditSink io.Writer, logger *slog.Logger, metrics *telemetry.PromMetrics,
+	pool *sql.DB, accounts core.AccountStore, localIdentities core.LocalIdentityStore,
+	authorizer core.Authorizer, roles core.RoleReader, sessions *scs.SessionManager,
+	mediaServers *mediaserver.Service, invites *inviteapp.Service, playbackStore core.PlaybackStore,
+	statsReader core.StatsReader, clock core.Clock, metadataService *metadata.Service,
+	requestService *requestapp.Service, downloadManagers *downloadmanager.Service,
+	oidcProvider core.OIDCProvider, oidcAccounts core.OIDCAccountStore, oidcFlows core.OIDCFlowStore,
 ) (*httpapi.Server, error) {
 	dist, err := web.Dist()
 	if err != nil {
@@ -426,7 +411,8 @@ func (g connectionGroup) CloseIdleConnections() {
 
 func requestDependencies(
 	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock,
-	mediaServers *mediaserver.Service, audit *telemetry.AuditLogger, logger *slog.Logger,
+	mediaServers *mediaserver.Service, requesterUsernames requestapp.RequesterUsernameReader,
+	audit *telemetry.AuditLogger, logger *slog.Logger,
 ) (*metadata.Service, *requestapp.Service, *downloadmanager.Service, *fulfilment.Manager, error) {
 	cipher, err := secrets.New(cfg.SecretKey.Bytes())
 	if err != nil {
@@ -459,7 +445,7 @@ func requestDependencies(
 	}
 	service, err := requestapp.NewService(requestapp.Dependencies{
 		Profiles: stores.profileReader, ProfileWriter: stores.profileWriter,
-		Requests: stores.requestReader, RequestWriter: stores.requestWriter,
+		Requests: stores.requestReader, Usernames: requesterUsernames, RequestWriter: stores.requestWriter,
 		QuotaReader: stores.quotaReader, QuotaWriter: stores.quotaWriter, QuotaDeleter: stores.quotaDeleter,
 		Metadata: metadataService, Clock: clock, Metrics: metrics,
 		Events: events, Managers: managerService, Progress: managerService, Fulfilment: fulfilmentManager,

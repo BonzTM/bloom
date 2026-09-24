@@ -244,6 +244,15 @@ func TestOIDCValidation(t *testing.T) {
 		name, key, value string
 	}{
 		{name: "issuer requires https", key: "BLOOM_OIDC_ISSUER_URL", value: "http://id.example"},
+		{name: "issuer no query", key: "BLOOM_OIDC_ISSUER_URL", value: "https://id.example?client=bloom"},
+		{name: "issuer no empty query", key: "BLOOM_OIDC_ISSUER_URL", value: "https://id.example?"},
+		{name: "issuer no fragment", key: "BLOOM_OIDC_ISSUER_URL", value: "https://id.example#metadata"},
+		{name: "issuer no empty fragment", key: "BLOOM_OIDC_ISSUER_URL", value: "https://id.example#"},
+		{name: "issuer not opaque", key: "BLOOM_OIDC_ISSUER_URL", value: "https:id.example"},
+		{name: "issuer port only host", key: "BLOOM_OIDC_ISSUER_URL", value: "https://:443"},
+		{name: "issuer empty host", key: "BLOOM_OIDC_ISSUER_URL", value: "https://"},
+		{name: "issuer no userinfo", key: "BLOOM_OIDC_ISSUER_URL", value: "https://user@id.example"},
+		{name: "issuer canonical round trip", key: "BLOOM_OIDC_ISSUER_URL", value: "https://id.example/a b"},
 		{name: "redirect same origin", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://other.example/callback"},
 		{name: "redirect exact path", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/callback"},
 		{name: "redirect encoded path", key: "BLOOM_OIDC_REDIRECT_URL", value: "https://bloom.example/%61pi/v1/auth/oidc/callback"},
@@ -268,6 +277,96 @@ func TestOIDCValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOIDCConfigByteBounds(t *testing.T) {
+	tests := []struct {
+		name, key string
+		atLimit   string
+		overLimit string
+		control   string
+	}{
+		{
+			name: "public URL", key: "BLOOM_PUBLIC_URL", atLimit: "https://" + strings.Repeat("a", maxPublicURLBytes-len("https://")),
+			overLimit: "https://" + strings.Repeat("a", maxPublicURLBytes-len("https://")+1), control: "https://bloom.example/\x01",
+		},
+		{
+			name: "client id", key: "BLOOM_OIDC_CLIENT_ID", atLimit: strings.Repeat("i", maxOIDCClientIDBytes),
+			overLimit: strings.Repeat("i", maxOIDCClientIDBytes+1), control: "client\x01id",
+		},
+		{
+			name: "client secret", key: "BLOOM_OIDC_CLIENT_SECRET", atLimit: strings.Repeat("s", maxOIDCClientSecretBytes),
+			overLimit: strings.Repeat("s", maxOIDCClientSecretBytes+1), control: "secret\x01",
+		},
+		{
+			name: "scope", key: "BLOOM_OIDC_SCOPES", atLimit: "openid " + strings.Repeat("s", maxOIDCScopeBytes),
+			overLimit: "openid " + strings.Repeat("s", maxOIDCScopeBytes+1), control: "openid group\x01name",
+		},
+		{
+			name: "role claim", key: "BLOOM_OIDC_ROLE_CLAIM", atLimit: strings.Repeat("c", maxOIDCClaimNameBytes),
+			overLimit: strings.Repeat("c", maxOIDCClaimNameBytes+1), control: "groups\x01",
+		},
+		{
+			name: "role map claim", key: "BLOOM_OIDC_ROLE_MAP", atLimit: strings.Repeat("m", maxOIDCRoleMapClaimBytes) + "=owner",
+			overLimit: strings.Repeat("m", maxOIDCRoleMapClaimBytes+1) + "=owner", control: "group\x01=owner",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			setValidOIDCEnvironment(t)
+			t.Setenv(testCase.key, testCase.atLimit)
+			if testCase.key == "BLOOM_PUBLIC_URL" {
+				t.Setenv("BLOOM_OIDC_REDIRECT_URL", testCase.atLimit+"/api/v1/auth/oidc/callback")
+			}
+			if _, err := Load(nil); err != nil {
+				t.Fatalf("Load at byte limit: %v", err)
+			}
+			t.Setenv(testCase.key, testCase.overLimit)
+			if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), testCase.key) {
+				t.Fatalf("Load over byte limit = %v, want %s error", err, testCase.key)
+			}
+			if testCase.control == "" {
+				return
+			}
+			t.Setenv(testCase.key, testCase.control)
+			if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), testCase.key) {
+				t.Fatalf("Load control character = %v, want %s error", err, testCase.key)
+			}
+		})
+	}
+}
+
+func TestOIDCRoleConfigurationUsesCoreRoleNameContract(t *testing.T) {
+	roles := []string{
+		"owner",
+		strings.Repeat("r", core.MaxRoleNameBytes),
+		strings.Repeat("r", core.MaxRoleNameBytes+1),
+		" owner",
+		"own\x7fer",
+		string([]byte{0xff}),
+	}
+	for _, role := range roles {
+		t.Run(fmt.Sprintf("%q", role), func(t *testing.T) {
+			setValidOIDCEnvironment(t)
+			t.Setenv("BLOOM_OIDC_DEFAULT_ROLE", role)
+			_, err := Load(nil)
+			if (err == nil) != core.ValidRoleName(role) {
+				t.Fatalf("Load role %q error = %v, core.ValidRoleName = %v", role, err, core.ValidRoleName(role))
+			}
+		})
+	}
+}
+
+func setValidOIDCEnvironment(t *testing.T) {
+	t.Helper()
+	setRequired(t)
+	t.Setenv("BLOOM_OIDC_ENABLED", "true")
+	t.Setenv("BLOOM_PUBLIC_URL", "https://bloom.example")
+	t.Setenv("BLOOM_OIDC_ISSUER_URL", "https://id.example")
+	t.Setenv("BLOOM_OIDC_CLIENT_ID", "bloom")
+	t.Setenv("BLOOM_OIDC_CLIENT_SECRET", "client-secret")
+	t.Setenv("BLOOM_OIDC_REDIRECT_URL", "https://bloom.example/api/v1/auth/oidc/callback")
+	t.Setenv("BLOOM_OIDC_ROLE_CLAIM", "groups")
 }
 
 func TestOIDCIssuerLengthBound(t *testing.T) {
@@ -726,4 +825,34 @@ func TestValidateAuthInvariants(t *testing.T) {
 	if err := bad.Validate(); err == nil {
 		t.Error("oversized LoginMaxConcurrent accepted, want error")
 	}
+}
+
+// A disabled provider still bounds every populated value, so switching it
+// on later cannot make a malformed value live.
+func TestOIDCDisabledStillBoundsPopulatedValues(t *testing.T) {
+	tests := []struct {
+		name, key, value string
+	}{
+		{name: "oversized client id", key: "BLOOM_OIDC_CLIENT_ID", value: strings.Repeat("a", maxOIDCClientIDBytes+1)},
+		{name: "control in display name", key: "BLOOM_OIDC_DISPLAY_NAME", value: "Home\x01SSO"},
+		{name: "oversized scope", key: "BLOOM_OIDC_SCOPES", value: "openid " + strings.Repeat("s", maxOIDCScopeBytes+1)},
+		{name: "invalid utf8 role claim", key: "BLOOM_OIDC_ROLE_CLAIM", value: "roles\xff"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("BLOOM_OIDC_ENABLED", "false")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(nil); err == nil {
+				t.Fatalf("Load accepted %s=%q with OIDC disabled", test.key, test.value)
+			}
+		})
+	}
+	t.Run("empty values pass", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("BLOOM_OIDC_ENABLED", "false")
+		if _, err := Load(nil); err != nil {
+			t.Fatalf("Load with OIDC disabled: %v", err)
+		}
+	})
 }
