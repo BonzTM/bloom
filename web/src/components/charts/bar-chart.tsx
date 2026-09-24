@@ -20,9 +20,13 @@ type BarChartProps = Readonly<{
   orientation?: "horizontal" | "vertical";
 }>;
 
-const WIDTH = 600;
+// Horizontal charts use a narrow drawing so their text stays legible when a
+// short chart is scaled to a card; vertical charts use a wide one.
+const H_WIDTH = 360;
 const ROW = 28;
-const LABEL_WIDTH = 160;
+const LABEL_WIDTH = 120;
+const VALUE_WIDTH = 64;
+const WIDTH = 600;
 const V_HEIGHT = 240;
 const V_AXIS = 28;
 
@@ -75,11 +79,11 @@ type BarsProps = Readonly<{
 
 function HorizontalBars({ data, ceiling, format }: BarsProps): ReactNode {
   const height = data.length * ROW;
-  const plotWidth = WIDTH - LABEL_WIDTH - 72;
+  const plotWidth = H_WIDTH - LABEL_WIDTH - VALUE_WIDTH;
   return (
     <svg
-      className="chart-svg"
-      viewBox={`0 0 ${String(WIDTH)} ${String(height)}`}
+      className="chart-svg chart-svg-horizontal"
+      viewBox={`0 0 ${String(H_WIDTH)} ${String(height)}`}
       aria-hidden="true"
       focusable="false"
     >
@@ -95,7 +99,7 @@ function HorizontalBars({ data, ceiling, format }: BarsProps): ReactNode {
               textAnchor="end"
               dominantBaseline="middle"
             >
-              {clip(point.label, 24)}
+              {clip(point.label, 18)}
             </text>
             <rect
               x={LABEL_WIDTH}
@@ -124,6 +128,8 @@ function VerticalBars({ data, ceiling, format }: BarsProps): ReactNode {
   const plotHeight = V_HEIGHT - V_AXIS;
   const slot = WIDTH / data.length;
   const barWidth = Math.max(slot * 0.6, 2);
+  // Labels need about 40 units each; beyond that only every nth is drawn.
+  const labelEvery = Math.max(1, Math.ceil(40 / slot));
   return (
     <svg
       className="chart-svg"
@@ -153,7 +159,7 @@ function VerticalBars({ data, ceiling, format }: BarsProps): ReactNode {
             >
               <title>{`${point.label}: ${format(point.value)}`}</title>
             </rect>
-            {data.length <= 31 ? (
+            {index % labelEvery === 0 ? (
               <text
                 x={x + barWidth / 2}
                 y={V_HEIGHT - 8}

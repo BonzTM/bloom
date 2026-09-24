@@ -697,6 +697,10 @@ button:disabled {
   width: 100%;
 }
 
+.chart-svg-horizontal {
+  max-width: 28rem;
+}
+
 .chart-bar {
   fill: var(--accent);
 }
