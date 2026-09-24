@@ -13,6 +13,7 @@ import {
   RefreshFailed,
 } from "./list-states.js";
 import { describeDecisionError } from "./request-errors.js";
+import { RequestProgress } from "./request-progress.js";
 import {
   kindLabel,
   seasonsLabel,
@@ -25,6 +26,7 @@ type RequestsQuery = ReturnType<typeof useRequests>;
 
 type RequestsTableProps = Readonly<{
   query: RequestsQuery;
+  accountId: string;
   profileNames: ReadonlyMap<string, string>;
   // The id of the request whose decision is in flight, if any.
   deciding: string | undefined;
@@ -37,6 +39,7 @@ type RequestsTableProps = Readonly<{
 // failed later page that keeps the rows, and a failed first load.
 export function RequestsTable({
   query,
+  accountId,
   profileNames,
   deciding,
   decideError,
@@ -65,6 +68,7 @@ export function RequestsTable({
       ) : (
         <Table
           requests={items}
+          accountId={accountId}
           profileNames={profileNames}
           deciding={deciding}
           onDecide={onDecide}
@@ -83,6 +87,7 @@ export function RequestsTable({
 
 type TableProps = Readonly<{
   requests: readonly MediaRequest[];
+  accountId: string;
   profileNames: ReadonlyMap<string, string>;
   deciding: string | undefined;
   onDecide: (decision: Decision) => void;
@@ -90,6 +95,7 @@ type TableProps = Readonly<{
 
 function Table({
   requests,
+  accountId,
   profileNames,
   deciding,
   onDecide,
@@ -120,6 +126,7 @@ function Table({
             <RequestRow
               key={request.id}
               request={request}
+              accountId={accountId}
               profileName={profileNames.get(request.profile_id)}
               deciding={deciding === request.id}
               onDecide={onDecide}
@@ -133,6 +140,7 @@ function Table({
 
 type RequestRowProps = Readonly<{
   request: MediaRequest;
+  accountId: string;
   profileName: string | undefined;
   deciding: boolean;
   onDecide: (decision: Decision) => void;
@@ -140,6 +148,7 @@ type RequestRowProps = Readonly<{
 
 function RequestRow({
   request,
+  accountId,
   profileName,
   deciding,
   onDecide,
@@ -171,19 +180,67 @@ function RequestRow({
       </td>
       <td>{decisionSummary(request)}</td>
       <td>
-        {request.status === "pending" ? (
-          <DecisionControls
-            id={request.id}
-            title={title}
-            deciding={deciding}
-            onDecide={onDecide}
-          />
-        ) : (
-          <span aria-hidden="true">—</span>
-        )}
+        <RowActions
+          request={request}
+          accountId={accountId}
+          title={title}
+          deciding={deciding}
+          onDecide={onDecide}
+        />
       </td>
     </tr>
   );
+}
+
+// Pending requests are decided; failed ones may be approved again, which
+// sends them back to the download manager; processing ones show progress.
+function RowActions({
+  request,
+  accountId,
+  title,
+  deciding,
+  onDecide,
+}: Readonly<{
+  request: MediaRequest;
+  accountId: string;
+  title: string;
+  deciding: boolean;
+  onDecide: (decision: Decision) => void;
+}>): ReactNode {
+  if (request.status === "pending") {
+    return (
+      <DecisionControls
+        id={request.id}
+        title={title}
+        deciding={deciding}
+        onDecide={onDecide}
+      />
+    );
+  }
+  if (request.status === "failed") {
+    return deciding ? (
+      <span role="status">Saving the decision…</span>
+    ) : (
+      <button
+        type="button"
+        onClick={() => {
+          onDecide({ id: request.id, verb: "approve", decision: {} });
+        }}
+      >
+        Approve again <span className="visually-hidden">{title}</span>
+      </button>
+    );
+  }
+  if (request.status === "processing") {
+    return (
+      <RequestProgress
+        accountId={accountId}
+        requestId={request.id}
+        title={title}
+      />
+    );
+  }
+  return <span aria-hidden="true">—</span>;
 }
 
 function shortId(id: string): string {
@@ -191,16 +248,23 @@ function shortId(id: string): string {
 }
 
 function decisionSummary(request: MediaRequest): ReactNode {
-  if (request.decided_at === undefined) {
+  if (request.decided_at === undefined && request.failure_reason === "") {
     return "—";
   }
   return (
     <>
-      <time dateTime={request.decided_at}>
-        {request.decided_at.slice(0, 10)}
-      </time>
+      {request.decided_at === undefined ? null : (
+        <time dateTime={request.decided_at}>
+          {request.decided_at.slice(0, 10)}
+        </time>
+      )}
       {request.decision_reason === "" ? null : (
         <span className="row-detail">{request.decision_reason}</span>
+      )}
+      {request.failure_reason === "" ? null : (
+        <span className="row-detail failure-reason">
+          {request.failure_reason}
+        </span>
       )}
     </>
   );

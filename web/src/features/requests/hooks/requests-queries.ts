@@ -5,6 +5,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
+import type {
+  DownloadManagersPage,
+  RegisterDownloadManagerRequest,
+  RegisteredDownloadManager,
+} from "../api/download-manager-schemas.js";
 import type { CreateMediaRequest } from "../api/metadata-schemas.js";
 import type { RequestsFilter } from "../api/requests-api.js";
 import type { MediaKind } from "../api/requests-schemas.js";
@@ -32,6 +37,11 @@ export const requestsKeys = {
       filter.requesterId ?? "",
     ] as const,
   key: (accountId: string) => ["requests", "tmdb-key", accountId] as const,
+  managers: (accountId: string) => ["requests", "managers", accountId] as const,
+  managerOptions: (accountId: string, managerId: string) =>
+    ["requests", "manager-options", accountId, managerId] as const,
+  progress: (accountId: string, requestId: string) =>
+    ["requests", "progress", accountId, requestId] as const,
   search: (accountId: string, query: string, kind: MediaKind | undefined) =>
     ["requests", "search", accountId, query, kind ?? ""] as const,
   title: (accountId: string, kind: MediaKind, providerId: string) =>
@@ -192,6 +202,118 @@ export function useRemoveMetadataKey(accountId: string) {
         configured: false,
       });
     },
+  });
+}
+
+export function useDownloadManagers(accountId: string, enabled = true) {
+  const api = useRequestsApi();
+  return useInfiniteQuery({
+    queryKey: requestsKeys.managers(accountId),
+    queryFn: ({ pageParam, signal }) => api.listManagers(pageParam, signal),
+    initialPageParam: firstPage,
+    getNextPageParam: (page: DownloadManagersPage) => nextCursor(page),
+    enabled,
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+type RegisterCallbacks = Readonly<{
+  onSuccess?: (result: RegisteredDownloadManager) => void;
+}>;
+
+// Register an instance. The API key never becomes a mutation variable: it
+// sits in a ref only until the request is built. A second call while one
+// is in flight is dropped.
+export function useRegisterDownloadManager(accountId: string) {
+  const api = useRequestsApi();
+  const queryClient = useQueryClient();
+  const pending = useRef<RegisterDownloadManagerRequest | null>(null);
+  const inFlight = useRef(false);
+  const mutation = useMutation({
+    mutationFn: () => {
+      const input = pending.current;
+      pending.current = null;
+      if (input === null) {
+        throw new Error("registerManager called without input");
+      }
+      return api.registerManager(input);
+    },
+    gcTime: 0,
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: requestsKeys.managers(accountId),
+      }),
+    onSettled: () => {
+      pending.current = null;
+      inFlight.current = false;
+    },
+  });
+  const { mutate } = mutation;
+  const register = useCallback(
+    (
+      input: RegisterDownloadManagerRequest,
+      callbacks: RegisterCallbacks = {},
+    ) => {
+      if (inFlight.current) {
+        return;
+      }
+      inFlight.current = true;
+      pending.current = input;
+      mutate(undefined, {
+        onSuccess: (result) => {
+          callbacks.onSuccess?.(result);
+        },
+      });
+    },
+    [mutate],
+  );
+  return {
+    register,
+    isPending: mutation.isPending,
+    error: mutation.error,
+    submittedAt: mutation.submittedAt,
+  };
+}
+
+export function useRemoveDownloadManager(accountId: string) {
+  const api = useRequestsApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.removeManager(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: requestsKeys.managers(accountId),
+      }),
+  });
+}
+
+// The quality profiles, root folders, and tags one instance offers.
+export function useDownloadManagerOptions(
+  accountId: string,
+  managerId: string | undefined,
+) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.managerOptions(accountId, managerId ?? ""),
+    queryFn: ({ signal }) => api.managerOptions(managerId ?? "", signal),
+    enabled: managerId !== undefined,
+    staleTime: 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+// Live queue state for one processing request; read only while shown and
+// never kept long, since it changes as the download runs.
+export function useRequestProgress(accountId: string, requestId: string) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.progress(accountId, requestId),
+    queryFn: ({ signal }) => api.progress(requestId, signal),
+    staleTime: 10_000,
+    gcTime: 30_000,
+    retry: false,
+    meta: { sessionScoped: true },
   });
 }
 

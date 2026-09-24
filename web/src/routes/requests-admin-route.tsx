@@ -90,6 +90,7 @@ function RequestsPage({
         ) : (
           <RequestsTable
             query={requests}
+            accountId={accountId}
             profileNames={profileNames}
             deciding={decide.isPending ? decide.variables.id : undefined}
             decideError={decide.error}

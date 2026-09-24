@@ -104,6 +104,20 @@ export const mediaRequestSchema = z.object({
   decision_reason: z
     .string()
     .refine((value) => utf8Length(value) <= MAX_REASON_BYTES),
+  failure_reason: z
+    .string()
+    .refine((value) => utf8Length(value) <= MAX_REASON_BYTES),
+  // What a claimed dispatch was sent with; empty until dispatched.
+  download_manager_id: z.string(),
+  download_manager_item_id: z.string().max(128),
+  dispatch_quality_profile: z
+    .string()
+    .refine((value) => utf8Length(value) <= MAX_FIELD_BYTES),
+  dispatch_root_folder: z
+    .string()
+    .refine((value) => utf8Length(value) <= MAX_FIELD_BYTES),
+  dispatch_tags: z.array(boundedString(MAX_TAG_BYTES)).max(32),
+  last_availability_check_at: z.iso.datetime({ offset: true }).optional(),
   decided_by_account_id: z.string(),
   decided_at: z.iso.datetime({ offset: true }).optional(),
   created_at: z.iso.datetime({ offset: true }),

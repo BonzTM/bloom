@@ -30,6 +30,9 @@ const LazyRequestsAdminRoute = lazy(
 );
 const LazyDiscoverRoute = lazy(() => import("../routes/discover-route.js"));
 const LazyTitleRoute = lazy(() => import("../routes/title-route.js"));
+const LazyDownloadManagersRoute = lazy(
+  () => import("../routes/download-managers-route.js"),
+);
 const LazyRequestProfilesRoute = lazy(
   () => import("../routes/request-profiles-route.js"),
 );
@@ -173,6 +176,16 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.requestsApprove]}>
                 <LazyPage loading="Loading requests…">
                   <LazyRequestsAdminRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "download-managers",
+            element: (
+              <RequirePermission anyOf={[permissions.adminSettings]}>
+                <LazyPage loading="Loading download managers…">
+                  <LazyDownloadManagersRoute />
                 </LazyPage>
               </RequirePermission>
             ),

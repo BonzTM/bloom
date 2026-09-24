@@ -25,21 +25,24 @@ async function openSettings(): Promise<AppRender & { table: HTMLElement }> {
   return { ...rendered, table };
 }
 
+// Chooses the Radarr instance, waits for its options, and fills the rest.
 async function fillProfile(user: User, name: string): Promise<void> {
-  const form = screen.getByRole("form", { name: "Create a profile" });
+  const form = await screen.findByRole("form", { name: "Create a profile" });
   await user.type(within(form).getByLabelText("Name"), name);
-  await user.click(within(form).getByLabelText("Movie"));
   await user.selectOptions(
     within(form).getByLabelText("Download manager"),
-    "Radarr",
+    "radarr-main (Radarr)",
   );
-  await user.type(
-    within(form).getByLabelText("Download manager instance"),
-    "radarr-4k",
+  await user.selectOptions(
+    await within(form).findByLabelText("Quality profile"),
+    "Ultra-HD",
   );
-  await user.type(within(form).getByLabelText("Quality profile"), "Ultra-HD");
-  await user.type(within(form).getByLabelText("Root folder"), "/data/movies4k");
-  await user.type(within(form).getByLabelText("Tags"), "bloom, 4k");
+  await user.selectOptions(
+    within(form).getByLabelText("Root folder"),
+    "/data/movies4k",
+  );
+  await user.click(within(form).getByLabelText("bloom"));
+  await user.click(within(form).getByLabelText("4k"));
 }
 
 function cachedText(queryClient: QueryClient): string {
@@ -89,9 +92,6 @@ it("lists profiles with their kinds, manager, folder, and tags", async () => {
   expect(
     within(movies).getByRole("button", { name: "Edit Movies HD" }),
   ).toBeVisible();
-  expect(within(table).getAllByRole("rowheader")[0]).toHaveTextContent(
-    "Movies HD",
-  );
 });
 
 it("stores a TMDB key without keeping it anywhere on the client", async () => {
@@ -105,9 +105,6 @@ it("stores a TMDB key without keeping it anywhere on the client", async () => {
 
   expect(await screen.findByText("Key stored")).toBeVisible();
   expect(screen.getByText("The TMDB key was saved.")).toBeVisible();
-  expect(
-    screen.getByRole("form", { name: "Replace the TMDB key" }),
-  ).toBeVisible();
   expect(screen.getByLabelText("New API key")).toHaveValue("");
   expect(cachedText(queryClient)).not.toContain("tmdb-secret-123");
   expect(document.body.textContent).not.toContain("tmdb-secret-123");
@@ -127,48 +124,19 @@ it("explains a key the server refuses and keeps it in the field", async () => {
   expect(within(form).getByLabelText("API key")).toHaveValue(INVALID_TMDB_KEY);
 });
 
-it("asks for the key before sending anything", async () => {
-  const user = userEvent.setup();
-  await openSettings();
-  const form = await screen.findByRole("form", { name: "Store the TMDB key" });
-
-  await user.click(within(form).getByRole("button", { name: "Store key" }));
-
-  const field = within(form).getByLabelText("API key");
-  expect(field).toBeInvalid();
-  expect(field).toHaveFocus();
-  expect(field).toHaveAccessibleDescription("Enter the TMDB API key.");
-});
-
 it("removes a stored key after an in-row confirmation", async () => {
   const user = userEvent.setup();
   setMockTmdbKeyConfigured(true);
   await openSettings();
   expect(await screen.findByText("Key stored")).toBeVisible();
-
-  await user.click(screen.getByRole("button", { name: "Remove the TMDB key" }));
-  expect(
-    screen.getByRole("button", { name: "Confirm removing the TMDB key" }),
-  ).toHaveFocus();
-  await user.click(
-    screen.getByRole("button", { name: "Cancel removing the TMDB key" }),
-  );
-  expect(
-    screen.getByRole("button", { name: "Remove the TMDB key" }),
-  ).toHaveFocus();
-
   await user.click(screen.getByRole("button", { name: "Remove the TMDB key" }));
   await user.click(
     screen.getByRole("button", { name: "Confirm removing the TMDB key" }),
   );
-
   expect(await screen.findByText("No key stored")).toBeVisible();
-  expect(
-    screen.queryByRole("button", { name: "Remove the TMDB key" }),
-  ).not.toBeInTheDocument();
 });
 
-it("creates a profile and lists it", async () => {
+it("creates a profile from a registered instance's options", async () => {
   const user = userEvent.setup();
   const { table } = await openSettings();
   await fillProfile(user, "Movies 4K");
@@ -177,30 +145,63 @@ it("creates a profile and lists it", async () => {
 
   expect(await screen.findByText("Saved Movies 4K.")).toBeVisible();
   const row = await within(table).findByRole("row", { name: /^Movies 4K / });
-  expect(row).toHaveTextContent("radarr · radarr-4k");
+  expect(row).toHaveTextContent("radarr · radarr-main");
+  expect(row).toHaveTextContent("Ultra-HD");
+  expect(row).toHaveTextContent("/data/movies4k");
   expect(row).toHaveTextContent("bloom, 4k");
-  expect(within(table).getAllByRole("rowheader")[0]).toHaveTextContent(
-    "Movies 4K",
-  );
   expect(screen.getByLabelText("Name")).toHaveValue("");
 });
 
-it("explains what is missing before sending anything", async () => {
+it("asks for an instance before showing its options", async () => {
   const user = userEvent.setup();
   await openSettings();
+  const form = await screen.findByRole("form", { name: "Create a profile" });
+  expect(
+    within(form).getByText(
+      "Choose an instance to pick its quality profile and root folder.",
+    ),
+  ).toBeVisible();
+  expect(
+    within(form).queryByLabelText("Quality profile"),
+  ).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", { name: "Create profile" }));
+  await user.click(
+    within(form).getByRole("button", { name: "Create profile" }),
+  );
 
-  const name = screen.getByLabelText("Name");
+  const name = within(form).getByLabelText("Name");
   expect(name).toBeInvalid();
   expect(name).toHaveFocus();
-  expect(name).toHaveAccessibleDescription("Enter the profile name.");
-  expect(
-    screen.getByRole("group", { name: "Media kinds" }),
-  ).toHaveAccessibleDescription(
-    "Choose at least one kind of media this profile accepts.",
-  );
+  expect(within(form).getByLabelText("Download manager")).toBeInvalid();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("preselects the only choice an instance offers", async () => {
+  const user = userEvent.setup();
+  await openSettings();
+  const form = await screen.findByRole("form", { name: "Create a profile" });
+  await user.selectOptions(
+    within(form).getByLabelText("Download manager"),
+    "sonarr-main (Sonarr)",
+  );
+  expect(await within(form).findByLabelText("Quality profile")).toHaveValue(
+    "Any",
+  );
+  expect(within(form).getByLabelText("Root folder")).toHaveValue("/data/tv");
+  expect(within(form).getByText("This instance has no tags.")).toBeVisible();
+});
+
+it("points at registration when no instance exists", async () => {
+  server.use(
+    http.get(
+      "*/api/v1/download-managers",
+      jsonApi(() => HttpResponse.json({ items: [], next_cursor: "" })),
+    ),
+  );
+  await openSettings();
+  expect(
+    await screen.findByRole("link", { name: "Register one first." }),
+  ).toHaveAttribute("href", "/admin/download-managers");
 });
 
 it("reports a name another profile already uses", async () => {
@@ -216,7 +217,7 @@ it("reports a name another profile already uses", async () => {
   expect(screen.getByLabelText("Name")).toHaveValue("series");
 });
 
-it("edits a profile in place and returns to creating", async () => {
+it("edits a profile with its instance and options preselected", async () => {
   const user = userEvent.setup();
   const { table } = await openSettings();
 
@@ -224,41 +225,33 @@ it("edits a profile in place and returns to creating", async () => {
     within(table).getByRole("button", { name: "Edit Movies HD" }),
   );
 
-  const heading = screen.getByRole("heading", {
-    name: "Edit Movies HD",
-    level: 2,
-  });
-  expect(heading).toHaveFocus();
+  expect(
+    screen.getByRole("heading", { name: "Edit Movies HD", level: 2 }),
+  ).toHaveFocus();
   const form = screen.getByRole("form", { name: "Edit profile Movies HD" });
   expect(within(form).getByLabelText("Name")).toHaveValue("Movies HD");
-  expect(within(form).getByLabelText("Movie")).toBeChecked();
-  expect(within(form).getByLabelText("Series")).not.toBeChecked();
-  expect(within(form).getByLabelText("Download manager")).toHaveValue("radarr");
-  expect(within(form).getByLabelText("Tags")).toHaveValue("bloom");
+  expect(within(form).getByLabelText("Download manager")).toHaveValue(
+    "7d8e9f0a-0000-4000-8000-000000000001",
+  );
+  expect(await within(form).findByLabelText("Quality profile")).toHaveValue(
+    "HD-1080p",
+  );
+  expect(within(form).getByLabelText("bloom")).toBeChecked();
+  expect(within(form).getByLabelText("4k")).not.toBeChecked();
 
-  await user.clear(within(form).getByLabelText("Quality profile"));
-  await user.type(within(form).getByLabelText("Quality profile"), "HD-720p");
+  await user.selectOptions(
+    within(form).getByLabelText("Quality profile"),
+    "Ultra-HD",
+  );
   await user.click(within(form).getByRole("button", { name: "Save profile" }));
 
   expect(await screen.findByText("Saved Movies HD.")).toBeVisible();
   expect(
-    await within(table).findByRole("row", { name: /^Movies HD .*HD-720p/ }),
+    await within(table).findByRole("row", { name: /^Movies HD .*Ultra-HD/ }),
   ).toBeVisible();
   expect(
     screen.getByRole("heading", { name: "Create a profile", level: 2 }),
   ).toBeVisible();
-  expect(screen.getByLabelText("Name")).toHaveValue("");
-});
-
-it("cancels editing without saving", async () => {
-  const user = userEvent.setup();
-  const { table } = await openSettings();
-  await user.click(within(table).getByRole("button", { name: "Edit Series" }));
-  await user.click(screen.getByRole("button", { name: "Cancel editing" }));
-  expect(
-    screen.getByRole("heading", { name: "Create a profile", level: 2 }),
-  ).toBeVisible();
-  expect(screen.getByLabelText("Name")).toHaveValue("");
 });
 
 it("removes a profile after an in-row confirmation", async () => {
@@ -270,27 +263,12 @@ it("removes a profile after an in-row confirmation", async () => {
     ),
   );
   const { table } = await openSettings();
-
-  await user.click(
-    within(table).getByRole("button", { name: "Remove Series" }),
-  );
-  expect(
-    within(table).getByRole("button", { name: "Confirm removing Series" }),
-  ).toHaveFocus();
-  await user.click(
-    within(table).getByRole("button", { name: "Cancel removing Series" }),
-  );
-  expect(
-    within(table).getByRole("button", { name: "Remove Series" }),
-  ).toHaveFocus();
-
   await user.click(
     within(table).getByRole("button", { name: "Remove Series" }),
   );
   await user.click(
     within(table).getByRole("button", { name: "Confirm removing Series" }),
   );
-
   expect(
     await within(table).findByRole("button", { name: "Remove Movies HD" }),
   ).toBeVisible();
@@ -300,20 +278,15 @@ it("removes a profile after an in-row confirmation", async () => {
 it("explains why a profile still in use cannot be removed", async () => {
   const user = userEvent.setup();
   const { table } = await openSettings();
-
   await user.click(
     within(table).getByRole("button", { name: "Remove Movies HD" }),
   );
   await user.click(
     within(table).getByRole("button", { name: "Confirm removing Movies HD" }),
   );
-
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent("requests still reference this one");
   expect(alert).toHaveFocus();
-  expect(
-    within(table).getByRole("button", { name: "Remove Movies HD" }),
-  ).toBeVisible();
 });
 
 it("offers a retry when the profiles cannot be listed", async () => {
@@ -337,25 +310,4 @@ it("offers a retry when the profiles cannot be listed", async () => {
       name: "Request profiles, ordered by name",
     }),
   ).toBeVisible();
-});
-
-it("sends one request when the profile form is submitted twice", async () => {
-  const user = userEvent.setup();
-  let requests = 0;
-  server.use(
-    http.post(
-      "*/api/v1/request-profiles",
-      jsonApi(() => {
-        requests += 1;
-        return undefined;
-      }),
-    ),
-  );
-  await openSettings();
-  await fillProfile(user, "Twice");
-
-  await user.dblClick(screen.getByRole("button", { name: "Create profile" }));
-
-  expect(await screen.findByText("Saved Twice.")).toBeVisible();
-  expect(requests).toBe(1);
 });

@@ -40,6 +40,11 @@ contracts) gets an entry here.
 
 ### Added
 
+- Administrators register Radarr and Sonarr instances from the web UI and
+  build request profiles from what an instance offers: its quality profiles,
+  root folders, and tags. The request queue shows why a request failed and
+  lets an approver send it again, and a processing request's queue progress
+  is readable on demand from the queue and from "My requests".
 - The Roles page shows and edits each role's request quota: how many movies
   and seasons its members may request in a rolling period, or no limit.
 - Radarr and Sonarr registration with probe-before-save encrypted API keys,

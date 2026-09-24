@@ -92,7 +92,7 @@ it("filters by status and shows the decision made", async () => {
   await user.selectOptions(screen.getByLabelText("Status"), "All statuses");
   const all = await findTable();
   expect(await within(all).findByRole("row", { name: /^Heat/ })).toBeVisible();
-  expect(within(all).getAllByRole("rowheader")).toHaveLength(4);
+  expect(within(all).getAllByRole("rowheader")).toHaveLength(6);
 });
 
 it("approves a request with a reason after confirming", async () => {
@@ -205,7 +205,9 @@ it("focuses the explanation when a decision is refused", async () => {
   );
 
   const alert = await screen.findByRole("alert");
-  expect(alert).toHaveTextContent("That request was already decided.");
+  expect(alert).toHaveTextContent(
+    "That request cannot be changed from its current state.",
+  );
   expect(alert).toHaveFocus();
 });
 
@@ -271,4 +273,60 @@ it("loads a later page on demand", async () => {
 
   expect(await within(table).findAllByRole("rowheader")).toHaveLength(2);
   expect(within(table).getByRole("row", { name: /^Heat/ })).toBeVisible();
+});
+
+it("shows a failed request's reason and lets an approver retry it", async () => {
+  const user = userEvent.setup();
+  await openRequests();
+  await user.selectOptions(screen.getByLabelText("Status"), "Failed");
+  const table = await findTable();
+  const row = await within(table).findByRole("row", {
+    name: /^Pulp Fiction \(1994\)/,
+  });
+  expect(row).toHaveTextContent("Failed");
+  expect(row).toHaveTextContent("root folder missing");
+
+  await user.click(
+    within(row).getByRole("button", {
+      name: "Approve again Pulp Fiction (1994)",
+    }),
+  );
+
+  await user.selectOptions(screen.getByLabelText("Status"), "Approved");
+  const approved = await findTable();
+  expect(
+    await within(approved).findByRole("row", { name: /^Pulp Fiction/ }),
+  ).toHaveTextContent("Approved");
+});
+
+it("reads queue progress for a processing request on demand", async () => {
+  const user = userEvent.setup();
+  let reads = 0;
+  server.use(
+    http.get(
+      "*/api/v1/requests/:id/progress",
+      jsonApi(() => {
+        reads += 1;
+        return undefined;
+      }),
+    ),
+  );
+  await openRequests();
+  await user.selectOptions(screen.getByLabelText("Status"), "Processing");
+  const table = await findTable();
+  const row = await within(table).findByRole("row", {
+    name: /^The Matrix \(1999\)/,
+  });
+  expect(reads).toBe(0);
+
+  await user.click(
+    within(row).getByRole("button", { name: "Progress of The Matrix (1999)" }),
+  );
+
+  expect(
+    await within(row).findByLabelText("Progress of The Matrix (1999)"),
+  ).toHaveTextContent("downloading, 75% done, expected 2026-09-23 13:30");
+  // Strict Mode's double mount may cancel and repeat the first read; the
+  // point is that nothing was read before the click.
+  expect(reads).toBeGreaterThanOrEqual(1);
 });

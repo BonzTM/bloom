@@ -1,5 +1,18 @@
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
+  downloadManagerOptionsSchema,
+  downloadManagersCursorSchema,
+  downloadManagersPageSchema,
+  registerDownloadManagerRequestSchema,
+  registeredDownloadManagerSchema,
+  requestProgressSchema,
+  type DownloadManagerOptions,
+  type DownloadManagersPage,
+  type RegisterDownloadManagerRequest,
+  type RegisteredDownloadManager,
+  type RequestProgress,
+} from "./download-manager-schemas.js";
+import {
   createMediaRequestSchema,
   metadataSearchResponseSchema,
   metadataSeriesSchema,
@@ -37,6 +50,7 @@ import {
 } from "./requests-schemas.js";
 
 const METADATA_PATH = "api/v1/metadata";
+const MANAGERS_PATH = "api/v1/download-managers";
 const PROFILES_PATH = "api/v1/request-profiles";
 const REQUESTS_PATH = "api/v1/requests";
 const KEY_PATH = "api/v1/metadata/providers/tmdb/key";
@@ -88,6 +102,59 @@ export class RequestsApi {
     return this.#client.requestEmpty(`${PROFILES_PATH}/${uuidSegment(id)}`, {
       method: "DELETE",
     });
+  }
+
+  // ---- download managers (admin.settings)
+
+  listManagers(
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<DownloadManagersPage> {
+    return this.#client.requestJson(
+      pagedPath(MANAGERS_PATH, {}, cursor, downloadManagersCursorSchema),
+      downloadManagersPageSchema,
+      { signal },
+    );
+  }
+
+  // Registers an instance after the server has probed it; the key travels
+  // once in this body and is never returned.
+  registerManager(
+    input: RegisterDownloadManagerRequest,
+  ): Promise<RegisteredDownloadManager> {
+    return this.#client.requestJson(
+      MANAGERS_PATH,
+      registeredDownloadManagerSchema,
+      {
+        method: "POST",
+        body: registerDownloadManagerRequestSchema.parse(input),
+      },
+    );
+  }
+
+  removeManager(id: string): Promise<void> {
+    return this.#client.requestEmpty(`${MANAGERS_PATH}/${uuidSegment(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  managerOptions(
+    id: string,
+    signal: AbortSignal,
+  ): Promise<DownloadManagerOptions> {
+    return this.#client.requestJson(
+      `${MANAGERS_PATH}/${uuidSegment(id)}/options`,
+      downloadManagerOptionsSchema,
+      { signal },
+    );
+  }
+
+  progress(requestId: string, signal: AbortSignal): Promise<RequestProgress> {
+    return this.#client.requestJson(
+      `${REQUESTS_PATH}/${uuidSegment(requestId)}/progress`,
+      requestProgressSchema,
+      { signal },
+    );
   }
 
   // ---- metadata (requests.create)

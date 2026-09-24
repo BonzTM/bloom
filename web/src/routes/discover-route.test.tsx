@@ -178,3 +178,18 @@ it("shows only the requests to an account that cannot search", async () => {
     screen.queryByRole("search", { name: "Search titles" }),
   ).not.toBeInTheDocument();
 });
+
+it("shows progress for the account's own processing request", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/requests");
+  const list = await screen.findByRole("list", {
+    name: "Your requests, newest first",
+  });
+  await user.click(
+    within(list).getByRole("button", { name: "Progress of The Matrix (1999)" }),
+  );
+  expect(
+    await within(list).findByLabelText("Progress of The Matrix (1999)"),
+  ).toHaveTextContent("75% done");
+});
