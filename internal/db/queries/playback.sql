@@ -55,11 +55,12 @@ ORDER BY w.started_at DESC, w.id DESC
 LIMIT sqlc.arg(page_size);
 
 -- name: ListUnresolvedWatchItemIDs :many
-SELECT w.item_id
+SELECT DISTINCT w.item_id
 FROM watches w
-WHERE w.media_server_id = sqlc.arg(media_server_id) AND w.library_id = ''
-GROUP BY w.item_id
-ORDER BY MIN(w.started_at), w.item_id
+WHERE w.media_server_id = sqlc.arg(media_server_id)
+  AND w.library_id = ''
+  AND w.item_id > sqlc.arg(after_item_id)
+ORDER BY w.item_id
 LIMIT sqlc.arg(row_limit);
 
 -- name: BackfillWatchLibrary :execrows

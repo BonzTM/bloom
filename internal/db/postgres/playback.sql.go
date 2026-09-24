@@ -565,21 +565,23 @@ func (q *Queries) ListRecentPlaybackWatches(ctx context.Context, arg ListRecentP
 }
 
 const listUnresolvedWatchItemIDs = `-- name: ListUnresolvedWatchItemIDs :many
-SELECT w.item_id
+SELECT DISTINCT w.item_id
 FROM watches w
-WHERE w.media_server_id = $1 AND w.library_id = ''
-GROUP BY w.item_id
-ORDER BY MIN(w.started_at), w.item_id
-LIMIT $2
+WHERE w.media_server_id = $1
+  AND w.library_id = ''
+  AND w.item_id > $2
+ORDER BY w.item_id
+LIMIT $3
 `
 
 type ListUnresolvedWatchItemIDsParams struct {
 	MediaServerID string
+	AfterItemID   string
 	RowLimit      int32
 }
 
 func (q *Queries) ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listUnresolvedWatchItemIDs, arg.MediaServerID, arg.RowLimit)
+	rows, err := q.db.QueryContext(ctx, listUnresolvedWatchItemIDs, arg.MediaServerID, arg.AfterItemID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

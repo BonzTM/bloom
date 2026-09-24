@@ -49,13 +49,13 @@ func (s *sqlitePlaybackStore) LoadOpenWatches(
 }
 
 func (s *sqlitePlaybackStore) ListUnresolvedWatchItemIDs(
-	ctx context.Context, mediaServerID string, limit int,
+	ctx context.Context, mediaServerID, afterItemID string, limit int,
 ) ([]string, error) {
 	if !core.ValidID(mediaServerID) || limit < 1 || limit > core.MaxPlaybackLibraryBackfillItems {
 		return nil, fmt.Errorf("list unresolved watch items: %w", core.ErrInvalidArgument)
 	}
 	items, err := s.q.ListUnresolvedWatchItemIDs(ctx, sqlite.ListUnresolvedWatchItemIDsParams{
-		MediaServerID: mediaServerID, RowLimit: int64(limit),
+		MediaServerID: mediaServerID, AfterItemID: afterItemID, RowLimit: int64(limit),
 	})
 	if err != nil {
 		return nil, playbackStoreError("list unresolved watch items", err)

@@ -64,12 +64,11 @@ type Dependencies struct {
 
 // Collector polls and persists playback for one media server.
 type Collector struct {
-	server    core.MediaServer
-	config    Config
-	deps      Dependencies
-	tracker   *core.PlaybackTracker
-	resolver  core.LibraryResolver
-	libraries *libraryCache
+	server     core.MediaServer
+	config     Config
+	deps       Dependencies
+	tracker    *core.PlaybackTracker
+	resolution *libraryResolverWorker
 }
 
 // NewCollector validates dependencies and returns one per-server collector.
@@ -87,14 +86,11 @@ func NewCollector(server core.MediaServer, config Config, deps Dependencies) (*C
 	if deps.NewID == nil {
 		deps.NewID = core.NewID
 	}
-	var resolver core.LibraryResolver
-	if candidate, ok := deps.Source.(core.LibraryResolver); ok {
-		resolver = candidate
+	collector := &Collector{server: server, config: config, deps: deps}
+	if resolver, ok := deps.Source.(core.LibraryResolver); ok {
+		collector.resolution = newLibraryResolverWorker(server, config, deps, resolver)
 	}
-	return &Collector{
-		server: server, config: config, deps: deps, resolver: resolver,
-		libraries: newLibraryCache(deps.Clock),
-	}, nil
+	return collector, nil
 }
 
 func validConfig(config Config) bool {
@@ -106,8 +102,32 @@ func validConfig(config Config) bool {
 		config.StoreTimeout >= minStoreTimeout && config.StoreTimeout <= maxStoreTimeout
 }
 
-// Run initializes persisted state, polls sequentially, and exits on cancellation.
+// Run owns library resolution, polls sequentially, and joins all work on exit.
 func (c *Collector) Run(ctx context.Context) error {
+	cancelResolver, resolverDone := c.startResolver(ctx)
+	if cancelResolver != nil {
+		defer func() {
+			cancelResolver()
+			<-resolverDone
+		}()
+	}
+	return c.runPollLoop(ctx)
+}
+
+func (c *Collector) startResolver(ctx context.Context) (context.CancelFunc, <-chan struct{}) {
+	if c.resolution == nil {
+		return nil, nil
+	}
+	resolverCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.resolution.run(resolverCtx)
+	}()
+	return cancel, done
+}
+
+func (c *Collector) runPollLoop(ctx context.Context) error {
 	if c.deps.Observer != nil {
 		defer c.deps.Observer.SetOpenWatches(string(c.server.Kind), c.server.ID, 0)
 	}
@@ -199,8 +219,6 @@ func (c *Collector) poll(ctx context.Context) (string, error) {
 		c.observePoll("failure", started)
 		return "store_failure", fmt.Errorf("apply playback sessions: %w", err)
 	}
-	attempted := make(map[string]bool, len(mutations))
-	c.resolveMutationLibraries(ctx, mutations, attempted)
 	if err := c.saveMutations(ctx, mutations); err != nil {
 		c.tracker = nil
 		c.observePoll("failure", started)
@@ -208,93 +226,11 @@ func (c *Collector) poll(ctx context.Context) (string, error) {
 	}
 	c.observePoll("success", started)
 	c.observeOpen()
-	c.backfillLibraries(ctx, attempted)
+	if c.resolution != nil {
+		c.resolution.enqueueForeground(mutations)
+		c.resolution.requestBackfill()
+	}
 	return "success", nil
-}
-
-func (c *Collector) resolveMutationLibraries(
-	ctx context.Context, mutations []core.PlaybackMutation, attempted map[string]bool,
-) {
-	if c.resolver == nil {
-		return
-	}
-	for index := range mutations {
-		watch := &mutations[index].Watch
-		if watch.LibraryID != "" {
-			continue
-		}
-		library, found := c.resolveLibrary(ctx, watch.ItemID, attempted)
-		if found {
-			watch.LibraryID, watch.LibraryName = library.ID, library.Name
-		}
-	}
-}
-
-func (c *Collector) resolveLibrary(
-	ctx context.Context, itemID string, attempted map[string]bool,
-) (core.Library, bool) {
-	if library, found, cached := c.libraries.get(itemID); cached {
-		return library, found
-	}
-	if attempted[itemID] {
-		return core.Library{}, false
-	}
-	attempted[itemID] = true
-	library, found, err := c.resolver.ResolveLibrary(ctx, itemID)
-	if err != nil {
-		c.observeLibraryResolution("failed")
-		c.deps.Logger.DebugContext(ctx, "playback library resolution failed", "item_id", itemID)
-		return core.Library{}, false
-	}
-	if !found {
-		c.libraries.put(itemID, core.Library{}, false)
-		c.observeLibraryResolution("failed")
-		return core.Library{}, false
-	}
-	if !library.Valid() {
-		c.observeLibraryResolution("failed")
-		c.deps.Logger.DebugContext(ctx, "playback library resolution returned invalid data", "item_id", itemID)
-		return core.Library{}, false
-	}
-	c.libraries.put(itemID, library, true)
-	c.observeLibraryResolution("resolved")
-	return library, true
-}
-
-func (c *Collector) backfillLibraries(ctx context.Context, attempted map[string]bool) {
-	if c.resolver == nil {
-		return
-	}
-	storeCtx, cancel := c.storeContext(ctx)
-	items, err := c.deps.Store.ListUnresolvedWatchItemIDs(
-		storeCtx, c.server.ID, core.MaxPlaybackLibraryBackfillItems,
-	)
-	cancel()
-	if err != nil {
-		c.deps.Logger.DebugContext(ctx, "playback library backfill list failed", "media_server_id", c.server.ID)
-		return
-	}
-	for _, itemID := range items {
-		library, found := c.resolveLibrary(ctx, itemID, attempted)
-		if !found {
-			continue
-		}
-		if err := c.backfillLibrary(ctx, itemID, library); err != nil {
-			c.deps.Logger.DebugContext(ctx, "playback library backfill update failed", "item_id", itemID)
-		}
-	}
-}
-
-func (c *Collector) backfillLibrary(ctx context.Context, itemID string, library core.Library) error {
-	storeCtx, cancel := c.storeContext(ctx)
-	defer cancel()
-	return c.deps.Store.BackfillWatchLibrary(storeCtx, c.server.ID, itemID, library)
-}
-
-func (c *Collector) observeLibraryResolution(outcome string) {
-	if c.deps.Observer != nil {
-		c.deps.Observer.IncLibraryResolution(c.server.ID, outcome)
-	}
 }
 
 func (c *Collector) restoreRecent(

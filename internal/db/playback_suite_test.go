@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
+	"github.com/BonzTM/bloom/internal/playback"
+	"github.com/BonzTM/bloom/internal/testutil"
 )
 
 func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -56,6 +59,175 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("library backfill is bounded and fill only", func(t *testing.T) {
 		testPlaybackLibraryBackfill(t, pool, driver)
 	})
+	t.Run("library backfill keyset reaches later resolvable items", func(t *testing.T) {
+		testPlaybackLibraryBackfillKeyset(t, pool, driver)
+	})
+}
+
+type keysetResolverSource struct {
+	called chan string
+}
+
+func (*keysetResolverSource) ListSessions(context.Context) ([]core.PlaybackSession, error) {
+	return nil, nil
+}
+
+func (s *keysetResolverSource) ResolveLibrary(
+	_ context.Context, itemID string,
+) (core.Library, bool, error) {
+	s.called <- itemID
+	if itemID == "item-25" {
+		return core.Library{ID: "library-keyset", Name: "Reached"}, true, nil
+	}
+	return core.Library{}, false, nil
+}
+
+type signalingPlaybackStore struct {
+	core.PlaybackPersistence
+	backfilled chan string
+}
+
+func (s signalingPlaybackStore) BackfillWatchLibrary(
+	ctx context.Context, serverID, itemID string, library core.Library,
+) error {
+	if err := s.PlaybackPersistence.BackfillWatchLibrary(ctx, serverID, itemID, library); err != nil {
+		return err
+	}
+	s.backfilled <- itemID
+	return nil
+}
+
+func testPlaybackLibraryBackfillKeyset(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Keyset")
+	store := newPlaybackTestStore(t, pool, driver)
+	seedUnresolvedItems(t, store, server.ID, 26)
+	source := &keysetResolverSource{called: make(chan string, 26)}
+	signalingStore := signalingPlaybackStore{PlaybackPersistence: store, backfilled: make(chan string, 1)}
+	polls, release := make(chan time.Duration, 2), make(chan struct{}, 1)
+	collector, err := playback.NewCollector(server.MediaServer, playback.Config{
+		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
+		MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+	}, playback.Dependencies{
+		Store: signalingStore, Source: source,
+		Clock:  testutil.NewFakeClock(time.Date(2026, 9, 23, 20, 0, 0, 0, time.UTC)),
+		Logger: slog.New(slog.DiscardHandler),
+		Wait: func(ctx context.Context, delay time.Duration) error {
+			polls <- delay
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- collector.Run(ctx) }()
+	receiveDBDuration(t, polls)
+	for index := range 25 {
+		want := fmt.Sprintf("item-%02d", index)
+		if got := receiveDBString(t, source.called); got != want {
+			t.Fatalf("first page item %d = %q, want %q", index, got, want)
+		}
+	}
+	release <- struct{}{}
+	receiveDBDuration(t, polls)
+	if got := receiveDBString(t, source.called); got != "item-25" {
+		t.Fatalf("second page item = %q, want item-25", got)
+	}
+	if got := receiveDBString(t, signalingStore.backfilled); got != "item-25" {
+		t.Fatalf("backfilled item = %q, want item-25", got)
+	}
+	cancel()
+	assertDBCollectorStopped(t, done)
+	assertKeysetLibrary(t, pool, server.ID)
+}
+
+func createPlaybackTestServer(
+	t *testing.T, pool *sql.DB, driver config.Driver, prefix string,
+) core.MediaServerRecord {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 20, 0, 0, 0, time.UTC))
+	server := mediaServerRecord(t, prefix+" "+mustID(t), "https://keyset.example.test", now)
+	if err := writer.CreateMediaServer(t.Context(), server); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := writer.DeleteMediaServer(context.Background(), server.ID); err != nil {
+			t.Errorf("DeleteMediaServer cleanup: %v", err)
+		}
+	})
+	return server
+}
+
+func seedUnresolvedItems(
+	t *testing.T, store core.PlaybackPersistence, serverID string, count int,
+) {
+	t.Helper()
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 20, 0, 0, 0, time.UTC))
+	mutations := make([]core.PlaybackMutation, 0, count)
+	for index := range count {
+		watch := playbackStoreWatch(t, serverID, now.Add(time.Duration(index)*time.Second))
+		watch.ItemID = fmt.Sprintf("item-%02d", index)
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch})
+	}
+	if err := store.SaveWatches(t.Context(), mutations); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func receiveDBDuration(t *testing.T, values <-chan time.Duration) time.Duration {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for playback poll")
+		return 0
+	}
+}
+
+func receiveDBString(t *testing.T, values <-chan string) string {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for playback resolution")
+		return ""
+	}
+}
+
+func assertDBCollectorStopped(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("playback collector did not stop")
+	}
+}
+
+func assertKeysetLibrary(t *testing.T, pool *sql.DB, serverID string) {
+	t.Helper()
+	var libraryID string
+	err := pool.QueryRowContext(t.Context(),
+		"SELECT library_id FROM watches WHERE media_server_id = $1 AND item_id = $2",
+		serverID, "item-25").Scan(&libraryID)
+	if err != nil || libraryID != "library-keyset" {
+		t.Fatalf("keyset library = %q, %v", libraryID, err)
+	}
 }
 
 func testPlaybackLibraryBackfill(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -83,7 +255,7 @@ func testPlaybackLibraryBackfill(t *testing.T, pool *sql.DB, driver config.Drive
 	if saveErr := store.SaveWatches(t.Context(), playbackMutations(first, second, third)); saveErr != nil {
 		t.Fatal(saveErr)
 	}
-	items, err := store.ListUnresolvedWatchItemIDs(t.Context(), server.ID, 1)
+	items, err := store.ListUnresolvedWatchItemIDs(t.Context(), server.ID, "", 1)
 	if err != nil || len(items) != 1 || items[0] != first.ItemID {
 		t.Fatalf("unresolved items = %v, %v", items, err)
 	}

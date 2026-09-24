@@ -17,7 +17,7 @@ const (
 	MaxPlaybackMutations = 2 * MaxPlaybackSessions
 	// MaxRestoredPlaybackWatches covers the largest configured missed-poll lifecycle.
 	MaxRestoredPlaybackWatches = 100 * MaxPlaybackSessions
-	// MaxPlaybackLibraryBackfillItems bounds one post-poll history trickle.
+	// MaxPlaybackLibraryBackfillItems bounds one library-resolution batch.
 	MaxPlaybackLibraryBackfillItems = 25
 )
 
@@ -200,7 +200,9 @@ type PlaybackStore interface {
 
 // PlaybackLibraryStore is the bounded persistence seam for library backfill.
 type PlaybackLibraryStore interface {
-	ListUnresolvedWatchItemIDs(ctx context.Context, mediaServerID string, limit int) ([]string, error)
+	ListUnresolvedWatchItemIDs(
+		ctx context.Context, mediaServerID, afterItemID string, limit int,
+	) ([]string, error)
 	BackfillWatchLibrary(ctx context.Context, mediaServerID, itemID string, library Library) error
 }
 

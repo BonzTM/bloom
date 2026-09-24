@@ -417,12 +417,12 @@ func (m *PromMetrics) IncWatchesClosed(kind, reason string) {
 // IncPlaybackRefreshFailure records one failed media-server listing attempt.
 func (m *PromMetrics) IncPlaybackRefreshFailure() { m.playbackRefreshFailures.Inc() }
 
-// IncLibraryResolution records one resolved or failed item-library lookup.
+// IncLibraryResolution records one resolution outcome or queue drop.
 func (m *PromMetrics) IncLibraryResolution(serverID, outcome string) {
 	if !core.ValidID(serverID) {
 		serverID = "invalid"
 	}
-	if outcome != "resolved" && outcome != "failed" {
+	if outcome != "resolved" && outcome != "failed" && outcome != "dropped" {
 		outcome = "invalid"
 	}
 	m.playbackLibraryResolutions.WithLabelValues(serverID, outcome).Inc()
