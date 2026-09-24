@@ -69,6 +69,28 @@ export type InvitesPage = z.output<typeof invitesPageSchema>;
 
 export const invitesCursorSchema = z.string().min(1).max(MAX_CURSOR_LENGTH);
 
+// The servers an invite may name: only what an inviter needs to choose one.
+export const inviteServerSchema = z.object({
+  id: z.uuid(),
+  name: z.string().min(1),
+});
+
+export type InviteServer = z.output<typeof inviteServerSchema>;
+
+const MAX_SERVER_CURSOR_LENGTH = 400;
+
+export const inviteServersPageSchema = z.object({
+  items: z.array(inviteServerSchema).max(100),
+  next_cursor: z.string().max(MAX_SERVER_CURSOR_LENGTH),
+});
+
+export type InviteServersPage = z.output<typeof inviteServersPageSchema>;
+
+export const inviteServersCursorSchema = z
+  .string()
+  .min(1)
+  .max(MAX_SERVER_CURSOR_LENGTH);
+
 // The exact request the server accepts: `CreateInviteRequest` is closed and
 // the label is already trimmed. Omitting `library_ids` grants every library.
 export const createInviteRequestSchema = z.strictObject({

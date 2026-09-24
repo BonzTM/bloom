@@ -2522,6 +2522,18 @@ export const handlers = [
     ),
   ),
   http.get(
+    "*/api/v1/invites/servers",
+    jsonApi(
+      ({ request }) =>
+        inviteDenial() ??
+        pagedItems(
+          new URL(request.url),
+          mediaServersQuerySchema,
+          mediaServers.map((server) => ({ id: server.id, name: server.name })),
+        ),
+    ),
+  ),
+  http.get(
     "*/api/v1/invites",
     jsonApi(
       ({ request }) =>

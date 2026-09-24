@@ -11,7 +11,6 @@ import {
   type AcceptInviteRequest,
   type CreatedInvite,
   type CreateInviteRequest,
-  type InvitesPage,
 } from "../api/invites-schemas.js";
 import { useInvitesApi } from "../invites-context.js";
 
@@ -22,6 +21,7 @@ import { useInvitesApi } from "../invites-context.js";
 export const invitesKeys = {
   all: ["invites"] as const,
   list: (accountId: string) => ["invites", "list", accountId] as const,
+  servers: (accountId: string) => ["invites", "servers", accountId] as const,
   preview: (code: string) => ["invites", "preview", code] as const,
 };
 
@@ -32,6 +32,18 @@ export function useInvites(accountId: string) {
   return useInfiniteQuery({
     queryKey: invitesKeys.list(accountId),
     queryFn: ({ pageParam, signal }) => api.list(pageParam, signal),
+    initialPageParam: firstPage,
+    getNextPageParam: nextCursor,
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useInviteServers(accountId: string) {
+  const api = useInvitesApi();
+  return useInfiniteQuery({
+    queryKey: invitesKeys.servers(accountId),
+    queryFn: ({ pageParam, signal }) => api.servers(pageParam, signal),
     initialPageParam: firstPage,
     getNextPageParam: nextCursor,
     staleTime: 30_000,
@@ -187,6 +199,6 @@ function invalidateList(
   });
 }
 
-function nextCursor(lastPage: InvitesPage): string | undefined {
+function nextCursor(lastPage: { next_cursor: string }): string | undefined {
   return lastPage.next_cursor === "" ? undefined : lastPage.next_cursor;
 }

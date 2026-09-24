@@ -178,13 +178,12 @@ it("revokes an invite after an in-row confirmation", async () => {
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
-it("explains why no server can be chosen without admin.settings", async () => {
+it("lets an inviter without admin.settings choose a server", async () => {
   setMockPermissions(["users.invite"]);
   await openInvites();
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Listing media servers needs the admin.settings permission",
-  );
-  expect(screen.queryByLabelText("Media server")).not.toBeInTheDocument();
+  const select = await screen.findByLabelText("Media server");
+  expect(within(select).getByRole("option", { name: "Cabin" })).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 it("offers a retry when the servers cannot be listed", async () => {
@@ -192,7 +191,7 @@ it("offers a retry when the servers cannot be listed", async () => {
   let failing = true;
   server.use(
     http.get(
-      "*/api/v1/media-servers",
+      "*/api/v1/invites/servers",
       jsonApi(() => (failing ? envelope(500, "internal", "boom") : undefined)),
     ),
   );
@@ -255,7 +254,7 @@ it("stops paging servers at a failed later page and resumes on retry", async () 
   let secondPageFails = true;
   server.use(
     http.get(
-      "*/api/v1/media-servers",
+      "*/api/v1/invites/servers",
       jsonApi(({ request }) => {
         const cursor = new URL(request.url).searchParams.get("cursor");
         if (cursor === null) {
@@ -268,7 +267,7 @@ it("stops paging servers at a failed later page and resumes on retry", async () 
       }),
     ),
     http.get(
-      "*/api/v1/media-servers",
+      "*/api/v1/invites/servers",
       jsonApi(({ request }) =>
         new URL(request.url).searchParams.has("cursor")
           ? undefined
@@ -293,7 +292,7 @@ it("stops paging servers at a failed later page and resumes on retry", async () 
 it("points at registration when no server exists yet", async () => {
   server.use(
     http.get(
-      "*/api/v1/media-servers",
+      "*/api/v1/invites/servers",
       jsonApi(() => HttpResponse.json({ items: [], next_cursor: "" })),
     ),
   );

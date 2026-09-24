@@ -15,9 +15,9 @@ import { InvitesTable } from "../features/invites/components/invites-table.js";
 import {
   useCreateInvite,
   useInvites,
+  useInviteServers,
   useRevokeInvite,
 } from "../features/invites/hooks/invites-queries.js";
-import { useMediaServers } from "../features/media-servers/hooks/media-servers-queries.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
@@ -39,11 +39,12 @@ function InvitesPage({
   accountId,
 }: Readonly<{ accountId: string }>): ReactNode {
   const invites = useInvites(accountId);
-  const servers = useMediaServers(accountId);
+  const servers = useInviteServers(accountId);
   const create = useCreateInvite(accountId);
   const revoke = useRevokeInvite(accountId);
   const denial =
     accessDenial(invites.error) ??
+    accessDenial(servers.error) ??
     accessDenial(create.error) ??
     accessDenial(revoke.error);
   // The server denied something the cached session says is allowed: the
@@ -51,7 +52,12 @@ function InvitesPage({
   // lets the route guard send the person to sign in or off this page.
   useSessionRecheck(
     denial !== undefined,
-    Math.max(invites.errorUpdatedAt, create.submittedAt, revoke.submittedAt),
+    Math.max(
+      invites.errorUpdatedAt,
+      servers.errorUpdatedAt,
+      create.submittedAt,
+      revoke.submittedAt,
+    ),
   );
   // Every registered server is a valid choice, so every page is fetched,
   // one at a time, stopping at a failure (the retry below resumes) and at a
@@ -124,7 +130,7 @@ function InvitesPage({
 }
 
 function serverList(
-  data: ReturnType<typeof useMediaServers>["data"],
+  data: ReturnType<typeof useInviteServers>["data"],
 ): readonly ServerChoice[] {
   if (data === undefined) {
     return [];
@@ -134,19 +140,16 @@ function serverList(
   );
 }
 
-type ServerListState = "loading" | "denied" | "failed" | "empty" | "ready";
+type ServerListState = "loading" | "failed" | "empty" | "ready";
 
 const MAX_SERVER_PAGES = 20;
 
-// The servers a new invite may name come from the media-server list, which
-// needs admin.settings; each state it can be in is shown as itself rather
-// than as an empty list.
+// The servers a new invite may name come from the inviter's own server
+// list; each state it can be in is shown as itself rather than as an
+// empty list. A refusal is handled by the page's session recheck.
 function serverListState(
-  servers: ReturnType<typeof useMediaServers>,
+  servers: ReturnType<typeof useInviteServers>,
 ): ServerListState {
-  if (accessDenial(servers.error) === "forbidden") {
-    return "denied";
-  }
   if (
     (servers.status === "error" && servers.data === undefined) ||
     servers.isFetchNextPageError
@@ -180,11 +183,6 @@ function CreateSection({
       <h2 id="create-invite-heading">Create an invite</h2>
       {serversState === "loading" ? (
         <AsyncStatus>Loading media servers…</AsyncStatus>
-      ) : serversState === "denied" ? (
-        <AsyncStatus kind="alert">
-          Listing media servers needs the admin.settings permission, so no
-          server can be chosen here.
-        </AsyncStatus>
       ) : serversState === "failed" ? (
         <>
           <AsyncStatus kind="alert">

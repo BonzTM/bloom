@@ -8,11 +8,14 @@ import {
   inviteIdSchema,
   invitesCursorSchema,
   invitesPageSchema,
+  inviteServersCursorSchema,
+  inviteServersPageSchema,
   publicInviteSchema,
   type AcceptedInvite,
   type AcceptInviteRequest,
   type CreatedInvite,
   type CreateInviteRequest,
+  type InviteServersPage,
   type InvitesPage,
   type PublicInvite,
 } from "./invites-schemas.js";
@@ -33,6 +36,24 @@ export class InvitesApi {
     return this.#client.requestJson(listPath(cursor), invitesPageSchema, {
       signal,
     });
+  }
+
+  // One page of media servers an invite may name (id and name only), the
+  // view an inviter is allowed even without admin.settings.
+  servers(
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<InviteServersPage> {
+    const path = `${ADMIN_PATH}/servers`;
+    const query =
+      cursor === undefined
+        ? ""
+        : `?${new URLSearchParams({ cursor: inviteServersCursorSchema.parse(cursor) }).toString()}`;
+    return this.#client.requestJson(
+      `${path}${query}`,
+      inviteServersPageSchema,
+      { signal },
+    );
   }
 
   // Creates an invite and returns its code exactly once.
