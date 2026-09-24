@@ -202,7 +202,8 @@ func assertStatsUserDetail(t *testing.T, reader core.StatsReader, fixture statsF
 	query.UserServerID, query.MediaUserID = fixture.serverA, fixture.userA
 	result, err := reader.ReadStats(t.Context(), query)
 	if err != nil || result.Totals.Plays != 2 || result.Totals.WatchSeconds != 300 ||
-		len(result.Titles) != 2 || len(result.Watches) != 2 || len(result.Daily) == 0 {
+		len(result.Titles) != 2 || len(result.Watches) != 2 || len(result.Daily) == 0 ||
+		result.Watches[0].Stream == nil || result.Watches[0].Stream.VideoCodec != "h264" {
 		t.Fatalf("user detail = %+v, %v", result, err)
 	}
 }

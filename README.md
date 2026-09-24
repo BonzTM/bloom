@@ -199,8 +199,13 @@ Bloom-owned watches with source `poll`. Every watch, active segment, and
 position sample stores its observation source. A watch retains the source that
 opened it if later observations arrive from another source. Bloom stores playing
 and paused intervals as separate segments, so active time excludes observed
-pauses. It also retains the newest 512 position and play-method samples per
-watch. Open watches are persisted on every observation and restored after a
+pauses. It also retains the newest 512 position, play-method, and stream-detail
+samples per watch. Each sample can include the observed container, video and
+audio codecs, bitrate, dimensions, framerate, audio channels, direct-stream
+flags, and transcode reasons. A position, pause, play-method, or stream-detail
+change creates a sample; an otherwise unchanged observation does not. The
+latest stream details are also stored on the watch for list responses. Open
+watches are persisted on every observation and restored after a
 restart. Bloom resolves each item's Jellyfin `CollectionFolder` ancestor and
 stores that library on the watch. A per-server cache bounds ancestor lookups to
 4096 entries for 24 hours. After each successful poll, Bloom also attempts up to
@@ -220,7 +225,10 @@ does not import activity from before collection started in this release.
 
 An authenticated account with `stats.read.all` can use cursor-paged
 `GET /api/v1/playback/now` and `GET /api/v1/playback/history`. The history route accepts an optional
-`media_server_id` filter. Successful reads emit no playback audit event;
+`media_server_id` filter. `GET /api/v1/playback/watches/{id}/positions`
+returns that watch's newest 512 samples in newest-first order. Watch list and
+per-user statistics detail responses include the latest stream details when
+available. Successful reads emit no playback audit event;
 authorization denials continue to use the shared security audit stream.
 
 An account with `stats.read.all` can also read the statistics dashboards at
@@ -564,6 +572,11 @@ down migration removes the index and both columns.
 Migration `00017_account_media_users` adds account-to-media-user links on both
 engines, including administrator suppression state. Deleting an account or
 media server cascades to its links. Its down migration removes the link table.
+
+Migration `00019_stream_details` adds nullable, bounded stream-detail columns
+to watches and watch-position samples on both engines. Apply it before enabling
+stream-detail collection. Its down migration removes those columns and loses
+the recorded stream-detail series.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

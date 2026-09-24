@@ -19,29 +19,56 @@ const (
 )
 
 type playbackWatchResponse struct {
-	ID              string           `json:"id"`
-	MediaServerID   string           `json:"media_server_id"`
-	MediaServerName string           `json:"media_server_name"`
-	MediaUserID     string           `json:"media_user_id"`
-	Username        string           `json:"username"`
-	DeviceID        string           `json:"device_id"`
-	DeviceName      string           `json:"device_name"`
-	Client          string           `json:"client"`
-	ItemID          string           `json:"item_id"`
-	ItemName        string           `json:"item_name"`
-	ItemType        string           `json:"item_type"`
-	SeriesName      string           `json:"series_name"`
-	LibraryID       string           `json:"library_id"`
-	LibraryName     string           `json:"library_name"`
-	SeasonNumber    *int32           `json:"season_number"`
-	EpisodeNumber   *int32           `json:"episode_number"`
-	PositionMS      int64            `json:"position_ms"`
-	Paused          bool             `json:"paused"`
-	PlayMethod      core.PlayMethod  `json:"play_method"`
-	Source          core.WatchSource `json:"source"`
-	ActiveSeconds   int64            `json:"active_seconds"`
-	StartedAt       time.Time        `json:"started_at"`
-	EndedAt         *time.Time       `json:"ended_at,omitempty"`
+	ID              string                 `json:"id"`
+	MediaServerID   string                 `json:"media_server_id"`
+	MediaServerName string                 `json:"media_server_name"`
+	MediaUserID     string                 `json:"media_user_id"`
+	Username        string                 `json:"username"`
+	DeviceID        string                 `json:"device_id"`
+	DeviceName      string                 `json:"device_name"`
+	Client          string                 `json:"client"`
+	ItemID          string                 `json:"item_id"`
+	ItemName        string                 `json:"item_name"`
+	ItemType        string                 `json:"item_type"`
+	SeriesName      string                 `json:"series_name"`
+	LibraryID       string                 `json:"library_id"`
+	LibraryName     string                 `json:"library_name"`
+	SeasonNumber    *int32                 `json:"season_number"`
+	EpisodeNumber   *int32                 `json:"episode_number"`
+	PositionMS      int64                  `json:"position_ms"`
+	Paused          bool                   `json:"paused"`
+	PlayMethod      core.PlayMethod        `json:"play_method"`
+	Stream          *streamDetailsResponse `json:"stream,omitempty"`
+	Source          core.WatchSource       `json:"source"`
+	ActiveSeconds   int64                  `json:"active_seconds"`
+	StartedAt       time.Time              `json:"started_at"`
+	EndedAt         *time.Time             `json:"ended_at,omitempty"`
+}
+
+type streamDetailsResponse struct {
+	Container        string   `json:"container,omitempty"`
+	VideoCodec       string   `json:"video_codec,omitempty"`
+	AudioCodec       string   `json:"audio_codec,omitempty"`
+	Bitrate          int64    `json:"bitrate,omitempty"`
+	Width            int32    `json:"width,omitempty"`
+	Height           int32    `json:"height,omitempty"`
+	Framerate        float64  `json:"framerate,omitempty"`
+	AudioChannels    int32    `json:"audio_channels,omitempty"`
+	IsVideoDirect    *bool    `json:"is_video_direct,omitempty"`
+	IsAudioDirect    *bool    `json:"is_audio_direct,omitempty"`
+	TranscodeReasons []string `json:"transcode_reasons,omitempty"`
+}
+
+type playbackPositionResponse struct {
+	ObservedAt time.Time              `json:"observed_at"`
+	PositionMS int64                  `json:"position_ms"`
+	Paused     bool                   `json:"paused"`
+	PlayMethod core.PlayMethod        `json:"play_method"`
+	Stream     *streamDetailsResponse `json:"stream,omitempty"`
+}
+
+type playbackPositionsResponse struct {
+	Items []playbackPositionResponse `json:"items"`
 }
 
 type playbackNowResponse struct {
@@ -102,6 +129,26 @@ func (s *Server) handlePlaybackHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, s.logger, http.StatusOK, playbackHistoryResponse{
 		Items: items, NextCursor: nextCursor,
 	})
+}
+
+func (s *Server) handlePlaybackPositions(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !core.ValidID(id) {
+		s.writeValidation(w, r, []httputil.FieldError{{
+			Field: "id", Code: "invalid", Message: "must be a valid UUID",
+		}})
+		return
+	}
+	positions, err := s.playbackReader.ListWatchPositions(r.Context(), id)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	items := make([]playbackPositionResponse, 0, len(positions))
+	for _, position := range positions {
+		items = append(items, playbackPositionDTO(position))
+	}
+	writeJSON(w, r, s.logger, http.StatusOK, playbackPositionsResponse{Items: items})
 }
 
 func playbackListQuery(
@@ -197,7 +244,29 @@ func playbackWatchDTO(watch core.PlaybackWatch, now time.Time) playbackWatchResp
 		SeasonNumber: watch.SeasonNumber, EpisodeNumber: watch.EpisodeNumber,
 		PositionMS: int64(watch.LastPosition / time.Millisecond), Paused: watch.State == core.WatchPaused,
 		PlayMethod: watch.PlayMethod, Source: watch.Source,
+		Stream:        streamDetailsDTO(watch.Stream),
 		ActiveSeconds: int64(watch.ActiveTimeAt(now) / time.Second),
 		StartedAt:     watch.StartedAt, EndedAt: watch.EndedAt,
+	}
+}
+
+func playbackPositionDTO(position core.PlaybackPosition) playbackPositionResponse {
+	return playbackPositionResponse{
+		ObservedAt: position.ObservedAt, PositionMS: int64(position.Position / time.Millisecond),
+		Paused: position.Paused, PlayMethod: position.PlayMethod,
+		Stream: streamDetailsDTO(position.Stream),
+	}
+}
+
+func streamDetailsDTO(stream *core.StreamDetails) *streamDetailsResponse {
+	if stream == nil {
+		return nil
+	}
+	return &streamDetailsResponse{
+		Container: stream.Container, VideoCodec: stream.VideoCodec, AudioCodec: stream.AudioCodec,
+		Bitrate: stream.Bitrate, Width: stream.Width, Height: stream.Height,
+		Framerate: stream.Framerate, AudioChannels: stream.AudioChannels,
+		IsVideoDirect: stream.IsVideoDirect, IsAudioDirect: stream.IsAudioDirect,
+		TranscodeReasons: stream.TranscodeReasons,
 	}
 }

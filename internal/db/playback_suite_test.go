@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -41,6 +42,7 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID)
 		writePlaybackPositions(t, store, watch, now)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 512)
+		assertPlaybackPositions(t, store, watch.ID)
 		closePlaybackWatch(t, store, watch, now)
 		assertPlaybackReads(t, store, server.ID, watch.ID)
 		if err := writer.DeleteMediaServer(t.Context(), server.ID); err != nil {
@@ -49,6 +51,9 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watches WHERE id = $1", watch.ID, 0)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_segments WHERE watch_id = $1", watch.ID, 0)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 0)
+		if _, err := store.ListWatchPositions(t.Context(), watch.ID); !errors.Is(err, core.ErrNotFound) {
+			t.Fatalf("ListWatchPositions deleted watch = %v, want not found", err)
+		}
 	})
 	t.Run("restart restores large open and exact recent sets", func(t *testing.T) {
 		testLargePlaybackRestart(t, pool, driver)
@@ -453,7 +458,8 @@ func playbackStoreWatch(t *testing.T, serverID string, now time.Time) core.Playb
 		DeviceID: "device-1", DeviceName: "Living Room", Client: "Jellyfin Web",
 		ServerSessionID: "session-1", ItemID: "item-1", ItemName: "Pilot",
 		ItemType: "Episode", SeriesName: "Series", PlayMethod: core.PlayMethodDirectPlay,
-		State: core.WatchPlaying, StartedAt: now, LastSeenAt: now,
+		Stream: playbackStoreStream(),
+		State:  core.WatchPlaying, StartedAt: now, LastSeenAt: now,
 		LastPosition: time.Minute, Source: core.WatchSourcePoll, CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -470,7 +476,8 @@ func assertPlaybackRestart(
 	if err != nil || len(watches) != 1 || watches[0].ID != watchID {
 		t.Fatalf("LoadOpenWatches after restart = %+v, %v", watches, err)
 	}
-	if watches[0].MediaServerName == "" || watches[0].LastPosition != time.Minute {
+	if watches[0].MediaServerName == "" || watches[0].LastPosition != time.Minute ||
+		watches[0].Stream == nil || watches[0].Stream.VideoCodec != "h264" {
 		t.Fatalf("restored watch = %+v", watches[0])
 	}
 }
@@ -537,7 +544,30 @@ func assertPlaybackReads(t *testing.T, store core.PlaybackStore, serverID, watch
 func playbackPosition(watchID string, observedAt time.Time, position time.Duration) core.PlaybackPosition {
 	return core.PlaybackPosition{
 		WatchID: watchID, ObservedAt: observedAt, Position: position,
-		PlayMethod: core.PlayMethodDirectPlay, Source: core.WatchSourceWebhook,
+		PlayMethod: core.PlayMethodDirectPlay, Stream: playbackStoreStream(), Source: core.WatchSourceWebhook,
+	}
+}
+
+func playbackStoreStream() *core.StreamDetails {
+	videoDirect, audioDirect := false, true
+	return &core.StreamDetails{
+		Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Bitrate: 8_000_000,
+		Width: 1920, Height: 1080, Framerate: 23.98, AudioChannels: 6,
+		IsVideoDirect: &videoDirect, IsAudioDirect: &audioDirect,
+		TranscodeReasons: []string{"VideoCodecNotSupported", "FutureReason"},
+	}
+}
+
+func assertPlaybackPositions(t *testing.T, store core.PlaybackStore, watchID string) {
+	t.Helper()
+	positions, err := store.ListWatchPositions(t.Context(), watchID)
+	if err != nil || len(positions) != core.MaxWatchPositions {
+		t.Fatalf("ListWatchPositions = %d, %v", len(positions), err)
+	}
+	first, last := positions[0], positions[len(positions)-1]
+	if !first.ObservedAt.After(last.ObservedAt) || first.Stream == nil ||
+		first.Stream.Framerate != 23.98 || len(first.Stream.TranscodeReasons) != 2 {
+		t.Fatalf("positions = first %+v, last %+v", first, last)
 	}
 }
 

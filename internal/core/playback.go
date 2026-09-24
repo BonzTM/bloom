@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -19,7 +22,69 @@ const (
 	MaxRestoredPlaybackWatches = 100 * MaxPlaybackSessions
 	// MaxPlaybackLibraryBackfillItems bounds one library-resolution batch.
 	MaxPlaybackLibraryBackfillItems = 25
+	// MaxStreamTextBytes bounds each upstream stream text value.
+	MaxStreamTextBytes = 64
+	// MaxStreamTranscodeReasons bounds one upstream reason list.
+	MaxStreamTranscodeReasons = 16
+	// MaxStreamBitrate bounds a stream bitrate in bits per second.
+	MaxStreamBitrate = int64(math.MaxInt32)
+	// MaxStreamDimension bounds a video width or height in pixels.
+	MaxStreamDimension = 65535
+	// MaxStreamFramerate bounds frames per second after two-decimal normalization.
+	MaxStreamFramerate = 1000
+	// MaxStreamAudioChannels bounds one observed audio-channel count.
+	MaxStreamAudioChannels = 64
 )
+
+// StreamDetails is one validated, bounded playback stream observation.
+type StreamDetails struct {
+	Container        string
+	VideoCodec       string
+	AudioCodec       string
+	Bitrate          int64
+	Width            int32
+	Height           int32
+	Framerate        float64
+	AudioChannels    int32
+	IsVideoDirect    *bool
+	IsAudioDirect    *bool
+	TranscodeReasons []string
+}
+
+// Valid reports whether every stream field fits Bloom's persisted bounds.
+func (s StreamDetails) Valid() bool {
+	if !validStreamText(s.Container) || !validStreamText(s.VideoCodec) ||
+		!validStreamText(s.AudioCodec) || s.Bitrate < 0 || s.Bitrate > MaxStreamBitrate ||
+		s.Width < 0 || s.Width > MaxStreamDimension || s.Height < 0 || s.Height > MaxStreamDimension ||
+		s.Framerate < 0 || s.Framerate > MaxStreamFramerate || math.IsNaN(s.Framerate) ||
+		math.IsInf(s.Framerate, 0) || s.AudioChannels < 0 || s.AudioChannels > MaxStreamAudioChannels ||
+		len(s.TranscodeReasons) > MaxStreamTranscodeReasons {
+		return false
+	}
+	if math.Round(s.Framerate*100) != s.Framerate*100 {
+		return false
+	}
+	for _, reason := range s.TranscodeReasons {
+		if reason == "" || !validStreamText(reason) {
+			return false
+		}
+	}
+	return true
+}
+
+func validStreamText(value string) bool {
+	return len(value) <= MaxStreamTextBytes && utf8.ValidString(value) &&
+		stringsIndexControl(value) < 0
+}
+
+func stringsIndexControl(value string) int {
+	for index, char := range value {
+		if unicode.IsControl(char) {
+			return index
+		}
+	}
+	return -1
+}
 
 // PlayMethod is Bloom's stable playback delivery classification.
 type PlayMethod string
@@ -58,6 +123,7 @@ type PlaybackSession struct {
 	Position        time.Duration
 	Paused          bool
 	PlayMethod      PlayMethod
+	Stream          *StreamDetails
 	LastActivityAt  time.Time
 }
 
@@ -119,6 +185,7 @@ type PlaybackWatch struct {
 	SeasonNumber    *int32
 	EpisodeNumber   *int32
 	PlayMethod      PlayMethod
+	Stream          *StreamDetails
 	State           WatchState
 	StartedAt       time.Time
 	LastSeenAt      time.Time
@@ -153,6 +220,7 @@ type PlaybackPosition struct {
 	Position   time.Duration
 	Paused     bool
 	PlayMethod PlayMethod
+	Stream     *StreamDetails
 	Source     WatchSource
 }
 
@@ -196,6 +264,7 @@ type PlaybackStore interface {
 	LoadOpenWatches(ctx context.Context, mediaServerID string) ([]PlaybackWatch, error)
 	SaveWatches(ctx context.Context, mutations []PlaybackMutation) error
 	ListWatches(ctx context.Context, query PlaybackQuery) ([]PlaybackWatch, error)
+	ListWatchPositions(ctx context.Context, watchID string) ([]PlaybackPosition, error)
 }
 
 // PlaybackLibraryStore is the bounded persistence seam for library backfill.
@@ -407,7 +476,27 @@ func clonePlaybackWatch(watch PlaybackWatch) PlaybackWatch {
 	if watch.EndedAt != nil {
 		watch.EndedAt = timePointer(*watch.EndedAt)
 	}
+	watch.Stream = cloneStreamDetails(watch.Stream)
 	return watch
+}
+
+func cloneStreamDetails(stream *StreamDetails) *StreamDetails {
+	if stream == nil {
+		return nil
+	}
+	copy := *stream
+	copy.IsVideoDirect = cloneBool(stream.IsVideoDirect)
+	copy.IsAudioDirect = cloneBool(stream.IsAudioDirect)
+	copy.TranscodeReasons = slices.Clone(stream.TranscodeReasons)
+	return &copy
+}
+
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func snapshotAlreadySeen(seen map[PlaybackKey]bool, key PlaybackKey) bool {
@@ -425,7 +514,8 @@ func snapshotAlreadySeen(seen map[PlaybackKey]bool, key PlaybackKey) bool {
 
 func (t *PlaybackTracker) sessionKey(session PlaybackSession) (PlaybackKey, error) {
 	if session.MediaUserID == "" || session.DeviceID == "" || session.ItemID == "" ||
-		session.Position < 0 || !session.PlayMethod.Valid() {
+		session.Position < 0 || !session.PlayMethod.Valid() ||
+		(session.Stream != nil && !session.Stream.Valid()) {
 		return PlaybackKey{}, fmt.Errorf("playback session: %w", ErrInvalidArgument)
 	}
 	return PlaybackKey{
@@ -487,6 +577,7 @@ func updateTrackedWatch(
 	session PlaybackSession,
 ) PlaybackMutation {
 	wasPlaying := tracked.watch.State == WatchPlaying
+	recordPosition := sampleChanged(tracked.watch, session)
 	if wasPlaying && !now.Before(tracked.watch.LastSeenAt) {
 		tracked.watch.ActiveTime += now.Sub(tracked.watch.LastSeenAt)
 	}
@@ -494,7 +585,10 @@ func updateTrackedWatch(
 	tracked.watch.LastSeenAt = now
 	tracked.watch.UpdatedAt = now
 	tracked.missed = 0
-	mutation := positionMutation(tracked.watch, now, source, session)
+	mutation := PlaybackMutation{Watch: tracked.watch}
+	if recordPosition {
+		mutation = positionMutation(tracked.watch, now, source, session)
+	}
 	if wasPlaying && session.Paused {
 		mutation.SegmentEnd = timePointer(now)
 	}
@@ -550,6 +644,7 @@ func applySession(watch *PlaybackWatch, session PlaybackSession) {
 	watch.SeasonNumber = cloneInt32(session.SeasonNumber)
 	watch.EpisodeNumber = cloneInt32(session.EpisodeNumber)
 	watch.PlayMethod = session.PlayMethod
+	watch.Stream = cloneStreamDetails(session.Stream)
 	watch.LastPosition = session.Position
 	if session.Paused {
 		watch.State = WatchPaused
@@ -580,9 +675,37 @@ func positionMutation(
 ) PlaybackMutation {
 	position := PlaybackPosition{
 		WatchID: watch.ID, ObservedAt: now, Position: session.Position,
-		Paused: session.Paused, PlayMethod: session.PlayMethod, Source: source,
+		Paused: session.Paused, PlayMethod: session.PlayMethod,
+		Stream: cloneStreamDetails(session.Stream), Source: source,
 	}
 	return PlaybackMutation{Watch: watch, Position: &position}
+}
+
+func sampleChanged(watch PlaybackWatch, session PlaybackSession) bool {
+	return watch.LastPosition != session.Position ||
+		(watch.State == WatchPaused) != session.Paused ||
+		watch.PlayMethod != session.PlayMethod ||
+		!streamDetailsEqual(watch.Stream, session.Stream)
+}
+
+func streamDetailsEqual(left, right *StreamDetails) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Container == right.Container && left.VideoCodec == right.VideoCodec &&
+		left.AudioCodec == right.AudioCodec && left.Bitrate == right.Bitrate &&
+		left.Width == right.Width && left.Height == right.Height &&
+		left.Framerate == right.Framerate && left.AudioChannels == right.AudioChannels &&
+		boolPointersEqual(left.IsVideoDirect, right.IsVideoDirect) &&
+		boolPointersEqual(left.IsAudioDirect, right.IsAudioDirect) &&
+		slices.Equal(left.TranscodeReasons, right.TranscodeReasons)
+}
+
+func boolPointersEqual(left, right *bool) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func (t *PlaybackTracker) observeMissing(seen map[PlaybackKey]bool) []PlaybackMutation {
@@ -683,6 +806,9 @@ func ValidatePlaybackWatch(watch PlaybackWatch) error {
 		!watch.Source.Valid() || watch.ActiveTime < 0 || watch.LastPosition < 0 {
 		return ErrInvalidArgument
 	}
+	if watch.Stream != nil && !watch.Stream.Valid() {
+		return ErrInvalidArgument
+	}
 	if (watch.LibraryID == "") != (watch.LibraryName == "") ||
 		(watch.LibraryID != "" && !(Library{ID: watch.LibraryID, Name: watch.LibraryName}).Valid()) {
 		return ErrInvalidArgument
@@ -722,7 +848,8 @@ func ValidatePlaybackMutation(mutation PlaybackMutation) error {
 	}
 	position := mutation.Position
 	if position.WatchID != mutation.Watch.ID || position.ObservedAt.IsZero() ||
-		position.Position < 0 || !position.PlayMethod.Valid() || !position.Source.Valid() {
+		position.Position < 0 || !position.PlayMethod.Valid() || !position.Source.Valid() ||
+		(position.Stream != nil && !position.Stream.Valid()) {
 		return ErrInvalidArgument
 	}
 	return nil

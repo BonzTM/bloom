@@ -267,41 +267,63 @@ type Session struct {
 }
 
 type Watch struct {
-	ID              string
-	MediaServerID   string
-	MediaUserID     string
-	Username        string
-	DeviceID        string
-	DeviceName      string
-	Client          string
-	ServerSessionID string
-	ItemID          string
-	ItemName        string
-	ItemType        string
-	SeriesName      string
-	SeasonNumber    sql.NullInt32
-	EpisodeNumber   sql.NullInt32
-	PlayMethod      string
-	State           string
-	StartedAt       time.Time
-	LastSeenAt      time.Time
-	EndedAt         sql.NullTime
-	ActiveSeconds   int64
-	LastPositionMs  int64
-	Source          string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	LibraryID       string
-	LibraryName     string
+	ID                        string
+	MediaServerID             string
+	MediaUserID               string
+	Username                  string
+	DeviceID                  string
+	DeviceName                string
+	Client                    string
+	ServerSessionID           string
+	ItemID                    string
+	ItemName                  string
+	ItemType                  string
+	SeriesName                string
+	SeasonNumber              sql.NullInt32
+	EpisodeNumber             sql.NullInt32
+	PlayMethod                string
+	State                     string
+	StartedAt                 time.Time
+	LastSeenAt                time.Time
+	EndedAt                   sql.NullTime
+	ActiveSeconds             int64
+	LastPositionMs            int64
+	Source                    string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	LibraryID                 string
+	LibraryName               string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt32
+	StreamHeight              sql.NullInt32
+	StreamFramerateHundredths sql.NullInt32
+	StreamAudioChannels       sql.NullInt32
+	StreamIsVideoDirect       sql.NullBool
+	StreamIsAudioDirect       sql.NullBool
+	StreamTranscodeReasons    sql.NullString
 }
 
 type WatchPosition struct {
-	WatchID    string
-	ObservedAt time.Time
-	PositionMs int64
-	Paused     bool
-	PlayMethod string
-	Source     string
+	WatchID                   string
+	ObservedAt                time.Time
+	PositionMs                int64
+	Paused                    bool
+	PlayMethod                string
+	Source                    string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt32
+	StreamHeight              sql.NullInt32
+	StreamFramerateHundredths sql.NullInt32
+	StreamAudioChannels       sql.NullInt32
+	StreamIsVideoDirect       sql.NullBool
+	StreamIsAudioDirect       sql.NullBool
+	StreamTranscodeReasons    sql.NullString
 }
 
 type WatchSegment struct {

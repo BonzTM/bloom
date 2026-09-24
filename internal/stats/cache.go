@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -141,6 +142,29 @@ func cloneResult(value core.StatsResult) core.StatsResult {
 	value.Daily = append([]core.StatsDailyBucket(nil), value.Daily...)
 	value.Weekdays = append([]core.StatsWeekdayBucket(nil), value.Weekdays...)
 	value.Hours = append([]core.StatsHourBucket(nil), value.Hours...)
-	value.Watches = append([]core.PlaybackWatch(nil), value.Watches...)
+	value.Watches = clonePlaybackWatches(value.Watches)
 	return value
+}
+
+func clonePlaybackWatches(values []core.PlaybackWatch) []core.PlaybackWatch {
+	result := append([]core.PlaybackWatch(nil), values...)
+	for index := range result {
+		if result[index].Stream == nil {
+			continue
+		}
+		stream := *result[index].Stream
+		stream.IsVideoDirect = cloneCacheBool(stream.IsVideoDirect)
+		stream.IsAudioDirect = cloneCacheBool(stream.IsAudioDirect)
+		stream.TranscodeReasons = slices.Clone(stream.TranscodeReasons)
+		result[index].Stream = &stream
+	}
+	return result
+}
+
+func cloneCacheBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }

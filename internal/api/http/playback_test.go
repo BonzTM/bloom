@@ -18,10 +18,24 @@ import (
 const playbackTestServerID = "33333333-3333-4333-8333-333333333333"
 
 type fakePlaybackReader struct {
-	mu      sync.Mutex
-	watches []core.PlaybackWatch
-	err     error
-	queries []core.PlaybackQuery
+	mu              sync.Mutex
+	watches         []core.PlaybackWatch
+	positions       []core.PlaybackPosition
+	err             error
+	queries         []core.PlaybackQuery
+	positionWatchID string
+}
+
+func (f *fakePlaybackReader) ListWatchPositions(
+	_ context.Context, watchID string,
+) ([]core.PlaybackPosition, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.positionWatchID = watchID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]core.PlaybackPosition(nil), f.positions...), nil
 }
 
 func (f *fakePlaybackReader) ListWatches(
@@ -74,7 +88,8 @@ func TestPlaybackNowReturnsCurrentActiveTime(t *testing.T) {
 		t.Fatalf("decode playback now: %v", err)
 	}
 	if len(response.Items) != 1 || response.Items[0].ActiveSeconds != 15 ||
-		response.Items[0].MediaServerName != "Home" || response.Items[0].Source != core.WatchSourcePoll {
+		response.Items[0].MediaServerName != "Home" || response.Items[0].Source != core.WatchSourcePoll ||
+		response.Items[0].Stream == nil || response.Items[0].Stream.VideoCodec != "h264" {
 		t.Fatalf("playback now response = %+v", response)
 	}
 	if len(h.audit.events) != auditCount {
@@ -159,7 +174,7 @@ func TestPlaybackHistoryPaginatesAndFilters(t *testing.T) {
 	if len(response.Items) != 1 || response.NextCursor == "" {
 		t.Fatalf("playback history response = %+v", response)
 	}
-	if response.Items[0].Source != core.WatchSourcePoll {
+	if response.Items[0].Source != core.WatchSourcePoll || response.Items[0].Stream == nil {
 		t.Fatalf("playback history source = %q", response.Items[0].Source)
 	}
 	query := h.playback.queries[len(h.playback.queries)-1]
@@ -176,9 +191,51 @@ func TestPlaybackHistoryPaginatesAndFilters(t *testing.T) {
 	}
 }
 
+func TestPlaybackPositionsReturnsNewestBoundedSeries(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	now := h.clock.Now()
+	h.playback.positions = []core.PlaybackPosition{{
+		WatchID: "22222222-2222-4222-8222-222222222222", ObservedAt: now,
+		Position: time.Minute, Paused: false, PlayMethod: core.PlayMethodTranscode,
+		Stream: playbackHTTPStream(), Source: core.WatchSourcePoll,
+	}}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222/positions"
+	recorder := h.request(t, http.MethodGet, path, "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET playback positions = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response playbackPositionsResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if h.playback.positionWatchID == "" || len(response.Items) != 1 ||
+		response.Items[0].Stream == nil || response.Items[0].Stream.VideoCodec != "h264" {
+		t.Fatalf("positions response = %+v, watch id = %q", response, h.playback.positionWatchID)
+	}
+}
+
+func TestPlaybackPositionsRejectsBadIDAndReturnsNotFound(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	bad := h.request(t, http.MethodGet, "/api/v1/playback/watches/bad/positions", "", cookie)
+	if bad.Code != http.StatusUnprocessableEntity || h.playback.positionWatchID != "" {
+		t.Fatalf("bad id = %d %s", bad.Code, bad.Body.String())
+	}
+	h.playback.err = core.ErrNotFound
+	missing := h.request(t, http.MethodGet,
+		"/api/v1/playback/watches/22222222-2222-4222-8222-222222222222/positions", "", cookie)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing watch = %d %s", missing.Code, missing.Body.String())
+	}
+}
+
 func TestPlaybackRoutesRequireStatsPermission(t *testing.T) {
 	document := loadOpenAPI(t)
-	for _, path := range []string{"/api/v1/playback/now", "/api/v1/playback/history"} {
+	for _, path := range []string{
+		"/api/v1/playback/now", "/api/v1/playback/history",
+		"/api/v1/playback/watches/22222222-2222-4222-8222-222222222222/positions",
+	} {
 		t.Run(path+" missing session", func(t *testing.T) {
 			h := newAuthHarness(t, nil)
 			recorder := h.request(t, http.MethodGet, path, "", nil)
@@ -214,8 +271,17 @@ func TestPlaybackOpenAPIContract(t *testing.T) {
 			path: "/api/v1/playback/history", schema: playbackHistorySchema,
 			statuses: []int{200, 401, 403, 422, 500, 405},
 		},
+		{
+			path:     "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222/positions",
+			schema:   playbackPositionsSchema,
+			statuses: []int{200, 401, 403, 404, 422, 500, 405},
+		},
 	}
 	for _, testCase := range tests {
+		operationPath := testCase.path
+		if strings.Contains(operationPath, "/positions") {
+			operationPath = "/api/v1/playback/watches/{id}/positions"
+		}
 		observed := make(map[int]authContractCase)
 		for _, status := range testCase.statuses {
 			h := newAuthHarness(t, nil)
@@ -229,12 +295,12 @@ func TestPlaybackOpenAPIContract(t *testing.T) {
 				headers = []string{"Allow", "Cache-Control", "X-Request-ID"}
 			}
 			expectation := authContractCase{
-				path: testCase.path, method: "get", status: status, schema: schema, headers: headers,
+				path: operationPath, method: "get", status: status, schema: schema, headers: headers,
 			}
 			assertHandlerContract(t, document, recorder, expectation)
 			observed[status] = expectation
 		}
-		assertOperationContract(t, document, "get "+testCase.path, observed)
+		assertOperationContract(t, document, "get "+operationPath, observed)
 	}
 }
 
@@ -266,6 +332,14 @@ func TestPlaybackNowOpenAPIMatchesPaginationLimit(t *testing.T) {
 	t.Fatal("page_size parameter not found")
 }
 
+func TestPlaybackPositionsOpenAPIMatchesRetentionLimit(t *testing.T) {
+	schema := loadOpenAPI(t).validator.Components.Schemas["PlaybackPositionsResponse"].Value
+	items := schema.Properties["items"].Value
+	if items.MaxItems == nil || *items.MaxItems != core.MaxWatchPositions {
+		t.Fatalf("positions maxItems = %v, want %d", items.MaxItems, core.MaxWatchPositions)
+	}
+}
+
 func playbackContractRequest(
 	t *testing.T,
 	h authHarness,
@@ -282,6 +356,14 @@ func playbackContractRequest(
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
 	switch status {
 	case http.StatusOK:
+		if strings.Contains(path, "/positions") {
+			h.playback.positions = []core.PlaybackPosition{{
+				WatchID: "22222222-2222-4222-8222-222222222222", ObservedAt: h.clock.Now(),
+				Position: time.Minute, PlayMethod: core.PlayMethodTranscode,
+				Stream: playbackHTTPStream(), Source: core.WatchSourcePoll,
+			}}
+			break
+		}
 		state := core.WatchPlaying
 		if path == "/api/v1/playback/history" {
 			state = core.WatchStopped
@@ -292,7 +374,13 @@ func playbackContractRequest(
 		h.authorization.permissions[h.store.accounts["alice"].ID] = nil
 		h.authorization.mu.Unlock()
 	case http.StatusUnprocessableEntity:
-		path += "?cursor=***"
+		if strings.Contains(path, "/positions") {
+			path = "/api/v1/playback/watches/bad/positions"
+		} else {
+			path += "?cursor=***"
+		}
+	case http.StatusNotFound:
+		h.playback.err = core.ErrNotFound
 	case http.StatusInternalServerError:
 		h.playback.err = errors.New("store failed")
 	}
@@ -358,6 +446,7 @@ func playbackHTTPWatch(now time.Time, state core.WatchState) core.PlaybackWatch 
 		DeviceID: "device-1", DeviceName: "TV", Client: "Jellyfin Web",
 		ItemID: "item-1", ItemName: "Pilot", ItemType: "Episode", SeriesName: "Series",
 		PlayMethod: core.PlayMethodDirectPlay, State: state, StartedAt: now.Add(-time.Minute),
+		Stream:     playbackHTTPStream(),
 		LastSeenAt: now.Add(-5 * time.Second), ActiveTime: 10 * time.Second,
 		LastPosition: time.Minute, Source: core.WatchSourcePoll,
 	}
@@ -365,4 +454,14 @@ func playbackHTTPWatch(now time.Time, state core.WatchState) core.PlaybackWatch 
 		watch.EndedAt = &endedAt
 	}
 	return watch
+}
+
+func playbackHTTPStream() *core.StreamDetails {
+	videoDirect, audioDirect := false, true
+	return &core.StreamDetails{
+		Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Bitrate: 8_000_000,
+		Width: 1920, Height: 1080, Framerate: 23.98, AudioChannels: 6,
+		IsVideoDirect: &videoDirect, IsAudioDirect: &audioDirect,
+		TranscodeReasons: []string{"VideoCodecNotSupported"},
+	}
 }

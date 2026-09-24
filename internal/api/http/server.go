@@ -74,6 +74,7 @@ type accountMediaUserManager interface {
 
 type playbackReader interface {
 	ListWatches(ctx context.Context, query core.PlaybackQuery) ([]core.PlaybackWatch, error)
+	ListWatchPositions(ctx context.Context, watchID string) ([]core.PlaybackPosition, error)
 }
 
 type metadataReader interface {

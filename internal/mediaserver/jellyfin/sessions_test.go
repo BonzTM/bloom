@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,6 +56,82 @@ func TestListSessionsRejectsPositiveTickOverflow(t *testing.T) {
 	client := newTestClient(t, server, nil)
 	_, err := client.ListSessions(context.Background())
 	assertMediaError(t, err, core.MediaServerMalformed)
+}
+
+func TestListSessionsMapsTranscodeStreamDetails(t *testing.T) {
+	body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie"},"PlayState":{"PlayMethod":"Transcode"},"TranscodingInfo":{"Container":"ts","VideoCodec":"h264","AudioCodec":"aac","Bitrate":8000000,"Width":1920,"Height":1080,"Framerate":23.976,"AudioChannels":6,"IsVideoDirect":false,"IsAudioDirect":true,"TranscodeReasons":["VideoCodecNotSupported","FutureReason"]}}]`
+	sessions := listSessionFixture(t, body)
+	if len(sessions) != 1 || sessions[0].Stream == nil {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	stream := sessions[0].Stream
+	if stream.Container != "ts" || stream.VideoCodec != "h264" || stream.AudioCodec != "aac" ||
+		stream.Bitrate != 8_000_000 || stream.Framerate != 23.98 ||
+		stream.IsVideoDirect == nil || *stream.IsVideoDirect ||
+		stream.IsAudioDirect == nil || !*stream.IsAudioDirect ||
+		len(stream.TranscodeReasons) != 2 || stream.TranscodeReasons[1] != "FutureReason" {
+		t.Fatalf("stream = %+v", stream)
+	}
+}
+
+func TestListSessionsMapsDirectPlayMediaStreams(t *testing.T) {
+	body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie","Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"hevc"},{"Type":"Audio","Codec":"aac","IsDefault":false},{"Type":"Audio","Codec":"opus","IsDefault":true}]},"PlayState":{"PlayMethod":"DirectPlay"}}]`
+	sessions := listSessionFixture(t, body)
+	stream := sessions[0].Stream
+	if stream == nil || stream.Container != "mkv" || stream.VideoCodec != "hevc" ||
+		stream.AudioCodec != "opus" || stream.IsVideoDirect != nil || stream.IsAudioDirect != nil ||
+		len(stream.TranscodeReasons) != 0 {
+		t.Fatalf("direct-play stream = %+v", stream)
+	}
+}
+
+func TestListSessionsRejectsMalformedStreamDetails(t *testing.T) {
+	base := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie"},"PlayState":{"PlayMethod":"Transcode"},"TranscodingInfo":%s}]`
+	tests := []string{
+		`{"Container":"bad\u000a"}`,
+		`{"VideoCodec":"` + strings.Repeat("x", core.MaxStreamTextBytes+1) + `"}`,
+		`{"Bitrate":-1}`,
+		`{"Framerate":1001}`,
+		`{"TranscodeReasons":["one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen"]}`,
+	}
+	for _, details := range tests {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, base, details)
+		}))
+		_, err := newTestClient(t, server, nil).ListSessions(t.Context())
+		server.Close()
+		assertMediaError(t, err, core.MediaServerMalformed)
+	}
+}
+
+func TestListSessionsRejectsMalformedDirectPlayStreamDetails(t *testing.T) {
+	tests := []string{
+		`"Container":"bad\u0085"`,
+		`"Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"` +
+			strings.Repeat("x", core.MaxStreamTextBytes+1) + `"}]`,
+	}
+	for _, fields := range tests {
+		body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie",` + fields + `},"PlayState":{"PlayMethod":"DirectPlay"}}]`
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprint(w, body)
+		}))
+		_, err := newTestClient(t, server, nil).ListSessions(t.Context())
+		server.Close()
+		assertMediaError(t, err, core.MediaServerMalformed)
+	}
+}
+
+func listSessionFixture(t *testing.T, body string) []core.PlaybackSession {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, body)
+	}))
+	t.Cleanup(server.Close)
+	sessions, err := newTestClient(t, server, nil).ListSessions(t.Context())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	return sessions
 }
 
 func TestListSessionsRetriesTransientServerFailure(t *testing.T) {

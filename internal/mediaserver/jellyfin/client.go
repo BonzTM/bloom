@@ -26,6 +26,7 @@ import (
 const (
 	maxResponseBytes            = 1 << 20
 	maxUsers                    = 10000
+	maxSessionMediaStreams      = 256
 	defaultTimeout              = 10 * time.Second
 	sessionsActiveWithinSeconds = 60
 )
@@ -454,6 +455,10 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 	if err != nil {
 		return core.PlaybackSession{}, err
 	}
+	stream, err := mapStreamDetails(value)
+	if err != nil {
+		return core.PlaybackSession{}, err
+	}
 	return core.PlaybackSession{
 		ServerSessionID: stringValue(value.Id), MediaUserID: value.UserId.String(),
 		Username: stringValue(value.UserName), DeviceID: *value.DeviceId,
@@ -462,8 +467,109 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 		SeriesName: stringValue(item.SeriesName), SeasonNumber: cloneInt32(item.ParentIndexNumber),
 		EpisodeNumber: cloneInt32(item.IndexNumber), Position: position,
 		Paused: boolValue(value.PlayState.IsPaused), PlayMethod: mapPlayMethod(value.PlayState.PlayMethod),
+		Stream:         stream,
 		LastActivityAt: core.NormalizeTime(*value.LastActivityDate),
 	}, nil
+}
+
+func mapStreamDetails(value jellyfinapi.SessionInfoDto) (*core.StreamDetails, error) {
+	if value.TranscodingInfo != nil {
+		return mapTranscodingDetails(*value.TranscodingInfo)
+	}
+	stream, err := mapDirectStreamDetails(value.NowPlayingItem)
+	if err != nil {
+		return nil, err
+	}
+	if stream.Container == "" && stream.VideoCodec == "" && stream.AudioCodec == "" {
+		return nil, nil
+	}
+	if !stream.Valid() {
+		return nil, errors.New("session direct stream details are out of range")
+	}
+	return &stream, nil
+}
+
+func mapTranscodingDetails(info jellyfinapi.TranscodingInfo) (*core.StreamDetails, error) {
+	reasons, err := transcodeReasons(info.TranscodeReasons)
+	if err != nil {
+		return nil, err
+	}
+	stream := &core.StreamDetails{
+		Container: stringValue(info.Container), VideoCodec: stringValue(info.VideoCodec),
+		AudioCodec: stringValue(info.AudioCodec), Bitrate: int64Value(info.Bitrate),
+		Width: int32Value(info.Width), Height: int32Value(info.Height),
+		Framerate: roundedFramerate(info.Framerate), AudioChannels: int32Value(info.AudioChannels),
+		IsVideoDirect: cloneBool(info.IsVideoDirect), IsAudioDirect: cloneBool(info.IsAudioDirect),
+		TranscodeReasons: reasons,
+	}
+	if !stream.Valid() {
+		return nil, errors.New("session transcoding details are out of range")
+	}
+	return stream, nil
+}
+
+func mapDirectStreamDetails(item *jellyfinapi.BaseItemDto) (core.StreamDetails, error) {
+	if item == nil {
+		return core.StreamDetails{}, nil
+	}
+	stream := core.StreamDetails{Container: stringValue(item.Container)}
+	if item.MediaStreams == nil {
+		return stream, nil
+	}
+	if len(*item.MediaStreams) > maxSessionMediaStreams {
+		return core.StreamDetails{}, errors.New("session media stream count exceeds limit")
+	}
+	for _, media := range *item.MediaStreams {
+		if media.Type == nil {
+			continue
+		}
+		switch *media.Type {
+		case jellyfinapi.MediaStreamTypeVideo:
+			if stream.VideoCodec == "" {
+				stream.VideoCodec = stringValue(media.Codec)
+			}
+		case jellyfinapi.MediaStreamTypeAudio:
+			if boolValue(media.IsDefault) && stream.AudioCodec == "" {
+				stream.AudioCodec = stringValue(media.Codec)
+			}
+		case jellyfinapi.MediaStreamTypeData, jellyfinapi.MediaStreamTypeEmbeddedImage,
+			jellyfinapi.MediaStreamTypeLyric, jellyfinapi.MediaStreamTypeSubtitle:
+			continue
+		default:
+			continue
+		}
+	}
+	return stream, nil
+}
+
+func int32Value(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func int64Value(value *int32) int64 { return int64(int32Value(value)) }
+
+func roundedFramerate(value *float32) float64 {
+	if value == nil {
+		return 0
+	}
+	return math.Round(float64(*value)*100) / 100
+}
+
+func transcodeReasons(values *[]jellyfinapi.TranscodeReason) ([]string, error) {
+	if values == nil {
+		return nil, nil
+	}
+	if len(*values) > core.MaxStreamTranscodeReasons {
+		return nil, errors.New("session transcode reason count exceeds limit")
+	}
+	reasons := make([]string, 0, len(*values))
+	for _, value := range *values {
+		reasons = append(reasons, string(value))
+	}
+	return reasons, nil
 }
 
 func positionFromTicks(ticks *int64) (time.Duration, error) {
@@ -502,6 +608,14 @@ func stringValue(value *string) string {
 func boolValue(value *bool) bool { return value != nil && *value }
 
 func cloneInt32(value *int32) *int32 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneBool(value *bool) *bool {
 	if value == nil {
 		return nil
 	}

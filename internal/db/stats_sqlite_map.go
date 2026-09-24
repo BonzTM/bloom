@@ -151,6 +151,14 @@ func sqliteStatsWatch(row sqlite.StatsUserRecentWatchesRow) (core.PlaybackWatch,
 	if err != nil {
 		return core.PlaybackWatch{}, fmt.Errorf("ended at: %w", err)
 	}
+	stream, err := sqliteStream(
+		row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec, row.StreamBitrate,
+		row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths, row.StreamAudioChannels,
+		row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons,
+	).domain()
+	if err != nil {
+		return core.PlaybackWatch{}, fmt.Errorf("stream details: %w", err)
+	}
 	return core.PlaybackWatch{
 		ID: row.ID, MediaServerID: row.MediaServerID, MediaServerName: row.MediaServerName,
 		MediaUserID: row.MediaUserID, Username: row.Username, DeviceID: row.DeviceID,
@@ -159,6 +167,7 @@ func sqliteStatsWatch(row sqlite.StatsUserRecentWatchesRow) (core.PlaybackWatch,
 		LibraryID: row.LibraryID, LibraryName: row.LibraryName,
 		SeasonNumber: season, EpisodeNumber: episode,
 		PlayMethod: core.PlayMethod(row.PlayMethod), State: core.WatchState(row.State),
+		Stream:    stream,
 		StartedAt: started, LastSeenAt: lastSeen, EndedAt: ended,
 		ActiveTime:   time.Duration(row.ActiveSeconds) * time.Second,
 		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond,

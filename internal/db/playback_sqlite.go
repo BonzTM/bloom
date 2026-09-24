@@ -107,7 +107,11 @@ func saveSQLiteMutation(
 	queries *sqlite.Queries,
 	mutation core.PlaybackMutation,
 ) error {
-	if err := queries.UpsertPlaybackWatch(ctx, sqliteWatchParams(mutation.Watch)); err != nil {
+	params, err := sqliteWatchParams(mutation.Watch)
+	if err != nil {
+		return playbackStoreError("encode playback watch", err)
+	}
+	if err := queries.UpsertPlaybackWatch(ctx, params); err != nil {
 		return playbackStoreError("upsert playback watch", err)
 	}
 	if mutation.SegmentEnd != nil {
@@ -138,10 +142,20 @@ func saveSQLitePosition(
 	if position == nil {
 		return nil
 	}
+	stream, err := encodeStreamDetails(position.Stream)
+	if err != nil {
+		return playbackStoreError("encode playback position", err)
+	}
 	params := sqlite.UpsertWatchPositionParams{
 		WatchID: position.WatchID, ObservedAt: formatSQLiteTime(position.ObservedAt),
 		PositionMs: durationMilliseconds(position.Position), Paused: boolToInt64(position.Paused),
 		PlayMethod: string(position.PlayMethod), Source: string(position.Source),
+		StreamContainer: stream.container, StreamVideoCodec: stream.videoCodec,
+		StreamAudioCodec: stream.audioCodec, StreamBitrate: stream.bitrate,
+		StreamWidth: stream.width, StreamHeight: stream.height,
+		StreamFramerateHundredths: stream.framerate, StreamAudioChannels: stream.audioChannels,
+		StreamIsVideoDirect: sqliteNullBool(stream.videoDirect),
+		StreamIsAudioDirect: sqliteNullBool(stream.audioDirect), StreamTranscodeReasons: stream.reasons,
 	}
 	if err := queries.UpsertWatchPosition(ctx, params); err != nil {
 		return playbackStoreError("upsert playback position", err)
@@ -150,6 +164,32 @@ func saveSQLitePosition(
 		return playbackStoreError("trim playback positions", err)
 	}
 	return nil
+}
+
+func (s *sqlitePlaybackStore) ListWatchPositions(
+	ctx context.Context, watchID string,
+) ([]core.PlaybackPosition, error) {
+	if !core.ValidID(watchID) {
+		return nil, fmt.Errorf("list watch positions: %w", core.ErrInvalidArgument)
+	}
+	if _, err := s.q.GetPlaybackWatchID(ctx, watchID); errors.Is(err, sql.ErrNoRows) {
+		return nil, core.ErrNotFound
+	} else if err != nil {
+		return nil, playbackStoreError("find playback watch", err)
+	}
+	rows, err := s.q.ListWatchPositions(ctx, watchID)
+	if err != nil {
+		return nil, playbackStoreError("list watch positions", err)
+	}
+	positions := make([]core.PlaybackPosition, 0, len(rows))
+	for _, row := range rows {
+		position, mapErr := sqlitePosition(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map watch position", mapErr)
+		}
+		positions = append(positions, position)
+	}
+	return positions, nil
 }
 
 func (s *sqlitePlaybackStore) ListWatches(
@@ -270,7 +310,11 @@ func sqlitePlaybackCursor(query core.PlaybackQuery) (string, string) {
 	return formatSQLiteTime(query.BeforeStartedAt), query.BeforeID
 }
 
-func sqliteWatchParams(w core.PlaybackWatch) sqlite.UpsertPlaybackWatchParams {
+func sqliteWatchParams(w core.PlaybackWatch) (sqlite.UpsertPlaybackWatchParams, error) {
+	stream, err := encodeStreamDetails(w.Stream)
+	if err != nil {
+		return sqlite.UpsertPlaybackWatchParams{}, err
+	}
 	return sqlite.UpsertPlaybackWatchParams{
 		ID: w.ID, MediaServerID: w.MediaServerID, MediaUserID: w.MediaUserID,
 		Username: w.Username, DeviceID: w.DeviceID, DeviceName: w.DeviceName, Client: w.Client,
@@ -279,11 +323,17 @@ func sqliteWatchParams(w core.PlaybackWatch) sqlite.UpsertPlaybackWatchParams {
 		LibraryID: w.LibraryID, LibraryName: w.LibraryName,
 		SeasonNumber: sqliteNullableInt32(w.SeasonNumber), EpisodeNumber: sqliteNullableInt32(w.EpisodeNumber),
 		PlayMethod: string(w.PlayMethod), State: string(w.State),
+		StreamContainer: stream.container, StreamVideoCodec: stream.videoCodec,
+		StreamAudioCodec: stream.audioCodec, StreamBitrate: stream.bitrate,
+		StreamWidth: stream.width, StreamHeight: stream.height,
+		StreamFramerateHundredths: stream.framerate, StreamAudioChannels: stream.audioChannels,
+		StreamIsVideoDirect: sqliteNullBool(stream.videoDirect),
+		StreamIsAudioDirect: sqliteNullBool(stream.audioDirect), StreamTranscodeReasons: stream.reasons,
 		StartedAt: formatSQLiteTime(w.StartedAt), LastSeenAt: formatSQLiteTime(w.LastSeenAt),
 		EndedAt: sqliteNullableTime(w.EndedAt), ActiveSeconds: durationSeconds(w.ActiveTime),
 		LastPositionMs: durationMilliseconds(w.LastPosition), Source: string(w.Source),
 		CreatedAt: formatSQLiteTime(w.CreatedAt), UpdatedAt: formatSQLiteTime(w.UpdatedAt),
-	}
+	}, nil
 }
 
 func sqliteNullableInt32(value *int32) sql.NullInt64 {
@@ -323,6 +373,7 @@ func sqliteStoredWatch(
 	ended sql.NullString,
 	activeSeconds, positionMS int64,
 	source, created, updated string,
+	stream storedStreamDetails,
 ) (core.PlaybackWatch, error) {
 	seasonNumber, err := sqliteInt32(season)
 	if err != nil {
@@ -352,6 +403,10 @@ func sqliteStoredWatch(
 	if err != nil {
 		return core.PlaybackWatch{}, err
 	}
+	details, err := stream.domain()
+	if err != nil {
+		return core.PlaybackWatch{}, err
+	}
 	return storedPlaybackWatch{
 		id: id, mediaServerID: serverID, mediaServerName: serverName, mediaUserID: userID,
 		username: username, deviceID: deviceID, deviceName: deviceName, client: client,
@@ -359,6 +414,7 @@ func sqliteStoredWatch(
 		seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
 		seasonNumber: seasonNumber, episodeNumber: episodeNumber,
 		playMethod: core.PlayMethod(method), state: core.WatchState(state),
+		stream:    details,
 		startedAt: startedAt, lastSeenAt: lastSeenAt, endedAt: endedAt,
 		activeSeconds: activeSeconds, lastPositionMS: positionMS, source: core.WatchSource(source),
 		createdAt: createdAt, updatedAt: updatedAt,
@@ -373,6 +429,9 @@ func sqliteOpenWatch(row sqlite.ListOpenPlaybackWatchesRow) (core.PlaybackWatch,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
@@ -384,6 +443,9 @@ func sqliteNowWatch(row sqlite.ListNowPlayingRow) (core.PlaybackWatch, error) {
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
@@ -395,6 +457,9 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
@@ -406,6 +471,9 @@ func sqliteRecentWatch(row sqlite.FindRecentPlaybackWatchRow) (core.PlaybackWatc
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
 }
 
@@ -417,5 +485,53 @@ func sqliteRecentServerWatch(row sqlite.ListRecentPlaybackWatchesRow) (core.Play
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
 	)
+}
+
+func sqliteStream(
+	container, videoCodec, audioCodec sql.NullString,
+	bitrate, width, height, framerate, channels sql.NullInt64,
+	videoDirect, audioDirect sql.NullInt64,
+	reasons sql.NullString,
+) storedStreamDetails {
+	return storedStreamDetails{
+		container: container, videoCodec: videoCodec, audioCodec: audioCodec, bitrate: bitrate,
+		width: width, height: height, framerate: framerate, audioChannels: channels,
+		videoDirect: sqliteBoolFromNull(videoDirect), audioDirect: sqliteBoolFromNull(audioDirect),
+		reasons: reasons,
+	}
+}
+
+func sqlitePosition(row sqlite.WatchPosition) (core.PlaybackPosition, error) {
+	observedAt, err := parseSQLiteTime(row.ObservedAt)
+	if err != nil {
+		return core.PlaybackPosition{}, err
+	}
+	stream, err := sqliteStream(
+		row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec, row.StreamBitrate,
+		row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths, row.StreamAudioChannels,
+		row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons,
+	).domain()
+	if err != nil {
+		return core.PlaybackPosition{}, err
+	}
+	return core.PlaybackPosition{
+		WatchID: row.WatchID, ObservedAt: observedAt,
+		Position: time.Duration(row.PositionMs) * time.Millisecond, Paused: row.Paused != 0,
+		PlayMethod: core.PlayMethod(row.PlayMethod), Stream: stream, Source: core.WatchSource(row.Source),
+	}, nil
+}
+
+func sqliteNullBool(value sql.NullBool) sql.NullInt64 {
+	if !value.Valid {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: boolToInt64(value.Bool), Valid: true}
+}
+
+func sqliteBoolFromNull(value sql.NullInt64) sql.NullBool {
+	return sql.NullBool{Bool: value.Int64 != 0, Valid: value.Valid}
 }

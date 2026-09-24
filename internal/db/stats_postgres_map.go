@@ -91,7 +91,15 @@ func mapPostgresMethodBreakdowns(rows []postgres.StatsPlayMethodsRow) ([]core.St
 	return result, nil
 }
 
-func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) core.PlaybackWatch {
+func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) (core.PlaybackWatch, error) {
+	stream, err := postgresStream(
+		row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec, row.StreamBitrate,
+		row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths, row.StreamAudioChannels,
+		row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons,
+	).domain()
+	if err != nil {
+		return core.PlaybackWatch{}, err
+	}
 	return core.PlaybackWatch{
 		ID: row.ID, MediaServerID: row.MediaServerID, MediaServerName: row.MediaServerName,
 		MediaUserID: row.MediaUserID, Username: row.Username, DeviceID: row.DeviceID,
@@ -100,10 +108,11 @@ func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) core.PlaybackWat
 		LibraryID: row.LibraryID, LibraryName: row.LibraryName,
 		SeasonNumber: int32FromNull(row.SeasonNumber), EpisodeNumber: int32FromNull(row.EpisodeNumber),
 		PlayMethod: core.PlayMethod(row.PlayMethod), State: core.WatchState(row.State),
+		Stream:    stream,
 		StartedAt: core.NormalizeTime(row.StartedAt), LastSeenAt: core.NormalizeTime(row.LastSeenAt),
 		EndedAt: timeFromNull(row.EndedAt), ActiveTime: time.Duration(row.ActiveSeconds) * time.Second,
 		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond,
 		Source:       core.WatchSource(row.Source), CreatedAt: core.NormalizeTime(row.CreatedAt),
 		UpdatedAt: core.NormalizeTime(row.UpdatedAt),
-	}
+	}, nil
 }

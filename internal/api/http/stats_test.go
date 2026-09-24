@@ -215,6 +215,23 @@ func TestStatsResponseDTOIncludesStoredWatchSeconds(t *testing.T) {
 	}
 }
 
+func TestStatsUserDetailIncludesLatestStream(t *testing.T) {
+	t.Parallel()
+	h := newAuthHarness(t, nil)
+	h.stats.result.Watches = []core.PlaybackWatch{playbackHTTPWatch(h.clock.Now(), core.WatchStopped)}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/stats/users/33333333-3333-4333-8333-333333333333/user-1"
+	recorder := h.request(t, http.MethodGet, path, "", cookie)
+	var response statsUserDetailResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Watches) != 1 || response.Watches[0].Stream == nil ||
+		response.Watches[0].Stream.VideoCodec != "h264" {
+		t.Fatalf("stats watches = %+v", response.Watches)
+	}
+}
+
 func TestStatsRoutePatternsAreRegistered(t *testing.T) {
 	t.Parallel()
 	h := newAuthHarness(t, nil)

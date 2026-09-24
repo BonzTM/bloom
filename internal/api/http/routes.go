@@ -71,6 +71,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, sessions: true, authRequired: true, optionalAccount: true, handler: (*Server).handleAcceptInvite},
 	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
 	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
+	{method: http.MethodGet, path: "/api/v1/playback/watches/{id}/positions", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackPositions},
 	{method: http.MethodGet, path: "/api/v1/stats/overview", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsOverview},
 	{method: http.MethodGet, path: "/api/v1/stats/daily", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsDaily},
 	{method: http.MethodGet, path: "/api/v1/stats/patterns", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleStatsPatterns},

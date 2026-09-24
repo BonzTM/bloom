@@ -88,6 +88,12 @@ func (s *memoryPlaybackStore) ListWatches(
 	return append([]core.PlaybackWatch(nil), s.recent...), nil
 }
 
+func (*memoryPlaybackStore) ListWatchPositions(
+	context.Context, string,
+) ([]core.PlaybackPosition, error) {
+	return nil, nil
+}
+
 func (s *memoryPlaybackStore) ListUnresolvedWatchItemIDs(
 	ctx context.Context, _, afterItemID string, limit int,
 ) ([]string, error) {
@@ -273,6 +279,67 @@ func TestCollectorSwitchesFromIdleToActiveInterval(t *testing.T) {
 	}
 	cancel()
 	assertCollectorStopped(t, done)
+}
+
+func TestCollectorPersistsSamplesForStreamChangesOnly(t *testing.T) {
+	direct := collectorSession()
+	direct.Stream = &core.StreamDetails{Container: "mkv", VideoCodec: "hevc", AudioCodec: "aac"}
+	unchanged := direct
+	transcode := direct
+	transcode.PlayMethod = core.PlayMethodTranscode
+	transcode.Stream = collectorTranscodeStream("h264")
+	codecChanged := transcode
+	codecChanged.Stream = collectorTranscodeStream("hevc")
+	source := &sequenceSource{responses: [][]core.PlaybackSession{
+		{direct}, {unchanged}, {transcode}, {codecChanged},
+	}}
+	store := &memoryPlaybackStore{}
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	collector := newTestCollectorWithClock(t, source, store, clock)
+	for range 4 {
+		if err := collector.runOnce(t.Context()); err != nil {
+			t.Fatalf("runOnce: %v", err)
+		}
+		clock.Advance(time.Second)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.mutations) != 4 || store.mutations[0].Position == nil ||
+		store.mutations[1].Position != nil || store.mutations[2].Position == nil ||
+		store.mutations[3].Position == nil ||
+		store.mutations[2].Position.Stream.VideoCodec != "h264" ||
+		store.mutations[3].Position.Stream.VideoCodec != "hevc" {
+		t.Fatalf("collector mutations = %+v", store.mutations)
+	}
+}
+
+func collectorTranscodeStream(codec string) *core.StreamDetails {
+	videoDirect, audioDirect := false, true
+	return &core.StreamDetails{
+		Container: "ts", VideoCodec: codec, AudioCodec: "aac", Bitrate: 8_000_000,
+		Width: 1920, Height: 1080, Framerate: 23.98, AudioChannels: 6,
+		IsVideoDirect: &videoDirect, IsAudioDirect: &audioDirect,
+		TranscodeReasons: []string{"VideoCodecNotSupported"},
+	}
+}
+
+func newTestCollectorWithClock(
+	t *testing.T, source Source, store core.PlaybackPersistence, clock core.Clock,
+) *Collector {
+	t.Helper()
+	collector, err := NewCollector(core.MediaServer{
+		ID: collectorServerID, Kind: core.MediaServerKindJellyfin,
+	}, Config{
+		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
+		MissedPolls: 3, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+	}, Dependencies{
+		Store: store, Source: source, Clock: clock, Logger: slog.New(slog.DiscardHandler),
+		NewID: func() (string, error) { return "00000000-0000-4000-8000-000000000001", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return collector
 }
 
 type blockingSource struct {

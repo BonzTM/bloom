@@ -1306,6 +1306,23 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/playback/watches/{id}/positions:
+    get:
+      tags: [playback]
+      operationId: listPlaybackWatchPositions
+      summary: Return the bounded stream and position sample series for one watch, newest first.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+      responses:
+        "200": { $ref: "#/components/responses/PlaybackPositionsListed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
   /api/v1/stats/overview:
     get:
       tags: [stats]
@@ -1789,6 +1806,16 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/PlaybackHistoryResponse" }
+    PlaybackPositionsListed:
+      description: At most 512 samples for one watch, ordered newest first.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlaybackPositionsResponse" }
     StatsOverviewReturned:
       description: Dashboard overview for the resolved window and time zone.
       headers: *AuthenticatedHeaders
@@ -2731,6 +2758,24 @@ components:
     PlaybackSource:
       type: string
       enum: [poll, websocket, webhook, import]
+    StreamDetails:
+      type: object
+      additionalProperties: false
+      properties:
+        container: { type: string, x-max-bytes: 64, pattern: '^[^\x00-\x1F\x7F-\x9F]*$' }
+        video_codec: { type: string, x-max-bytes: 64, pattern: '^[^\x00-\x1F\x7F-\x9F]*$' }
+        audio_codec: { type: string, x-max-bytes: 64, pattern: '^[^\x00-\x1F\x7F-\x9F]*$' }
+        bitrate: { type: integer, format: int64, minimum: 0, maximum: 2147483647 }
+        width: { type: integer, format: int32, minimum: 0, maximum: 65535 }
+        height: { type: integer, format: int32, minimum: 0, maximum: 65535 }
+        framerate: { type: number, format: double, minimum: 0, maximum: 1000, multipleOf: 0.01 }
+        audio_channels: { type: integer, format: int32, minimum: 0, maximum: 64 }
+        is_video_direct: { type: boolean }
+        is_audio_direct: { type: boolean }
+        transcode_reasons:
+          type: array
+          maxItems: 16
+          items: { type: string, minLength: 1, x-max-bytes: 64, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
     PlaybackWatch:
       type: object
       required:
@@ -2777,6 +2822,7 @@ components:
         position_ms: { type: integer, format: int64, minimum: 0 }
         paused: { type: boolean }
         play_method: { $ref: "#/components/schemas/PlayMethod" }
+        stream: { $ref: "#/components/schemas/StreamDetails" }
         source: { $ref: "#/components/schemas/PlaybackSource" }
         active_seconds: { type: integer, format: int64, minimum: 0 }
         started_at: { type: string, format: date-time }
@@ -2808,6 +2854,25 @@ components:
           maxItems: 100
           items: { $ref: "#/components/schemas/PlaybackHistoryWatch" }
         next_cursor: { type: string, maxLength: 256 }
+    PlaybackPosition:
+      type: object
+      required: [observed_at, position_ms, paused, play_method]
+      additionalProperties: false
+      properties:
+        observed_at: { type: string, format: date-time }
+        position_ms: { type: integer, format: int64, minimum: 0 }
+        paused: { type: boolean }
+        play_method: { $ref: "#/components/schemas/PlayMethod" }
+        stream: { $ref: "#/components/schemas/StreamDetails" }
+    PlaybackPositionsResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 512
+          items: { $ref: "#/components/schemas/PlaybackPosition" }
     StatsTitleKind:
       type: string
       enum: [movie, series, other]

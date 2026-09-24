@@ -174,7 +174,11 @@ func (s *postgresStatsBackend) recentWatches(ctx context.Context, query core.Sta
 	}
 	result := make([]core.PlaybackWatch, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, postgresStatsWatch(row))
+		watch, mapErr := postgresStatsWatch(row)
+		if mapErr != nil {
+			return nil, statsStoreError("map statistics recent watches", mapErr)
+		}
+		result = append(result, watch)
 	}
 	return result, nil
 }
