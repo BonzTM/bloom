@@ -8,6 +8,7 @@ export const permissions = {
   adminRoles: "admin.roles",
   usersInvite: "users.invite",
   statsReadAll: "stats.read.all",
+  statsReadOwn: "stats.read.own",
   requestsApprove: "requests.approve",
   requestsCreate: "requests.create",
   requestsReadOwn: "requests.read.own",

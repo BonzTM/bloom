@@ -15,19 +15,8 @@ import {
   StatsControls,
   type WindowDays,
 } from "../features/playback/components/stats-controls.js";
-import {
-  BreakdownCharts,
-  DailyCharts,
-  ReportFailed,
-  TitleCharts,
-  TotalsCards,
-} from "../features/playback/components/stats-panels.js";
-import {
-  formatActiveTime,
-  itemTitle,
-  playMethodLabel,
-  whereLabel,
-} from "../features/playback/components/watch-format.js";
+import { ReportFailed } from "../features/playback/components/stats-panels.js";
+import { UserDashboard } from "../features/playback/components/user-dashboard.js";
 import { useStatsUser } from "../features/playback/hooks/stats-queries.js";
 import { accessDenial, ApiError } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
@@ -121,63 +110,7 @@ function UserStatsPage({
           />
         )
       ) : (
-        <>
-          <section aria-labelledby="user-totals-heading" className="card">
-            <h2 id="user-totals-heading">Totals</h2>
-            <TotalsCards totals={user.data.totals} />
-            <TitleCharts titles={user.data.titles} />
-            <BreakdownCharts
-              clients={user.data.clients}
-              devices={user.data.devices}
-              playMethods={user.data.play_methods}
-            />
-          </section>
-          <section aria-labelledby="user-daily-heading" className="card">
-            <h2 id="user-daily-heading">Over time</h2>
-            <DailyCharts items={user.data.daily} />
-          </section>
-          <section aria-labelledby="user-watches-heading" className="card">
-            <h2 id="user-watches-heading">Latest watches</h2>
-            {user.data.watches.length === 0 ? (
-              <p>Nothing recorded in this window.</p>
-            ) : (
-              <div
-                className="table-scroll"
-                role="region"
-                aria-label="Latest watches table"
-                tabIndex={0}
-              >
-                <table>
-                  <caption>Latest watches, newest first</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Title</th>
-                      <th scope="col">Where</th>
-                      <th scope="col">Method</th>
-                      <th scope="col">Active</th>
-                      <th scope="col">Started</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {user.data.watches.map((watch) => (
-                      <tr key={watch.id}>
-                        <th scope="row">{itemTitle(watch)}</th>
-                        <td>{whereLabel(watch)}</td>
-                        <td>{playMethodLabel(watch.play_method)}</td>
-                        <td>{formatActiveTime(watch.active_seconds)}</td>
-                        <td>
-                          <time dateTime={watch.started_at}>
-                            {watch.started_at.slice(0, 16).replace("T", " ")}
-                          </time>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </>
+        <UserDashboard data={user.data} />
       )}
     </>
   );

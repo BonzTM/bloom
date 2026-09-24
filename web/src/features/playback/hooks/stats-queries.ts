@@ -91,6 +91,26 @@ export function useStatsUsers(accountId: string, params: StatsParams) {
   });
 }
 
+export function useStatsMe(accountId: string, params: StatsParams) {
+  const api = usePlaybackApi();
+  return useQuery({
+    queryKey: statsKeys.report(accountId, "me", params),
+    queryFn: ({ signal }) => api.statsMe(params, signal),
+    staleTime: STALE_MS,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useMyMediaUsers(accountId: string) {
+  const api = usePlaybackApi();
+  return useQuery({
+    queryKey: ["stats", "me", "media-users", accountId] as const,
+    queryFn: ({ signal }) => api.myMediaUsers(signal),
+    staleTime: STALE_MS,
+    meta: { sessionScoped: true },
+  });
+}
+
 export function useStatsUser(
   accountId: string,
   params: StatsParams,
