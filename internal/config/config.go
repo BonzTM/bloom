@@ -730,6 +730,9 @@ func validatePublicURL(raw string) (*url.URL, error) {
 }
 
 func (o OIDCConfig) validate(publicURL *url.URL) error {
+	if err := o.validatePopulatedText(); err != nil {
+		return err
+	}
 	if !o.Enabled {
 		return nil
 	}
@@ -804,6 +807,39 @@ func (o OIDCConfig) validateClaims() error {
 	}
 	if o.DefaultRole != "" && !core.ValidRoleName(o.DefaultRole) {
 		return errors.New("config: BLOOM_OIDC_DEFAULT_ROLE is not a valid role name")
+	}
+	return nil
+}
+
+// validatePopulatedText bounds every OIDC text value that is set, whether or
+// not OIDC is enabled, so a disabled provider cannot carry a malformed value
+// that becomes live the moment it is switched on.
+type boundedConfigText struct {
+	key     string
+	value   string
+	maximum int
+}
+
+func (o OIDCConfig) validatePopulatedText() error {
+	values := make([]boundedConfigText, 0, 6+len(o.Scopes)+len(o.RoleMap))
+	values = append(values,
+		boundedConfigText{"BLOOM_OIDC_DISPLAY_NAME", o.DisplayName, 80},
+		boundedConfigText{"BLOOM_OIDC_ISSUER_URL", o.IssuerURL, core.MaxOIDCIssuerBytes},
+		boundedConfigText{"BLOOM_OIDC_CLIENT_ID", o.ClientID, maxOIDCClientIDBytes},
+		boundedConfigText{"BLOOM_OIDC_CLIENT_SECRET", string(o.ClientSecret.Bytes()), maxOIDCClientSecretBytes},
+		boundedConfigText{"BLOOM_OIDC_USERNAME_CLAIM", o.UsernameClaim, maxOIDCClaimNameBytes},
+		boundedConfigText{"BLOOM_OIDC_ROLE_CLAIM", o.RoleClaim, maxOIDCClaimNameBytes},
+	)
+	for _, scope := range o.Scopes {
+		values = append(values, boundedConfigText{"BLOOM_OIDC_SCOPES", scope, maxOIDCScopeBytes})
+	}
+	for key := range o.RoleMap {
+		values = append(values, boundedConfigText{"BLOOM_OIDC_ROLE_MAP", key, maxOIDCClaimNameBytes})
+	}
+	for _, value := range values {
+		if value.value != "" && validateConfigText(value.value, value.maximum) != nil {
+			return fmt.Errorf("config: %s must contain at most %d valid bytes without control characters", value.key, value.maximum)
+		}
 	}
 	return nil
 }

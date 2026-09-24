@@ -826,3 +826,33 @@ func TestValidateAuthInvariants(t *testing.T) {
 		t.Error("oversized LoginMaxConcurrent accepted, want error")
 	}
 }
+
+// A disabled provider still bounds every populated value, so switching it
+// on later cannot make a malformed value live.
+func TestOIDCDisabledStillBoundsPopulatedValues(t *testing.T) {
+	tests := []struct {
+		name, key, value string
+	}{
+		{name: "oversized client id", key: "BLOOM_OIDC_CLIENT_ID", value: strings.Repeat("a", maxOIDCClientIDBytes+1)},
+		{name: "control in display name", key: "BLOOM_OIDC_DISPLAY_NAME", value: "Home\x01SSO"},
+		{name: "oversized scope", key: "BLOOM_OIDC_SCOPES", value: "openid " + strings.Repeat("s", maxOIDCScopeBytes+1)},
+		{name: "invalid utf8 role claim", key: "BLOOM_OIDC_ROLE_CLAIM", value: "roles\xff"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("BLOOM_OIDC_ENABLED", "false")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(nil); err == nil {
+				t.Fatalf("Load accepted %s=%q with OIDC disabled", test.key, test.value)
+			}
+		})
+	}
+	t.Run("empty values pass", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("BLOOM_OIDC_ENABLED", "false")
+		if _, err := Load(nil); err != nil {
+			t.Fatalf("Load with OIDC disabled: %v", err)
+		}
+	})
+}
