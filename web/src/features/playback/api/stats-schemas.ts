@@ -23,8 +23,23 @@ export type StatsTitleKind = z.output<typeof statsTitleKindSchema>;
 export type StatsParams = Readonly<{
   days: number;
   mediaServerId?: string;
+  // A library belongs to one server, so a library filter always carries
+  // the server it lives on.
+  libraryId?: string;
   timeZone: string;
 }>;
+
+const MAX_LIBRARY_ID_BYTES = 128;
+const MAX_LIBRARY_NAME = 500;
+
+export const statsLibraryIdSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) =>
+      new TextEncoder().encode(value).length <= MAX_LIBRARY_ID_BYTES &&
+      !/[\p{Cc}]/u.test(value),
+  );
 
 export const statsWindowSchema = z.object({
   days: statsDaysSchema,
@@ -135,6 +150,26 @@ export const statsUsersSchema = z.object({
 });
 
 export type StatsUsers = z.output<typeof statsUsersSchema>;
+
+export const statsLibrarySchema = z.object({
+  media_server_id: z.uuid(),
+  library_id: z.string().max(MAX_LIBRARY_ID_BYTES),
+  library_name: z.string().max(MAX_LIBRARY_NAME),
+  plays: int64(),
+  watch_seconds: int64(),
+  unique_users: int64(),
+  unique_titles: int64(),
+  last_watched_at: z.iso.datetime({ offset: true }),
+});
+
+export type StatsLibrary = z.output<typeof statsLibrarySchema>;
+
+export const statsLibrariesSchema = z.object({
+  window: statsWindowSchema,
+  items: z.array(statsLibrarySchema).max(50),
+});
+
+export type StatsLibraries = z.output<typeof statsLibrariesSchema>;
 
 export const statsUserDetailSchema = z.object({
   window: statsWindowSchema,

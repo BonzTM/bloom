@@ -17,14 +17,32 @@ export function browserTimeZone(): string {
   }
 }
 
+export type LibraryChoice = Readonly<{
+  serverId: string;
+  id: string;
+  name: string;
+}>;
+
+export type LibraryFilter = Readonly<{ serverId: string; id: string }>;
+
 type StatsControlsProps = Readonly<{
   days: WindowDays;
   onDaysChange: (days: WindowDays) => void;
   servers: readonly { id: string; name: string }[];
   serverId: string | undefined;
   onServerChange: (id: string | undefined) => void;
+  // Libraries with recorded watches; choosing one also selects its server.
+  libraries: readonly LibraryChoice[];
+  library: LibraryFilter | undefined;
+  onLibraryChange: (library: LibraryFilter | undefined) => void;
   timeZone: string;
 }>;
+
+const LIBRARY_SEPARATOR = "|";
+
+function libraryValue(library: LibraryFilter): string {
+  return `${library.serverId}${LIBRARY_SEPARATOR}${library.id}`;
+}
 
 // The window and server a dashboard is computed for, and the zone its
 // days and hours are in.
@@ -34,6 +52,9 @@ export function StatsControls({
   servers,
   serverId,
   onServerChange,
+  libraries,
+  library,
+  onLibraryChange,
   timeZone,
 }: StatsControlsProps): ReactNode {
   const id = useId();
@@ -72,6 +93,40 @@ export function StatsControls({
             {servers.map((server) => (
               <option key={server.id} value={server.id}>
                 {server.name}
+              </option>
+            ))}
+          </select>
+        </>
+      ) : null}
+      {libraries.length > 0 || library !== undefined ? (
+        <>
+          <label htmlFor={`${id}-library`}>Library</label>
+          <select
+            id={`${id}-library`}
+            value={library === undefined ? "" : libraryValue(library)}
+            onChange={(event) => {
+              const chosen = libraries.find(
+                (choice) =>
+                  libraryValue({ serverId: choice.serverId, id: choice.id }) ===
+                  event.target.value,
+              );
+              onLibraryChange(
+                chosen === undefined
+                  ? undefined
+                  : { serverId: chosen.serverId, id: chosen.id },
+              );
+            }}
+          >
+            <option value="">All libraries</option>
+            {libraries.map((choice) => (
+              <option
+                key={libraryValue({ serverId: choice.serverId, id: choice.id })}
+                value={libraryValue({
+                  serverId: choice.serverId,
+                  id: choice.id,
+                })}
+              >
+                {choice.name}
               </option>
             ))}
           </select>

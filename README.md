@@ -245,8 +245,9 @@ disabled, it is rounded down to the second.
 `BLOOM_STATS_CACHE_TTL=0` disables it. Cache expiry is the invalidation policy,
 so a dashboard can trail a newly recorded watch by at most the configured TTL.
 
-Own-statistics access for non-administrator accounts remains later because
-Bloom accounts are not yet linked to media-server users.
+The Statistics page shows the library ranking and filters every report by
+one library. Own-statistics access for non-administrator accounts remains
+later because Bloom accounts are not yet linked to media-server users.
 
 The web UI shows the same reports under Statistics in the administration
 area: totals, most-watched titles, most active people, breakdowns, plays and

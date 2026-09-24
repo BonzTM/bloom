@@ -141,3 +141,51 @@ it("offers a retry when one report fails", async () => {
     await screen.findByRole("figure", { name: "Plays by weekday" }),
   ).toBeVisible();
 });
+
+it("ranks libraries and groups watches without a known library", async () => {
+  await openStatistics();
+  const chart = await screen.findByRole("figure", {
+    name: "Most watched libraries",
+  });
+  expect(
+    within(chart).getByRole("row", { name: /^Movies / }),
+  ).toHaveTextContent("12");
+  expect(
+    within(chart).getByRole("row", { name: /^Unknown library / }),
+  ).toHaveTextContent("3");
+});
+
+it("filters every report by one library and clears it when the server changes", async () => {
+  const user = userEvent.setup();
+  const requested: string[] = [];
+  server.use(
+    http.get(
+      "*/api/v1/stats/daily",
+      jsonApi(({ request }) => {
+        requested.push(new URL(request.url).search);
+        return undefined;
+      }),
+    ),
+  );
+  await openStatistics();
+  const library = await screen.findByLabelText("Library");
+  expect(
+    within(library).queryByRole("option", { name: "Unknown library" }),
+  ).not.toBeInTheDocument();
+
+  await user.selectOptions(library, "Shows");
+
+  expect(await screen.findByLabelText("Server")).toHaveDisplayValue(
+    "Living room",
+  );
+  await screen.findByRole("figure", { name: "Plays per day" });
+  const filtered = requested.find((q) => q.includes("library_id=lib-shows"));
+  expect(filtered).toContain(
+    "media_server_id=3d7f1a2b-0000-4000-8000-000000000002",
+  );
+
+  await user.selectOptions(screen.getByLabelText("Server"), "All servers");
+
+  expect(screen.getByLabelText("Library")).toHaveDisplayValue("All libraries");
+  expect(screen.getByLabelText("Server")).toHaveDisplayValue("All servers");
+});

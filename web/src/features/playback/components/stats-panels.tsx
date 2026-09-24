@@ -11,6 +11,7 @@ import { LineChart } from "../../../components/charts/line-chart.js";
 import type {
   StatsBreakdown,
   StatsDailyBucket,
+  StatsLibrary,
   StatsPatterns,
   StatsTitle,
   StatsTotals,
@@ -154,6 +155,28 @@ export function UsersChart({
         </ul>
       )}
     </>
+  );
+}
+
+export const UNKNOWN_LIBRARY = "Unknown library";
+
+// Libraries ranked by plays. Watches recorded before their library was
+// known are grouped under one unknown row.
+export function LibrariesChart({
+  libraries,
+}: Readonly<{ libraries: readonly StatsLibrary[] }>): ReactNode {
+  return (
+    <BarChart
+      title="Most watched libraries"
+      labelHeading="Library"
+      valueHeading="Plays"
+      points={libraries.map((library) => ({
+        label:
+          library.library_id === "" ? UNKNOWN_LIBRARY : library.library_name,
+        value: library.plays,
+      }))}
+      format={formatCount}
+    />
   );
 }
 
