@@ -118,6 +118,8 @@ UPDATE requests SET
     dispatch_quality_profile = CASE WHEN status = 'failed' THEN '' ELSE dispatch_quality_profile END,
     dispatch_root_folder = CASE WHEN status = 'failed' THEN '' ELSE dispatch_root_folder END,
     dispatch_tags = CASE WHEN status = 'failed' THEN '[]' ELSE dispatch_tags END,
+    dispatch_lease_token = CASE WHEN status IN ('approved', 'failed') THEN '' ELSE dispatch_lease_token END,
+    dispatch_lease_expires_at = CASE WHEN status IN ('approved', 'failed') THEN NULL ELSE dispatch_lease_expires_at END,
     last_availability_check_at = CASE WHEN status = 'failed' THEN NULL ELSE last_availability_check_at END,
     updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND status = sqlc.arg(from_status);
@@ -127,9 +129,12 @@ UPDATE request_seasons SET status = sqlc.arg(to_status) WHERE request_id = sqlc.
 
 -- name: RecordRequestDispatch :execrows
 UPDATE requests SET status = 'processing', download_manager_item_id = sqlc.arg(manager_item_id),
-    failure_reason = '', last_availability_check_at = NULL, updated_at = sqlc.arg(updated_at)
+    failure_reason = '', dispatch_lease_token = '', dispatch_lease_expires_at = NULL,
+    last_availability_check_at = NULL, updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND status = 'approved'
   AND download_manager_id <> ''
+  AND dispatch_lease_token = sqlc.arg(dispatch_lease_token)
+  AND dispatch_lease_expires_at > sqlc.arg(updated_at)
   AND (download_manager_item_id = '' OR download_manager_item_id = sqlc.arg(manager_item_id));
 
 -- name: ClaimRequestDispatch :execrows
@@ -138,8 +143,22 @@ UPDATE requests SET
     dispatch_quality_profile = sqlc.arg(dispatch_quality_profile),
     dispatch_root_folder = sqlc.arg(dispatch_root_folder),
     dispatch_tags = sqlc.arg(dispatch_tags),
+    dispatch_lease_token = sqlc.arg(dispatch_lease_token),
+    dispatch_lease_expires_at = sqlc.arg(dispatch_lease_expires_at),
     updated_at = sqlc.arg(updated_at)
-WHERE id = sqlc.arg(id) AND status = 'approved' AND download_manager_id = '';
+WHERE id = sqlc.arg(id) AND status = 'approved'
+  AND (dispatch_lease_token = '' OR dispatch_lease_expires_at <= sqlc.arg(updated_at));
+
+-- name: FailRequestDispatch :execrows
+UPDATE requests SET
+    status = 'failed', failure_reason = sqlc.arg(failure_reason),
+    download_manager_id = '', download_manager_item_id = '',
+    dispatch_quality_profile = '', dispatch_root_folder = '', dispatch_tags = '[]',
+    dispatch_lease_token = '', dispatch_lease_expires_at = NULL,
+    last_availability_check_at = NULL, updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND status = 'approved'
+  AND dispatch_lease_token = sqlc.arg(dispatch_lease_token)
+  AND dispatch_lease_expires_at > sqlc.arg(updated_at);
 
 -- name: StampRequestAvailabilityCheck :execrows
 UPDATE requests SET last_availability_check_at = sqlc.arg(checked_at)

@@ -142,6 +142,8 @@ type Request struct {
 	DispatchQualityProfile  string
 	DispatchRootFolder      string
 	DispatchTags            string
+	DispatchLeaseExpiresAt  sql.NullTime
+	DispatchLeaseToken      string
 	LastAvailabilityCheckAt sql.NullTime
 }
 

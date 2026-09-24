@@ -1683,6 +1683,7 @@ components:
         name: { type: string, minLength: 1, x-max-bytes: 500 }
     DownloadManagerOptions:
       type: object
+      description: Current choices; every collection is an array and is empty rather than null when no choices exist.
       required: [quality_profiles, root_folders, tags]
       additionalProperties: false
       properties:

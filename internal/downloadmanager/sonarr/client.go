@@ -175,8 +175,8 @@ func (c *Client) Queue(ctx context.Context, managerID string, seasons []int) (co
 	}
 	var queue sonarrapi.QueueResourcePagingResource
 	path := "/api/v3/queue?page=1&pageSize=100&includeSeries=true&seriesIds=" + url.QueryEscape(managerID)
-	if err := c.http.GetJSON(ctx, "queue", path, &queue); err != nil {
-		return core.DownloadProgress{}, err
+	if requestErr := c.http.GetJSON(ctx, "queue", path, &queue); requestErr != nil {
+		return core.DownloadProgress{}, requestErr
 	}
 	progress := core.DownloadProgress{Status: "not_queued"}
 	if queue.Records != nil {
@@ -188,10 +188,13 @@ func (c *Client) Queue(ctx context.Context, managerID string, seasons []int) (co
 		}
 	}
 	var series sonarrapi.SeriesResource
-	if err := c.http.GetJSON(ctx, "series", "/api/v3/series/"+managerID, &series); err != nil {
-		return core.DownloadProgress{}, err
+	if requestErr := c.http.GetJSON(ctx, "series", "/api/v3/series/"+managerID, &series); requestErr != nil {
+		return core.DownloadProgress{}, requestErr
 	}
-	hasFile := requestedSeasonsComplete(series, seasons)
+	hasFile, err := requestedSeasonsHaveFiles(series, seasons)
+	if err != nil {
+		return progress, err
+	}
 	progress.HasFile = hasFile
 	if progress.Status == "not_queued" {
 		progress.Complete = hasFile
@@ -272,29 +275,34 @@ func queueProgress(item sonarrapi.QueueResource) core.DownloadProgress {
 	}
 }
 
-func requestedSeasonsComplete(series sonarrapi.SeriesResource, requested []int) bool {
+func requestedSeasonsHaveFiles(series sonarrapi.SeriesResource, requested []int) (bool, error) {
 	if len(requested) == 0 {
-		return false
+		return false, core.ErrInvalidArgument
 	}
 	if series.Seasons == nil {
-		return statisticsComplete(series.Statistics)
+		return false, managerError("series", core.DownloadManagerMalformed, errors.New("missing seasons"))
 	}
-	complete := 0
-	for _, season := range *series.Seasons {
-		if season.SeasonNumber == nil || !containsSeason(requested, int(*season.SeasonNumber)) {
-			continue
+	for _, number := range requested {
+		statistics, found := requestedSeasonStatistics(*series.Seasons, number)
+		if !found || statistics == nil || statistics.EpisodeCount == nil || statistics.EpisodeFileCount == nil {
+			return false, managerError("series", core.DownloadManagerMalformed, errors.New("missing requested season statistics"))
 		}
-		if !seasonStatisticsComplete(season.Statistics) {
-			return false
+		if !seasonStatisticsComplete(statistics) {
+			return false, nil
 		}
-		complete++
 	}
-	return complete == len(requested)
+	return true, nil
 }
 
-func statisticsComplete(statistics *sonarrapi.SeriesStatisticsResource) bool {
-	return statistics != nil && statistics.EpisodeCount != nil && statistics.EpisodeFileCount != nil &&
-		*statistics.EpisodeCount > 0 && *statistics.EpisodeFileCount >= *statistics.EpisodeCount
+func requestedSeasonStatistics(
+	seasons []sonarrapi.SeasonResource, requested int,
+) (*sonarrapi.SeasonStatisticsResource, bool) {
+	for _, season := range seasons {
+		if season.SeasonNumber != nil && int(*season.SeasonNumber) == requested {
+			return season.Statistics, true
+		}
+	}
+	return nil, false
 }
 
 func seasonStatisticsComplete(statistics *sonarrapi.SeasonStatisticsResource) bool {
@@ -315,7 +323,11 @@ func boundedSize(value *float64) int64 {
 func mapOptions(
 	profiles []sonarrapi.QualityProfileResource, roots []sonarrapi.RootFolderResource, tags []sonarrapi.TagResource,
 ) (core.DownloadManagerOptions, error) {
-	result := core.DownloadManagerOptions{}
+	result := core.DownloadManagerOptions{
+		QualityProfiles: make([]core.DownloadManagerOption, 0, len(profiles)),
+		RootFolders:     make([]core.DownloadManagerOption, 0, len(roots)),
+		Tags:            make([]core.DownloadManagerOption, 0, len(tags)),
+	}
 	for _, value := range profiles {
 		if value.Id == nil || *value.Id <= 0 || value.Name == nil || *value.Name == "" {
 			return result, managerError("quality_profiles", core.DownloadManagerMalformed, errors.New("invalid quality profile"))

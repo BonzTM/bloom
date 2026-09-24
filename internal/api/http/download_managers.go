@@ -124,9 +124,15 @@ func (s *Server) handleDownloadManagerOptions(w http.ResponseWriter, r *http.Req
 		writeError(w, r, s.logger, err)
 		return
 	}
-	writeJSON(w, r, s.logger, http.StatusOK, downloadManagerOptionsResponse{
-		QualityProfiles: options.QualityProfiles, RootFolders: options.RootFolders, Tags: options.Tags,
-	})
+	writeJSON(w, r, s.logger, http.StatusOK, downloadManagerOptionsDTO(options))
+}
+
+func downloadManagerOptionsDTO(options core.DownloadManagerOptions) downloadManagerOptionsResponse {
+	return downloadManagerOptionsResponse{
+		QualityProfiles: append([]core.DownloadManagerOption{}, options.QualityProfiles...),
+		RootFolders:     append([]core.DownloadManagerOption{}, options.RootFolders...),
+		Tags:            append([]core.DownloadManagerOption{}, options.Tags...),
+	}
 }
 
 func (s *Server) downloadManagerID(w http.ResponseWriter, r *http.Request) (string, bool) {

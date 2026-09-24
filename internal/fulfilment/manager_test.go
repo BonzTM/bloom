@@ -77,12 +77,15 @@ func (f *managerFixture) TransitionRequest(
 }
 
 func (f *managerFixture) RecordRequestDispatch(
-	_ context.Context, id, itemID string, at time.Time,
+	_ context.Context, id, leaseToken, itemID string, at time.Time,
 ) (core.MediaRequest, error) {
 	for index := range f.requests {
-		if f.requests[index].ID == id && f.requests[index].Status == core.RequestApproved {
+		if f.requests[index].ID == id && f.requests[index].Status == core.RequestApproved &&
+			f.requests[index].DispatchLeaseToken == leaseToken {
 			f.requests[index].Status = core.RequestProcessing
 			f.requests[index].DownloadManagerItemID = itemID
+			f.requests[index].DispatchLeaseToken = ""
+			f.requests[index].DispatchLeaseExpiresAt = nil
 			f.requests[index].UpdatedAt = at
 			return f.requests[index], nil
 		}
@@ -91,16 +94,35 @@ func (f *managerFixture) RecordRequestDispatch(
 }
 
 func (f *managerFixture) ClaimRequestDispatch(
-	_ context.Context, id string, snapshot core.RequestDispatchSnapshot, at time.Time,
+	_ context.Context, id string, snapshot core.RequestDispatchSnapshot, lease core.RequestDispatchLease, at time.Time,
 ) (core.MediaRequest, error) {
 	for index := range f.requests {
 		request := &f.requests[index]
-		if request.ID == id && request.Status == core.RequestApproved && request.DownloadManagerID == "" {
+		leaseExpired := request.DispatchLeaseExpiresAt != nil && !request.DispatchLeaseExpiresAt.After(at)
+		if request.ID == id && request.Status == core.RequestApproved &&
+			(request.DispatchLeaseToken == "" || leaseExpired) {
 			request.DownloadManagerID = snapshot.DownloadManagerID
 			request.DispatchQualityProfile = snapshot.QualityProfile
 			request.DispatchRootFolder = snapshot.RootFolder
 			request.DispatchTags = append([]string(nil), snapshot.Tags...)
+			request.DispatchLeaseToken = lease.Token
+			request.DispatchLeaseExpiresAt = new(lease.ExpiresAt)
 			request.UpdatedAt = at
+			return *request, nil
+		}
+	}
+	return core.MediaRequest{}, core.ErrInvalidTransition
+}
+
+func (f *managerFixture) FailRequestDispatch(
+	_ context.Context, id, leaseToken, reason string, at time.Time,
+) (core.MediaRequest, error) {
+	for index := range f.requests {
+		request := &f.requests[index]
+		if request.ID == id && request.Status == core.RequestApproved &&
+			request.DispatchLeaseToken == leaseToken && request.DispatchLeaseExpiresAt.After(at) {
+			request.Status, request.FailureReason, request.UpdatedAt = core.RequestFailed, reason, at
+			request.DispatchLeaseToken, request.DispatchLeaseExpiresAt = "", nil
 			return *request, nil
 		}
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 const listRequestsForAvailability = `-- name: ListRequestsForAvailability :many
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, last_availability_check_at FROM requests
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at FROM requests
 WHERE status = 'processing'
 ORDER BY last_availability_check_at ASC NULLS FIRST, created_at ASC, id ASC
 LIMIT $1
@@ -48,6 +48,8 @@ func (q *Queries) ListRequestsForAvailability(ctx context.Context, pageSize int3
 			&i.DispatchQualityProfile,
 			&i.DispatchRootFolder,
 			&i.DispatchTags,
+			&i.DispatchLeaseExpiresAt,
+			&i.DispatchLeaseToken,
 			&i.LastAvailabilityCheckAt,
 		); err != nil {
 			return nil, err

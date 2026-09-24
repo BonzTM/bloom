@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -135,4 +136,30 @@ func TestDownloadManagerRoutesRejectInvalidAndUpstreamFailures(t *testing.T) {
 	if errors.Is(h.downloadManagers.err, core.ErrDownloadManagerInUse) && strings.Contains(h.logs.String(), "secret") {
 		t.Fatal("application log contains the API key")
 	}
+}
+
+func TestDownloadManagerOptionsEncodeEmptyArraysAndMatchContract(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.downloadManagers.options = core.DownloadManagerOptions{}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	response := h.request(
+		t, http.MethodGet,
+		"/api/v1/download-managers/33333333-3333-4333-8333-333333333333/options", "", cookie,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("options status = %d: %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode options: %v", err)
+	}
+	for _, field := range []string{"quality_profiles", "root_folders", "tags"} {
+		values, ok := body[field].([]any)
+		if !ok || len(values) != 0 {
+			t.Errorf("%s = %#v, want []", field, body[field])
+		}
+	}
+	assertJSONMatchesSchema(
+		t, loadOpenAPI(t), response.Body.Bytes(), "#/components/schemas/DownloadManagerOptions",
+	)
 }

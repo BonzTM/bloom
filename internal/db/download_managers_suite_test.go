@@ -18,6 +18,21 @@ func runDownloadManagerEngineTests(t *testing.T, pool *sql.DB, driver config.Dri
 		t.Fatalf("NewDownloadManagerStores: %v", setupErr)
 	}
 	now := core.NormalizeTime(time.Date(2026, 9, 23, 20, 0, 0, 123456789, time.UTC))
+	t.Run("binary name ordering and pagination", func(t *testing.T) {
+		testDownloadManagerBinaryPagination(t, reader, writer, now)
+	})
+	t.Run("round trip", func(t *testing.T) {
+		testDownloadManagerRoundTrip(t, reader, writer, now)
+	})
+	t.Run("referenced manager", func(t *testing.T) {
+		testReferencedDownloadManager(t, pool, driver, writer, now)
+	})
+}
+
+func testDownloadManagerRoundTrip(
+	t *testing.T, reader core.DownloadManagerReader, writer core.DownloadManagerWriter, now time.Time,
+) {
+	t.Helper()
 	record := core.DownloadManagerRecord{DownloadManager: core.DownloadManager{
 		ID: mustID(t), Kind: core.DownloadManagerKindRadarr, Name: "Main Radarr",
 		BaseURL: "https://radarr.example", CreatedAt: now, UpdatedAt: now,
@@ -42,8 +57,16 @@ func runDownloadManagerEngineTests(t *testing.T, pool *sql.DB, driver config.Dri
 	if _, err := reader.GetDownloadManager(t.Context(), record.ID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("deleted manager error = %v", err)
 	}
+}
 
-	record.ID, record.Name = mustID(t), "Profile Radarr"
+func testReferencedDownloadManager(
+	t *testing.T, pool *sql.DB, driver config.Driver, writer core.DownloadManagerWriter, now time.Time,
+) {
+	t.Helper()
+	record := core.DownloadManagerRecord{DownloadManager: core.DownloadManager{
+		ID: mustID(t), Kind: core.DownloadManagerKindRadarr, Name: "Profile Radarr",
+		BaseURL: "https://radarr.example", CreatedAt: now, UpdatedAt: now,
+	}, CredentialCiphertext: []byte("ciphertext"), KeyID: "key-1"}
 	if err := writer.CreateDownloadManager(t.Context(), record); err != nil {
 		t.Fatalf("create referenced manager: %v", err)
 	}
@@ -67,5 +90,36 @@ func runDownloadManagerEngineTests(t *testing.T, pool *sql.DB, driver config.Dri
 	}
 	if err := writer.DeleteDownloadManager(t.Context(), record.ID); err != nil {
 		t.Fatalf("delete unreferenced manager: %v", err)
+	}
+}
+
+func testDownloadManagerBinaryPagination(
+	t *testing.T, reader core.DownloadManagerReader, writer core.DownloadManagerWriter, now time.Time,
+) {
+	t.Helper()
+	names := []string{"a", "B", "c"}
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		record := core.DownloadManagerRecord{DownloadManager: core.DownloadManager{
+			ID: mustID(t), Kind: core.DownloadManagerKindRadarr, Name: name,
+			BaseURL: "https://pagination.example", CreatedAt: now, UpdatedAt: now,
+		}, CredentialCiphertext: []byte("ciphertext"), KeyID: "key-1"}
+		if err := writer.CreateDownloadManager(t.Context(), record); err != nil {
+			t.Fatalf("create %q: %v", name, err)
+		}
+		ids = append(ids, record.ID)
+	}
+	first, err := reader.ListDownloadManagers(t.Context(), "", 2)
+	if err != nil || len(first) != 2 || first[0].Name != "a" || first[1].Name != "B" {
+		t.Fatalf("first binary page = %+v, %v", first, err)
+	}
+	second, err := reader.ListDownloadManagers(t.Context(), core.MediaServerNameKey(first[1].Name), 2)
+	if err != nil || len(second) != 1 || second[0].Name != "c" {
+		t.Fatalf("second binary page = %+v, %v", second, err)
+	}
+	for _, id := range ids {
+		if err := writer.DeleteDownloadManager(t.Context(), id); err != nil {
+			t.Fatalf("delete pagination fixture: %v", err)
+		}
 	}
 }

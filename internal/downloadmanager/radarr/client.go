@@ -265,7 +265,11 @@ func boundedSize(value *float64) int64 {
 func mapOptions(
 	profiles []radarrapi.QualityProfileResource, roots []radarrapi.RootFolderResource, tags []radarrapi.TagResource,
 ) (core.DownloadManagerOptions, error) {
-	result := core.DownloadManagerOptions{}
+	result := core.DownloadManagerOptions{
+		QualityProfiles: make([]core.DownloadManagerOption, 0, len(profiles)),
+		RootFolders:     make([]core.DownloadManagerOption, 0, len(roots)),
+		Tags:            make([]core.DownloadManagerOption, 0, len(tags)),
+	}
 	for _, value := range profiles {
 		if value.Id == nil || *value.Id <= 0 || value.Name == nil || *value.Name == "" {
 			return result, malformedError("quality_profiles", errors.New("invalid quality profile"))

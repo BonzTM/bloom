@@ -35,6 +35,9 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("fulfilment transitions", func(t *testing.T) {
 		testFulfilmentTransitions(t, requestReader, requestWriter, account.ID, profile.ID, now)
 	})
+	t.Run("dispatch leases are exclusive and reclaimable", func(t *testing.T) {
+		testDispatchLeases(t, requestWriter, account.ID, profile.ID, now)
+	})
 	t.Run("series fulfilment transitions", func(t *testing.T) {
 		testSeriesFulfilmentTransitions(t, requestWriter, account.ID, profile.ID, now)
 	})
@@ -71,11 +74,12 @@ func testFulfilmentTransitions(
 		DownloadManagerID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		QualityProfile:    "1", RootFolder: "/movies", Tags: []string{"requests"},
 	}
-	claimed, claimErr := dispatch.ClaimRequestDispatch(t.Context(), available.ID, snapshot, now)
+	lease := requestDispatchLease("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", now)
+	claimed, claimErr := dispatch.ClaimRequestDispatch(t.Context(), available.ID, snapshot, lease, now)
 	if claimErr != nil || claimed.DownloadManagerID != snapshot.DownloadManagerID || !slices.Equal(claimed.DispatchTags, snapshot.Tags) {
 		t.Fatalf("claim dispatch = %+v, %v", claimed, claimErr)
 	}
-	processing, dispatchErr := dispatch.RecordRequestDispatch(t.Context(), available.ID, "77", now.Add(time.Second))
+	processing, dispatchErr := dispatch.RecordRequestDispatch(t.Context(), available.ID, lease.Token, "77", now.Add(time.Second))
 	if dispatchErr != nil || processing.Status != core.RequestProcessing || processing.DownloadManagerItemID != "77" {
 		t.Fatalf("dispatch = %+v, %v", processing, dispatchErr)
 	}
@@ -91,10 +95,11 @@ func testFulfilmentTransitions(
 	if _, err := writer.TransitionRequest(t.Context(), failed.ID, core.RequestPending, core.RequestApproved, accountID, "", now); err != nil {
 		t.Fatalf("approve failure fixture: %v", err)
 	}
-	if _, err := dispatch.ClaimRequestDispatch(t.Context(), failed.ID, snapshot, now); err != nil {
+	failureLease := requestDispatchLease("aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa", now)
+	if _, err := dispatch.ClaimRequestDispatch(t.Context(), failed.ID, snapshot, failureLease, now); err != nil {
 		t.Fatalf("claim failure fixture: %v", err)
 	}
-	failed, failureErr := writer.TransitionRequest(t.Context(), failed.ID, core.RequestApproved, core.RequestFailed, "", "dispatch failed", now.Add(time.Second))
+	failed, failureErr := dispatch.FailRequestDispatch(t.Context(), failed.ID, failureLease.Token, "dispatch failed", now.Add(time.Second))
 	if failureErr != nil || failed.FailureReason != "dispatch failed" {
 		t.Fatalf("failed = %+v, %v", failed, failureErr)
 	}
@@ -106,6 +111,96 @@ func testFulfilmentTransitions(
 	if _, err := reader.GetRequest(t.Context(), reapproved.ID); err != nil {
 		t.Fatalf("reload reapproved request: %v", err)
 	}
+}
+
+func testDispatchLeases(
+	t *testing.T, writer core.RequestWriter, accountID, profileID string, now time.Time,
+) {
+	t.Helper()
+	dispatch := requireRequestDispatchWriter(t, writer)
+	request := approvedRequestFixture(t, writer, accountID, profileID, "408", now)
+	snapshot := core.RequestDispatchSnapshot{
+		DownloadManagerID: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+		QualityProfile:    "1", RootFolder: "/movies", Tags: []string{},
+	}
+	first := requestDispatchLease("dddddddd-1111-4111-8111-dddddddddddd", now)
+	second := requestDispatchLease("dddddddd-2222-4222-8222-dddddddddddd", now)
+	assertOneConcurrentLease(t, dispatch, request.ID, snapshot, first, second, now)
+	reclaimRequest := approvedRequestFixture(t, writer, accountID, profileID, "409", now)
+	testExpiredLeaseReclaim(t, dispatch, reclaimRequest.ID, snapshot, first, second, now)
+}
+
+func assertOneConcurrentLease(
+	t *testing.T, dispatch core.RequestDispatchWriter, requestID string, snapshot core.RequestDispatchSnapshot,
+	first, second core.RequestDispatchLease, now time.Time,
+) {
+	t.Helper()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, lease := range []core.RequestDispatchLease{first, second} {
+		go func() {
+			<-start
+			_, err := dispatch.ClaimRequestDispatch(t.Context(), requestID, snapshot, lease, now)
+			results <- err
+		}()
+	}
+	close(start)
+	successes := 0
+	for range 2 {
+		if err := <-results; err == nil {
+			successes++
+		} else if !errors.Is(err, core.ErrInvalidTransition) {
+			t.Fatalf("concurrent claim error = %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful concurrent claims = %d, want 1", successes)
+	}
+}
+
+func testExpiredLeaseReclaim(
+	t *testing.T, dispatch core.RequestDispatchWriter, requestID string, snapshot core.RequestDispatchSnapshot,
+	first, second core.RequestDispatchLease, now time.Time,
+) {
+	t.Helper()
+	if _, err := dispatch.ClaimRequestDispatch(t.Context(), requestID, snapshot, first, now); err != nil {
+		t.Fatalf("claim initial lease: %v", err)
+	}
+	if _, err := dispatch.ClaimRequestDispatch(t.Context(), requestID, snapshot, second, now.Add(time.Second)); !errors.Is(err, core.ErrInvalidTransition) {
+		t.Fatalf("claim live lease error = %v, want ErrInvalidTransition", err)
+	}
+	second.ExpiresAt = first.ExpiresAt.Add(time.Minute)
+	active, err := dispatch.ClaimRequestDispatch(t.Context(), requestID, snapshot, second, first.ExpiresAt)
+	if err != nil {
+		t.Fatalf("reclaim expired lease: %v", err)
+	}
+	if active.DispatchLeaseToken != second.Token {
+		t.Fatalf("reclaimed lease token = %q, want %q", active.DispatchLeaseToken, second.Token)
+	}
+	if _, err := dispatch.RecordRequestDispatch(t.Context(), requestID, first.Token, "91", first.ExpiresAt); !errors.Is(err, core.ErrInvalidTransition) {
+		t.Fatalf("stale success error = %v, want ErrInvalidTransition", err)
+	}
+	if _, err := dispatch.FailRequestDispatch(t.Context(), requestID, first.Token, "stale", first.ExpiresAt); !errors.Is(err, core.ErrInvalidTransition) {
+		t.Fatalf("stale failure error = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func approvedRequestFixture(
+	t *testing.T, writer core.RequestWriter, accountID, profileID, providerID string, now time.Time,
+) core.MediaRequest {
+	t.Helper()
+	request := requestFixture(t, accountID, profileID, providerID, now)
+	if err := writer.CreateRequest(t.Context(), request, now, true); err != nil {
+		t.Fatalf("create lease request: %v", err)
+	}
+	if _, err := writer.TransitionRequest(t.Context(), request.ID, core.RequestPending, core.RequestApproved, accountID, "", now); err != nil {
+		t.Fatalf("approve lease request: %v", err)
+	}
+	return request
+}
+
+func requestDispatchLease(token string, now time.Time) core.RequestDispatchLease {
+	return core.RequestDispatchLease{Token: token, ExpiresAt: now.Add(time.Minute)}
 }
 
 func testSeriesFulfilmentTransitions(
@@ -124,10 +219,11 @@ func testSeriesFulfilmentTransitions(
 		DownloadManagerID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 		QualityProfile:    "2", RootFolder: "/series", Tags: []string{"series"},
 	}
-	if _, err := dispatch.ClaimRequestDispatch(t.Context(), series.ID, snapshot, now); err != nil {
+	lease := requestDispatchLease("bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb", now)
+	if _, err := dispatch.ClaimRequestDispatch(t.Context(), series.ID, snapshot, lease, now); err != nil {
 		t.Fatalf("claim series: %v", err)
 	}
-	processing, err := dispatch.RecordRequestDispatch(t.Context(), series.ID, "88", now.Add(time.Second))
+	processing, err := dispatch.RecordRequestDispatch(t.Context(), series.ID, lease.Token, "88", now.Add(time.Second))
 	assertSeasonStatuses(t, processing, core.SeasonProcessing, err)
 	available, err := writer.TransitionRequest(t.Context(), series.ID, core.RequestProcessing, core.RequestAvailable, "", "", now.Add(2*time.Second))
 	assertSeasonStatuses(t, available, core.SeasonAvailable, err)
@@ -152,10 +248,11 @@ func prepareProcessingSeries(
 	if _, err := writer.TransitionRequest(t.Context(), request.ID, core.RequestPending, core.RequestApproved, accountID, "", now); err != nil {
 		t.Fatalf("approve failure series: %v", err)
 	}
-	if _, err := dispatch.ClaimRequestDispatch(t.Context(), request.ID, snapshot, now); err != nil {
+	lease := requestDispatchLease("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb", now)
+	if _, err := dispatch.ClaimRequestDispatch(t.Context(), request.ID, snapshot, lease, now); err != nil {
 		t.Fatalf("claim failure series: %v", err)
 	}
-	if _, err := dispatch.RecordRequestDispatch(t.Context(), request.ID, "89", now.Add(time.Second)); err != nil {
+	if _, err := dispatch.RecordRequestDispatch(t.Context(), request.ID, lease.Token, "89", now.Add(time.Second)); err != nil {
 		t.Fatalf("dispatch failure series: %v", err)
 	}
 }
@@ -194,10 +291,11 @@ func testAvailabilityClaimsAreFair(
 			DownloadManagerID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 			QualityProfile:    "1", RootFolder: "/movies", Tags: []string{},
 		}
-		if _, err := dispatch.ClaimRequestDispatch(t.Context(), request.ID, snapshot, now); err != nil {
+		lease := requestDispatchLease(mustID(t), now)
+		if _, err := dispatch.ClaimRequestDispatch(t.Context(), request.ID, snapshot, lease, now); err != nil {
 			t.Fatalf("claim processing request: %v", err)
 		}
-		if _, err := dispatch.RecordRequestDispatch(t.Context(), request.ID, providerID, now); err != nil {
+		if _, err := dispatch.RecordRequestDispatch(t.Context(), request.ID, lease.Token, providerID, now); err != nil {
 			t.Fatalf("record processing request: %v", err)
 		}
 		ids = append(ids, request.ID)
@@ -350,12 +448,26 @@ func transitionSeriesToTerminal(
 	if _, err := writer.TransitionRequest(t.Context(), requestID, from, core.RequestApproved, accountID, "", now); err != nil {
 		return err
 	}
-	from = core.RequestApproved
+	dispatch := requireRequestDispatchWriter(t, writer)
+	snapshot := core.RequestDispatchSnapshot{
+		DownloadManagerID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+		QualityProfile:    "1", RootFolder: "/media", Tags: []string{},
+	}
+	lease := requestDispatchLease(mustID(t), now)
+	if _, err := dispatch.ClaimRequestDispatch(t.Context(), requestID, snapshot, lease, now); err != nil {
+		return err
+	}
+	if status == core.RequestFailed {
+		_, err := dispatch.FailRequestDispatch(t.Context(), requestID, lease.Token, "failed", now.Add(time.Second))
+		return err
+	}
+	if _, err := dispatch.RecordRequestDispatch(t.Context(), requestID, lease.Token, "90", now.Add(time.Second)); err != nil {
+		return err
+	}
+	from = core.RequestProcessing
 	if status == core.RequestAvailable {
-		if _, err := writer.TransitionRequest(t.Context(), requestID, from, core.RequestProcessing, accountID, "", now); err != nil {
-			return err
-		}
-		from = core.RequestProcessing
+		_, err := writer.TransitionRequest(t.Context(), requestID, from, status, accountID, "", now.Add(2*time.Second))
+		return err
 	}
 	_, err := writer.TransitionRequest(t.Context(), requestID, from, status, accountID, "", now)
 	return err

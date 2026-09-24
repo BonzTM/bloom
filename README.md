@@ -263,8 +263,9 @@ Register each Radarr or Sonarr instance with `POST /api/v1/download-managers`.
 Bloom verifies the API key before storing it encrypted. Use `GET` on that
 collection to list registrations and
 `GET /api/v1/download-managers/{id}/options` to read its quality profiles, root
-folders, and tags. Bloom never returns an API key. Deletion is refused while a
-request profile references the instance.
+folders, and tags. Empty option collections are returned as JSON arrays, never
+`null`. Bloom never returns an API key. Deletion is refused while a request
+profile references the instance.
 
 Create at least one request profile with `POST /api/v1/request-profiles`.
 Profiles select the kinds supported by the named instance: Radarr handles
@@ -278,9 +279,12 @@ and submit a movie or selected series seasons to `POST /api/v1/requests`.
 Accounts with `requests.approve` are exempt from quotas and their own requests
 are approved immediately. Other requests remain pending until an approver uses
 the request's `/approve` or `/decline` route. Approved requests are dispatched
-idempotently and move to `processing`; permanent failures move to `failed` and
-may be approved again. `GET /api/v1/requests/{id}/progress` reads current queue
-state for the owner or an approver. Bloom snapshots the manager registration,
+under an exclusive ten-minute lease and move to `processing`; an approved
+request whose worker stops is reclaimed after its lease expires. Only the
+current lease owner can record dispatch success or failure. Permanent failures
+move to `failed` and may be approved again.
+`GET /api/v1/requests/{id}/progress` reads current queue state for the owner or
+an approver. Bloom snapshots the manager registration,
 quality profile, root folder, and tags when dispatch starts. Editing the request
 profile cannot redirect an in-flight request. Deleting that snapshotted manager
 causes the next availability check to move the request to `failed`, where an

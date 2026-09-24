@@ -16,8 +16,11 @@ UPDATE requests SET
     dispatch_quality_profile = ?2,
     dispatch_root_folder = ?3,
     dispatch_tags = ?4,
-    updated_at = ?5
-WHERE id = ?6 AND status = 'approved' AND download_manager_id = ''
+    dispatch_lease_token = ?5,
+    dispatch_lease_expires_at = ?6,
+    updated_at = ?7
+WHERE id = ?8 AND status = 'approved'
+  AND (dispatch_lease_token = '' OR dispatch_lease_expires_at <= ?7)
 `
 
 type ClaimRequestDispatchParams struct {
@@ -25,6 +28,8 @@ type ClaimRequestDispatchParams struct {
 	DispatchQualityProfile string
 	DispatchRootFolder     string
 	DispatchTags           string
+	DispatchLeaseToken     string
+	DispatchLeaseExpiresAt sql.NullString
 	UpdatedAt              string
 	ID                     string
 }
@@ -35,6 +40,8 @@ func (q *Queries) ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDisp
 		arg.DispatchQualityProfile,
 		arg.DispatchRootFolder,
 		arg.DispatchTags,
+		arg.DispatchLeaseToken,
+		arg.DispatchLeaseExpiresAt,
 		arg.UpdatedAt,
 		arg.ID,
 	)
@@ -300,6 +307,38 @@ func (q *Queries) DeleteRoleRequestQuota(ctx context.Context, roleID string) (in
 	return result.RowsAffected()
 }
 
+const failRequestDispatch = `-- name: FailRequestDispatch :execrows
+UPDATE requests SET
+    status = 'failed', failure_reason = ?1,
+    download_manager_id = '', download_manager_item_id = '',
+    dispatch_quality_profile = '', dispatch_root_folder = '', dispatch_tags = '[]',
+    dispatch_lease_token = '', dispatch_lease_expires_at = NULL,
+    last_availability_check_at = NULL, updated_at = ?2
+WHERE id = ?3 AND status = 'approved'
+  AND dispatch_lease_token = ?4
+  AND dispatch_lease_expires_at > ?2
+`
+
+type FailRequestDispatchParams struct {
+	FailureReason      string
+	UpdatedAt          string
+	ID                 string
+	DispatchLeaseToken string
+}
+
+func (q *Queries) FailRequestDispatch(ctx context.Context, arg FailRequestDispatchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, failRequestDispatch,
+		arg.FailureReason,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.DispatchLeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getAccountRequestQuota = `-- name: GetAccountRequestQuota :one
 SELECT account_id, movie_limit, movie_period_seconds, season_limit, season_period_seconds
 FROM account_request_quotas WHERE account_id = ?1
@@ -340,7 +379,7 @@ func (q *Queries) GetMetadataProvider(ctx context.Context, kind string) (Metadat
 }
 
 const getRequest = `-- name: GetRequest :one
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, last_availability_check_at FROM requests WHERE id = ?1
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at FROM requests WHERE id = ?1
 `
 
 func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
@@ -368,6 +407,8 @@ func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
 		&i.DispatchQualityProfile,
 		&i.DispatchRootFolder,
 		&i.DispatchTags,
+		&i.DispatchLeaseExpiresAt,
+		&i.DispatchLeaseToken,
 		&i.LastAvailabilityCheckAt,
 	)
 	return i, err
@@ -523,7 +564,7 @@ func (q *Queries) ListRequestSeasons(ctx context.Context, requestID string) ([]L
 }
 
 const listRequests = `-- name: ListRequests :many
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, last_availability_check_at FROM requests
+SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at FROM requests
 WHERE (CAST(?1 AS INTEGER) = 0 OR requester_account_id = ?2)
   AND (CAST(?3 AS INTEGER) = 0 OR status = ?4)
   AND (CAST(?5 AS INTEGER) = 0
@@ -584,6 +625,8 @@ func (q *Queries) ListRequests(ctx context.Context, arg ListRequestsParams) ([]R
 			&i.DispatchQualityProfile,
 			&i.DispatchRootFolder,
 			&i.DispatchTags,
+			&i.DispatchLeaseExpiresAt,
+			&i.DispatchLeaseToken,
 			&i.LastAvailabilityCheckAt,
 		); err != nil {
 			return nil, err
@@ -638,20 +681,29 @@ func (q *Queries) ListRoleRequestQuotasForAccount(ctx context.Context, accountID
 
 const recordRequestDispatch = `-- name: RecordRequestDispatch :execrows
 UPDATE requests SET status = 'processing', download_manager_item_id = ?1,
-    failure_reason = '', last_availability_check_at = NULL, updated_at = ?2
+    failure_reason = '', dispatch_lease_token = '', dispatch_lease_expires_at = NULL,
+    last_availability_check_at = NULL, updated_at = ?2
 WHERE id = ?3 AND status = 'approved'
   AND download_manager_id <> ''
+  AND dispatch_lease_token = ?4
+  AND dispatch_lease_expires_at > ?2
   AND (download_manager_item_id = '' OR download_manager_item_id = ?1)
 `
 
 type RecordRequestDispatchParams struct {
-	ManagerItemID string
-	UpdatedAt     string
-	ID            string
+	ManagerItemID      string
+	UpdatedAt          string
+	ID                 string
+	DispatchLeaseToken string
 }
 
 func (q *Queries) RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, recordRequestDispatch, arg.ManagerItemID, arg.UpdatedAt, arg.ID)
+	result, err := q.db.ExecContext(ctx, recordRequestDispatch,
+		arg.ManagerItemID,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.DispatchLeaseToken,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -688,6 +740,8 @@ UPDATE requests SET
     dispatch_quality_profile = CASE WHEN status = 'failed' THEN '' ELSE dispatch_quality_profile END,
     dispatch_root_folder = CASE WHEN status = 'failed' THEN '' ELSE dispatch_root_folder END,
     dispatch_tags = CASE WHEN status = 'failed' THEN '[]' ELSE dispatch_tags END,
+    dispatch_lease_token = CASE WHEN status IN ('approved', 'failed') THEN '' ELSE dispatch_lease_token END,
+    dispatch_lease_expires_at = CASE WHEN status IN ('approved', 'failed') THEN NULL ELSE dispatch_lease_expires_at END,
     last_availability_check_at = CASE WHEN status = 'failed' THEN NULL ELSE last_availability_check_at END,
     updated_at = ?5
 WHERE id = ?6 AND status = ?7

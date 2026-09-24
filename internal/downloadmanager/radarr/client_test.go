@@ -114,6 +114,13 @@ func TestProbeOptionsAndQueueProgress(t *testing.T) {
 	}
 }
 
+func TestMapOptionsReturnsNonNilEmptySlices(t *testing.T) {
+	options, err := mapOptions(nil, nil, nil)
+	if err != nil || options.QualityProfiles == nil || options.RootFolders == nil || options.Tags == nil {
+		t.Fatalf("mapOptions = %+v, %v", options, err)
+	}
+}
+
 func newTestClient(t *testing.T, server *httptest.Server) *Client {
 	t.Helper()
 	target, err := url.Parse(server.URL)

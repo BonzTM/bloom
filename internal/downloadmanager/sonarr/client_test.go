@@ -2,6 +2,7 @@ package sonarr
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -138,6 +139,56 @@ func TestCompletedQueueWithoutRequestedSeasonFilesIsNotAvailable(t *testing.T) {
 	progress, err := newTestClient(t, server).Queue(t.Context(), "20", []int{1})
 	if err != nil || !progress.Complete || progress.HasFile {
 		t.Fatalf("Queue = %+v, %v", progress, err)
+	}
+}
+
+func TestQueueRejectsMissingRequestedSeasonData(t *testing.T) {
+	tests := []struct {
+		name    string
+		series  map[string]any
+		seasons []int
+	}{
+		{name: "missing seasons", series: map[string]any{
+			"id": 20, "statistics": map[string]any{"episodeCount": 16, "episodeFileCount": 16},
+		}, seasons: []int{1}},
+		{name: "partial seasons", series: map[string]any{
+			"id": 20, "seasons": []map[string]any{{
+				"seasonNumber": 1, "statistics": map[string]any{"episodeCount": 8, "episodeFileCount": 8},
+			}},
+		}, seasons: []int{1, 2}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			progress, err := queueWithSeries(t, testCase.series, testCase.seasons)
+			var classified *core.DownloadManagerError
+			if progress.HasFile || !errors.As(err, &classified) ||
+				classified.Kind != core.DownloadManagerMalformed || classified.Retryable {
+				t.Fatalf("Queue = %+v, %v", progress, err)
+			}
+		})
+	}
+}
+
+func queueWithSeries(t *testing.T, series map[string]any, seasons []int) (core.DownloadProgress, error) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/queue":
+			writeTestJSON(t, w, map[string]any{"records": []any{}})
+		case "/api/v3/series/20":
+			writeTestJSON(t, w, series)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	return newTestClient(t, server).Queue(t.Context(), "20", seasons)
+}
+
+func TestMapOptionsReturnsNonNilEmptySlices(t *testing.T) {
+	options, err := mapOptions(nil, nil, nil)
+	if err != nil || options.QualityProfiles == nil || options.RootFolders == nil || options.Tags == nil {
+		t.Fatalf("mapOptions = %+v, %v", options, err)
 	}
 }
 

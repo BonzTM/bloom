@@ -27,12 +27,18 @@ ALTER TABLE requests ADD COLUMN dispatch_root_folder TEXT NOT NULL DEFAULT ''
     CHECK (length(CAST(dispatch_root_folder AS BLOB)) <= 500);
 ALTER TABLE requests ADD COLUMN dispatch_tags TEXT NOT NULL DEFAULT '[]'
     CHECK (length(CAST(dispatch_tags AS BLOB)) <= 32768);
+ALTER TABLE requests ADD COLUMN dispatch_lease_expires_at TEXT;
+ALTER TABLE requests ADD COLUMN dispatch_lease_token TEXT NOT NULL DEFAULT ''
+    CHECK ((dispatch_lease_token = '' AND dispatch_lease_expires_at IS NULL)
+        OR (length(dispatch_lease_token) = 36 AND dispatch_lease_expires_at IS NOT NULL));
 ALTER TABLE requests ADD COLUMN last_availability_check_at TEXT;
 CREATE INDEX requests_availability_idx ON requests(status, last_availability_check_at, created_at, id);
 
 -- +goose Down
 DROP INDEX requests_availability_idx;
 ALTER TABLE requests DROP COLUMN last_availability_check_at;
+ALTER TABLE requests DROP COLUMN dispatch_lease_token;
+ALTER TABLE requests DROP COLUMN dispatch_lease_expires_at;
 ALTER TABLE requests DROP COLUMN dispatch_tags;
 ALTER TABLE requests DROP COLUMN dispatch_root_folder;
 ALTER TABLE requests DROP COLUMN dispatch_quality_profile;

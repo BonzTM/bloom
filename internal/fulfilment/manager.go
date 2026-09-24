@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	maxBatchSize        = 100
-	maxDispatchAttempts = 3
-	defaultScanInterval = 30 * time.Second
-	maxFailureReason    = 1000
+	maxBatchSize          = 100
+	maxDispatchAttempts   = 3
+	dispatchLeaseDuration = 10 * time.Minute
+	defaultScanInterval   = 30 * time.Second
+	maxFailureReason      = 1000
 )
 
 // Downloader dispatches titles and reads their live progress.
@@ -150,21 +151,17 @@ func (m *Manager) dispatchBatch(ctx context.Context) error {
 }
 
 func (m *Manager) dispatch(ctx context.Context, request core.MediaRequest) error {
-	var err error
-	if request.DownloadManagerID == "" {
-		request, err = m.claimDispatch(ctx, request)
-		if err != nil {
-			return m.fail(ctx, request, core.RequestApproved, "request dispatch target is unavailable", "dispatch", err)
-		}
+	request, err := m.claimDispatch(ctx, request)
+	if err != nil {
+		return fmt.Errorf("claim request dispatch %s: %w", request.ID, err)
 	}
-	itemID := request.DownloadManagerItemID
-	if itemID == "" {
-		itemID, err = m.addWithRetry(ctx, request)
-		if err != nil {
-			return m.fail(ctx, request, core.RequestApproved, "download manager dispatch failed", "dispatch", err)
-		}
+	itemID, err := m.addWithRetry(ctx, request)
+	if err != nil {
+		return m.failDispatch(ctx, request, "download manager dispatch failed", err)
 	}
-	updated, err := m.deps.Dispatch.RecordRequestDispatch(ctx, request.ID, itemID, core.NormalizeTime(m.deps.Clock.Now()))
+	updated, err := m.deps.Dispatch.RecordRequestDispatch(
+		ctx, request.ID, request.DispatchLeaseToken, itemID, core.NormalizeTime(m.deps.Clock.Now()),
+	)
 	if err != nil {
 		return fmt.Errorf("record dispatched request %s: %w", request.ID, err)
 	}
@@ -186,8 +183,14 @@ func (m *Manager) claimDispatch(ctx context.Context, request core.MediaRequest) 
 		DownloadManagerID: manager.ID, QualityProfile: profile.QualityProfile,
 		RootFolder: profile.RootFolder, Tags: append([]string(nil), profile.Tags...),
 	}
+	now := core.NormalizeTime(m.deps.Clock.Now())
+	token, err := core.NewID()
+	if err != nil {
+		return request, fmt.Errorf("create dispatch lease token: %w", err)
+	}
+	lease := core.RequestDispatchLease{Token: token, ExpiresAt: now.Add(dispatchLeaseDuration)}
 	return m.deps.Dispatch.ClaimRequestDispatch(
-		ctx, request.ID, snapshot, core.NormalizeTime(m.deps.Clock.Now()),
+		ctx, request.ID, snapshot, lease, now,
 	)
 }
 
@@ -278,6 +281,23 @@ func (m *Manager) fail(
 	}
 	m.publish(ctx, updated, core.RequestEventFailed)
 	m.audit(ctx, updated, "request.fail", telemetry.AuditFailure, auditReason)
+	return fmt.Errorf("fail request %s: %w", request.ID, cause)
+}
+
+func (m *Manager) failDispatch(
+	ctx context.Context, request core.MediaRequest, reason string, cause error,
+) error {
+	if len(reason) > maxFailureReason {
+		reason = reason[:maxFailureReason]
+	}
+	updated, err := m.deps.Dispatch.FailRequestDispatch(
+		ctx, request.ID, request.DispatchLeaseToken, reason, core.NormalizeTime(m.deps.Clock.Now()),
+	)
+	if err != nil {
+		return errors.Join(cause, fmt.Errorf("mark request dispatch failed: %w", err))
+	}
+	m.publish(ctx, updated, core.RequestEventFailed)
+	m.audit(ctx, updated, "request.fail", telemetry.AuditFailure, "dispatch")
 	return fmt.Errorf("fail request %s: %w", request.ID, cause)
 }
 

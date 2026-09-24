@@ -109,6 +109,8 @@ type MediaRequest struct {
 	DispatchQualityProfile  string
 	DispatchRootFolder      string
 	DispatchTags            []string
+	DispatchLeaseToken      string
+	DispatchLeaseExpiresAt  *time.Time
 	LastAvailabilityCheckAt *time.Time
 	DecidedBy               string
 	DecidedAt               *time.Time
@@ -122,6 +124,12 @@ type RequestDispatchSnapshot struct {
 	QualityProfile    string
 	RootFolder        string
 	Tags              []string
+}
+
+// RequestDispatchLease grants one worker temporary ownership of dispatch.
+type RequestDispatchLease struct {
+	Token     string
+	ExpiresAt time.Time
 }
 
 // RequestSeason identifies one requested series season.
@@ -252,8 +260,9 @@ type RequestWriter interface {
 
 // RequestDispatchWriter records a successful download-manager dispatch.
 type RequestDispatchWriter interface {
-	ClaimRequestDispatch(ctx context.Context, id string, snapshot RequestDispatchSnapshot, at time.Time) (MediaRequest, error)
-	RecordRequestDispatch(ctx context.Context, id, managerItemID string, at time.Time) (MediaRequest, error)
+	ClaimRequestDispatch(ctx context.Context, id string, snapshot RequestDispatchSnapshot, lease RequestDispatchLease, at time.Time) (MediaRequest, error)
+	RecordRequestDispatch(ctx context.Context, id, leaseToken, managerItemID string, at time.Time) (MediaRequest, error)
+	FailRequestDispatch(ctx context.Context, id, leaseToken, reason string, at time.Time) (MediaRequest, error)
 }
 
 // RequestAvailabilityClaimer atomically selects and stamps the fairest processing batch.
@@ -267,6 +276,14 @@ func ValidateRequestDispatchSnapshot(snapshot RequestDispatchSnapshot) error {
 		!boundedText(snapshot.QualityProfile, MaxRequestProfileFieldBytes) ||
 		!boundedText(snapshot.RootFolder, MaxRequestProfileFieldBytes) ||
 		!requestTagsValid(snapshot.Tags) {
+		return ErrInvalidArgument
+	}
+	return nil
+}
+
+// ValidateRequestDispatchLease validates lease identity and a future expiry.
+func ValidateRequestDispatchLease(lease RequestDispatchLease, at time.Time) error {
+	if !ValidID(lease.Token) || at.IsZero() || !lease.ExpiresAt.After(at) {
 		return ErrInvalidArgument
 	}
 	return nil
@@ -431,9 +448,7 @@ type RequestTransition struct {
 var requestTransitions = [...]RequestTransition{
 	{From: RequestPending, To: RequestApproved, Permission: PermissionRequestsApprove},
 	{From: RequestPending, To: RequestDeclined, Permission: PermissionRequestsApprove},
-	{From: RequestApproved, To: RequestProcessing, Permission: PermissionAdminSettings},
 	{From: RequestProcessing, To: RequestAvailable, Permission: PermissionAdminSettings},
-	{From: RequestApproved, To: RequestFailed, Permission: PermissionAdminSettings},
 	{From: RequestProcessing, To: RequestFailed, Permission: PermissionAdminSettings},
 	{From: RequestFailed, To: RequestApproved, Permission: PermissionRequestsApprove},
 }

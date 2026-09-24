@@ -349,13 +349,13 @@ func (s *requests) TransitionRequest(ctx context.Context, id string, from, to co
 }
 
 func (s *requests) RecordRequestDispatch(
-	ctx context.Context, id, managerItemID string, at time.Time,
+	ctx context.Context, id, leaseToken, managerItemID string, at time.Time,
 ) (core.MediaRequest, error) {
-	if !core.ValidID(id) || managerItemID == "" || len(managerItemID) > 100 {
+	if !core.ValidID(id) || !core.ValidID(leaseToken) || managerItemID == "" || len(managerItemID) > 100 {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
 	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
-		return s.recordDispatch(ctx, tx, id, managerItemID, at)
+		return s.recordDispatch(ctx, tx, id, leaseToken, managerItemID, at)
 	})
 	if err != nil {
 		return core.MediaRequest{}, err
@@ -364,14 +364,15 @@ func (s *requests) RecordRequestDispatch(
 }
 
 func (s *requests) recordDispatch(
-	ctx context.Context, tx *sql.Tx, id, managerItemID string, at time.Time,
+	ctx context.Context, tx *sql.Tx, id, leaseToken, managerItemID string, at time.Time,
 ) error {
 	if s.sqlite != nil {
 		q := s.sqlite.WithTx(tx)
 		rows, err := q.RecordRequestDispatch(ctx, sqlite.RecordRequestDispatchParams{
 			ManagerItemID: managerItemID, UpdatedAt: formatSQLiteTime(at), ID: id,
+			DispatchLeaseToken: leaseToken,
 		})
-		if resultErr := dispatchTransitionResult(rows, err); resultErr != nil {
+		if resultErr := dispatchTransitionResult("record request dispatch", rows, err); resultErr != nil {
 			return resultErr
 		}
 		if err := q.TransitionRequestSeasons(ctx, sqlite.TransitionRequestSeasonsParams{RequestID: id, ToStatus: string(core.RequestProcessing)}); err != nil {
@@ -382,8 +383,9 @@ func (s *requests) recordDispatch(
 	q := s.postgres.WithTx(tx)
 	rows, err := q.RecordRequestDispatch(ctx, postgres.RecordRequestDispatchParams{
 		ManagerItemID: managerItemID, UpdatedAt: core.NormalizeTime(at), ID: id,
+		DispatchLeaseToken: leaseToken,
 	})
-	if resultErr := dispatchTransitionResult(rows, err); resultErr != nil {
+	if resultErr := dispatchTransitionResult("record request dispatch", rows, err); resultErr != nil {
 		return resultErr
 	}
 	if err := q.TransitionRequestSeasons(ctx, postgres.TransitionRequestSeasonsParams{RequestID: id, ToStatus: string(core.RequestProcessing)}); err != nil {
@@ -392,9 +394,9 @@ func (s *requests) recordDispatch(
 	return nil
 }
 
-func dispatchTransitionResult(rows int64, err error) error {
+func dispatchTransitionResult(operation string, rows int64, err error) error {
 	if err != nil {
-		return fmt.Errorf("record request dispatch: %w", err)
+		return fmt.Errorf("%s: %w", operation, err)
 	}
 	if rows != 1 {
 		return core.ErrInvalidTransition
@@ -403,16 +405,17 @@ func dispatchTransitionResult(rows int64, err error) error {
 }
 
 func (s *requests) ClaimRequestDispatch(
-	ctx context.Context, id string, snapshot core.RequestDispatchSnapshot, at time.Time,
+	ctx context.Context, id string, snapshot core.RequestDispatchSnapshot, lease core.RequestDispatchLease, at time.Time,
 ) (core.MediaRequest, error) {
-	if !core.ValidID(id) || core.ValidateRequestDispatchSnapshot(snapshot) != nil {
+	if !core.ValidID(id) || core.ValidateRequestDispatchSnapshot(snapshot) != nil ||
+		core.ValidateRequestDispatchLease(lease, at) != nil {
 		return core.MediaRequest{}, core.ErrInvalidArgument
 	}
 	tags, err := json.Marshal(snapshot.Tags)
 	if err != nil {
 		return core.MediaRequest{}, fmt.Errorf("encode dispatch tags: %w", err)
 	}
-	rows, err := s.claimRequestDispatch(ctx, id, snapshot, string(tags), at)
+	rows, err := s.claimRequestDispatch(ctx, id, snapshot, lease, string(tags), at)
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
@@ -423,20 +426,72 @@ func (s *requests) ClaimRequestDispatch(
 }
 
 func (s *requests) claimRequestDispatch(
-	ctx context.Context, id string, snapshot core.RequestDispatchSnapshot, tags string, at time.Time,
+	ctx context.Context, id string, snapshot core.RequestDispatchSnapshot,
+	lease core.RequestDispatchLease, tags string, at time.Time,
 ) (int64, error) {
 	if s.sqlite != nil {
 		rows, err := s.sqlite.ClaimRequestDispatch(ctx, sqlite.ClaimRequestDispatchParams{
 			DownloadManagerID: snapshot.DownloadManagerID, DispatchQualityProfile: snapshot.QualityProfile,
-			DispatchRootFolder: snapshot.RootFolder, DispatchTags: tags, UpdatedAt: formatSQLiteTime(at), ID: id,
+			DispatchRootFolder: snapshot.RootFolder, DispatchTags: tags, DispatchLeaseToken: lease.Token,
+			DispatchLeaseExpiresAt: sqliteNullableTime(&lease.ExpiresAt), UpdatedAt: formatSQLiteTime(at), ID: id,
 		})
 		return rows, wrapRequestClaimError(err)
 	}
 	rows, err := s.postgres.ClaimRequestDispatch(ctx, postgres.ClaimRequestDispatchParams{
 		DownloadManagerID: snapshot.DownloadManagerID, DispatchQualityProfile: snapshot.QualityProfile,
-		DispatchRootFolder: snapshot.RootFolder, DispatchTags: tags, UpdatedAt: core.NormalizeTime(at), ID: id,
+		DispatchRootFolder: snapshot.RootFolder, DispatchTags: tags, DispatchLeaseToken: lease.Token,
+		DispatchLeaseExpiresAt: postgresNullableTime(&lease.ExpiresAt), UpdatedAt: core.NormalizeTime(at), ID: id,
 	})
 	return rows, wrapRequestClaimError(err)
+}
+
+func (s *requests) FailRequestDispatch(
+	ctx context.Context, id, leaseToken, reason string, at time.Time,
+) (core.MediaRequest, error) {
+	if !core.ValidID(id) || !core.ValidID(leaseToken) || core.ValidateDecisionReason(reason) != nil {
+		return core.MediaRequest{}, core.ErrInvalidArgument
+	}
+	err := withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		return s.failRequestDispatch(ctx, tx, id, leaseToken, reason, at)
+	})
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
+	return s.GetRequest(ctx, id)
+}
+
+func (s *requests) failRequestDispatch(
+	ctx context.Context, tx *sql.Tx, id, leaseToken, reason string, at time.Time,
+) error {
+	if s.sqlite != nil {
+		q := s.sqlite.WithTx(tx)
+		rows, err := q.FailRequestDispatch(ctx, sqlite.FailRequestDispatchParams{
+			FailureReason: reason, UpdatedAt: formatSQLiteTime(at), ID: id, DispatchLeaseToken: leaseToken,
+		})
+		return s.finishFailedDispatch(ctx, rows, err, q, nil, id)
+	}
+	q := s.postgres.WithTx(tx)
+	rows, err := q.FailRequestDispatch(ctx, postgres.FailRequestDispatchParams{
+		FailureReason: reason, UpdatedAt: core.NormalizeTime(at), ID: id, DispatchLeaseToken: leaseToken,
+	})
+	return s.finishFailedDispatch(ctx, rows, err, nil, q, id)
+}
+
+func (s *requests) finishFailedDispatch(
+	ctx context.Context, rows int64, err error, sq *sqlite.Queries, pg *postgres.Queries, id string,
+) error {
+	if resultErr := dispatchTransitionResult("fail request dispatch", rows, err); resultErr != nil {
+		return resultErr
+	}
+	if sq != nil {
+		err = sq.TransitionRequestSeasons(ctx, sqlite.TransitionRequestSeasonsParams{RequestID: id, ToStatus: string(core.RequestFailed)})
+	} else {
+		err = pg.TransitionRequestSeasons(ctx, postgres.TransitionRequestSeasonsParams{RequestID: id, ToStatus: string(core.RequestFailed)})
+	}
+	if err != nil {
+		return fmt.Errorf("fail request dispatch seasons: %w", err)
+	}
+	return nil
 }
 
 func wrapRequestClaimError(err error) error {
@@ -620,6 +675,10 @@ func sqliteRequest(row sqlite.Request) (core.MediaRequest, error) {
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
+	leaseExpiry, err := parseNullableSQLiteTime(row.DispatchLeaseExpiresAt)
+	if err != nil {
+		return core.MediaRequest{}, err
+	}
 	tags, err := decodeDispatchTags(row.DispatchTags)
 	if err != nil {
 		return core.MediaRequest{}, err
@@ -630,6 +689,7 @@ func sqliteRequest(row sqlite.Request) (core.MediaRequest, error) {
 		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, FailureReason: row.FailureReason,
 		DownloadManagerID: row.DownloadManagerID, DownloadManagerItemID: row.DownloadManagerItemID,
 		DispatchQualityProfile: row.DispatchQualityProfile, DispatchRootFolder: row.DispatchRootFolder, DispatchTags: tags,
+		DispatchLeaseToken: row.DispatchLeaseToken, DispatchLeaseExpiresAt: leaseExpiry,
 		LastAvailabilityCheckAt: lastCheck, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
 		CreatedAt: created, UpdatedAt: updated,
 	}, nil
@@ -646,6 +706,11 @@ func postgresRequest(row postgres.Request) (core.MediaRequest, error) {
 		value := core.NormalizeTime(row.LastAvailabilityCheckAt.Time)
 		lastCheck = &value
 	}
+	var leaseExpiry *time.Time
+	if row.DispatchLeaseExpiresAt.Valid {
+		value := core.NormalizeTime(row.DispatchLeaseExpiresAt.Time)
+		leaseExpiry = &value
+	}
 	tags, err := decodeDispatchTags(row.DispatchTags)
 	if err != nil {
 		return core.MediaRequest{}, err
@@ -656,6 +721,7 @@ func postgresRequest(row postgres.Request) (core.MediaRequest, error) {
 		Status: core.RequestStatus(row.Status), DecisionReason: row.DecisionReason, FailureReason: row.FailureReason,
 		DownloadManagerID: row.DownloadManagerID, DownloadManagerItemID: row.DownloadManagerItemID,
 		DispatchQualityProfile: row.DispatchQualityProfile, DispatchRootFolder: row.DispatchRootFolder, DispatchTags: tags,
+		DispatchLeaseToken: row.DispatchLeaseToken, DispatchLeaseExpiresAt: leaseExpiry,
 		LastAvailabilityCheckAt: lastCheck, DecidedBy: row.DecidedByAccountID.String, DecidedAt: decided,
 		CreatedAt: core.NormalizeTime(row.CreatedAt), UpdatedAt: core.NormalizeTime(row.UpdatedAt),
 	}, nil
