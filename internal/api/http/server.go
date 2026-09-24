@@ -18,6 +18,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
 	inviteapp "github.com/BonzTM/bloom/internal/invite"
+	notifyapp "github.com/BonzTM/bloom/internal/notify"
 	requestapp "github.com/BonzTM/bloom/internal/request"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -80,6 +81,22 @@ type metadataManager interface {
 	RemoveKey(context.Context, core.MetadataProviderKind) error
 }
 
+type notificationReader interface {
+	Get(context.Context, string) (core.NotificationRegistration, error)
+	List(context.Context, string, int) ([]core.NotificationRegistration, error)
+	Deliveries(context.Context, string, *core.NotificationDeliveryCursor, int) ([]core.NotificationDelivery, error)
+}
+
+type notificationManager interface {
+	Register(context.Context, notifyapp.RegistrationInput) (core.NotificationRegistration, error)
+	Update(context.Context, string, notifyapp.RegistrationInput) (core.NotificationRegistration, error)
+	Delete(context.Context, string) (core.NotificationRegistration, error)
+}
+
+type notificationTester interface {
+	Test(context.Context, string) error
+}
+
 // Server owns the HTTP listener, mux, and middleware wiring. It holds the
 // dependencies the handlers need and the readiness flag the shutdown sequence
 // flips. It never stores a request context.
@@ -122,6 +139,9 @@ type Server struct {
 	metadataReader         metadataReader
 	metadataManager        metadataManager
 	requestService         *requestapp.Service
+	notificationReader     notificationReader
+	notificationManager    notificationManager
+	notificationTester     notificationTester
 	clock                  core.Clock
 	oidcProvider           core.OIDCProvider
 	oidcAccounts           core.OIDCAccountStore
@@ -176,6 +196,12 @@ type Deps struct {
 	MetadataManager metadataManager
 	// RequestService supplies request profiles, quotas, and request lifecycle policy.
 	RequestService *requestapp.Service
+	// NotificationReader supplies channel and delivery-log reads.
+	NotificationReader notificationReader
+	// NotificationManager supplies channel registration changes.
+	NotificationManager notificationManager
+	// NotificationTester sends explicit administrator test messages.
+	NotificationTester notificationTester
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -306,6 +332,9 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		metadataReader:         deps.MetadataReader,
 		metadataManager:        deps.MetadataManager,
 		requestService:         deps.RequestService,
+		notificationReader:     deps.NotificationReader,
+		notificationManager:    deps.NotificationManager,
+		notificationTester:     deps.NotificationTester,
 		mediaOperationTimeout:  derivedAuthOperationTimeout(cfg.WriteTimeout),
 		clock:                  deps.Clock,
 		oidcProvider:           deps.OIDC,
@@ -484,6 +513,9 @@ func csrfAuditResource(path string) string {
 		return auditResourceMediaServers
 	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
 		return auditResourceDownloadManagers
+	case "/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
+		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries":
+		return auditResourceNotifications
 	case "/api/v1/invites", "/api/v1/invites/{id}":
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":

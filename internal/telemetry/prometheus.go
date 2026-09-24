@@ -55,6 +55,8 @@ type PromMetrics struct {
 	downloadManagerRequests    *prometheus.CounterVec
 	downloadManagerSeconds     *prometheus.HistogramVec
 	downloadManagerRetries     *prometheus.CounterVec
+	notificationDeliveries     *prometheus.CounterVec
+	notificationOutboxDepth    prometheus.Gauge
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -81,6 +83,14 @@ func NewPromMetrics(namespace string) *PromMetrics {
 	}, []string{"report", "outcome"})
 	requestCollectors := newRequestCollectors(namespace)
 	downloadCollectors := newDownloadManagerCollectors(namespace)
+	notificationDeliveries := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "notification_deliveries_total",
+		Help: "Notification delivery attempts by channel kind and bounded outcome.",
+	}, []string{"kind", "outcome"})
+	notificationOutboxDepth := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "notification_outbox_depth",
+		Help: "Current count of pending notification outbox rows.",
+	})
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -110,6 +120,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		downloadManagerRequests:    downloadCollectors.requests,
 		downloadManagerSeconds:     downloadCollectors.seconds,
 		downloadManagerRetries:     downloadCollectors.retries,
+		notificationDeliveries:     notificationDeliveries,
+		notificationOutboxDepth:    notificationOutboxDepth,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -338,7 +350,27 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.downloadManagerRequests,
 		m.downloadManagerSeconds,
 		m.downloadManagerRetries,
+		m.notificationDeliveries,
+		m.notificationOutboxDepth,
 	)
+}
+
+// ObserveNotificationDelivery records one bounded worker outcome.
+func (m *PromMetrics) ObserveNotificationDelivery(kind, outcome string) {
+	switch core.NotificationKind(kind) {
+	case core.NotificationKindWebhook, core.NotificationKindDiscord, core.NotificationKindEmail:
+	default:
+		kind = "invalid"
+	}
+	if outcome != "sent" && outcome != "retry" && outcome != "failed" {
+		outcome = "invalid"
+	}
+	m.notificationDeliveries.WithLabelValues(kind, outcome).Inc()
+}
+
+// SetNotificationOutboxDepth publishes the current pending row count.
+func (m *PromMetrics) SetNotificationOutboxDepth(depth int64) {
+	m.notificationOutboxDepth.Set(float64(max(depth, 0)))
 }
 
 // ObserveDownloadManagerRequest records one bounded Radarr or Sonarr operation.

@@ -38,6 +38,8 @@ tags:
     description: Registered media-server connections. Credentials are write-only.
   - name: download-managers
     description: Registered Radarr and Sonarr connections. Credentials are write-only.
+  - name: notifications
+    description: Administrative notification channels and durable at-least-once delivery history. Secrets are write-only. Webhook receivers should deduplicate using the delivery UUID sent as signed payload field delivery_id and headers X-Bloom-Delivery-ID and Idempotency-Key.
   - name: invites
     description: Administrative invite management and public redemption.
   - name: playback
@@ -767,6 +769,120 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/DownloadManagerFailure" }
         "503": { $ref: "#/components/responses/DownloadManagerFailure" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/notification-channels:
+    post:
+      tags: [notifications]
+      operationId: createNotificationChannel
+      summary: Probe and register a webhook, Discord, or email channel.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannelCreateRequest" } } }
+      responses:
+        "201": { description: Channel registered after a successful test send., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/NotificationChannelFailure" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    get:
+      tags: [notifications]
+      operationId: listNotificationChannels
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, maxLength: 400 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { description: Channels ordered by case-folded name., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannelsResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/notification-channels/{id}:
+    get:
+      tags: [notifications]
+      operationId: getNotificationChannel
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      responses:
+        "200": { description: Channel settings with credential-presence flags only., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    put:
+      tags: [notifications]
+      operationId: updateNotificationChannel
+      summary: Replace channel settings; enabled channels are probed and omitted credentials are retained.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannelUpdateRequest" } } }
+      responses:
+        "200": { description: Updated channel., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/NotificationChannelFailure" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    delete:
+      tags: [notifications]
+      operationId: deleteNotificationChannel
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      responses:
+        "204": { description: Channel hidden and disabled immediately; its rows are removed after any live delivery lease finishes or expires. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/notification-channels/{id}/test:
+    post:
+      tags: [notifications]
+      operationId: testNotificationChannel
+      summary: Send one test message immediately.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      responses:
+        "200": { description: Test send outcome., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationTestResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/NotificationChannelFailure" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/notification-channels/{id}/deliveries:
+    get:
+      tags: [notifications]
+      operationId: listNotificationDeliveries
+      summary: List recent durable delivery attempts for one channel.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+        - { name: cursor, in: query, schema: { type: string, maxLength: 256 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { description: Deliveries ordered newest first., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationDeliveriesResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/invites:
     post:
@@ -1672,6 +1788,15 @@ components:
         X-Request-ID: { $ref: "#/components/headers/XRequestID" }
         Retry-After: { $ref: "#/components/headers/RetryAfter" }
       content: *AuthenticatedErrorContent
+    NotificationChannelFailure:
+      description: Opaque notification-channel probe or test-send failure.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content: *AuthenticatedErrorContent
     QuotaExceeded:
       description: The account's rolling request quota is exhausted.
       headers: *AuthenticatedHeaders
@@ -1842,6 +1967,188 @@ components:
         quality_profiles: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/DownloadManagerOption" } }
         root_folders: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/DownloadManagerOption" } }
         tags: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/DownloadManagerOption" } }
+    NotificationKind:
+      type: string
+      enum: [webhook, discord, email]
+    NotificationEventType:
+      type: string
+      enum: [created, approved, declined, dispatched, available, failed]
+    NotificationTLSMode:
+      type: string
+      enum: [starttls, implicit]
+    NotificationAuthMode:
+      type: string
+      enum: [plain, login]
+    NotificationWebhookCreateRequest:
+      type: object
+      required: [url, shared_secret, allow_insecure, allow_private]
+      additionalProperties: false
+      properties:
+        url: { type: string, format: uri, minLength: 1, maxLength: 2048, writeOnly: true }
+        shared_secret: { type: string, format: password, minLength: 1, maxLength: 4096, writeOnly: true }
+        allow_insecure: { type: boolean }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+    NotificationWebhookUpdateRequest:
+      type: object
+      required: [allow_insecure, allow_private]
+      additionalProperties: false
+      properties:
+        url: { type: string, format: uri, minLength: 1, maxLength: 2048, writeOnly: true }
+        shared_secret: { type: string, format: password, minLength: 1, maxLength: 4096, writeOnly: true }
+        allow_insecure: { type: boolean }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+    NotificationDiscordCreateRequest:
+      type: object
+      required: [webhook_url, allow_insecure, allow_private]
+      additionalProperties: false
+      properties:
+        webhook_url: { type: string, format: uri, minLength: 1, maxLength: 2048, writeOnly: true }
+        allow_insecure: { type: boolean }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+    NotificationDiscordUpdateRequest:
+      type: object
+      required: [allow_insecure, allow_private]
+      additionalProperties: false
+      properties:
+        webhook_url: { type: string, format: uri, minLength: 1, maxLength: 2048, writeOnly: true }
+        allow_insecure: { type: boolean }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+    NotificationEmailCreateRequest:
+      type: object
+      required: [smtp_host, smtp_port, tls_mode, auth_mode, username, password, from_address, from_name, recipients, allow_private]
+      additionalProperties: false
+      properties:
+        smtp_host: { type: string, minLength: 1, maxLength: 253 }
+        smtp_port: { type: integer, minimum: 1, maximum: 65535 }
+        tls_mode: { $ref: "#/components/schemas/NotificationTLSMode" }
+        auth_mode: { $ref: "#/components/schemas/NotificationAuthMode" }
+        username: { type: string, minLength: 1, maxLength: 320 }
+        password: { type: string, format: password, minLength: 1, maxLength: 4096, writeOnly: true }
+        from_address: { type: string, format: email, maxLength: 320 }
+        from_name: { type: string, maxLength: 200 }
+        recipients: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, description: Recipient mailboxes must also be unique under case-insensitive comparison., items: { type: string, format: email, maxLength: 320 } }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+    NotificationEmailUpdateRequest:
+      type: object
+      required: [smtp_host, smtp_port, tls_mode, auth_mode, username, from_address, from_name, recipients, allow_private]
+      additionalProperties: false
+      properties:
+        smtp_host: { type: string, minLength: 1, maxLength: 253 }
+        smtp_port: { type: integer, minimum: 1, maximum: 65535 }
+        tls_mode: { $ref: "#/components/schemas/NotificationTLSMode" }
+        auth_mode: { $ref: "#/components/schemas/NotificationAuthMode" }
+        username: { type: string, minLength: 1, maxLength: 320 }
+        password: { type: string, format: password, minLength: 1, maxLength: 4096, writeOnly: true }
+        from_address: { type: string, format: email, maxLength: 320 }
+        from_name: { type: string, maxLength: 200 }
+        recipients: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, description: Recipient mailboxes must also be unique under case-insensitive comparison., items: { type: string, format: email, maxLength: 320 } }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+    NotificationChannelCreateRequest:
+      type: object
+      required: [kind, name, enabled, subscriptions, subject_template, body_template]
+      additionalProperties: false
+      properties:
+        kind: { $ref: "#/components/schemas/NotificationKind" }
+        name: { type: string, minLength: 1, x-max-bytes: 100 }
+        enabled: { type: boolean, description: Disabled updates skip probing and terminally fail pending deliveries without a live lease; live sends record their outcome and new claims exclude the channel. }
+        subscriptions: { type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
+        subject_template: { type: string, x-max-bytes: 4096 }
+        body_template: { type: string, x-max-bytes: 4096 }
+        webhook: { $ref: "#/components/schemas/NotificationWebhookCreateRequest" }
+        discord: { $ref: "#/components/schemas/NotificationDiscordCreateRequest" }
+        email: { $ref: "#/components/schemas/NotificationEmailCreateRequest" }
+      oneOf:
+        - required: [webhook]
+        - required: [discord]
+        - required: [email]
+    NotificationChannelUpdateRequest:
+      type: object
+      required: [kind, name, enabled, subscriptions, subject_template, body_template]
+      additionalProperties: false
+      properties:
+        kind: { $ref: "#/components/schemas/NotificationKind" }
+        name: { type: string, minLength: 1, x-max-bytes: 100 }
+        enabled: { type: boolean, description: Disabled updates skip probing and terminally fail pending deliveries without a live lease; live sends record their outcome and new claims exclude the channel. }
+        subscriptions: { type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
+        subject_template: { type: string, x-max-bytes: 4096 }
+        body_template: { type: string, x-max-bytes: 4096 }
+        webhook: { $ref: "#/components/schemas/NotificationWebhookUpdateRequest" }
+        discord: { $ref: "#/components/schemas/NotificationDiscordUpdateRequest" }
+        email: { $ref: "#/components/schemas/NotificationEmailUpdateRequest" }
+      oneOf:
+        - required: [webhook]
+        - required: [discord]
+        - required: [email]
+    NotificationCredentialPresence:
+      type: object
+      required: [url_set, shared_secret_set, password_set]
+      additionalProperties: false
+      properties:
+        url_set: { type: boolean }
+        shared_secret_set: { type: boolean }
+        password_set: { type: boolean }
+    NotificationChannel:
+      type: object
+      required: [id, kind, name, enabled, subscriptions, subject_template, body_template, allow_insecure, allow_private, credentials, consecutive_failures, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/NotificationKind" }
+        name: { type: string, minLength: 1, x-max-bytes: 100 }
+        enabled: { type: boolean, description: Whether the worker may resolve and send through this channel. }
+        subscriptions: { type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
+        subject_template: { type: string, x-max-bytes: 4096 }
+        body_template: { type: string, x-max-bytes: 4096 }
+        allow_insecure: { type: boolean }
+        allow_private: { type: boolean, description: "Allows private address ranges but never loopback, unspecified, multicast, link-local, or cloud-metadata destinations." }
+        smtp_host: { type: string, maxLength: 253 }
+        smtp_port: { type: integer, minimum: 1, maximum: 65535 }
+        tls_mode: { $ref: "#/components/schemas/NotificationTLSMode" }
+        auth_mode: { $ref: "#/components/schemas/NotificationAuthMode" }
+        username: { type: string, maxLength: 320 }
+        from_address: { type: string, format: email, maxLength: 320 }
+        from_name: { type: string, maxLength: 200 }
+        recipients: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, format: email, maxLength: 320 } }
+        credentials: { $ref: "#/components/schemas/NotificationCredentialPresence" }
+        degraded_at: { type: string, format: date-time }
+        consecutive_failures: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    NotificationChannelsResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/NotificationChannel" } }
+        next_cursor: { type: string, maxLength: 400 }
+    NotificationDelivery:
+      type: object
+      required: [id, event_type, request_id, status, attempts, last_error, next_attempt_at, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid, description: Stable delivery identifier used as the webhook idempotency key and email Message-ID local part. }
+        event_type: { $ref: "#/components/schemas/NotificationEventType" }
+        request_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, sent, failed] }
+        attempts: { type: integer, minimum: 0, maximum: 8 }
+        last_error: { type: string, maxLength: 512 }
+        next_attempt_at: { type: string, format: date-time }
+        sent_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    NotificationDeliveriesResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/NotificationDelivery" } }
+        next_cursor: { type: string, maxLength: 256 }
+    NotificationTestResponse:
+      type: object
+      required: [outcome]
+      additionalProperties: false
+      properties:
+        outcome: { type: string, const: sent }
     MetadataTitle:
       type: object
       required: [kind, provider, provider_id, title, year, overview, poster_path]
@@ -2707,6 +3014,7 @@ components:
         - download_manager_failure
         - download_manager_not_found
         - download_manager_in_use
+        - notification_channel_failure
     OIDCCallbackErrorCode:
       type: string
       description: Closed browser-facing OIDC callback failure code set.

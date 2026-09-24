@@ -40,13 +40,15 @@ func (*lifecycleStore) UsernamesByAccountIDs(context.Context, []string) (map[str
 	return map[string]string{}, nil
 }
 
-func (s *lifecycleStore) CreateRequest(_ context.Context, request core.MediaRequest, _ time.Time, _ bool) error {
+func (s *lifecycleStore) CreateRequest(
+	_ context.Context, request core.MediaRequest, _ time.Time, _ bool, _ ...core.RequestEvent,
+) error {
 	s.request = request
 	return nil
 }
 
 func (s *lifecycleStore) TransitionRequest(
-	_ context.Context, _ string, from, to core.RequestStatus, actorID, reason string, at time.Time,
+	_ context.Context, _ string, from, to core.RequestStatus, actorID, reason string, at time.Time, _ ...core.RequestEvent,
 ) (core.MediaRequest, error) {
 	if s.request.Status != from {
 		return core.MediaRequest{}, core.ErrInvalidTransition

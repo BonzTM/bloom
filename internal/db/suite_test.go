@@ -58,6 +58,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runStatsEngineTests(t, pool, driver)
 	runDownloadManagerEngineTests(t, pool, driver)
 	runRequestEngineTests(t, pool, driver, store)
+	runNotificationEngineTests(t, pool, driver, store)
 }
 
 func testOIDCFlowClaim(t *testing.T, pool *sql.DB, sessions scs.CtxStore, clock *testutil.FakeClock) {
@@ -1121,6 +1122,9 @@ ORDER BY tc.table_name, kcu.column_name`
 		"invite_redemptions:media_server_id:media_servers:id:RESTRICT",
 		"invites:created_by_account_id:accounts:id:RESTRICT",
 		"invites:media_server_id:media_servers:id:RESTRICT",
+		"notification_channel_subscriptions:channel_id:notification_channels:id:CASCADE",
+		"notification_outbox:channel_id:notification_channels:id:CASCADE",
+		"notification_outbox:event_id:notification_events:id:CASCADE",
 		"request_profile_tags:profile_id:request_profiles:id:CASCADE",
 		"request_seasons:request_id:requests:id:CASCADE",
 		"requests:decided_by_account_id:accounts:id:RESTRICT",

@@ -149,3 +149,9 @@ func (NopMetrics) ObserveMetadataRetry(string, string, string) {}
 
 // IncMediaRequest discards a media request outcome.
 func (NopMetrics) IncMediaRequest(string, string) {}
+
+// ObserveNotificationDelivery discards a notification delivery outcome.
+func (NopMetrics) ObserveNotificationDelivery(string, string) {}
+
+// SetNotificationOutboxDepth discards the current pending delivery count.
+func (NopMetrics) SetNotificationOutboxDepth(int64) {}

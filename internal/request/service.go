@@ -126,14 +126,19 @@ func (s *Service) Create(ctx context.Context, requester core.Account, input Crea
 	if err != nil {
 		return core.MediaRequest{}, err
 	}
-	if err := s.writer.CreateRequest(ctx, request, request.CreatedAt, autoApprove); err != nil {
+	events := []core.RequestEvent{requestEvent(request, core.RequestEventCreated, requester.ID)}
+	if autoApprove {
+		events = append(events, requestEvent(request, core.RequestEventApproved, requester.ID))
+	}
+	if err := s.writer.CreateRequest(ctx, request, request.CreatedAt, autoApprove, events...); err != nil {
 		s.metrics.IncMediaRequest(string(request.Kind), requestOutcome(err))
 		return core.MediaRequest{}, fmt.Errorf("create request: %w", err)
 	}
 	s.metrics.IncMediaRequest(string(request.Kind), string(request.Status))
-	s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventCreated, requester.ID))
+	for _, event := range events {
+		s.events.PublishRequestEvent(ctx, event)
+	}
 	if autoApprove {
-		s.events.PublishRequestEvent(ctx, requestEvent(request, core.RequestEventApproved, requester.ID))
 		s.enqueue(request.ID)
 	}
 	return request, nil
@@ -273,18 +278,23 @@ func (s *Service) Decide(ctx context.Context, actorID, id string, approve bool, 
 	if from != core.RequestPending && (!approve || from != core.RequestFailed) {
 		return core.MediaRequest{}, core.ErrInvalidTransition
 	}
-	request, err := s.writer.TransitionRequest(ctx, id, from, to, actorID, reason, core.NormalizeTime(s.clock.Now()))
+	at := core.NormalizeTime(s.clock.Now())
+	eventType := core.RequestEventDeclined
+	if approve {
+		eventType = core.RequestEventApproved
+	}
+	event := requestEvent(current, eventType, actorID)
+	event.Status, event.Reason, event.At = to, reason, at
+	request, err := s.writer.TransitionRequest(ctx, id, from, to, actorID, reason, at, event)
 	if err != nil {
 		return core.MediaRequest{}, fmt.Errorf("decide request: %w", err)
 	}
 	request.RequesterUsername = current.RequesterUsername
 	s.metrics.IncMediaRequest(string(request.Kind), string(to))
-	eventType := core.RequestEventDeclined
 	if approve {
-		eventType = core.RequestEventApproved
 		s.enqueue(request.ID)
 	}
-	s.events.PublishRequestEvent(ctx, requestEvent(request, eventType, actorID))
+	s.events.PublishRequestEvent(ctx, event)
 	return request, nil
 }
 
@@ -431,7 +441,15 @@ func (nopEvents) PublishRequestEvent(context.Context, core.RequestEvent) {}
 
 func requestEvent(request core.MediaRequest, eventType core.RequestEventType, actorID string) core.RequestEvent {
 	return core.RequestEvent{
-		Type: eventType, RequestID: request.ID, ActorID: actorID,
-		Kind: request.Kind, Title: request.Title, At: request.UpdatedAt,
+		Type: eventType, RequestID: request.ID, RequesterID: request.RequesterID, ActorID: actorID,
+		Kind: request.Kind, Title: request.Title, Status: request.Status,
+		Reason: requestEventReason(request), At: request.UpdatedAt,
 	}
+}
+
+func requestEventReason(request core.MediaRequest) string {
+	if request.FailureReason != "" {
+		return request.FailureReason
+	}
+	return request.DecisionReason
 }
