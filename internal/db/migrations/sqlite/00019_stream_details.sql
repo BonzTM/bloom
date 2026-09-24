@@ -47,10 +47,13 @@ ALTER TABLE watch_positions ADD COLUMN stream_is_audio_direct INTEGER
     CHECK (stream_is_audio_direct IS NULL OR stream_is_audio_direct IN (0, 1));
 ALTER TABLE watch_positions ADD COLUMN stream_transcode_reasons TEXT
     CHECK (stream_transcode_reasons IS NULL OR length(CAST(stream_transcode_reasons AS BLOB)) <= 8192);
+ALTER TABLE watch_positions ADD COLUMN is_transition INTEGER NOT NULL DEFAULT 0
+    CHECK (is_transition IN (0, 1));
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
+ALTER TABLE watch_positions DROP COLUMN is_transition;
 ALTER TABLE watch_positions DROP COLUMN stream_transcode_reasons;
 ALTER TABLE watch_positions DROP COLUMN stream_is_audio_direct;
 ALTER TABLE watch_positions DROP COLUMN stream_is_video_direct;

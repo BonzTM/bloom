@@ -727,7 +727,7 @@ const listWatchPositions = `-- name: ListWatchPositions :many
 SELECT watch_id, observed_at, position_ms, paused, play_method, source,
        stream_container, stream_video_codec, stream_audio_codec, stream_bitrate,
        stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
-       stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons
+       stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons, is_transition
 FROM watch_positions
 WHERE watch_id = ?1
 ORDER BY observed_at DESC
@@ -761,6 +761,7 @@ func (q *Queries) ListWatchPositions(ctx context.Context, watchID string) ([]Wat
 			&i.StreamIsVideoDirect,
 			&i.StreamIsAudioDirect,
 			&i.StreamTranscodeReasons,
+			&i.IsTransition,
 		); err != nil {
 			return nil, err
 		}
@@ -782,7 +783,7 @@ WHERE watch_positions.watch_id = ?1
       SELECT kept.observed_at
       FROM watch_positions AS kept
       WHERE kept.watch_id = ?1
-      ORDER BY kept.observed_at DESC
+      ORDER BY kept.is_transition DESC, kept.observed_at DESC
       LIMIT 512
   )
 `
@@ -938,7 +939,7 @@ INSERT INTO watch_positions (
     watch_id, observed_at, position_ms, paused, play_method, source,
     stream_container, stream_video_codec, stream_audio_codec, stream_bitrate,
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
-    stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons
+    stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons, is_transition
 )
 VALUES (
     ?1, ?2, ?3, ?4,
@@ -946,7 +947,7 @@ VALUES (
     ?8, ?9, ?10,
     ?11, ?12, ?13,
     ?14, ?15,
-    ?16, ?17
+    ?16, ?17, ?18
 )
 ON CONFLICT (watch_id, observed_at) DO UPDATE SET
     position_ms = excluded.position_ms,
@@ -963,7 +964,8 @@ ON CONFLICT (watch_id, observed_at) DO UPDATE SET
     stream_audio_channels = excluded.stream_audio_channels,
     stream_is_video_direct = excluded.stream_is_video_direct,
     stream_is_audio_direct = excluded.stream_is_audio_direct,
-    stream_transcode_reasons = excluded.stream_transcode_reasons
+    stream_transcode_reasons = excluded.stream_transcode_reasons,
+    is_transition = excluded.is_transition
 `
 
 type UpsertWatchPositionParams struct {
@@ -984,6 +986,7 @@ type UpsertWatchPositionParams struct {
 	StreamIsVideoDirect       sql.NullInt64
 	StreamIsAudioDirect       sql.NullInt64
 	StreamTranscodeReasons    sql.NullString
+	IsTransition              int64
 }
 
 func (q *Queries) UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error {
@@ -1005,6 +1008,7 @@ func (q *Queries) UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositi
 		arg.StreamIsVideoDirect,
 		arg.StreamIsAudioDirect,
 		arg.StreamTranscodeReasons,
+		arg.IsTransition,
 	)
 	return err
 }

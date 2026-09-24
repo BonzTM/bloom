@@ -55,6 +55,12 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 			t.Fatalf("ListWatchPositions deleted watch = %v, want not found", err)
 		}
 	})
+	t.Run("transitions outlive position-only samples", func(t *testing.T) {
+		testPlaybackTransitionRetention(t, pool, driver)
+	})
+	t.Run("framerate hundredths round trip", func(t *testing.T) {
+		testPlaybackFramerateRoundTrip(t, pool, driver)
+	})
 	t.Run("restart restores large open and exact recent sets", func(t *testing.T) {
 		testLargePlaybackRestart(t, pool, driver)
 	})
@@ -67,6 +73,90 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("library backfill keyset reaches later resolvable items", func(t *testing.T) {
 		testPlaybackLibraryBackfillKeyset(t, pool, driver)
 	})
+}
+
+func testPlaybackFramerateRoundTrip(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Framerate")
+	store := newPlaybackTestStore(t, pool, driver)
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 22, 0, 0, 0, time.UTC))
+	want := []float64{20.06, 29.97, 23.98}
+	for index, framerate := range want {
+		watch := playbackStoreWatch(t, server.ID, now.Add(time.Duration(index)*time.Second))
+		watch.MediaUserID = fmt.Sprintf("framerate-user-%d", index)
+		watch.Stream.Framerate = framerate
+		if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+			t.Fatalf("SaveWatches(%v): %v", framerate, err)
+		}
+	}
+	watches, err := store.LoadOpenWatches(t.Context(), server.ID)
+	if err != nil || len(watches) != len(want) {
+		t.Fatalf("LoadOpenWatches = %d, %v", len(watches), err)
+	}
+	got := make(map[float64]bool, len(watches))
+	for _, watch := range watches {
+		got[watch.Stream.Framerate] = true
+	}
+	for _, framerate := range want {
+		if !got[framerate] {
+			t.Errorf("round trip omitted framerate %v: %v", framerate, got)
+		}
+	}
+}
+
+func testPlaybackTransitionRetention(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Transitions")
+	store := newPlaybackTestStore(t, pool, driver)
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 21, 0, 0, 0, time.UTC))
+	watch := playbackStoreWatch(t, server.ID, now)
+	start := playbackPosition(watch.ID, now, watch.LastPosition)
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch, Position: &start}}); err != nil {
+		t.Fatalf("SaveWatches(start): %v", err)
+	}
+	transitionAt := now.Add(time.Second)
+	transition := playbackPosition(watch.ID, transitionAt, watch.LastPosition+time.Second)
+	transition.IsTransition = true
+	watch.LastSeenAt, watch.UpdatedAt = transitionAt, transitionAt
+	watch.LastPosition = transition.Position
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch, Position: &transition}}); err != nil {
+		t.Fatalf("SaveWatches(transition): %v", err)
+	}
+	writeLaterPlaybackPositions(t, store, watch, transitionAt)
+	positions, err := store.ListWatchPositions(t.Context(), watch.ID)
+	if err != nil || len(positions) != core.MaxWatchPositions {
+		t.Fatalf("retained positions = %d, %v", len(positions), err)
+	}
+	found := false
+	for _, position := range positions {
+		if position.ObservedAt.Equal(transitionAt) {
+			found = position.IsTransition
+		}
+	}
+	if !found {
+		t.Fatal("older transition sample was trimmed before position-only samples")
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, core.MaxWatchPositions)
+}
+
+func writeLaterPlaybackPositions(
+	t *testing.T,
+	store core.PlaybackStore,
+	watch core.PlaybackWatch,
+	start time.Time,
+) {
+	t.Helper()
+	mutations := make([]core.PlaybackMutation, 0, core.MaxWatchPositions)
+	for index := 1; index <= core.MaxWatchPositions; index++ {
+		observedAt := start.Add(time.Duration(index) * time.Second)
+		watch.LastSeenAt, watch.UpdatedAt = observedAt, observedAt
+		watch.LastPosition += time.Second
+		position := playbackPosition(watch.ID, observedAt, watch.LastPosition)
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch, Position: &position})
+	}
+	if err := store.SaveWatches(t.Context(), mutations); err != nil {
+		t.Fatalf("SaveWatches(later positions): %v", err)
+	}
 }
 
 type keysetResolverSource struct {

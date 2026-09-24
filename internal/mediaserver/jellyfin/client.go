@@ -476,17 +476,24 @@ func mapStreamDetails(value jellyfinapi.SessionInfoDto) (*core.StreamDetails, er
 	if value.TranscodingInfo != nil {
 		return mapTranscodingDetails(*value.TranscodingInfo)
 	}
-	stream, err := mapDirectStreamDetails(value.NowPlayingItem)
+	stream, err := mapDirectStreamDetails(value.NowPlayingItem, value.PlayState)
 	if err != nil {
 		return nil, err
-	}
-	if stream.Container == "" && stream.VideoCodec == "" && stream.AudioCodec == "" {
-		return nil, nil
 	}
 	if !stream.Valid() {
 		return nil, errors.New("session direct stream details are out of range")
 	}
+	if streamDetailsEmpty(stream) {
+		return nil, nil
+	}
 	return &stream, nil
+}
+
+func streamDetailsEmpty(stream core.StreamDetails) bool {
+	return stream.Container == "" && stream.VideoCodec == "" && stream.AudioCodec == "" &&
+		stream.Bitrate == 0 && stream.Width == 0 && stream.Height == 0 && stream.Framerate == 0 &&
+		stream.AudioChannels == 0 && stream.IsVideoDirect == nil && stream.IsAudioDirect == nil &&
+		len(stream.TranscodeReasons) == 0
 }
 
 func mapTranscodingDetails(info jellyfinapi.TranscodingInfo) (*core.StreamDetails, error) {
@@ -508,7 +515,10 @@ func mapTranscodingDetails(info jellyfinapi.TranscodingInfo) (*core.StreamDetail
 	return stream, nil
 }
 
-func mapDirectStreamDetails(item *jellyfinapi.BaseItemDto) (core.StreamDetails, error) {
+func mapDirectStreamDetails(
+	item *jellyfinapi.BaseItemDto,
+	playState *jellyfinapi.PlayerStateInfo,
+) (core.StreamDetails, error) {
 	if item == nil {
 		return core.StreamDetails{}, nil
 	}
@@ -519,18 +529,49 @@ func mapDirectStreamDetails(item *jellyfinapi.BaseItemDto) (core.StreamDetails, 
 	if len(*item.MediaStreams) > maxSessionMediaStreams {
 		return core.StreamDetails{}, errors.New("session media stream count exceeds limit")
 	}
-	for _, media := range *item.MediaStreams {
+	var audioIndex *int32
+	if playState != nil {
+		audioIndex = playState.AudioStreamIndex
+	}
+	video, audio := selectDirectStreams(*item.MediaStreams, audioIndex)
+	if video != nil {
+		stream.VideoCodec = stringValue(video.Codec)
+		stream.Bitrate = int64Value(video.BitRate)
+		stream.Width = int32Value(video.Width)
+		stream.Height = int32Value(video.Height)
+		stream.Framerate = roundedFramerate(directVideoFramerate(video))
+	}
+	if audio != nil {
+		stream.AudioCodec = stringValue(audio.Codec)
+		stream.AudioChannels = int32Value(audio.Channels)
+		if video == nil {
+			stream.Bitrate = int64Value(audio.BitRate)
+		}
+	}
+	return stream, nil
+}
+
+func selectDirectStreams(
+	streams []jellyfinapi.MediaStream,
+	audioIndex *int32,
+) (*jellyfinapi.MediaStream, *jellyfinapi.MediaStream) {
+	var video, selectedAudio, defaultAudio *jellyfinapi.MediaStream
+	for index := range streams {
+		media := &streams[index]
 		if media.Type == nil {
 			continue
 		}
 		switch *media.Type {
 		case jellyfinapi.MediaStreamTypeVideo:
-			if stream.VideoCodec == "" {
-				stream.VideoCodec = stringValue(media.Codec)
+			if video == nil {
+				video = media
 			}
 		case jellyfinapi.MediaStreamTypeAudio:
-			if boolValue(media.IsDefault) && stream.AudioCodec == "" {
-				stream.AudioCodec = stringValue(media.Codec)
+			if defaultAudio == nil && boolValue(media.IsDefault) {
+				defaultAudio = media
+			}
+			if selectedAudio == nil && audioIndex != nil && media.Index != nil && *media.Index == *audioIndex {
+				selectedAudio = media
 			}
 		case jellyfinapi.MediaStreamTypeData, jellyfinapi.MediaStreamTypeEmbeddedImage,
 			jellyfinapi.MediaStreamTypeLyric, jellyfinapi.MediaStreamTypeSubtitle:
@@ -539,7 +580,20 @@ func mapDirectStreamDetails(item *jellyfinapi.BaseItemDto) (core.StreamDetails, 
 			continue
 		}
 	}
-	return stream, nil
+	if selectedAudio == nil {
+		selectedAudio = defaultAudio
+	}
+	return video, selectedAudio
+}
+
+func directVideoFramerate(stream *jellyfinapi.MediaStream) *float32 {
+	if stream.ReferenceFrameRate != nil {
+		return stream.ReferenceFrameRate
+	}
+	if stream.AverageFrameRate != nil {
+		return stream.AverageFrameRate
+	}
+	return stream.RealFrameRate
 }
 
 func int32Value(value *int32) int32 {

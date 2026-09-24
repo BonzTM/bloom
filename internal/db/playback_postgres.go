@@ -157,6 +157,7 @@ func savePostgresPosition(
 		StreamAudioChannels:       postgresNullInt32(stream.audioChannels),
 		StreamIsVideoDirect:       stream.videoDirect, StreamIsAudioDirect: stream.audioDirect,
 		StreamTranscodeReasons: stream.reasons,
+		IsTransition:           position.IsTransition,
 	}
 	if err := queries.UpsertWatchPosition(ctx, params); err != nil {
 		return playbackStoreError("upsert playback position", err)
@@ -467,6 +468,7 @@ func postgresPosition(row postgres.WatchPosition) (core.PlaybackPosition, error)
 		WatchID: row.WatchID, ObservedAt: core.NormalizeTime(row.ObservedAt),
 		Position: time.Duration(row.PositionMs) * time.Millisecond, Paused: row.Paused,
 		PlayMethod: core.PlayMethod(row.PlayMethod), Stream: stream, Source: core.WatchSource(row.Source),
+		IsTransition: row.IsTransition,
 	}, nil
 }
 

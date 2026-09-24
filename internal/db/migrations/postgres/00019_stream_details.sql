@@ -26,12 +26,14 @@ ALTER TABLE watch_positions
     ADD COLUMN stream_audio_channels INTEGER CHECK (stream_audio_channels IS NULL OR stream_audio_channels BETWEEN 0 AND 64),
     ADD COLUMN stream_is_video_direct BOOLEAN,
     ADD COLUMN stream_is_audio_direct BOOLEAN,
-    ADD COLUMN stream_transcode_reasons TEXT COLLATE "C" CHECK (stream_transcode_reasons IS NULL OR octet_length(stream_transcode_reasons) <= 8192);
+    ADD COLUMN stream_transcode_reasons TEXT COLLATE "C" CHECK (stream_transcode_reasons IS NULL OR octet_length(stream_transcode_reasons) <= 8192),
+    ADD COLUMN is_transition BOOLEAN NOT NULL DEFAULT FALSE;
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 ALTER TABLE watch_positions
+    DROP COLUMN is_transition,
     DROP COLUMN stream_transcode_reasons,
     DROP COLUMN stream_is_audio_direct,
     DROP COLUMN stream_is_video_direct,

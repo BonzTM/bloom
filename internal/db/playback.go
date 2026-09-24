@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/BonzTM/bloom/internal/config"
@@ -80,7 +81,7 @@ func encodeStreamDetails(stream *core.StreamDetails) (storedStreamDetails, error
 		audioCodec: optionalStreamString(stream.AudioCodec),
 		bitrate:    optionalPositiveInt64(stream.Bitrate), width: optionalPositiveInt64(int64(stream.Width)),
 		height:        optionalPositiveInt64(int64(stream.Height)),
-		framerate:     optionalPositiveInt64(int64(stream.Framerate * 100)),
+		framerate:     optionalPositiveInt64(int64(math.Round(stream.Framerate * 100))),
 		audioChannels: optionalPositiveInt64(int64(stream.AudioChannels)),
 		videoDirect:   nullableBool(stream.IsVideoDirect), audioDirect: nullableBool(stream.IsAudioDirect),
 		reasons: reasons,

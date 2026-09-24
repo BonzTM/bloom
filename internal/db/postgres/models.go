@@ -324,6 +324,7 @@ type WatchPosition struct {
 	StreamIsVideoDirect       sql.NullBool
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
+	IsTransition              bool
 }
 
 type WatchSegment struct {

@@ -61,7 +61,7 @@ func (s StreamDetails) Valid() bool {
 		len(s.TranscodeReasons) > MaxStreamTranscodeReasons {
 		return false
 	}
-	if math.Round(s.Framerate*100) != s.Framerate*100 {
+	if !hasHundredthPrecision(s.Framerate) {
 		return false
 	}
 	for _, reason := range s.TranscodeReasons {
@@ -70,6 +70,11 @@ func (s StreamDetails) Valid() bool {
 		}
 	}
 	return true
+}
+
+func hasHundredthPrecision(value float64) bool {
+	scaled := value * 100
+	return math.Abs(scaled-math.Round(scaled)) <= 1e-9
 }
 
 func validStreamText(value string) bool {
@@ -215,13 +220,14 @@ func (w PlaybackWatch) ActiveTimeAt(now time.Time) time.Duration {
 
 // PlaybackPosition is one bounded progress and delivery-method sample.
 type PlaybackPosition struct {
-	WatchID    string
-	ObservedAt time.Time
-	Position   time.Duration
-	Paused     bool
-	PlayMethod PlayMethod
-	Stream     *StreamDetails
-	Source     WatchSource
+	WatchID      string
+	ObservedAt   time.Time
+	Position     time.Duration
+	Paused       bool
+	PlayMethod   PlayMethod
+	Stream       *StreamDetails
+	Source       WatchSource
+	IsTransition bool
 }
 
 // PlaybackMutation persists one complete watch snapshot and its transition deltas.
@@ -578,6 +584,7 @@ func updateTrackedWatch(
 ) PlaybackMutation {
 	wasPlaying := tracked.watch.State == WatchPlaying
 	recordPosition := sampleChanged(tracked.watch, session)
+	isTransition := transitionChanged(tracked.watch, session)
 	if wasPlaying && !now.Before(tracked.watch.LastSeenAt) {
 		tracked.watch.ActiveTime += now.Sub(tracked.watch.LastSeenAt)
 	}
@@ -587,7 +594,7 @@ func updateTrackedWatch(
 	tracked.missed = 0
 	mutation := PlaybackMutation{Watch: tracked.watch}
 	if recordPosition {
-		mutation = positionMutation(tracked.watch, now, source, session)
+		mutation = positionMutation(tracked.watch, now, source, session, isTransition)
 	}
 	if wasPlaying && session.Paused {
 		mutation.SegmentEnd = timePointer(now)
@@ -605,12 +612,13 @@ func reopenTrackedWatch(
 	tracked *trackedWatch,
 	session PlaybackSession,
 ) PlaybackMutation {
+	isTransition := transitionChanged(tracked.watch, session)
 	applySession(&tracked.watch, session)
 	tracked.watch.LastSeenAt = now
 	tracked.watch.EndedAt = nil
 	tracked.watch.UpdatedAt = now
 	tracked.missed = 0
-	mutation := positionMutation(tracked.watch, now, source, session)
+	mutation := positionMutation(tracked.watch, now, source, session, isTransition)
 	if !session.Paused {
 		mutation.SegmentStart = timePointer(now)
 		mutation.SegmentSource = source
@@ -659,7 +667,7 @@ func mutationForStart(
 	source WatchSource,
 	session PlaybackSession,
 ) PlaybackMutation {
-	mutation := positionMutation(watch, now, source, session)
+	mutation := positionMutation(watch, now, source, session, false)
 	if !session.Paused {
 		mutation.SegmentStart = timePointer(now)
 		mutation.SegmentSource = source
@@ -672,18 +680,22 @@ func positionMutation(
 	now time.Time,
 	source WatchSource,
 	session PlaybackSession,
+	isTransition bool,
 ) PlaybackMutation {
 	position := PlaybackPosition{
 		WatchID: watch.ID, ObservedAt: now, Position: session.Position,
 		Paused: session.Paused, PlayMethod: session.PlayMethod,
-		Stream: cloneStreamDetails(session.Stream), Source: source,
+		Stream: cloneStreamDetails(session.Stream), Source: source, IsTransition: isTransition,
 	}
 	return PlaybackMutation{Watch: watch, Position: &position}
 }
 
 func sampleChanged(watch PlaybackWatch, session PlaybackSession) bool {
-	return watch.LastPosition != session.Position ||
-		(watch.State == WatchPaused) != session.Paused ||
+	return watch.LastPosition != session.Position || transitionChanged(watch, session)
+}
+
+func transitionChanged(watch PlaybackWatch, session PlaybackSession) bool {
+	return (watch.State == WatchPaused) != session.Paused ||
 		watch.PlayMethod != session.PlayMethod ||
 		!streamDetailsEqual(watch.Stream, session.Stream)
 }

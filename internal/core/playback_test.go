@@ -102,6 +102,10 @@ func TestPlaybackTrackerKeepsOpeningSourceAcrossMixedObservations(t *testing.T) 
 		resume.Position.Source != core.WatchSourcePoll {
 		t.Fatalf("row sources = start %+v, pause %+v, resume %+v", start, pause, resume)
 	}
+	if start.Position.IsTransition || !pause.Position.IsTransition || !resume.Position.IsTransition {
+		t.Fatalf("transition markers = start %t, pause %t, resume %t",
+			start.Position.IsTransition, pause.Position.IsTransition, resume.Position.IsTransition)
+	}
 }
 
 func TestPlaybackTrackerSamplesStreamChangesWithoutDuplicateUnchangedSamples(t *testing.T) {
@@ -127,12 +131,13 @@ func TestPlaybackTrackerSamplesStreamChangesWithoutDuplicateUnchangedSamples(t *
 	session.Stream = testTranscodeStreamDetails("h264")
 	transcoded := onlyMutation(t, observe(t, tracker, ids, now.Add(2*time.Second), session))
 	if transcoded.Position == nil || transcoded.Position.PlayMethod != core.PlayMethodTranscode ||
-		transcoded.Position.Stream.VideoCodec != "h264" {
+		transcoded.Position.Stream.VideoCodec != "h264" || !transcoded.Position.IsTransition {
 		t.Fatalf("transcode sample = %+v", transcoded.Position)
 	}
 	session.Stream = testTranscodeStreamDetails("hevc")
 	codecChanged := onlyMutation(t, observe(t, tracker, ids, now.Add(3*time.Second), session))
-	if codecChanged.Position == nil || codecChanged.Position.Stream.VideoCodec != "hevc" {
+	if codecChanged.Position == nil || codecChanged.Position.Stream.VideoCodec != "hevc" ||
+		!codecChanged.Position.IsTransition {
 		t.Fatalf("codec-change sample = %+v", codecChanged.Position)
 	}
 }

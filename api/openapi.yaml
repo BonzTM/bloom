@@ -1310,7 +1310,8 @@ paths:
     get:
       tags: [playback]
       operationId: listPlaybackWatchPositions
-      summary: Return the bounded stream and position sample series for one watch, newest first.
+      summary: Return up to 512 retained stream and position samples for one watch, newest first.
+      description: Pause, play-method, and stream transitions are retained ahead of position-only samples.
       security:
         - sessionCookie: []
       parameters:

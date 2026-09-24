@@ -75,13 +75,60 @@ func TestListSessionsMapsTranscodeStreamDetails(t *testing.T) {
 }
 
 func TestListSessionsMapsDirectPlayMediaStreams(t *testing.T) {
-	body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie","Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"hevc"},{"Type":"Audio","Codec":"aac","IsDefault":false},{"Type":"Audio","Codec":"opus","IsDefault":true}]},"PlayState":{"PlayMethod":"DirectPlay"}}]`
+	body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie","Container":"mkv","MediaStreams":[{"Type":"Video","Index":0,"Codec":"hevc","BitRate":7500000,"Width":3840,"Height":2160,"AverageFrameRate":20.06},{"Type":"Audio","Index":1,"Codec":"aac","Channels":2,"IsDefault":false},{"Type":"Audio","Index":2,"Codec":"opus","Channels":6,"IsDefault":true}]},"PlayState":{"PlayMethod":"DirectPlay","AudioStreamIndex":99}}]`
 	sessions := listSessionFixture(t, body)
 	stream := sessions[0].Stream
 	if stream == nil || stream.Container != "mkv" || stream.VideoCodec != "hevc" ||
-		stream.AudioCodec != "opus" || stream.IsVideoDirect != nil || stream.IsAudioDirect != nil ||
+		stream.AudioCodec != "opus" || stream.Bitrate != 7_500_000 ||
+		stream.Width != 3840 || stream.Height != 2160 || stream.Framerate != 20.06 ||
+		stream.AudioChannels != 6 || stream.IsVideoDirect != nil || stream.IsAudioDirect != nil ||
 		len(stream.TranscodeReasons) != 0 {
 		t.Fatalf("direct-play stream = %+v", stream)
+	}
+}
+
+func TestListSessionsSelectedAudioTrackChangeCreatesSample(t *testing.T) {
+	first := listSessionFixture(t, directPlaySessionBody(1))
+	second := listSessionFixture(t, directPlaySessionBody(2))
+	tracker, err := core.NewPlaybackTracker("server", core.PlaybackTrackerConfig{
+		MissedPolls: 3, ResumeWindow: time.Minute,
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newID := func() (string, error) { return "33333333-3333-4333-8333-333333333333", nil }
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	mutations, err := tracker.Observe(now, core.WatchSourcePoll, first, newID)
+	if err != nil || len(mutations) != 1 || mutations[0].Position == nil ||
+		mutations[0].Position.Stream == nil || mutations[0].Position.Stream.AudioCodec != "aac" {
+		t.Fatalf("first observation = %+v, %v", mutations, err)
+	}
+	mutations, err = tracker.Observe(now.Add(time.Second), core.WatchSourcePoll, second, newID)
+	if err != nil || len(mutations) != 1 || mutations[0].Position == nil ||
+		mutations[0].Position.Stream == nil || mutations[0].Position.Stream.AudioCodec != "opus" {
+		t.Fatalf("switched observation = %+v, %v", mutations, err)
+	}
+}
+
+func directPlaySessionBody(audioIndex int) string {
+	return fmt.Sprintf(`[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie","Container":"mkv","MediaStreams":[{"Type":"Video","Index":0,"Codec":"hevc"},{"Type":"Audio","Index":1,"Codec":"aac","IsDefault":true},{"Type":"Audio","Index":2,"Codec":"opus","IsDefault":false}]},"PlayState":{"PlayMethod":"DirectPlay","AudioStreamIndex":%d}}]`, audioIndex)
+}
+
+func TestListSessionsRoundsFrameratesToHundredths(t *testing.T) {
+	tests := []struct {
+		framerate float64
+		want      float64
+	}{
+		{framerate: 20.06, want: 20.06},
+		{framerate: 29.97, want: 29.97},
+		{framerate: 23.976, want: 23.98},
+	}
+	for _, testCase := range tests {
+		body := fmt.Sprintf(`[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie"},"PlayState":{"PlayMethod":"Transcode"},"TranscodingInfo":{"Framerate":%v}}]`, testCase.framerate)
+		stream := listSessionFixture(t, body)[0].Stream
+		if stream == nil || stream.Framerate != testCase.want {
+			t.Errorf("framerate %v mapped to %+v, want %v", testCase.framerate, stream, testCase.want)
+		}
 	}
 }
 
@@ -105,19 +152,28 @@ func TestListSessionsRejectsMalformedStreamDetails(t *testing.T) {
 }
 
 func TestListSessionsRejectsMalformedDirectPlayStreamDetails(t *testing.T) {
-	tests := []string{
-		`"Container":"bad\u0085"`,
-		`"Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"` +
-			strings.Repeat("x", core.MaxStreamTextBytes+1) + `"}]`,
+	tests := []struct {
+		name   string
+		fields string
+	}{
+		{name: "container control", fields: `"Container":"bad\u0085"`},
+		{name: "codec length", fields: `"Container":"mkv","MediaStreams":[{"Type":"Video","Codec":"` +
+			strings.Repeat("x", core.MaxStreamTextBytes+1) + `"}]`},
+		{name: "negative bitrate", fields: `"MediaStreams":[{"Type":"Video","BitRate":-1}]`},
+		{name: "width", fields: `"MediaStreams":[{"Type":"Video","Width":65536}]`},
+		{name: "framerate", fields: `"MediaStreams":[{"Type":"Video","AverageFrameRate":1001}]`},
+		{name: "channels", fields: `"MediaStreams":[{"Type":"Audio","Index":1,"IsDefault":true,"Channels":65}]`},
 	}
-	for _, fields := range tests {
-		body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie",` + fields + `},"PlayState":{"PlayMethod":"DirectPlay"}}]`
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = fmt.Fprint(w, body)
-		}))
-		_, err := newTestClient(t, server, nil).ListSessions(t.Context())
-		server.Close()
-		assertMediaError(t, err, core.MediaServerMalformed)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie",` + testCase.fields + `},"PlayState":{"PlayMethod":"DirectPlay"}}]`
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, body)
+			}))
+			_, err := newTestClient(t, server, nil).ListSessions(t.Context())
+			server.Close()
+			assertMediaError(t, err, core.MediaServerMalformed)
+		})
 	}
 }
 

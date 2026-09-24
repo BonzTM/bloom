@@ -323,6 +323,7 @@ type WatchPosition struct {
 	StreamIsVideoDirect       sql.NullInt64
 	StreamIsAudioDirect       sql.NullInt64
 	StreamTranscodeReasons    sql.NullString
+	IsTransition              int64
 }
 
 type WatchSegment struct {

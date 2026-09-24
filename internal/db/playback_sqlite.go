@@ -156,6 +156,7 @@ func saveSQLitePosition(
 		StreamFramerateHundredths: stream.framerate, StreamAudioChannels: stream.audioChannels,
 		StreamIsVideoDirect: sqliteNullBool(stream.videoDirect),
 		StreamIsAudioDirect: sqliteNullBool(stream.audioDirect), StreamTranscodeReasons: stream.reasons,
+		IsTransition: boolToInt64(position.IsTransition),
 	}
 	if err := queries.UpsertWatchPosition(ctx, params); err != nil {
 		return playbackStoreError("upsert playback position", err)
@@ -522,6 +523,7 @@ func sqlitePosition(row sqlite.WatchPosition) (core.PlaybackPosition, error) {
 		WatchID: row.WatchID, ObservedAt: observedAt,
 		Position: time.Duration(row.PositionMs) * time.Millisecond, Paused: row.Paused != 0,
 		PlayMethod: core.PlayMethod(row.PlayMethod), Stream: stream, Source: core.WatchSource(row.Source),
+		IsTransition: row.IsTransition != 0,
 	}, nil
 }
 
