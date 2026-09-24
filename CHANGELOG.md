@@ -32,6 +32,8 @@ contracts) gets an entry here.
   commit, retry uncertain outcomes idempotently with the original failure ID,
   and contain reconciliation provisioner panics as generic retry or terminal
   outcomes after releasing operation resources.
+- The invites page lists servers through `GET /api/v1/invites/servers`, so an
+  inviter without `admin.settings` can choose a server.
 
 - OIDC configuration now bounds client identifiers, client secrets, scopes,
   claim names, role-map claim keys, and the public URL, and rejects malformed
