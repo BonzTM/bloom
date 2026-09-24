@@ -415,6 +415,10 @@ administration area. Anyone who may request media searches, browses
 posters, picks seasons, and follows their own requests under Requests in the
 main navigation. Posters load from `image.tmdb.org`, the only third-party
 origin the page allows for images.
+Administrators register webhook, Discord, and email channels under
+Notifications, choose the request events each one receives, send a test
+message, and read each channel's delivery log with its retries and last
+error.
 
 ### Back up the master secret
 

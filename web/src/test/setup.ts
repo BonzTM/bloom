@@ -4,6 +4,7 @@ import { cleanup } from "@testing-library/react";
 import {
   resetMockInvites,
   resetMockMediaServers,
+  resetMockNotifications,
   resetMockRequests,
   resetMockRoleQuotas,
   resetMockSession,
@@ -22,6 +23,7 @@ afterEach(() => {
   resetMockInvites();
   resetMockRequests();
   resetMockRoleQuotas();
+  resetMockNotifications();
 });
 
 afterAll(() => {

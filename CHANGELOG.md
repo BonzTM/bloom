@@ -76,6 +76,10 @@ contracts) gets an entry here.
   metrics and history, and SQLite/PostgreSQL migration `00015`.
 - Notification retention and worker interval settings:
   `BLOOM_NOTIFY_RETENTION` and `BLOOM_NOTIFY_WORKER_INTERVAL`.
+- A Notifications page for accounts with `admin.settings`: register webhook,
+  Discord, and email channels, pick the request events each receives, keep
+  stored secrets by leaving the fields blank on edit, send a test message,
+  and read each channel's delivery log with attempts and the last error.
 
 - A Statistics page for accounts with `stats.read.all`: totals, most-watched
   movies and series, most active people, client, device, and play-method

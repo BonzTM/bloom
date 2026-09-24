@@ -1120,3 +1120,19 @@ table time {
   text-align: center;
   text-transform: uppercase;
 }
+
+.template-fields {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.template-fields summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.template-fields > div,
+.template-fields > p {
+  margin-top: var(--space-2);
+}

@@ -38,6 +38,9 @@ const LazyDownloadManagersRoute = lazy(
 const LazyRequestProfilesRoute = lazy(
   () => import("../routes/request-profiles-route.js"),
 );
+const LazyNotificationChannelsRoute = lazy(
+  () => import("../routes/notification-channels-route.js"),
+);
 const LazyInviteAcceptRoute = lazy(
   () => import("../routes/invite-accept-route.js"),
 );
@@ -218,6 +221,16 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.adminSettings]}>
                 <LazyPage loading="Loading request settings…">
                   <LazyRequestProfilesRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "notifications",
+            element: (
+              <RequirePermission anyOf={[permissions.adminSettings]}>
+                <LazyPage loading="Loading notifications…">
+                  <LazyNotificationChannelsRoute />
                 </LazyPage>
               </RequirePermission>
             ),

@@ -31,6 +31,11 @@ it.each([
     "Request profiles table",
     "Request profiles, ordered by name",
   ],
+  [
+    "/admin/notifications",
+    "Notification channels table",
+    "Notification channels, ordered by name",
+  ],
 ])(
   "%s wraps its table in a focusable named region",
   async (path, region, caption) => {

@@ -8,6 +8,7 @@ import { createTestRouter } from "../app/router.js";
 import { AuthApi } from "../features/auth/api/auth-api.js";
 import { InvitesApi } from "../features/invites/api/invites-api.js";
 import { MediaServersApi } from "../features/media-servers/api/media-servers-api.js";
+import { NotificationsApi } from "../features/notifications/api/notifications-api.js";
 import { PlaybackApi } from "../features/playback/api/playback-api.js";
 import { RequestsApi } from "../features/requests/api/requests-api.js";
 import { RolesApi } from "../features/roles/api/roles-api.js";
@@ -38,6 +39,7 @@ export function renderApp(initialEntry: InitialEntry = "/"): AppRender {
   const invitesApi = new InvitesApi(client);
   const playbackApi = new PlaybackApi(client);
   const requestsApi = new RequestsApi(client);
+  const notificationsApi = new NotificationsApi(client);
   const router = createTestRouter([initialEntry]);
   const result = render(
     <StrictMode>
@@ -49,6 +51,7 @@ export function renderApp(initialEntry: InitialEntry = "/"): AppRender {
         invitesApi={invitesApi}
         playbackApi={playbackApi}
         requestsApi={requestsApi}
+        notificationsApi={notificationsApi}
         queryClient={queryClient}
         router={router}
       />
