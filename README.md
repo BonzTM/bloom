@@ -272,7 +272,8 @@ links unless `include_suppressed=true` is supplied. The `PUT` body is
 `{"media_user_id":"..."}`.
 
 The Statistics page shows the library ranking and filters every report by
-one library.
+one library. Accounts with `stats.read.own` see their own dashboard under
+My statistics, one per media-server user linked to the account.
 
 The web UI shows the same reports under Statistics in the administration
 area: totals, most-watched titles, most active people, breakdowns, plays and

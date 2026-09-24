@@ -67,6 +67,9 @@ contracts) gets an entry here.
   `/api/v1/accounts/{id}/media-users` and
   `/api/v1/accounts/{id}/media-users/{media_server_id}`.
 - SQLite/PostgreSQL migration `00017_account_media_users`.
+- A "My statistics" page for accounts with `stats.read.own`: the dashboard of
+  the media-server user linked to the account, one per linked server, with a
+  plain explanation when no user is linked yet.
 - Playback watches now retain their Jellyfin collection-folder library. A
   bounded per-server cache and a 25-item post-poll backfill trickle resolve
   older watches without a separate scheduler.

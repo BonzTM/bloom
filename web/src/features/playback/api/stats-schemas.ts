@@ -46,6 +46,8 @@ export const statsWindowSchema = z.object({
   start: z.iso.datetime({ offset: true }),
   end: z.iso.datetime({ offset: true }),
   media_server_id: z.union([z.literal(""), z.uuid()]),
+  // Present on the caller's own dashboard: the linked media user it used.
+  media_user_id: z.string().min(1).max(MAX_LIBRARY_ID_BYTES).optional(),
   time_zone: statsZoneSchema,
 });
 
@@ -170,6 +172,27 @@ export const statsLibrariesSchema = z.object({
 });
 
 export type StatsLibraries = z.output<typeof statsLibrariesSchema>;
+
+export const accountMediaUserSchema = z.object({
+  account_id: z.uuid(),
+  media_server_id: z.uuid(),
+  media_server_name: z.string().min(1),
+  media_user_id: z.string().min(1).max(MAX_LIBRARY_ID_BYTES),
+  username: z.string().min(1).max(64),
+  source: z.enum(["invite", "match", "admin"]),
+  created_at: z.iso.datetime({ offset: true }),
+  updated_at: z.iso.datetime({ offset: true }),
+});
+
+export type AccountMediaUser = z.output<typeof accountMediaUserSchema>;
+
+export const accountMediaUsersSchema = z.object({
+  items: z.array(accountMediaUserSchema).max(64),
+});
+
+export type AccountMediaUsers = z.output<typeof accountMediaUsersSchema>;
+
+export const MEDIA_USER_NOT_LINKED = "media_user_not_linked";
 
 export const statsUserDetailSchema = z.object({
   window: statsWindowSchema,

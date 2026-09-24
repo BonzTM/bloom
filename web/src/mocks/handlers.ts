@@ -46,6 +46,7 @@ import {
   requestQuotaInputSchema,
   type RequestQuota,
 } from "../features/roles/api/quota-schemas.js";
+import type { AccountMediaUser } from "../features/playback/api/stats-schemas.js";
 import {
   channelRequestSchema,
   type ChannelRequest,
@@ -205,6 +206,7 @@ export const errorCodeSchema = z.enum([
   "download_manager_not_found",
   "download_manager_in_use",
   "notification_channel_failure",
+  "media_user_not_linked",
 ]);
 
 export type ErrorCode = z.output<typeof errorCodeSchema>;
@@ -1841,6 +1843,41 @@ function statsDailyItems(days: number) {
   });
 }
 
+// The signed-in account's media-user links. Alice on Cabin by default;
+// tests clear or extend the list.
+export const mockOwnLinks: readonly AccountMediaUser[] = [
+  {
+    account_id: "2f5b8c1d-0000-4000-8000-000000000001",
+    media_server_id: CABIN,
+    media_server_name: "Cabin",
+    media_user_id: "u-alice",
+    username: "alice",
+    source: "match",
+    created_at: "2026-09-20T10:00:00Z",
+    updated_at: "2026-09-20T10:00:00Z",
+  },
+];
+
+let ownLinks: readonly AccountMediaUser[] = mockOwnLinks;
+
+export function setMockOwnLinks(next: readonly AccountMediaUser[]): void {
+  ownLinks = next;
+}
+
+export function resetMockOwnLinks(): void {
+  ownLinks = mockOwnLinks;
+}
+
+function ownStatsDenial() {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("stats.read.own")) {
+    return envelope(403, "forbidden", "missing permission stats.read.own");
+  }
+  return undefined;
+}
+
 function statsDenial() {
   if (!signedIn) {
     return envelope(401, "unauthorized", "sign in required");
@@ -1992,6 +2029,43 @@ const statsHandlers = [
     ),
   ),
   http.get(
+    "*/api/v1/me/media-users",
+    jsonApi(() => ownStatsDenial() ?? HttpResponse.json({ items: ownLinks })),
+  ),
+  http.get(
+    "*/api/v1/stats/me",
+    jsonApi(({ request }) => {
+      const denied = ownStatsDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const url = new URL(request.url);
+      const wanted = url.searchParams.get("media_server_id") ?? "";
+      const link = ownLinks.find(
+        (candidate) => wanted === "" || candidate.media_server_id === wanted,
+      );
+      if (link === undefined) {
+        return envelope(404, "media_user_not_linked", "no linked media user");
+      }
+      const user = statsUsers.find(
+        (candidate) =>
+          candidate.media_server_id === link.media_server_id &&
+          candidate.media_user_id === link.media_user_id,
+      );
+      if (user === undefined) {
+        return envelope(404, "not_found", "user not found");
+      }
+      return statsReport(url, (window) => ({
+        window: {
+          ...window,
+          media_server_id: link.media_server_id,
+          media_user_id: link.media_user_id,
+        },
+        ...userReport(user, window.days),
+      }));
+    }),
+  ),
+  http.get(
     "*/api/v1/stats/users/:serverId/:userId",
     jsonApi(({ request, params }) => {
       const denied = statsDenial();
@@ -2008,24 +2082,30 @@ const statsHandlers = [
       }
       return statsReport(new URL(request.url), (window) => ({
         window,
-        totals: {
-          plays: user.plays,
-          watch_seconds: user.watch_seconds,
-          unique_users: 1,
-          unique_titles: 2,
-        },
-        titles: statsTitles.filter(
-          (t) => t.media_server_id === user.media_server_id,
-        ),
-        ...statsBreakdowns,
-        daily: statsDailyItems(window.days),
-        watches: mockPlaybackHistory.filter(
-          (watch) => watch.media_user_id === user.media_user_id,
-        ),
+        ...userReport(user, window.days),
       }));
     }),
   ),
 ];
+
+function userReport(user: (typeof statsUsers)[number], days: number) {
+  return {
+    totals: {
+      plays: user.plays,
+      watch_seconds: user.watch_seconds,
+      unique_users: 1,
+      unique_titles: 2,
+    },
+    titles: statsTitles.filter(
+      (t) => t.media_server_id === user.media_server_id,
+    ),
+    ...statsBreakdowns,
+    daily: statsDailyItems(days),
+    watches: mockPlaybackHistory.filter(
+      (watch) => watch.media_user_id === user.media_user_id,
+    ),
+  };
+}
 
 // ---- notification channels. The hostname below exercises a failed probe
 // or test send; deliveries belong to a channel and are newest first.

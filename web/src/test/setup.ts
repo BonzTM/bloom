@@ -5,6 +5,7 @@ import {
   resetMockInvites,
   resetMockMediaServers,
   resetMockNotifications,
+  resetMockOwnLinks,
   resetMockRequests,
   resetMockRoleQuotas,
   resetMockSession,
@@ -24,6 +25,7 @@ afterEach(() => {
   resetMockRequests();
   resetMockRoleQuotas();
   resetMockNotifications();
+  resetMockOwnLinks();
 });
 
 afterAll(() => {

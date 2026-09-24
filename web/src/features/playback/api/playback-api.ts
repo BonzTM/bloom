@@ -2,6 +2,7 @@ import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
   mediaUserIdSchema,
   statsDailySchema,
+  accountMediaUsersSchema,
   statsDaysSchema,
   statsLibrariesSchema,
   statsLibraryIdSchema,
@@ -12,6 +13,7 @@ import {
   statsUserDetailSchema,
   statsUsersSchema,
   statsZoneSchema,
+  type AccountMediaUsers,
   type StatsDaily,
   type StatsLibraries,
   type StatsOverview,
@@ -127,6 +129,24 @@ export class PlaybackApi {
       {
         signal,
       },
+    );
+  }
+
+  // The caller's own dashboard through the media user linked to the
+  // account, and the links themselves (stats.read.own).
+  statsMe(params: StatsParams, signal: AbortSignal): Promise<StatsUserDetail> {
+    return this.#client.requestJson(
+      statsPath("me", params),
+      statsUserDetailSchema,
+      { signal },
+    );
+  }
+
+  myMediaUsers(signal: AbortSignal): Promise<AccountMediaUsers> {
+    return this.#client.requestJson(
+      "api/v1/me/media-users",
+      accountMediaUsersSchema,
+      { signal },
     );
   }
 
