@@ -23,6 +23,7 @@ sql:
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_sqlite.sql
       - internal/db/queries/playback.sql
+      - internal/db/queries/stats.sql
       - internal/db/queries/requests.sql
       - internal/db/queries/requests_sqlite.sql
     gen:
@@ -47,6 +48,7 @@ sql:
       - internal/db/queries/invites.sql
       - internal/db/queries/invites_postgres.sql
       - internal/db/queries/playback.sql
+      - internal/db/queries/stats.sql
       - internal/db/queries/requests.sql
       - internal/db/queries/requests_postgres.sql
     gen:

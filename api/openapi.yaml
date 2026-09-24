@@ -42,6 +42,8 @@ tags:
     description: Administrative invite management and public redemption.
   - name: playback
     description: Administrator playback activity and history.
+  - name: stats
+    description: Administrator statistics dashboards computed from recorded watches.
   - name: metadata
     description: TMDB-backed search, details, and write-only provider credentials.
   - name: requests
@@ -1187,8 +1189,112 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/stats/overview:
+    get:
+      tags: [stats]
+      operationId: getStatsOverview
+      summary: Return totals, top-five title and user rankings, and playback breakdowns.
+      security: [{ sessionCookie: [] }]
+      parameters: &StatsWindowParameters
+        - { $ref: "#/components/parameters/StatsDays" }
+        - { $ref: "#/components/parameters/StatsMediaServerID" }
+        - { $ref: "#/components/parameters/StatsTimeZone" }
+      responses: &StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsOverviewReturned" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/stats/daily:
+    get:
+      tags: [stats]
+      operationId: getStatsDaily
+      summary: Return plays and recorded watch seconds by local calendar day.
+      security: [{ sessionCookie: [] }]
+      parameters: *StatsWindowParameters
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsDailyReturned" }
+  /api/v1/stats/patterns:
+    get:
+      tags: [stats]
+      operationId: getStatsPatterns
+      summary: Return play counts by local weekday and hour of day.
+      security: [{ sessionCookie: [] }]
+      parameters: *StatsWindowParameters
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsPatternsReturned" }
+  /api/v1/stats/titles:
+    get:
+      tags: [stats]
+      operationId: listStatsTitles
+      summary: Return the top 50 titles under one title grouping rule.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/StatsDays" }
+        - { $ref: "#/components/parameters/StatsMediaServerID" }
+        - { $ref: "#/components/parameters/StatsTimeZone" }
+        - { $ref: "#/components/parameters/StatsTitleKind" }
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsTitlesReturned" }
+  /api/v1/stats/users:
+    get:
+      tags: [stats]
+      operationId: listStatsUsers
+      summary: Return the top 50 media-server users.
+      security: [{ sessionCookie: [] }]
+      parameters: *StatsWindowParameters
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsUsersReturned" }
+  /api/v1/stats/users/{media_server_id}/{media_user_id}:
+    get:
+      tags: [stats]
+      operationId: getStatsUser
+      summary: Return one media-server user's dashboard and latest 20 watches.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/StatsPathMediaServerID" }
+        - { $ref: "#/components/parameters/StatsMediaUserID" }
+        - { $ref: "#/components/parameters/StatsDays" }
+        - { $ref: "#/components/parameters/StatsMediaServerID" }
+        - { $ref: "#/components/parameters/StatsTimeZone" }
+      responses:
+        <<: *StatsOverviewResponses
+        "200": { $ref: "#/components/responses/StatsUserReturned" }
 components:
   parameters:
+    StatsDays:
+      name: days
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+    StatsMediaServerID:
+      name: media_server_id
+      in: query
+      schema: { type: string, format: uuid }
+    StatsTimeZone:
+      name: tz
+      in: query
+      description: IANA time-zone name used only for calendar buckets. The host-dependent special value Local is rejected.
+      schema: { type: string, minLength: 1, x-max-bytes: 64, default: UTC, not: { const: Local } }
+    StatsTitleKind:
+      name: kind
+      in: query
+      required: true
+      schema: { $ref: "#/components/schemas/StatsTitleKind" }
+    StatsPathMediaServerID:
+      name: media_server_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    StatsMediaUserID:
+      name: media_user_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, x-max-bytes: 256, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
     MediaServerID:
       name: id
       in: path
@@ -1414,6 +1520,30 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/PlaybackHistoryResponse" }
+    StatsOverviewReturned:
+      description: Dashboard overview for the resolved window and time zone.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsOverviewResponse" } } }
+    StatsDailyReturned:
+      description: Local calendar-day statistics for the resolved window.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsDailyResponse" } } }
+    StatsPatternsReturned:
+      description: Complete seven-weekday and 24-hour play-count buckets.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsPatternsResponse" } } }
+    StatsTitlesReturned:
+      description: At most 50 ranked title groups.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsTitlesResponse" } } }
+    StatsUsersReturned:
+      description: At most 50 ranked media-server users.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsUsersResponse" } } }
+    StatsUserReturned:
+      description: One media-server user's dashboard and at most 20 latest watches.
+      headers: *AuthenticatedHeaders
+      content: { application/json: { schema: { $ref: "#/components/schemas/StatsUserResponse" } } }
     Unauthorized:
       description: No live authenticated session.
       headers:
@@ -2194,6 +2324,139 @@ components:
           maxItems: 100
           items: { $ref: "#/components/schemas/PlaybackHistoryWatch" }
         next_cursor: { type: string, maxLength: 256 }
+    StatsTitleKind:
+      type: string
+      enum: [movie, series, other]
+    StatsWindow:
+      type: object
+      required: [days, start, end, media_server_id, time_zone]
+      additionalProperties: false
+      properties:
+        days: { type: integer, minimum: 1, maximum: 365 }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        media_server_id:
+          oneOf:
+            - { type: string, const: "" }
+            - { type: string, format: uuid }
+        time_zone: { type: string, minLength: 1, x-max-bytes: 64 }
+    StatsTotals:
+      type: object
+      required: [plays, watch_seconds, unique_users, unique_titles]
+      additionalProperties: false
+      properties:
+        plays: { type: integer, format: int64, minimum: 0 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+        unique_users: { type: integer, format: int64, minimum: 0 }
+        unique_titles: { type: integer, format: int64, minimum: 0 }
+    StatsTitle:
+      type: object
+      required: [kind, media_server_id, key, name, plays, watch_seconds, last_watched_at]
+      additionalProperties: false
+      properties:
+        kind: { $ref: "#/components/schemas/StatsTitleKind" }
+        media_server_id: { type: string, format: uuid }
+        key: { type: string }
+        name: { type: string }
+        plays: { type: integer, format: int64, minimum: 1 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+        last_watched_at: { type: string, format: date-time }
+    StatsUser:
+      type: object
+      required: [media_server_id, media_user_id, username, plays, watch_seconds, last_watched_at]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        media_user_id: { type: string, minLength: 1 }
+        username: { type: string }
+        plays: { type: integer, format: int64, minimum: 1 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+        last_watched_at: { type: string, format: date-time }
+    StatsBreakdown:
+      type: object
+      required: [name, plays, watch_seconds]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        plays: { type: integer, format: int64, minimum: 1 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+    StatsDailyBucket:
+      type: object
+      required: [date, plays, watch_seconds]
+      additionalProperties: false
+      properties:
+        date: { type: string, format: date }
+        plays: { type: integer, format: int64, minimum: 0 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+    StatsWeekdayBucket:
+      type: object
+      required: [weekday, plays]
+      additionalProperties: false
+      properties:
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        plays: { type: integer, format: int64, minimum: 0 }
+    StatsHourBucket:
+      type: object
+      required: [hour, plays]
+      additionalProperties: false
+      properties:
+        hour: { type: integer, minimum: 0, maximum: 23 }
+        plays: { type: integer, format: int64, minimum: 0 }
+    StatsOverviewResponse:
+      type: object
+      required: [window, totals, titles, users, clients, devices, play_methods]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        totals: { $ref: "#/components/schemas/StatsTotals" }
+        titles: { type: array, maxItems: 15, items: { $ref: "#/components/schemas/StatsTitle" } }
+        users: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/StatsUser" } }
+        clients: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/StatsBreakdown" } }
+        devices: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/StatsBreakdown" } }
+        play_methods: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/StatsBreakdown" } }
+    StatsDailyResponse:
+      type: object
+      required: [window, items]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        items: { type: array, maxItems: 367, items: { $ref: "#/components/schemas/StatsDailyBucket" } }
+    StatsPatternsResponse:
+      type: object
+      required: [window, weekdays, hours]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        weekdays: { type: array, minItems: 7, maxItems: 7, items: { $ref: "#/components/schemas/StatsWeekdayBucket" } }
+        hours: { type: array, minItems: 24, maxItems: 24, items: { $ref: "#/components/schemas/StatsHourBucket" } }
+    StatsTitlesResponse:
+      type: object
+      required: [window, kind, items]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        kind: { $ref: "#/components/schemas/StatsTitleKind" }
+        items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/StatsTitle" } }
+    StatsUsersResponse:
+      type: object
+      required: [window, items]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/StatsUser" } }
+    StatsUserResponse:
+      type: object
+      required: [window, totals, titles, clients, devices, play_methods, daily, watches]
+      additionalProperties: false
+      properties:
+        window: { $ref: "#/components/schemas/StatsWindow" }
+        totals: { $ref: "#/components/schemas/StatsTotals" }
+        titles: { type: array, maxItems: 15, items: { $ref: "#/components/schemas/StatsTitle" } }
+        clients: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/StatsBreakdown" } }
+        devices: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/StatsBreakdown" } }
+        play_methods: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/StatsBreakdown" } }
+        daily: { type: array, maxItems: 367, items: { $ref: "#/components/schemas/StatsDailyBucket" } }
+        watches: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/PlaybackWatch" } }
     LoginRequest:
       type: object
       required: [username, password]

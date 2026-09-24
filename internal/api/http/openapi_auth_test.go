@@ -35,6 +35,12 @@ const (
 	providersSchema         = "#/components/schemas/AuthProvidersResponse"
 	playbackNowSchema       = "#/components/schemas/PlaybackNowResponse"
 	playbackHistorySchema   = "#/components/schemas/PlaybackHistoryResponse"
+	statsOverviewSchema     = "#/components/schemas/StatsOverviewResponse"
+	statsDailySchema        = "#/components/schemas/StatsDailyResponse"
+	statsPatternsSchema     = "#/components/schemas/StatsPatternsResponse"
+	statsTitlesSchema       = "#/components/schemas/StatsTitlesResponse"
+	statsUsersSchema        = "#/components/schemas/StatsUsersResponse"
+	statsUserSchema         = "#/components/schemas/StatsUserResponse"
 )
 
 var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Location", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
@@ -497,7 +503,9 @@ func assertResponseSchema(
 	case currentSchema, permissionsSchema, rolesSchema, errorSchema,
 		createMediaServerSchema, mediaServersSchema, mediaServerSchema,
 		probeMediaServerSchema, librariesSchema, providersSchema,
-		playbackNowSchema, playbackHistorySchema:
+		playbackNowSchema, playbackHistorySchema, statsOverviewSchema,
+		statsDailySchema, statsPatternsSchema, statsTitlesSchema,
+		statsUsersSchema, statsUserSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	default:
 		t.Fatalf("unsupported test schema %q", schema)

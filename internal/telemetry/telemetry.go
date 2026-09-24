@@ -135,6 +135,9 @@ func (NopMetrics) IncWatchesClosed(string, string) {}
 // IncPlaybackRefreshFailure does nothing.
 func (NopMetrics) IncPlaybackRefreshFailure() {}
 
+// ObserveStatsQuery does nothing.
+func (NopMetrics) ObserveStatsQuery(string, string, float64) {}
+
 // ObserveMetadataRequest discards a metadata-provider observation.
 func (NopMetrics) ObserveMetadataRequest(string, string, string, float64) {}
 

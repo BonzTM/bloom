@@ -92,6 +92,17 @@ type Querier interface {
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error)
+	StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams) ([]StatsBucketRowsRow, error)
+	StatsClients(ctx context.Context, arg StatsClientsParams) ([]StatsClientsRow, error)
+	StatsDevices(ctx context.Context, arg StatsDevicesParams) ([]StatsDevicesRow, error)
+	StatsMovieTitles(ctx context.Context, arg StatsMovieTitlesParams) ([]StatsMovieTitlesRow, error)
+	StatsOtherTitles(ctx context.Context, arg StatsOtherTitlesParams) ([]StatsOtherTitlesRow, error)
+	StatsPlayMethods(ctx context.Context, arg StatsPlayMethodsParams) ([]StatsPlayMethodsRow, error)
+	StatsSeriesTitles(ctx context.Context, arg StatsSeriesTitlesParams) ([]StatsSeriesTitlesRow, error)
+	// Statistics queries are portable across SQLite and PostgreSQL.
+	StatsTotals(ctx context.Context, arg StatsTotalsParams) (StatsTotalsRow, error)
+	StatsUserRecentWatches(ctx context.Context, arg StatsUserRecentWatchesParams) ([]StatsUserRecentWatchesRow, error)
+	StatsUsers(ctx context.Context, arg StatsUsersParams) ([]StatsUsersRow, error)
 	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)
 	TransitionRequestSeasons(ctx context.Context, arg TransitionRequestSeasonsParams) error
 	TrimWatchPositions(ctx context.Context, watchID string) error

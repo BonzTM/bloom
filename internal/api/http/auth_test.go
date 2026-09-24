@@ -260,6 +260,7 @@ type authHarness struct {
 	downloadManagers *fakeDownloadManagerService
 	invites          *fakeInviteService
 	playback         *fakePlaybackReader
+	stats            *fakeStatsReader
 }
 
 type controllableSessionStore struct {
@@ -428,6 +429,7 @@ func newAuthHarnessConfigured(
 	downloadManagers := newFakeDownloadManagerService()
 	invites := newFakeInviteService(clock.Now())
 	playback := &fakePlaybackReader{}
+	stats := &fakeStatsReader{}
 	srv := New(config.HTTPConfig{
 		Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 8192,
 	}, Deps{
@@ -440,6 +442,7 @@ func newAuthHarnessConfigured(
 		InviteReader:   invites,
 		InviteManager:  invites,
 		PlaybackReader: playback,
+		StatsReader:    stats,
 		Sessions:       sessions, Audit: audit, Clock: clock, Auth: authCfg,
 		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
@@ -451,6 +454,7 @@ func newAuthHarnessConfigured(
 		downloadManagers: downloadManagers,
 		invites:          invites,
 		playback:         playback,
+		stats:            stats,
 	}
 }
 
