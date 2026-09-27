@@ -123,6 +123,10 @@ contracts) gets an entry here.
   JSONL watch export, audited administrator import routes, worker metrics,
   `BLOOM_IMPORT_WORKER_INTERVAL`, `BLOOM_DATA_DIR`, and SQLite/PostgreSQL migration
   `00022_history_imports`.
+- An Imports page under Administration: start a Playback Reporting import
+  for a server or upload another Bloom's export file, watch each job's
+  counters update while it runs, cancel a waiting or running job, and
+  download watches as JSON Lines.
 - Registration pages say which way a media-server or download-manager probe
   failed: the address could not be reached, the API key was rejected, the API
   was not found at that address, or the answer did not look like the expected

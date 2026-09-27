@@ -6,6 +6,7 @@ import { AuthApi } from "./features/auth/api/auth-api.js";
 import { InvitesApi } from "./features/invites/api/invites-api.js";
 import { MediaServersApi } from "./features/media-servers/api/media-servers-api.js";
 import { NotificationsApi } from "./features/notifications/api/notifications-api.js";
+import { ImportsApi } from "./features/imports/api/imports-api.js";
 import { PlaybackApi } from "./features/playback/api/playback-api.js";
 import { RequestsApi } from "./features/requests/api/requests-api.js";
 import { RolesApi } from "./features/roles/api/roles-api.js";
@@ -34,6 +35,7 @@ async function start(): Promise<void> {
   const playbackApi = new PlaybackApi(client);
   const requestsApi = new RequestsApi(client);
   const notificationsApi = new NotificationsApi(client);
+  const importsApi = new ImportsApi(client);
   createRoot(rootElement).render(
     <StrictMode>
       <AppProviders
@@ -45,6 +47,7 @@ async function start(): Promise<void> {
         playbackApi={playbackApi}
         requestsApi={requestsApi}
         notificationsApi={notificationsApi}
+        importsApi={importsApi}
         queryClient={createQueryClient()}
         router={createAppRouter()}
       />

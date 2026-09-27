@@ -59,6 +59,7 @@ import {
   type Delivery,
   type NotificationChannel,
 } from "../features/notifications/api/notification-schemas.js";
+import type { ImportJob } from "../features/imports/api/imports-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -211,6 +212,7 @@ export const errorCodeSchema = z.enum([
   "download_manager_failure",
   "download_manager_not_found",
   "download_manager_in_use",
+  "import_in_progress",
   "notification_channel_failure",
   "media_user_not_linked",
 ]);
@@ -2729,8 +2731,184 @@ const discoverHandlers = [
   ),
 ];
 
+// ---- imports (admin.settings)
+
+export const IMPORT_RUNNING_ID = "9c1d2e3f-0000-4000-8000-000000000001";
+export const IMPORT_DONE_ID = "9c1d2e3f-0000-4000-8000-000000000002";
+
+export const mockImports: readonly ImportJob[] = [
+  {
+    id: IMPORT_RUNNING_ID,
+    media_server_id: LIVING_ROOM,
+    source: "bloom_export",
+    state: "running",
+    read: 1_500,
+    imported: 1_420,
+    skipped: 20,
+    duplicate: 60,
+    last_error: "",
+    requested_by: mockAccount.id,
+    created_at: "2026-09-27T14:00:00Z",
+    started_at: "2026-09-27T14:00:05Z",
+    updated_at: "2026-09-27T14:02:00Z",
+  },
+  {
+    id: IMPORT_DONE_ID,
+    media_server_id: CABIN,
+    source: "playback_reporting",
+    state: "completed",
+    read: 8_213,
+    imported: 8_100,
+    skipped: 13,
+    duplicate: 100,
+    last_error: "",
+    requested_by: mockAccount.id,
+    created_at: "2026-09-26T09:00:00Z",
+    started_at: "2026-09-26T09:00:04Z",
+    finished_at: "2026-09-26T09:07:41Z",
+    updated_at: "2026-09-26T09:07:41Z",
+  },
+];
+
+let importJobs: ImportJob[] = [...mockImports];
+
+export function resetMockImports(): void {
+  importJobs = [...mockImports];
+}
+
+const importsQuerySchema = pageQuerySchema(256);
+
+async function createImport(request: Request) {
+  let mediaServerId: unknown;
+  let source: unknown;
+  let file: unknown;
+  if (sendsJson(request)) {
+    const body: unknown = await request.json();
+    if (typeof body !== "object" || body === null) {
+      return envelope(422, "validation_failed", "invalid body");
+    }
+    mediaServerId = (body as Record<string, unknown>).media_server_id;
+    source = (body as Record<string, unknown>).source;
+  } else if (
+    request.headers.get("content-type")?.includes("multipart/form-data") ===
+    true
+  ) {
+    const form = await request.formData();
+    mediaServerId = form.get("media_server_id");
+    source = form.get("source");
+    file = form.get("file");
+  } else {
+    return envelope(
+      415,
+      "unsupported_media_type",
+      "expected JSON or multipart",
+    );
+  }
+  if (source !== "playback_reporting" && source !== "bloom_export") {
+    return envelope(422, "validation_failed", "invalid source");
+  }
+  if (
+    typeof mediaServerId !== "string" ||
+    !z.uuid().safeParse(mediaServerId).success
+  ) {
+    return envelope(422, "validation_failed", "invalid media_server_id");
+  }
+  if (source === "bloom_export" && !(file instanceof File)) {
+    return envelope(422, "validation_failed", "file required");
+  }
+  if (
+    importJobs.some(
+      (job) =>
+        job.media_server_id === mediaServerId &&
+        job.source === source &&
+        (job.state === "pending" || job.state === "running"),
+    )
+  ) {
+    return envelope(409, "import_in_progress", "an import is already active");
+  }
+  const job: ImportJob = {
+    id: `9c1d2e3f-0000-4000-8000-${String(importJobs.length + 1).padStart(12, "0")}`,
+    media_server_id: mediaServerId,
+    source,
+    state: "pending",
+    read: 0,
+    imported: 0,
+    skipped: 0,
+    duplicate: 0,
+    last_error: "",
+    requested_by: mockAccount.id,
+    created_at: "2026-09-27T15:00:00Z",
+    updated_at: "2026-09-27T15:00:00Z",
+  };
+  importJobs = [job, ...importJobs];
+  return HttpResponse.json(job, { status: 201 });
+}
+
+const importHandlers = [
+  http.get(
+    "*/api/v1/imports",
+    jsonApi(
+      ({ request }) =>
+        mediaServerDenial() ??
+        pagedItems(new URL(request.url), importsQuerySchema, importJobs),
+    ),
+  ),
+  http.post(
+    "*/api/v1/imports",
+    jsonApi(({ request }) => mediaServerDenial() ?? createImport(request)),
+  ),
+  http.get(
+    "*/api/v1/imports/:id",
+    jsonApi(({ params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const job = importJobs.find((candidate) => candidate.id === params.id);
+      return job === undefined
+        ? envelope(404, "not_found", "import not found")
+        : HttpResponse.json(job);
+    }),
+  ),
+  http.post(
+    "*/api/v1/imports/:id/cancel",
+    jsonApi(({ params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const job = importJobs.find((candidate) => candidate.id === params.id);
+      if (job === undefined) {
+        return envelope(404, "not_found", "import not found");
+      }
+      const cancelled: ImportJob = {
+        ...job,
+        state: "cancelled",
+        finished_at: "2026-09-27T15:01:00Z",
+        updated_at: "2026-09-27T15:01:00Z",
+      };
+      importJobs = importJobs.map((candidate) =>
+        candidate.id === job.id ? cancelled : candidate,
+      );
+      return HttpResponse.json(cancelled);
+    }),
+  ),
+  http.get("*/api/v1/exports/watches", () => {
+    const denied = mediaServerDenial();
+    if (denied !== undefined) {
+      return denied;
+    }
+    const lines = mockPlaybackHistory.map((watch) => JSON.stringify(watch));
+    return new HttpResponse(`${lines.join("\n")}\n`, {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
+  }),
+];
+
 export const handlers = [
   ...discoverHandlers,
+  ...importHandlers,
   ...notificationHandlers,
   ...statsHandlers,
   ...requestHandlers,

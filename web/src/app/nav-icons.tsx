@@ -14,6 +14,7 @@ export type IconName =
   | "play"
   | "server"
   | "download"
+  | "upload"
   | "sliders"
   | "bell"
   | "ticket"
@@ -31,6 +32,7 @@ const PATHS: Readonly<Record<IconName, string>> = {
   play: "M8 5v14l11-7L8 5Z",
   server: "M4 5h16v5H4zM4 14h16v5H4zM7 7.5h.01M7 16.5h.01",
   download: "M12 4v11m0 0-4-4m4 4 4-4M4 19h16",
+  upload: "M12 15V4m0 0L8 8m4-4 4 4M4 19h16",
   sliders: "M4 7h10m4 0h2M4 17h4m4 0h8M14 5v4M8 15v4",
   bell: "M6 16V11a6 6 0 1 1 12 0v5l2 2H4l2-2Zm4 3a2 2 0 0 0 4 0",
   ticket:
