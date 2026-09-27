@@ -10,6 +10,13 @@ export function posterUrl(posterPath: string, size: PosterSize): string {
   return `${POSTER_ORIGIN}/${size}${posterPath}`;
 }
 
+// A wide backdrop for a title page's hero, or undefined without one.
+export function backdropUrl(backdropPath: string): string | undefined {
+  return backdropPath === ""
+    ? undefined
+    : `${POSTER_ORIGIN}/w1280${backdropPath}`;
+}
+
 type PosterProps = Readonly<{
   posterPath: string;
   title: string;

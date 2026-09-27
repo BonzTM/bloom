@@ -15,11 +15,14 @@ import { server } from "../test/server.js";
 
 type User = ReturnType<typeof userEvent.setup>;
 
+// Searching starts from the top bar, the way Seerr does it; the in-page
+// form appears with the results to refine the kind.
 async function search(user: User, query: string): Promise<void> {
-  const form = await screen.findByRole("search", { name: "Search titles" });
-  await user.clear(within(form).getByLabelText("Title"));
-  await user.type(within(form).getByLabelText("Title"), query);
-  await user.click(within(form).getByRole("button", { name: "Search" }));
+  const box = await screen.findByRole("searchbox", {
+    name: "Search movies and series",
+  });
+  await user.clear(box);
+  await user.type(box, `${query}{Enter}`);
 }
 
 it("offers requests from the navigation and the home page", async () => {
@@ -53,7 +56,7 @@ it("searches on submit and shows posters that link to the title", async () => {
   signInMockSession();
   renderApp("/requests");
   expect(
-    await screen.findByText("Type a title to search The Movie Database."),
+    await screen.findByRole("list", { name: "Trending this week" }),
   ).toBeVisible();
 
   await search(user, "heat");
@@ -70,9 +73,8 @@ it("searches on submit and shows posters that link to the title", async () => {
 it("keeps the query in the address and narrows by kind", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  const { router } = renderApp("/requests");
+  const { router } = renderApp("/requests?q=the");
   const form = await screen.findByRole("search", { name: "Search titles" });
-  await user.type(within(form).getByLabelText("Title"), "the");
   await user.selectOptions(within(form).getByLabelText("Kind"), "Series");
   await user.click(within(form).getByRole("button", { name: "Search" }));
 
@@ -130,11 +132,16 @@ it("sends nothing for an empty query", async () => {
   );
   signInMockSession();
   renderApp("/requests");
-  const form = await screen.findByRole("search", { name: "Search titles" });
-  await user.click(within(form).getByRole("button", { name: "Search" }));
+  const box = await screen.findByRole("searchbox", {
+    name: "Search movies and series",
+  });
+  await user.type(box, "{Enter}");
   expect(
-    screen.getByText("Type a title to search The Movie Database."),
+    await screen.findByRole("list", { name: "Trending this week" }),
   ).toBeVisible();
+  expect(
+    screen.queryByRole("search", { name: "Search titles" }),
+  ).not.toBeInTheDocument();
   expect(searches).toBe(0);
 });
 
@@ -160,7 +167,10 @@ it("shows only the search to an account that cannot read its requests", async ()
   signInMockSession();
   renderApp("/requests");
   expect(
-    await screen.findByRole("search", { name: "Search titles" }),
+    await screen.findByRole("searchbox", { name: "Search movies and series" }),
+  ).toBeVisible();
+  expect(
+    await screen.findByRole("list", { name: "Trending this week" }),
   ).toBeVisible();
   expect(
     screen.queryByRole("heading", { name: "My requests" }),

@@ -88,11 +88,11 @@ function DiscoverPage({
     <>
       <h1>Discover</h1>
       <p className="page-intro">
-        Find a movie or series and ask for it. Requests wait for approval unless
-        your account approves its own, and become available once the download
-        finishes.
+        Browse what is trending or search from the bar above, then ask for a
+        movie or series. Requests wait for approval unless your account approves
+        its own, and become available once the download finishes.
       </p>
-      {canSearch ? (
+      {canSearch && query !== "" ? (
         <section aria-labelledby="search-heading" className="card">
           <h2 id="search-heading">Search</h2>
           <SearchForm

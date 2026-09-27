@@ -16,6 +16,9 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Title pages open with a hero: the backdrop behind the poster, name, and
+  overview, with the request form below. Discover shows the search form only
+  with results; searching starts from the top bar.
 - The app shell is reworked: a sidebar with icons and an Administration
   section that links straight to each admin page, a top bar with a global
   title search and the session controls, a drawer on small screens, and a

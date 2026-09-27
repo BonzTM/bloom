@@ -1224,16 +1224,54 @@ button:disabled {
 .title-page {
   display: grid;
   gap: var(--space-5);
-  grid-template-columns: minmax(10rem, 16rem) 1fr;
+}
+
+/* The hero bleeds to the content edges; the backdrop sits behind a
+   gradient so the heading stays readable over any image. */
+.title-hero {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  position: relative;
+}
+
+.title-hero.has-backdrop {
+  background-position: center 20%;
+  background-size: cover;
+}
+
+.title-hero.has-backdrop::before {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--bg) 92%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 75%, transparent) 55%,
+    color-mix(in srgb, var(--bg) 45%, transparent) 100%
+  );
+  content: "";
+  inset: 0;
+  position: absolute;
+}
+
+.title-hero-inner {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(9rem, 14rem) 1fr;
+  padding: var(--space-5);
+  position: relative;
+}
+
+.title-heading h1 {
+  margin-bottom: var(--space-2);
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
 }
 
 @media (max-width: 48rem) {
-  .title-page {
+  .title-hero-inner {
     grid-template-columns: 1fr;
   }
 
   .title-poster {
-    max-width: 12rem;
+    max-width: 10rem;
   }
 }
 
