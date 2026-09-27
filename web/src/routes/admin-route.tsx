@@ -83,6 +83,14 @@ export default function AdminRoute(): ReactNode {
           <PermissionGate anyOf={[permissions.statsReadAll]}>
             <li className="card">
               <h2>
+                <Link to="/admin/libraries">Libraries</Link>
+              </h2>
+              <p>What each library holds, item by item, and who watched it.</p>
+            </li>
+          </PermissionGate>
+          <PermissionGate anyOf={[permissions.statsReadAll]}>
+            <li className="card">
+              <h2>
                 <Link to="/admin/playback">Playback</Link>
               </h2>
               <p>See what is playing now and what finished recently.</p>

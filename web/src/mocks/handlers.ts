@@ -60,6 +60,7 @@ import {
   type NotificationChannel,
 } from "../features/notifications/api/notification-schemas.js";
 import type { ImportJob } from "../features/imports/api/imports-schemas.js";
+import type { CatalogItem } from "../features/catalog/api/catalog-schemas.js";
 import type { Role } from "../features/roles/api/roles-schemas.js";
 import type { VersionInfo } from "../features/system/api/system-schemas.js";
 
@@ -213,6 +214,7 @@ export const errorCodeSchema = z.enum([
   "download_manager_not_found",
   "download_manager_in_use",
   "import_in_progress",
+  "conflict",
   "notification_channel_failure",
   "media_user_not_linked",
 ]);
@@ -2906,7 +2908,368 @@ const importHandlers = [
   }),
 ];
 
+// ---- library catalog (stats.read.all; sync needs admin.settings)
+
+const mockLibrariesByServer: Readonly<
+  Record<string, readonly { id: string; name: string; type: string }[]>
+> = {
+  [CABIN]: [
+    { id: "lib-movies", name: "Movies", type: "movies" },
+    { id: "lib-shows", name: "Shows", type: "tvshows" },
+  ],
+  [LIVING_ROOM]: [{ id: "lib-shows", name: "Shows", type: "tvshows" }],
+};
+
+function catalogItem(
+  patch: Partial<CatalogItem> &
+    Pick<CatalogItem, "item_id" | "name" | "item_type" | "library_id">,
+): CatalogItem {
+  return {
+    media_server_id: CABIN,
+    parent_id: patch.library_id,
+    series_id: "",
+    series_name: "",
+    season_id: "",
+    genres: [],
+    primary_image_tag: "tag",
+    archived: false,
+    first_seen_at: "2026-09-01T00:00:00Z",
+    last_seen_at: "2026-09-27T00:00:00Z",
+    updated_at: "2026-09-27T00:00:00Z",
+    plays: 0,
+    watch_seconds: 0,
+    unique_users: 0,
+    ...patch,
+  };
+}
+
+export const mockCatalogItems: readonly CatalogItem[] = [
+  catalogItem({
+    item_id: "i-4",
+    name: "Ronin",
+    item_type: "Movie",
+    library_id: "lib-movies",
+    production_year: 1998,
+    runtime_ms: 7_320_000,
+    premiere_date: "1998-09-25T00:00:00Z",
+    date_created: "2026-09-20T10:00:00Z",
+    community_rating: 7.2,
+    genres: ["Action", "Thriller"],
+    plays: 6,
+    watch_seconds: 39_600,
+    unique_users: 1,
+    first_played_at: "2026-09-21T20:00:00Z",
+    last_played_at: "2026-09-22T22:02:00Z",
+  }),
+  catalogItem({
+    item_id: "i-9",
+    name: "Heat",
+    item_type: "Movie",
+    library_id: "lib-movies",
+    production_year: 1995,
+    runtime_ms: 10_200_000,
+    date_created: "2026-09-10T10:00:00Z",
+    genres: ["Crime", "Drama"],
+    plays: 3,
+    watch_seconds: 28_800,
+    unique_users: 2,
+    last_played_at: "2026-09-20T21:00:00Z",
+  }),
+  catalogItem({
+    item_id: "i-11",
+    name: "Dune",
+    item_type: "Movie",
+    library_id: "lib-movies",
+    production_year: 2021,
+    date_created: "2026-09-26T10:00:00Z",
+    genres: ["Science Fiction"],
+  }),
+  catalogItem({
+    item_id: "s-1",
+    name: "The Arrival",
+    item_type: "Series",
+    library_id: "lib-shows",
+    production_year: 2021,
+    date_created: "2026-09-05T10:00:00Z",
+    genres: ["Drama"],
+    plays: 14,
+    watch_seconds: 36_120,
+    unique_users: 2,
+    last_played_at: "2026-09-23T21:44:00Z",
+  }),
+  catalogItem({
+    item_id: "e-1",
+    name: "Pilot",
+    item_type: "Episode",
+    library_id: "lib-shows",
+    parent_id: "se-1",
+    series_id: "s-1",
+    series_name: "The Arrival",
+    season_id: "se-1",
+    season_number: 1,
+    index_number: 1,
+    runtime_ms: 2_700_000,
+    date_created: "2026-09-05T10:00:00Z",
+    plays: 5,
+    watch_seconds: 12_000,
+    unique_users: 2,
+    last_played_at: "2026-09-23T21:44:00Z",
+  }),
+];
+
+function catalogDenial() {
+  return statsDenial();
+}
+
+function catalogSummary(serverId: string) {
+  const libraries = mockLibrariesByServer[serverId] ?? [];
+  return libraries.map((library) => {
+    const items = mockCatalogItems.filter(
+      (item) =>
+        item.library_id === library.id && item.media_server_id === serverId,
+    );
+    const types = new Map<
+      string,
+      { items: number; plays: number; watch_seconds: number }
+    >();
+    for (const item of items) {
+      const entry = types.get(item.item_type) ?? {
+        items: 0,
+        plays: 0,
+        watch_seconds: 0,
+      };
+      entry.items += 1;
+      entry.plays += item.plays;
+      entry.watch_seconds += item.watch_seconds;
+      types.set(item.item_type, entry);
+    }
+    return {
+      library_id: library.id,
+      types: [...types.entries()].map(([item_type, entry]) => ({
+        item_type,
+        ...entry,
+      })),
+    };
+  });
+}
+
+function catalogPage(url: URL, items: readonly CatalogItem[]) {
+  const limit = Number(url.searchParams.get("limit") ?? "50");
+  const offset = Number(url.searchParams.get("offset") ?? "0");
+  if (
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 100 ||
+    !Number.isInteger(offset) ||
+    offset < 0
+  ) {
+    return envelope(422, "validation_failed", "invalid page");
+  }
+  return HttpResponse.json({
+    items: items.slice(offset, offset + limit),
+    limit,
+    offset,
+  });
+}
+
+function sortedCatalogItems(url: URL, libraryId: string): CatalogItem[] {
+  const sort = url.searchParams.get("sort") ?? "name";
+  const order = url.searchParams.get("order") ?? "asc";
+  const itemType = url.searchParams.get("item_type");
+  const items = mockCatalogItems.filter(
+    (item) =>
+      item.library_id === libraryId &&
+      (itemType === null || item.item_type === itemType),
+  );
+  const key = (item: CatalogItem): string | number => {
+    switch (sort) {
+      case "plays":
+        return item.plays;
+      case "watch_time":
+        return item.watch_seconds;
+      case "date_added":
+        return item.date_created ?? "";
+      case "premiere_date":
+        return item.premiere_date ?? "";
+      case "last_played":
+        return item.last_played_at ?? "";
+      default:
+        return item.name;
+    }
+  };
+  const sorted = [...items].sort((a, b) =>
+    key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0,
+  );
+  return order === "desc" ? sorted.reverse() : sorted;
+}
+
+let catalogSyncQueued = false;
+
+export function resetMockCatalog(): void {
+  catalogSyncQueued = false;
+}
+
+const catalogHandlers = [
+  http.get(
+    "*/api/v1/media-servers/:id/libraries",
+    jsonApi(({ params }) => {
+      const denied = catalogDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      return HttpResponse.json({
+        items: mockLibrariesByServer[String(params.id)] ?? [],
+      });
+    }),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/libraries/catalog",
+    jsonApi(
+      ({ params }) =>
+        catalogDenial() ??
+        HttpResponse.json({ items: catalogSummary(String(params.id)) }),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/libraries/:libraryId/items",
+    jsonApi(({ params, request }) => {
+      const url = new URL(request.url);
+      return (
+        catalogDenial() ??
+        catalogPage(url, sortedCatalogItems(url, String(params.libraryId)))
+      );
+    }),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/libraries/:libraryId/recent",
+    jsonApi(
+      ({ params }) =>
+        catalogDenial() ??
+        HttpResponse.json({
+          items: mockCatalogItems
+            .filter((item) => item.library_id === params.libraryId)
+            .sort((a, b) =>
+              (b.date_created ?? "").localeCompare(a.date_created ?? ""),
+            )
+            .slice(0, 20),
+          limit: 20,
+          offset: 0,
+        }),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/libraries/:libraryId/genres",
+    jsonApi(({ params }) => {
+      const denied = catalogDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const totals = new Map<
+        string,
+        { items: number; plays: number; watch_seconds: number }
+      >();
+      for (const item of mockCatalogItems.filter(
+        (i) => i.library_id === params.libraryId,
+      )) {
+        for (const genre of item.genres) {
+          const entry = totals.get(genre) ?? {
+            items: 0,
+            plays: 0,
+            watch_seconds: 0,
+          };
+          entry.items += 1;
+          entry.plays += item.plays;
+          entry.watch_seconds += item.watch_seconds;
+          totals.set(genre, entry);
+        }
+      }
+      return HttpResponse.json({
+        items: [...totals.entries()].map(([genre, entry]) => ({
+          genre,
+          ...entry,
+        })),
+      });
+    }),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/libraries/:libraryId/stale",
+    jsonApi(
+      ({ params, request }) =>
+        catalogDenial() ??
+        catalogPage(
+          new URL(request.url),
+          mockCatalogItems.filter(
+            (item) => item.library_id === params.libraryId && item.plays === 0,
+          ),
+        ),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/items/:itemId",
+    jsonApi(({ params }) => {
+      const denied = catalogDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const item = mockCatalogItems.find(
+        (candidate) => candidate.item_id === params.itemId,
+      );
+      if (item === undefined) {
+        return envelope(404, "not_found", "item not found");
+      }
+      const children =
+        item.item_type === "Series"
+          ? [
+              { item_type: "Season", items: 1 },
+              { item_type: "Episode", items: 1 },
+            ]
+          : [];
+      return HttpResponse.json({ item, children });
+    }),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/items/:itemId/history",
+    jsonApi(({ params, request }) => {
+      const denied = catalogDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const url = new URL(request.url);
+      const limit = Number(url.searchParams.get("limit") ?? "50");
+      const offset = Number(url.searchParams.get("offset") ?? "0");
+      const watches = mockPlaybackHistory.filter(
+        (watch) =>
+          watch.item_id === params.itemId ||
+          (watch.series_name === "The Arrival" && params.itemId === "s-1"),
+      );
+      return HttpResponse.json({
+        items: watches.slice(offset, offset + limit),
+        limit,
+        offset,
+      });
+    }),
+  ),
+  http.post(
+    "*/api/v1/media-servers/:id/catalog/sync",
+    jsonApi(({ params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (catalogSyncQueued) {
+        return envelope(409, "conflict", "a walk is already queued");
+      }
+      catalogSyncQueued = true;
+      return HttpResponse.json(
+        { media_server_id: String(params.id), state: "pending" },
+        { status: 202 },
+      );
+    }),
+  ),
+];
+
 export const handlers = [
+  ...catalogHandlers,
   ...discoverHandlers,
   ...importHandlers,
   ...notificationHandlers,

@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { RouterProvider, type RouterProviderProps } from "react-router-dom";
 import type { AuthApi } from "../features/auth/api/auth-api.js";
 import { AuthApiContext } from "../features/auth/auth-context.js";
+import type { CatalogApi } from "../features/catalog/api/catalog-api.js";
+import { CatalogApiContext } from "../features/catalog/catalog-context.js";
 import type { ImportsApi } from "../features/imports/api/imports-api.js";
 import { ImportsApiContext } from "../features/imports/imports-context.js";
 import type { InvitesApi } from "../features/invites/api/invites-api.js";
@@ -30,6 +32,7 @@ type AppProvidersProps = Readonly<{
   requestsApi: RequestsApi;
   notificationsApi: NotificationsApi;
   importsApi: ImportsApi;
+  catalogApi: CatalogApi;
   queryClient: QueryClient;
   router: RouterProviderProps["router"];
 }>;
@@ -44,6 +47,7 @@ export function AppProviders({
   requestsApi,
   notificationsApi,
   importsApi,
+  catalogApi,
   queryClient,
   router,
 }: AppProvidersProps): ReactNode {
@@ -58,7 +62,9 @@ export function AppProviders({
                   <RequestsApiContext value={requestsApi}>
                     <NotificationsApiContext value={notificationsApi}>
                       <ImportsApiContext value={importsApi}>
-                        <RouterProvider router={router} />
+                        <CatalogApiContext value={catalogApi}>
+                          <RouterProvider router={router} />
+                        </CatalogApiContext>
                       </ImportsApiContext>
                     </NotificationsApiContext>
                   </RequestsApiContext>

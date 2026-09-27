@@ -44,6 +44,9 @@ const LazyNotificationChannelsRoute = lazy(
   () => import("../routes/notification-channels-route.js"),
 );
 const LazyImportsRoute = lazy(() => import("../routes/imports-route.js"));
+const LazyLibrariesRoute = lazy(() => import("../routes/libraries-route.js"));
+const LazyLibraryRoute = lazy(() => import("../routes/library-route.js"));
+const LazyItemRoute = lazy(() => import("../routes/item-route.js"));
 const LazyInviteAcceptRoute = lazy(
   () => import("../routes/invite-accept-route.js"),
 );
@@ -254,6 +257,36 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.adminSettings]}>
                 <LazyPage loading="Loading notifications…">
                   <LazyNotificationChannelsRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "libraries",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading libraries…">
+                  <LazyLibrariesRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "libraries/:serverId/:libraryId",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading the library…">
+                  <LazyLibraryRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "libraries/:serverId/items/:itemId",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading the item…">
+                  <LazyItemRoute />
                 </LazyPage>
               </RequirePermission>
             ),

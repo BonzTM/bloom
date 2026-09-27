@@ -148,6 +148,12 @@ const ADMIN_LINKS: readonly AdminLink[] = [
     anyOf: [permissions.statsReadAll],
   },
   {
+    to: "/admin/libraries",
+    label: "Libraries",
+    icon: "library",
+    anyOf: [permissions.statsReadAll],
+  },
+  {
     to: "/admin/media-servers",
     label: "Media servers",
     icon: "server",
