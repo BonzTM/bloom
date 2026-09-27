@@ -14,7 +14,7 @@ import type {
   MediaKind,
   MediaRequest,
 } from "../features/requests/api/requests-schemas.js";
-import { Poster } from "../features/requests/components/poster.js";
+import { backdropUrl, Poster } from "../features/requests/components/poster.js";
 import { describeSearchError } from "../features/requests/components/request-errors.js";
 import { RequestForm } from "../features/requests/components/request-form.js";
 import {
@@ -92,22 +92,38 @@ function TitlePage({ accountId, kind, providerId }: TitlePageProps): ReactNode {
   }
   const seasons: readonly MetadataSeason[] | undefined =
     kind === "series" ? series.data?.seasons : undefined;
+  const backdrop = backdropUrl(title.data.backdrop_path);
   return (
     <article className="title-page">
-      <div className="title-poster">
-        <Poster
-          posterPath={title.data.poster_path}
-          title={title.data.title}
-          size="w500"
-        />
-      </div>
+      <header
+        className={
+          backdrop === undefined ? "title-hero" : "title-hero has-backdrop"
+        }
+        style={
+          backdrop === undefined
+            ? undefined
+            : { backgroundImage: `url("${backdrop}")` }
+        }
+      >
+        <div className="title-hero-inner">
+          <div className="title-poster">
+            <Poster
+              posterPath={title.data.poster_path}
+              title={title.data.title}
+              size="w500"
+            />
+          </div>
+          <div className="title-heading">
+            <p>
+              <Link to="/requests">Back to discover</Link>
+            </p>
+            <h1>{titleWithYear(title.data)}</h1>
+            <p className="badge badge-neutral">{kindLabel(kind)}</p>
+            <Overview title={title.data} />
+          </div>
+        </div>
+      </header>
       <div className="title-body">
-        <p>
-          <Link to="/requests">Back to requests</Link>
-        </p>
-        <h1>{titleWithYear(title.data)}</h1>
-        <p className="badge badge-neutral">{kindLabel(kind)}</p>
-        <Overview title={title.data} />
         <RequestSection
           title={title.data}
           seasons={seasons}
