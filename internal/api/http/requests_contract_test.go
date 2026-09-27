@@ -133,6 +133,25 @@ func TestRequestSliceErrorCodes(t *testing.T) {
 	}
 }
 
+func TestOtherErrorCodesNeverCarryAReason(t *testing.T) {
+	tests := []error{
+		core.ErrNotFound,
+		core.ErrAlreadyExists,
+		core.ErrDownloadItemMissing,
+		&core.MediaServerError{Kind: core.MediaServerSaturated, Operation: "probe"},
+		errors.New("internal failure"),
+	}
+	for _, testErr := range tests {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "https://bloom.test/api/v1/requests", nil)
+		writeError(recorder, request, slog.New(slog.DiscardHandler), testErr)
+		envelope := decodeEnvelope(t, recorder)
+		if envelope.Reason != "" || strings.Contains(recorder.Body.String(), `"reason"`) {
+			t.Errorf("error %T produced reason: %s", testErr, recorder.Body.String())
+		}
+	}
+}
+
 func TestRequestStateChangingRoutesHaveCSRFAuditResources(t *testing.T) {
 	patterns := []string{
 		"/api/v1/download-managers", "/api/v1/download-managers/{id}",

@@ -52,6 +52,10 @@ const (
 	codeNotificationFailure     = "notification_channel_failure"
 	codeMediaUserNotLinked      = "media_user_not_linked"
 	codeInviteFailureLeased     = "invite_provisioning_failure_leased"
+	reasonUnreachable           = "unreachable"
+	reasonUnauthorized          = "unauthorized"
+	reasonNotFound              = "not_found"
+	reasonMalformed             = "malformed"
 	oidcFailureClassification   = "OpenID Connect callback failure"
 	maxLoggedErrorBytes         = 512
 )
@@ -145,7 +149,7 @@ func inviteErrorClass(err error) (int, string, bool) {
 
 func downloadManagerErrorClass(err error) (int, string, bool) {
 	switch {
-	case errors.Is(err, core.ErrDownloadItemMissing), isDownloadManagerErrorKind(err, core.DownloadManagerNotFound):
+	case errors.Is(err, core.ErrDownloadItemMissing):
 		return http.StatusNotFound, codeDownloadManagerNotFound, true
 	case errors.Is(err, core.ErrDownloadManagerInUse):
 		return http.StatusConflict, codeDownloadManagerInUse, true
@@ -199,8 +203,58 @@ func writeError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 	writeJSON(w, r, logger, status, httputil.ErrorResponse{
 		Code:      code,
 		Message:   safeMessage(status, err),
+		Reason:    upstreamFailureReason(err, code),
 		RequestID: requestIDFrom(r.Context()),
 	})
+}
+
+func upstreamFailureReason(err error, code string) string {
+	switch code {
+	case codeMediaServerFailure:
+		return mediaServerFailureReason(err)
+	case codeDownloadManagerFailure:
+		return downloadManagerFailureReason(err)
+	default:
+		return ""
+	}
+}
+
+func mediaServerFailureReason(err error) string {
+	var mediaErr *core.MediaServerError
+	if !errors.As(err, &mediaErr) {
+		return ""
+	}
+	switch mediaErr.Kind {
+	case core.MediaServerUnavailable:
+		return reasonUnreachable
+	case core.MediaServerUnauthorized:
+		return reasonUnauthorized
+	case core.MediaServerNotFound:
+		return reasonNotFound
+	case core.MediaServerMalformed:
+		return reasonMalformed
+	default:
+		return ""
+	}
+}
+
+func downloadManagerFailureReason(err error) string {
+	var managerErr *core.DownloadManagerError
+	if !errors.As(err, &managerErr) {
+		return ""
+	}
+	switch managerErr.Kind {
+	case core.DownloadManagerUnavailable:
+		return reasonUnreachable
+	case core.DownloadManagerUnauthorized:
+		return reasonUnauthorized
+	case core.DownloadManagerNotFound:
+		return reasonNotFound
+	case core.DownloadManagerMalformed:
+		return reasonMalformed
+	default:
+		return ""
+	}
 }
 
 func logRequestError(r *http.Request, logger *slog.Logger, err error) (int, string) {

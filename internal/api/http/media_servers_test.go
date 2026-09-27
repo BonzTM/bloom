@@ -318,6 +318,42 @@ func TestMediaServerUpstreamFailureIsOpaque(t *testing.T) {
 	}
 }
 
+func TestMediaServerRegistrationAndProbeFailureReasons(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   core.MediaServerErrorKind
+		reason string
+	}{
+		{name: "unavailable", kind: core.MediaServerUnavailable, reason: "unreachable"},
+		{name: "unauthorized", kind: core.MediaServerUnauthorized, reason: "unauthorized"},
+		{name: "not found", kind: core.MediaServerNotFound, reason: "not_found"},
+		{name: "malformed", kind: core.MediaServerMalformed, reason: "malformed"},
+	}
+	requests := []struct {
+		name, method, path, body, contentType string
+	}{
+		{name: "registration", method: http.MethodPost, path: "/api/v1/media-servers", body: `{"kind":"jellyfin","name":"Home","base_url":"https://media.example.test","api_key":"secret"}`, contentType: "application/json"},
+		{name: "probe", method: http.MethodPost, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe"},
+	}
+	for _, request := range requests {
+		for _, testCase := range tests {
+			t.Run(request.name+" "+testCase.name, func(t *testing.T) {
+				h := newAuthHarness(t, nil)
+				cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+				h.mediaServers.err = &core.MediaServerError{
+					Kind: testCase.kind, Operation: "probe", Err: errors.New("private.example.test api-key upstream body"),
+				}
+				recorder := h.requestWithContentType(t, request.method, request.path, request.body, cookie, request.contentType)
+				envelope := decodeEnvelope(t, recorder)
+				if recorder.Code != http.StatusBadGateway || envelope.Code != codeMediaServerFailure ||
+					envelope.Message != http.StatusText(http.StatusBadGateway) || envelope.Reason != testCase.reason {
+					t.Fatalf("response = %d %+v", recorder.Code, envelope)
+				}
+			})
+		}
+	}
+}
+
 func TestMediaServerTerminalFailuresThroughHandlerAndClientOmitRetryAfter(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -405,8 +441,9 @@ func TestMediaServerSaturationReturnsServiceUnavailable(t *testing.T) {
 		Kind: core.MediaServerSaturated, Operation: "probe", Retryable: true, RetryAfter: time.Second,
 	}
 	recorder := h.request(t, http.MethodPost, "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", "", cookie)
-	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Retry-After") != "1" {
-		t.Fatalf("response = %d Retry-After %q", recorder.Code, recorder.Header().Get("Retry-After"))
+	envelope := decodeEnvelope(t, recorder)
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Retry-After") != "1" || envelope.Reason != "" {
+		t.Fatalf("response = %d Retry-After %q envelope=%+v", recorder.Code, recorder.Header().Get("Retry-After"), envelope)
 	}
 }
 
