@@ -140,6 +140,7 @@ type Server struct {
 	pinger                 Pinger
 	web                    http.Handler
 	maxBodyBytes           int64
+	importTransferTimeout  time.Duration
 	identity               core.IdentityProvider
 	accounts               core.AccountStore
 	sessions               *scs.SessionManager
@@ -350,6 +351,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		pinger:                 deps.Pinger,
 		web:                    deps.Web,
 		maxBodyBytes:           cfg.MaxBodyBytes,
+		importTransferTimeout:  cfg.ImportTransferTimeout,
 		identity:               deps.Identity,
 		accounts:               deps.Accounts,
 		sessions:               deps.Sessions,
@@ -589,7 +591,7 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
 		return auditResourceRequestQuotas
 	case "/api/v1/imports", "/api/v1/imports/{id}", "/api/v1/imports/{id}/cancel":
-		return "imports"
+		return auditResourceImports
 	default:
 		return auditResourceRouteUnmatched
 	}

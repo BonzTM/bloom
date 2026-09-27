@@ -173,7 +173,7 @@ func readJSONLLines(
 			return nil, offset, skipped, errors.New("JSONL line exceeds size limit")
 		}
 		if len(bytes.TrimSpace(line)) > 0 {
-			record, decodeErr := decodeJSONLRecord(line)
+			record, decodeErr := DecodeWatchJSONL(line)
 			if decodeErr != nil {
 				return nil, offset, skipped, decodeErr
 			}
@@ -191,7 +191,8 @@ func readJSONLLines(
 	return records, offset, skipped, nil
 }
 
-func decodeJSONLRecord(line []byte) (core.ImportedWatch, error) {
+// DecodeWatchJSONL validates and normalizes one Bloom watch-export record.
+func DecodeWatchJSONL(line []byte) (core.ImportedWatch, error) {
 	if !utf8.Valid(line) {
 		return core.ImportedWatch{}, errors.New("JSONL line is not valid UTF-8")
 	}
@@ -217,6 +218,7 @@ func decodeJSONLRecord(line []byte) (core.ImportedWatch, error) {
 		SeasonNumber: wire.SeasonNumber, EpisodeNumber: wire.EpisodeNumber,
 		PlayMethod: wire.PlayMethod, Stream: importedStream(wire.Stream),
 		StartedAt: core.NormalizeTime(wire.StartedAt), EndedAt: normalizedTime(wire.EndedAt),
+		Runtime:      millisecondsDuration(wire.RuntimeMS),
 		Duration:     time.Duration(wire.ActiveSeconds) * time.Second,
 		LastPosition: time.Duration(wire.PositionMS) * time.Millisecond,
 	}
@@ -224,6 +226,14 @@ func decodeJSONLRecord(line []byte) (core.ImportedWatch, error) {
 		return core.ImportedWatch{}, fmt.Errorf("validate imported watch: %w", core.ErrInvalidArgument)
 	}
 	return record, nil
+}
+
+func millisecondsDuration(value *int64) *time.Duration {
+	if value == nil {
+		return nil
+	}
+	duration := time.Duration(*value) * time.Millisecond
+	return &duration
 }
 
 func validWatchWire(wire bloomExportRecord) bool {

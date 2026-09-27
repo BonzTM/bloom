@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -119,6 +120,9 @@ func (s *Server) createReportingImport(
 func (s *Server) createBloomImport(
 	w http.ResponseWriter, r *http.Request, accountID string,
 ) (job core.ImportJob, result error) {
+	if err := s.setImportReadDeadline(w); err != nil {
+		return core.ImportJob{}, fmt.Errorf("extend import upload deadline: %w", err)
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, importMultipartBytes)
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -369,18 +373,36 @@ func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
 		s.writeValidation(w, r, fields)
 		return
 	}
+	if err := s.setExportWriteDeadline(w); err != nil {
+		s.failWatchExport(w, r, fmt.Errorf("extend watch export deadline: %w", err))
+		return
+	}
+	page, cursor, err := s.watchExportPage(r, query, min(exportBatchSize, limit))
+	if err != nil {
+		s.failWatchExport(w, r, err)
+		return
+	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Trailer", "X-Next-Cursor")
 	w.WriteHeader(http.StatusOK)
-	cursor, err := s.streamWatchExport(w, r, query, limit)
+	cursor, err = s.streamWatchExport(w, r, query, limit, page, cursor)
 	if err != nil {
-		s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditFailure, "failed")
-		s.logger.ErrorContext(r.Context(), "stream watch export", "error", err)
-		return
+		s.abortWatchExport(r, err)
 	}
 	w.Header().Set("X-Next-Cursor", cursor)
 	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
+}
+
+func (s *Server) failWatchExport(w http.ResponseWriter, r *http.Request, err error) {
+	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditFailure, "failed")
+	writeError(w, r, s.logger, err)
+}
+
+func (s *Server) abortWatchExport(r *http.Request, err error) {
+	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditFailure, "failed")
+	s.logger.ErrorContext(r.Context(), "stream watch export", "error", err)
+	panic(http.ErrAbortHandler)
 }
 
 func exportQuery(r *http.Request) (core.PlaybackQuery, int, []httputil.FieldError) {
@@ -399,16 +421,10 @@ func exportQuery(r *http.Request) (core.PlaybackQuery, int, []httputil.FieldErro
 
 func (s *Server) streamWatchExport(
 	w http.ResponseWriter, r *http.Request, query core.PlaybackQuery, limit int,
+	page []core.PlaybackWatch, cursor string,
 ) (string, error) {
 	written := 0
 	for written < limit {
-		pageSize := min(exportBatchSize, limit-written)
-		query.PageSize = pageSize + 1
-		watches, err := s.playbackReader.ListWatches(r.Context(), query)
-		if err != nil {
-			return "", err
-		}
-		page, cursor := playbackPage(watches, pageSize)
 		for _, watch := range page {
 			if err := importer.EncodeWatchJSONL(w, watch); err != nil {
 				return "", err
@@ -418,11 +434,62 @@ func (s *Server) streamWatchExport(
 		if cursor == "" || written == limit {
 			return cursor, nil
 		}
-		started, id, fields := playbackCursorValues([]string{cursor}, nil)
-		if len(fields) > 0 {
-			return "", errors.New("encode internal export cursor")
+		var err error
+		query, err = nextExportQuery(query, cursor)
+		if err != nil {
+			return "", err
 		}
-		query.BeforeStartedAt, query.BeforeID = started, id
+		page, cursor, err = s.watchExportPage(r, query, min(exportBatchSize, limit-written))
+		if err != nil {
+			return "", err
+		}
 	}
 	return "", nil
+}
+
+func (s *Server) watchExportPage(
+	r *http.Request, query core.PlaybackQuery, size int,
+) ([]core.PlaybackWatch, string, error) {
+	query.PageSize = size + 1
+	watches, err := s.playbackReader.ListWatches(r.Context(), query)
+	if err != nil {
+		return nil, "", err
+	}
+	page, cursor := playbackPage(watches, size)
+	return page, cursor, nil
+}
+
+func nextExportQuery(query core.PlaybackQuery, cursor string) (core.PlaybackQuery, error) {
+	started, id, fields := playbackCursorValues([]string{cursor}, nil)
+	if len(fields) > 0 {
+		return core.PlaybackQuery{}, errors.New("encode internal export cursor")
+	}
+	query.BeforeStartedAt, query.BeforeID = started, id
+	return query, nil
+}
+
+func (s *Server) setImportReadDeadline(w http.ResponseWriter) error {
+	return setTransferDeadline(w, s.importTransferTimeout, true)
+}
+
+func (s *Server) setExportWriteDeadline(w http.ResponseWriter) error {
+	return setTransferDeadline(w, s.importTransferTimeout, false)
+}
+
+func setTransferDeadline(w http.ResponseWriter, timeout time.Duration, read bool) error {
+	if timeout <= 0 {
+		return nil
+	}
+	controller := http.NewResponseController(w)
+	deadline := time.Now().Add(timeout)
+	var err error
+	if read {
+		err = controller.SetReadDeadline(deadline)
+	} else {
+		err = controller.SetWriteDeadline(deadline)
+	}
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
 }

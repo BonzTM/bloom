@@ -1518,7 +1518,7 @@ paths:
       tags: [imports]
       operationId: exportWatches
       summary: Stream one bounded page of watches as Bloom JSON Lines.
-      description: Records are ordered by `(started_at, id)` newest first. Continue with the `X-Next-Cursor` response trailer until it is empty.
+      description: Records are ordered by `(started_at, id)` newest first. Continue with the `X-Next-Cursor` response trailer until it is empty. A response that ends without the terminating chunk and trailer is truncated and must be retried.
       security: [{ sessionCookie: [] }]
       parameters:
         - { name: cursor, in: query, schema: { type: string, maxLength: 256 } }

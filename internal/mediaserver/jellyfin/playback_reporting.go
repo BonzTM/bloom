@@ -92,12 +92,9 @@ func decodePlaybackReporting(body []byte) (core.PlaybackReportingPage, error) {
 		}
 		page.Cursor = rowID
 		record, err := playbackReportingRow(row, rowID)
-		if errors.Is(err, errSkippedPlaybackRow) {
+		if err != nil {
 			page.Skipped++
 			continue
-		}
-		if err != nil {
-			return core.PlaybackReportingPage{}, err
 		}
 		page.Records = append(page.Records, record)
 	}
@@ -120,11 +117,11 @@ func playbackReportingRowID(row []any, previous int64) (int64, error) {
 func playbackReportingRow(row []any, rowID int64) (core.ImportedWatch, error) {
 	started, err := reportingTime(row[1])
 	if err != nil {
-		return core.ImportedWatch{}, err
+		return core.ImportedWatch{}, errSkippedPlaybackRow
 	}
 	duration, err := reportingInt(row[9])
 	if err != nil || duration < 0 || duration > math.MaxInt32 {
-		return core.ImportedWatch{}, errors.New("plugin duration is invalid")
+		return core.ImportedWatch{}, errSkippedPlaybackRow
 	}
 	values := make([]string, 0, 7)
 	for _, index := range []int{2, 3, 4, 5, 6, 7, 8} {

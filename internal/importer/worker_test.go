@@ -157,6 +157,37 @@ func TestWorkerLogsAndBacksOffOnStoreFailure(t *testing.T) {
 	}
 }
 
+func TestBloomJobRecoversAfterStagingBecomesAvailable(t *testing.T) {
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceBloomExport
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	id, err := worker.deps.Staging.stage(strings.NewReader(validJSONLFixture() + "\n"))
+	if err != nil {
+		t.Fatalf("stage upload: %v", err)
+	}
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	mounted := worker.deps.Staging.root + ".mounted"
+	if err := os.Rename(worker.deps.Staging.root, mounted); err != nil {
+		t.Fatalf("move staging root: %v", err)
+	}
+	if err := worker.deps.Staging.markUnavailable(errors.New("mount unavailable")); !errors.Is(err, errStagingUnavailable) {
+		t.Fatalf("mark unavailable: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); !errors.Is(err, errStagingUnavailable) || store.finished != "" {
+		t.Fatalf("unavailable run = %v, finished %q", err, store.finished)
+	}
+	if err := os.Rename(mounted, worker.deps.Staging.root); err != nil {
+		t.Fatalf("restore staging root: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); err != nil || store.finished != core.ImportCompleted || store.result.Imported != 1 {
+		t.Fatalf("recovered run = %v, state %q, counters %+v", err, store.finished, store.result)
+	}
+}
+
 func TestWorkerSweepKeepsOnlyActiveUploads(t *testing.T) {
 	store := workerStore{job: pendingWorkerJob(t)}
 	worker := newTestWorker(t, &store, reportingStub{})

@@ -133,6 +133,7 @@ type ImportedWatch struct {
 	Stream                          *StreamDetails
 	StartedAt                       time.Time
 	EndedAt                         *time.Time
+	Runtime                         *time.Duration
 	Duration, LastPosition          time.Duration
 }
 
@@ -144,7 +145,8 @@ func (w ImportedWatch) Valid() bool {
 		!validImportValue(w.DeviceName) || !validImportValue(w.Client) ||
 		!validImportValue(w.ItemName) || !validImportValue(w.ItemType) ||
 		!validImportValue(w.SeriesName) || !w.PlayMethod.Valid() ||
-		w.StartedAt.IsZero() || w.Duration < 0 || w.LastPosition < 0 {
+		w.StartedAt.IsZero() || w.Duration < 0 || w.LastPosition < 0 ||
+		(w.Runtime != nil && *w.Runtime < 0) {
 		return false
 	}
 	if (w.LibraryID == "") != (w.LibraryName == "") ||

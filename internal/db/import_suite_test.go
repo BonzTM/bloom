@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
+	"github.com/BonzTM/bloom/internal/importer"
 )
 
 type importFixture struct {
@@ -288,19 +290,30 @@ func testBloomExportSnapshot(
 ) {
 	t.Helper()
 	season, episode, direct := int32(3), int32(8), true
+	runtime := 42 * time.Minute
 	ended := fixture.now.Add(95 * time.Second)
-	record := core.ImportedWatch{
-		RecordID: "snapshot", MediaUserID: "snapshot-user", Username: "Snapshot",
+	exported := core.PlaybackWatch{
+		ID: mustID(t), MediaServerID: fixture.serverID, MediaServerName: "Import source",
+		MediaUserID: "snapshot-user", Username: "Snapshot",
 		DeviceID: "device-id", DeviceName: "TV", Client: "Web", ItemID: "snapshot-item",
 		ItemName: "Episode", ItemType: "Episode", SeriesName: "Series",
 		LibraryID: "library", LibraryName: "Shows", SeasonNumber: &season, EpisodeNumber: &episode,
-		PlayMethod: core.PlayMethodDirectStream, StartedAt: fixture.now, EndedAt: &ended,
-		Duration: 90 * time.Second, LastPosition: 45 * time.Second,
+		PlayMethod: core.PlayMethodDirectStream, State: core.WatchStopped,
+		Source: core.WatchSourcePoll, StartedAt: fixture.now, EndedAt: &ended,
+		Runtime: &runtime, ActiveTime: 90 * time.Second, LastPosition: 45 * time.Second,
 		Stream: &core.StreamDetails{
 			Container: "mkv", VideoCodec: "h264", AudioCodec: "aac",
 			Bitrate: 1000, Width: 1920, Height: 1080, Framerate: 24, AudioChannels: 2,
 			IsVideoDirect: &direct, IsAudioDirect: &direct, TranscodeReasons: []string{"reason"},
 		},
+	}
+	var payload bytes.Buffer
+	if err := importer.EncodeWatchJSONL(&payload, exported); err != nil {
+		t.Fatalf("EncodeWatchJSONL: %v", err)
+	}
+	record, err := importer.DecodeWatchJSONL(payload.Bytes())
+	if err != nil {
+		t.Fatalf("DecodeWatchJSONL: %v", err)
 	}
 	claimed := createClaimedImport(t, fixture, core.ImportSourceBloomExport, `{"id":"placeholder","offset":0}`)
 	commitSingleImport(t, fixture, claimed, record)
@@ -310,7 +323,7 @@ func testBloomExportSnapshot(
 	if err != nil || len(watches) != 1 {
 		t.Fatalf("ListWatches = %+v, %v", watches, err)
 	}
-	assertBloomSnapshot(t, watches[0], record)
+	assertBloomSnapshot(t, watches[0], exported)
 }
 
 func createClaimedImport(
@@ -380,14 +393,22 @@ func assertWatchSourceCounts(
 	}
 }
 
-func assertBloomSnapshot(t *testing.T, watch core.PlaybackWatch, record core.ImportedWatch) {
+func assertBloomSnapshot(t *testing.T, watch, exported core.PlaybackWatch) {
 	t.Helper()
-	if watch.DeviceID != record.DeviceID || watch.SeriesName != record.SeriesName ||
-		watch.LibraryID != record.LibraryID || watch.LibraryName != record.LibraryName ||
-		watch.SeasonNumber == nil || *watch.SeasonNumber != *record.SeasonNumber ||
-		watch.EpisodeNumber == nil || *watch.EpisodeNumber != *record.EpisodeNumber ||
-		watch.LastPosition != record.LastPosition || watch.EndedAt == nil ||
-		!watch.EndedAt.Equal(*record.EndedAt) || !reflect.DeepEqual(watch.Stream, record.Stream) {
-		t.Fatalf("Bloom snapshot = %+v, want %+v", watch, record)
+	if watch.MediaServerID != exported.MediaServerID || watch.MediaUserID != exported.MediaUserID ||
+		watch.Username != exported.Username || watch.DeviceID != exported.DeviceID ||
+		watch.DeviceName != exported.DeviceName || watch.Client != exported.Client ||
+		watch.ItemID != exported.ItemID || watch.ItemName != exported.ItemName || watch.ItemType != exported.ItemType ||
+		watch.SeriesName != exported.SeriesName || watch.PlayMethod != exported.PlayMethod ||
+		watch.LibraryID != exported.LibraryID || watch.LibraryName != exported.LibraryName ||
+		watch.SeasonNumber == nil || *watch.SeasonNumber != *exported.SeasonNumber ||
+		watch.EpisodeNumber == nil || *watch.EpisodeNumber != *exported.EpisodeNumber ||
+		watch.ActiveTime != exported.ActiveTime || watch.LastPosition != exported.LastPosition ||
+		watch.Runtime == nil || exported.Runtime == nil || *watch.Runtime != *exported.Runtime ||
+		!watch.StartedAt.Equal(exported.StartedAt) || watch.EndedAt == nil ||
+		!watch.EndedAt.Equal(*exported.EndedAt) || !reflect.DeepEqual(watch.Stream, exported.Stream) ||
+		watch.Source != core.WatchSourceImport || watch.ImportSource != core.ImportSourceBloomExport ||
+		watch.ImportRecordID != exported.ID || watch.State != core.WatchStopped {
+		t.Fatalf("Bloom snapshot = %+v, want exported %+v", watch, exported)
 	}
 }

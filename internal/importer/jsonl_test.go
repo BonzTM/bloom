@@ -36,7 +36,7 @@ func TestWatchJSONLRoundTripUsesOriginalWatchID(t *testing.T) {
 	if err := EncodeWatchJSONL(&output, watch); err != nil {
 		t.Fatalf("EncodeWatchJSONL: %v", err)
 	}
-	record, err := decodeJSONLRecord(output.Bytes())
+	record, err := DecodeWatchJSONL(output.Bytes())
 	if err != nil {
 		t.Fatalf("decodeJSONLRecord: %v", err)
 	}
@@ -46,6 +46,7 @@ func TestWatchJSONLRoundTripUsesOriginalWatchID(t *testing.T) {
 		record.SeasonNumber == nil || *record.SeasonNumber != season ||
 		record.EpisodeNumber == nil || *record.EpisodeNumber != episode ||
 		record.LastPosition != watch.LastPosition || !reflect.DeepEqual(record.Stream, watch.Stream) ||
+		record.Runtime == nil || *record.Runtime != runtime ||
 		record.EndedAt == nil || !record.EndedAt.Equal(ended) {
 		t.Fatalf("round trip = %+v", record)
 	}
@@ -65,8 +66,8 @@ func TestWatchJSONLRejectsSchemaDriftAndControlCharacters(t *testing.T) {
 		strings.Replace(base, `"position_ms":0`, `"position_ms":9223372036854775807`, 1),
 		strings.Replace(base, `"runtime_ms":null`, `"runtime_ms":9223372036855`, 1),
 	} {
-		if _, err := decodeJSONLRecord([]byte(line)); err == nil {
-			t.Errorf("decodeJSONLRecord accepted %s", line)
+		if _, err := DecodeWatchJSONL([]byte(line)); err == nil {
+			t.Errorf("DecodeWatchJSONL accepted %s", line)
 		}
 	}
 }

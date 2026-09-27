@@ -75,7 +75,7 @@ INSERT INTO watches (
     stream_container, stream_video_codec, stream_audio_codec, stream_bitrate,
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
     stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons,
-    state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms, source,
+    state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms, runtime_ms, source,
     created_at, updated_at, import_source, import_record_id
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(media_user_id), sqlc.arg(username),
@@ -87,7 +87,7 @@ INSERT INTO watches (
     sqlc.narg(stream_framerate_hundredths), sqlc.narg(stream_audio_channels),
     sqlc.narg(stream_is_video_direct), sqlc.narg(stream_is_audio_direct),
     sqlc.narg(stream_transcode_reasons), 'stopped', sqlc.arg(started_at), sqlc.arg(ended_at),
-    sqlc.arg(ended_at), sqlc.arg(active_seconds), sqlc.arg(last_position_ms), 'import',
+    sqlc.arg(ended_at), sqlc.arg(active_seconds), sqlc.arg(last_position_ms), sqlc.narg(runtime_ms), 'import',
     sqlc.arg(now), sqlc.arg(now), sqlc.arg(import_source), sqlc.arg(import_record_id)
 )
 ON CONFLICT (media_server_id, import_source, import_record_id)

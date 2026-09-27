@@ -17,9 +17,12 @@ const (
 	stagingDirectory         = "imports"
 	stagingSuffix            = ".jsonl"
 	partialSuffix            = ".partial"
-	maxStagingFiles          = core.MaxActiveImportUploads + 1
+	maxStagingSweepEntries   = core.MaxActiveImportUploads + 1
+	stagingSweepChunkSize    = 128
 	uploadUnavailableMessage = "This Bloom cannot store uploads; set BLOOM_DATA_DIR to a writable directory."
 )
+
+var errStagingUnavailable = errors.New("import staging unavailable")
 
 // Staging confines uploaded import files to one private local root.
 type Staging struct {
@@ -28,6 +31,7 @@ type Staging struct {
 	maxBytes    int64
 	mu          sync.RWMutex
 	unavailable error
+	established bool
 }
 
 // NewStaging resolves the private import root and records setup failures for lazy recovery.
@@ -41,6 +45,7 @@ func NewStaging(dataDirectory string) (*Staging, error) {
 	}
 	staging := &Staging{root: root, slots: make(chan struct{}, 1), maxBytes: core.MaxImportUploadBytes}
 	staging.unavailable = prepareStagingRoot(root)
+	staging.established = staging.unavailable == nil
 	return staging, nil
 }
 
@@ -48,6 +53,10 @@ func prepareStagingRoot(root string) error {
 	if mkdirErr := os.MkdirAll(root, 0o700); mkdirErr != nil {
 		return fmt.Errorf("create import staging root: %w", mkdirErr)
 	}
+	return secureStagingRoot(root)
+}
+
+func secureStagingRoot(root string) error {
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("inspect import staging root: %w", errors.Join(err, core.ErrInvalidArgument))
@@ -81,16 +90,49 @@ func (s *Staging) ensureAvailable() error {
 	if s == nil {
 		return core.ErrInvalidArgument
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.unavailable == nil {
-		return nil
-	}
-	s.unavailable = prepareStagingRoot(s.root)
-	if s.unavailable != nil {
+	if err := s.refreshAvailability(); err != nil {
 		return uploadUnavailableError()
 	}
 	return nil
+}
+
+func (s *Staging) refreshAvailability() error {
+	if s == nil {
+		return core.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.established {
+		s.unavailable = secureStagingRoot(s.root)
+	} else {
+		s.unavailable = prepareStagingRoot(s.root)
+	}
+	if s.unavailable != nil {
+		return errors.Join(errStagingUnavailable, s.unavailable)
+	}
+	s.established = true
+	return nil
+}
+
+func (s *Staging) checkAvailability() error {
+	if s == nil {
+		return core.ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unavailable = secureStagingRoot(s.root)
+	if s.unavailable != nil {
+		return errors.Join(errStagingUnavailable, s.unavailable)
+	}
+	s.established = true
+	return nil
+}
+
+func (s *Staging) markUnavailable(cause error) error {
+	s.mu.Lock()
+	s.unavailable = cause
+	s.mu.Unlock()
+	return errors.Join(errStagingUnavailable, cause)
 }
 
 func uploadUnavailableError() error {
@@ -109,13 +151,13 @@ func (s *Staging) stage(upload io.Reader) (id string, result error) {
 	}
 	root, err := os.OpenRoot(s.root)
 	if err != nil {
-		return "", fmt.Errorf("open import staging root: %w", err)
+		return "", s.markUnavailable(fmt.Errorf("open import staging root: %w", err))
 	}
 	defer func() { result = errors.Join(result, root.Close()) }()
 	partial := id + partialSuffix
 	file, err := root.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return "", fmt.Errorf("create import staging file: %w", err)
+		return "", s.markUnavailable(fmt.Errorf("create import staging file: %w", err))
 	}
 	written, copyErr := io.Copy(file, io.LimitReader(upload, s.maxBytes+1))
 	closeErr := file.Close()
@@ -127,7 +169,8 @@ func (s *Staging) stage(upload io.Reader) (id string, result error) {
 		return "", errors.Join(copyErr, closeErr, removeErr)
 	}
 	if err := root.Rename(partial, stagingName(id)); err != nil {
-		return "", errors.Join(fmt.Errorf("publish import staging file: %w", err), removeStagingPartial(root, partial))
+		cause := errors.Join(fmt.Errorf("publish import staging file: %w", err), removeStagingPartial(root, partial))
+		return "", s.markUnavailable(cause)
 	}
 	return id, nil
 }
@@ -148,18 +191,27 @@ func (s *Staging) open(id string) (*os.File, error) {
 	defer root.Close()
 	before, err := root.Lstat(name)
 	if err != nil || !before.Mode().IsRegular() {
-		return nil, fmt.Errorf("inspect import staging file: %w", errors.Join(err, core.ErrInvalidArgument))
+		return nil, s.classifyOpenError("inspect import staging file", err)
 	}
 	file, err := root.Open(name)
 	if err != nil {
-		return nil, fmt.Errorf("open import staging file: %w", err)
+		return nil, s.classifyOpenError("open import staging file", err)
 	}
 	after, err := file.Stat()
 	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
 		_ = file.Close()
-		return nil, fmt.Errorf("verify import staging file: %w", errors.Join(err, core.ErrInvalidArgument))
+		return nil, s.classifyOpenError("verify import staging file", err)
 	}
 	return file, nil
+}
+
+func (s *Staging) classifyOpenError(operation string, cause error) error {
+	info, rootErr := os.Lstat(s.root)
+	if rootErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		unavailable := s.markUnavailable(errors.Join(rootErr, core.ErrInvalidArgument))
+		return fmt.Errorf("%s: %w", operation, errors.Join(cause, unavailable))
+	}
+	return fmt.Errorf("%s: %w", operation, errors.Join(cause, core.ErrInvalidArgument))
 }
 
 func (s *Staging) remove(id string) error {
@@ -185,30 +237,44 @@ func (s *Staging) removeNamed(id, suffix string) error {
 	return nil
 }
 
-func (s *Staging) sweep(active map[string]struct{}) error {
+func (s *Staging) sweep(active map[string]struct{}) (result error) {
 	if s.isUnavailable() {
 		return nil
 	}
-	entries, err := os.ReadDir(s.root)
+	directory, err := os.Open(s.root)
 	if err != nil {
-		return fmt.Errorf("read import staging root: %w", err)
+		return s.markUnavailable(fmt.Errorf("open import staging root: %w", err))
 	}
-	if len(entries) > maxStagingFiles {
-		return errors.New("import staging file count exceeds safety bound")
-	}
-	for _, entry := range entries {
-		id, suffix, ok := stagingEntry(entry.Name())
-		if !ok {
-			continue
+	defer func() { result = errors.Join(result, directory.Close()) }()
+	processed := 0
+	for processed < maxStagingSweepEntries {
+		limit := min(stagingSweepChunkSize, maxStagingSweepEntries-processed)
+		entries, readErr := directory.ReadDir(limit)
+		for _, entry := range entries {
+			if err := s.sweepEntry(active, entry.Name()); err != nil {
+				return err
+			}
 		}
-		if _, referenced := active[id]; referenced && suffix == stagingSuffix {
-			continue
+		processed += len(entries)
+		if errors.Is(readErr, io.EOF) {
+			return nil
 		}
-		if err := s.removeNamed(id, suffix); err != nil {
-			return err
+		if readErr != nil {
+			return fmt.Errorf("read import staging root: %w", readErr)
 		}
 	}
 	return nil
+}
+
+func (s *Staging) sweepEntry(active map[string]struct{}, name string) error {
+	id, suffix, ok := stagingEntry(name)
+	if !ok {
+		return nil
+	}
+	if _, referenced := active[id]; referenced && suffix == stagingSuffix {
+		return nil
+	}
+	return s.removeNamed(id, suffix)
 }
 
 func (s *Staging) openRootFor(id, suffix string) (*os.Root, string, error) {
@@ -223,7 +289,7 @@ func (s *Staging) openRootFor(id, suffix string) (*os.Root, string, error) {
 	}
 	root, err := os.OpenRoot(s.root)
 	if err != nil {
-		return nil, "", fmt.Errorf("open import staging root: %w", err)
+		return nil, "", s.markUnavailable(fmt.Errorf("open import staging root: %w", err))
 	}
 	return root, name, nil
 }

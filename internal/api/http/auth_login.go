@@ -285,6 +285,8 @@ const (
 	auditResourceInvites          = "route:invites"
 	auditResourceInvitePublic     = "route:invite_public"
 	auditResourcePlayback         = "route:playback"
+	auditResourceImports          = "route:imports"
+	auditResourceWatchExports     = "route:watch_exports"
 	auditResourceStats            = "route:stats"
 	auditResourceMetadata         = "route:metadata"
 	auditResourceMetadataSettings = "route:metadata.settings"
@@ -294,6 +296,9 @@ const (
 )
 
 func routeResource(r *http.Request) string {
+	if resource := importRouteResource(r.Pattern); resource != "" {
+		return resource
+	}
 	switch r.Pattern {
 	case "/api/v1/auth/login":
 		return auditResourceAuthLogin
@@ -348,6 +353,17 @@ func routeResource(r *http.Request) string {
 		return auditResourceRequestQuotas
 	default:
 		return auditResourceRouteUnmatched
+	}
+}
+
+func importRouteResource(pattern string) string {
+	switch pattern {
+	case "/api/v1/imports", "/api/v1/imports/{id}", "/api/v1/imports/{id}/cancel":
+		return auditResourceImports
+	case "/api/v1/exports/watches":
+		return auditResourceWatchExports
+	default:
+		return ""
 	}
 }
 

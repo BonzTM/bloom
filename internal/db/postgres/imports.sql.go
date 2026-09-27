@@ -230,7 +230,7 @@ INSERT INTO watches (
     stream_container, stream_video_codec, stream_audio_codec, stream_bitrate,
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
     stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons,
-    state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms, source,
+    state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms, runtime_ms, source,
     created_at, updated_at, import_source, import_record_id
 ) VALUES (
     $1, $2, $3, $4,
@@ -242,8 +242,8 @@ INSERT INTO watches (
     $23, $24,
     $25, $26,
     $27, 'stopped', $28, $29,
-    $29, $30, $31, 'import',
-    $32, $32, $33, $34
+    $29, $30, $31, $32, 'import',
+    $33, $33, $34, $35
 )
 ON CONFLICT (media_server_id, import_source, import_record_id)
 WHERE import_record_id IS NOT NULL DO NOTHING
@@ -281,6 +281,7 @@ type InsertImportedWatchParams struct {
 	EndedAt                   time.Time
 	ActiveSeconds             int64
 	LastPositionMs            int64
+	RuntimeMs                 sql.NullInt64
 	Now                       time.Time
 	ImportSource              sql.NullString
 	ImportRecordID            sql.NullString
@@ -319,6 +320,7 @@ func (q *Queries) InsertImportedWatch(ctx context.Context, arg InsertImportedWat
 		arg.EndedAt,
 		arg.ActiveSeconds,
 		arg.LastPositionMs,
+		arg.RuntimeMs,
 		arg.Now,
 		arg.ImportSource,
 		arg.ImportRecordID,

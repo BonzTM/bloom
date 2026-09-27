@@ -33,7 +33,11 @@ contracts) gets an entry here.
   and retry the directory lazily after the mount is fixed.
 - Bloom export imports now retain the complete exported watch snapshot except
   segments and position samples. Collected watches win import deduplication in
-  either commit order, and malformed Playback Reporting rows are skipped.
+  either commit order, including runtime, and every malformed Playback Reporting
+  field after a valid ascending row ID is skipped with cursor progress.
+- Large import uploads and streamed watch exports use the bounded
+  `BLOOM_IMPORT_TRANSFER_TIMEOUT` deadline (`10m` by default, valid from `30s`
+  through `2h`) instead of the global 15-second HTTP transfer deadlines.
 - Import batches now fence every write and checkpoint with the active lease.
   Import persistence failures remain distinguishable from missing jobs and
   expired leases.

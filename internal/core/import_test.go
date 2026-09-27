@@ -40,6 +40,12 @@ func TestImportedWatchRejectsControlsAndOversizedIdentifiers(t *testing.T) {
 	if !record.Valid() {
 		t.Fatal("valid imported watch was rejected")
 	}
+	negativeRuntime := -time.Millisecond
+	record.Runtime = &negativeRuntime
+	if record.Valid() {
+		t.Fatal("negative runtime was accepted")
+	}
+	record.Runtime = nil
 	record.ItemName = "bad\nname"
 	if record.Valid() {
 		t.Fatal("control character was accepted")

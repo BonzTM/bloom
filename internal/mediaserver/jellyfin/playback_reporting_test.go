@@ -45,18 +45,47 @@ func TestPlaybackReportingClassifiesMissingPlugin(t *testing.T) {
 	}
 }
 
-func TestPlaybackReportingRejectsMalformedRows(t *testing.T) {
+func TestPlaybackReportingSkipsBadDateAndAdvances(t *testing.T) {
 	client := newTransportClient(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusOK, `{"colums":["rowid","DateCreated","UserId","ItemId","ItemType","ItemName","PlaybackMethod","ClientName","DeviceName","PlayDuration"],"results":[[1,"bad","user","item","Movie","Title","DirectPlay","Web","TV",1]],"message":""}`), nil
+		return jsonResponse(http.StatusOK, `{"colums":["rowid","DateCreated","UserId","ItemId","ItemType","ItemName","PlaybackMethod","ClientName","DeviceName","PlayDuration"],"results":[[42,"bad","user","item","Movie","Title","DirectPlay","Web","TV",1],[43,"2026-09-20 12:35:56","user","item","Movie","Title","DirectPlay","Web","TV",1]],"message":""}`), nil
 	}))
-	_, err := client.PlaybackReporting(t.Context(), 0, core.ImportBatchSize)
-	assertMediaError(t, err, core.MediaServerMalformed)
+	assertPlaybackReportingProgress(t, client)
+}
+
+func TestPlaybackReportingSkipsBadDurationAndAdvances(t *testing.T) {
+	client := newTransportClient(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `{"colums":["rowid","DateCreated","UserId","ItemId","ItemType","ItemName","PlaybackMethod","ClientName","DeviceName","PlayDuration"],"results":[[42,"2026-09-20 12:34:56","user","item","Movie","Title","DirectPlay","Web","TV","bad"],[43,"2026-09-20 12:35:56","user","item","Movie","Title","DirectPlay","Web","TV",1]],"message":""}`), nil
+	}))
+	assertPlaybackReportingProgress(t, client)
 }
 
 func TestPlaybackReportingSkipsMalformedTextAndAdvances(t *testing.T) {
 	client := newTransportClient(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return jsonResponse(http.StatusOK, `{"colums":["rowid","DateCreated","UserId","ItemId","ItemType","ItemName","PlaybackMethod","ClientName","DeviceName","PlayDuration"],"results":[[42,"2026-09-20 12:34:56",null,"item","Movie","Title","DirectPlay","Web","TV",1],[43,"2026-09-20 12:35:56","user","item","Movie","Title","DirectPlay","Web","TV",1]],"message":""}`), nil
 	}))
+	page, err := client.PlaybackReporting(t.Context(), 41, core.ImportBatchSize)
+	if err != nil || page.Cursor != 43 || page.Skipped != 1 || len(page.Records) != 1 ||
+		page.Records[0].RecordID != "43" {
+		t.Fatalf("PlaybackReporting = %+v, %v", page, err)
+	}
+}
+
+func TestPlaybackReportingRejectsMalformedOrNonAscendingRowID(t *testing.T) {
+	for _, rows := range []string{
+		`[["bad","2026-09-20 12:34:56","user","item","Movie","Title","DirectPlay","Web","TV",1]]`,
+		`[[42,"2026-09-20 12:34:56","user","item","Movie","Title","DirectPlay","Web","TV",1],[42,"2026-09-20 12:35:56","user","item","Movie","Title","DirectPlay","Web","TV",1]]`,
+	} {
+		client := newTransportClient(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+			body := `{"colums":["rowid","DateCreated","UserId","ItemId","ItemType","ItemName","PlaybackMethod","ClientName","DeviceName","PlayDuration"],"results":` + rows + `,"message":""}`
+			return jsonResponse(http.StatusOK, body), nil
+		}))
+		_, err := client.PlaybackReporting(t.Context(), 41, core.ImportBatchSize)
+		assertMediaError(t, err, core.MediaServerMalformed)
+	}
+}
+
+func assertPlaybackReportingProgress(t *testing.T, client *Client) {
+	t.Helper()
 	page, err := client.PlaybackReporting(t.Context(), 41, core.ImportBatchSize)
 	if err != nil || page.Cursor != 43 || page.Skipped != 1 || len(page.Records) != 1 ||
 		page.Records[0].RecordID != "43" {

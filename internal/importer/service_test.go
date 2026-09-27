@@ -164,6 +164,25 @@ func TestBloomUploadStagingRecoversLazily(t *testing.T) {
 	}
 }
 
+func TestBloomUploadDetectsLaterStagingLoss(t *testing.T) {
+	service, staging := newService(t, &serviceStore{workerStore: &workerStore{}})
+	mounted := staging.root + ".mounted"
+	if err := os.Rename(staging.root, mounted); err != nil {
+		t.Fatalf("move staging root: %v", err)
+	}
+	_, err := service.StageBloomExport(t.Context(), &failOnRead{t: t})
+	assertUploadUnavailable(t, err)
+	if _, err := os.Lstat(staging.root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lost mount was replaced by a shadow staging root: %v", err)
+	}
+	if err := os.Rename(mounted, staging.root); err != nil {
+		t.Fatalf("restore staging root: %v", err)
+	}
+	if _, err := service.StageBloomExport(t.Context(), strings.NewReader("{}\n")); err != nil {
+		t.Fatalf("StageBloomExport after later recovery: %v", err)
+	}
+}
+
 type failOnRead struct{ t *testing.T }
 
 func (r *failOnRead) Read([]byte) (int, error) {

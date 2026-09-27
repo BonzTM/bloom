@@ -22,6 +22,7 @@ type fakePlaybackReader struct {
 	watches         []core.PlaybackWatch
 	positions       []core.PlaybackPosition
 	err             error
+	errorsByCall    []error
 	queries         []core.PlaybackQuery
 	positionWatchID string
 }
@@ -45,6 +46,9 @@ func (f *fakePlaybackReader) ListWatches(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.queries = append(f.queries, query)
+	if call := len(f.queries); call <= len(f.errorsByCall) && f.errorsByCall[call-1] != nil {
+		return nil, f.errorsByCall[call-1]
+	}
 	if f.err != nil {
 		return nil, f.err
 	}

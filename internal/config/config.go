@@ -203,6 +203,8 @@ type HTTPConfig struct {
 	IdleTimeout time.Duration
 	// MaxBodyBytes caps non-streaming request bodies before decoding.
 	MaxBodyBytes int64
+	// ImportTransferTimeout bounds one large import upload or watch export.
+	ImportTransferTimeout time.Duration
 }
 
 // DatabaseConfig configures the engine and the database/sql pool. All four pool
@@ -265,6 +267,9 @@ const (
 	defaultWriteTimeout                = 15 * time.Second
 	defaultIdleTimeout                 = 60 * time.Second
 	defaultMaxBodyBytes                = 1 << 20 // 1 MiB
+	defaultImportTransferTimeout       = 10 * time.Minute
+	minImportTransferTimeout           = 30 * time.Second
+	maxImportTransferTimeout           = 2 * time.Hour
 	defaultMaxOpenConns                = 25
 	defaultMaxIdleConns                = 25
 	defaultConnMaxLifetime             = 30 * time.Minute
@@ -367,6 +372,7 @@ type rawFlags struct {
 	bootstrapUsername                                                              *string
 	secretKey, bootstrapPassword                                                   string
 	readHeaderTimeout, readTimeout, writeTimeout, idleTimeout                      *time.Duration
+	importTransferTimeout                                                          *time.Duration
 	connMaxLifetime, connMaxIdleTime, shutdownGrace                                *time.Duration
 	maxBodyBytes                                                                   *int64
 	maxOpenConns, maxIdleConns                                                     *int
@@ -433,6 +439,8 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		writeTimeout:      fs.Duration("http-write-timeout", env.duration("BLOOM_HTTP_WRITE_TIMEOUT", defaultWriteTimeout), "HTTP write timeout"),
 		idleTimeout:       fs.Duration("http-idle-timeout", env.duration("BLOOM_HTTP_IDLE_TIMEOUT", defaultIdleTimeout), "HTTP idle timeout"),
 		maxBodyBytes:      fs.Int64("http-max-body-bytes", env.int64("BLOOM_HTTP_MAX_BODY_BYTES", defaultMaxBodyBytes), "max request body size in bytes"),
+		importTransferTimeout: fs.Duration("import-transfer-timeout", env.duration(
+			"BLOOM_IMPORT_TRANSFER_TIMEOUT", defaultImportTransferTimeout), "import upload and watch export timeout"),
 
 		driver:           fs.String("db-driver", env.string("BLOOM_DB_DRIVER", string(DriverSQLite)), "database engine: sqlite|postgres"),
 		dsn:              fs.String("db-dsn", env.string("BLOOM_DB_DSN", ""), "database DSN (sqlite default: "+DefaultSQLiteDSN+")"),
@@ -619,6 +627,7 @@ func (r rawFlags) httpConfig() HTTPConfig {
 		Addr: *r.addr, ReadHeaderTimeout: *r.readHeaderTimeout,
 		ReadTimeout: *r.readTimeout, WriteTimeout: *r.writeTimeout,
 		IdleTimeout: *r.idleTimeout, MaxBodyBytes: *r.maxBodyBytes,
+		ImportTransferTimeout: *r.importTransferTimeout,
 	}
 }
 
@@ -1050,6 +1059,10 @@ func (h HTTPConfig) validate() error {
 	}
 	if h.MaxBodyBytes <= 0 {
 		return fmt.Errorf("config: BLOOM_HTTP_MAX_BODY_BYTES must be positive, got %d", h.MaxBodyBytes)
+	}
+	if h.ImportTransferTimeout < minImportTransferTimeout || h.ImportTransferTimeout > maxImportTransferTimeout {
+		return fmt.Errorf("config: BLOOM_IMPORT_TRANSFER_TIMEOUT must be between %s and %s",
+			minImportTransferTimeout, maxImportTransferTimeout)
 	}
 	return nil
 }

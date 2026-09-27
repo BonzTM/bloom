@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -50,6 +51,8 @@ type statusRecorder struct {
 	status int
 }
 
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
@@ -82,7 +85,10 @@ func recoverMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
-				if recover() != nil {
+				if recovered := recover(); recovered != nil {
+					if recoveredErr, ok := recovered.(error); ok && errors.Is(recoveredErr, http.ErrAbortHandler) {
+						panic(recovered)
+					}
 					logger.ErrorContext(r.Context(), "panic recovered",
 						"method", r.Method,
 						"route", routePattern(r),

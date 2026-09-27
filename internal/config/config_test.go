@@ -118,6 +118,9 @@ func assertHTTPDefaults(t *testing.T, cfg Config) {
 	if cfg.HTTP.MaxBodyBytes != defaultMaxBodyBytes {
 		t.Errorf("MaxBodyBytes = %d, want default %d", cfg.HTTP.MaxBodyBytes, defaultMaxBodyBytes)
 	}
+	if cfg.HTTP.ImportTransferTimeout != defaultImportTransferTimeout {
+		t.Errorf("ImportTransferTimeout = %s, want %s", cfg.HTTP.ImportTransferTimeout, defaultImportTransferTimeout)
+	}
 }
 
 func assertDatabaseDefaults(t *testing.T, cfg Config) {
@@ -265,6 +268,24 @@ func TestLoadImportWorkerConfiguration(t *testing.T) {
 			t.Setenv("BLOOM_IMPORT_WORKER_INTERVAL", value)
 			if _, err := Load(nil); err == nil {
 				t.Fatal("Load accepted invalid import worker interval")
+			}
+		})
+	}
+}
+
+func TestImportTransferTimeoutConfiguration(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_IMPORT_TRANSFER_TIMEOUT", "45m")
+	cfg, err := Load(nil)
+	if err != nil || cfg.HTTP.ImportTransferTimeout != 45*time.Minute {
+		t.Fatalf("import transfer timeout = %s, %v", cfg.HTTP.ImportTransferTimeout, err)
+	}
+	for _, value := range []string{"29s", "2h1s"} {
+		t.Run(value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("BLOOM_IMPORT_TRANSFER_TIMEOUT", value)
+			if _, err := Load(nil); err == nil {
+				t.Fatal("Load accepted invalid import transfer timeout")
 			}
 		})
 	}
@@ -831,9 +852,12 @@ func TestLoadMalformedEnvRejected(t *testing.T) {
 func validConfigForTest() Config {
 	return Config{
 		DataDirectory: defaultDataDirectory,
-		HTTP:          HTTPConfig{Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second, MaxBodyBytes: 1},
-		Database:      DatabaseConfig{Driver: DriverSQLite, DSN: "file::memory:?_pragma=foreign_keys(1)", MaxOpenConns: 5, MaxIdleConns: 5, ConnMaxLifetime: time.Minute},
-		Telemetry:     TelemetryConfig{LogFormat: LogFormatJSON, TraceSampleRatio: 1},
+		HTTP: HTTPConfig{
+			Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second,
+			MaxBodyBytes: 1, ImportTransferTimeout: defaultImportTransferTimeout,
+		},
+		Database:  DatabaseConfig{Driver: DriverSQLite, DSN: "file::memory:?_pragma=foreign_keys(1)", MaxOpenConns: 5, MaxIdleConns: 5, ConnMaxLifetime: time.Minute},
+		Telemetry: TelemetryConfig{LogFormat: LogFormatJSON, TraceSampleRatio: 1},
 		Auth: AuthConfig{
 			SessionCookieSecure: true, SessionLifetime: time.Hour, SessionIdleTimeout: time.Minute,
 			LoginRateRefillInterval: time.Minute, LoginRateBurst: 5, LoginRateMaxKeys: 100,

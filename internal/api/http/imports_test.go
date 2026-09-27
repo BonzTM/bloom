@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -301,6 +303,137 @@ func TestWatchExportValidationFailureIsAuditedWithoutQueryData(t *testing.T) {
 	}
 }
 
+func TestWatchExportFirstQueryFailureReturnsDocumented500(t *testing.T) {
+	server, _, audit := importHandlerServer(t)
+	server.playbackReader = &fakePlaybackReader{err: errors.New("database unavailable")}
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
+	recorder := httptest.NewRecorder()
+	server.handleExportWatches(recorder, request)
+	if recorder.Code != http.StatusInternalServerError ||
+		!strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("first query failure = %d %q: %s", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
+	if event := audit.last(t); event.Result != telemetry.AuditFailure || event.Reason != "failed" {
+		t.Fatalf("failure audit = %+v", event)
+	}
+}
+
+func TestWatchExportMidstreamFailureAbortsTransfer(t *testing.T) {
+	server, _, audit := importHandlerServer(t)
+	watches := make([]core.PlaybackWatch, exportBatchSize+1)
+	ended := time.Date(2026, 9, 25, 12, 1, 0, 0, time.UTC)
+	for index := range watches {
+		watches[index] = exportHTTPWatch(ended.Add(-time.Duration(index) * time.Minute))
+	}
+	server.playbackReader = &fakePlaybackReader{
+		watches: watches, errorsByCall: []error{nil, errors.New("database unavailable")},
+	}
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches?limit=501", "", core.PermissionAdminSettings)
+	recorder := httptest.NewRecorder()
+	handler := recoverMiddleware(server.logger)(http.HandlerFunc(server.handleExportWatches))
+	recovered := capturePanic(func() { handler.ServeHTTP(recorder, request) })
+	abortErr, ok := recovered.(error)
+	if !ok || !errors.Is(abortErr, http.ErrAbortHandler) || recorder.Code != http.StatusOK ||
+		recorder.Header().Get("X-Next-Cursor") != "" {
+		t.Fatalf("midstream failure = panic %v status %d trailer %q", recovered, recorder.Code, recorder.Header().Get("X-Next-Cursor"))
+	}
+	if event := audit.last(t); event.Result != telemetry.AuditFailure || event.Reason != "failed" {
+		t.Fatalf("failure audit = %+v", event)
+	}
+}
+
+func capturePanic(call func()) any {
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		call()
+	}()
+	return recovered
+}
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	readDeadline, writeDeadline time.Time
+	writeDelay                  time.Duration
+}
+
+func (r *deadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	r.readDeadline = deadline
+	return nil
+}
+
+func (r *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	r.writeDeadline = deadline
+	return nil
+}
+
+func (r *deadlineRecorder) Write(data []byte) (int, error) {
+	time.Sleep(r.writeDelay)
+	if !r.writeDeadline.IsZero() && time.Now().After(r.writeDeadline) {
+		return 0, context.DeadlineExceeded
+	}
+	return r.ResponseRecorder.Write(data)
+}
+
+type slowDeadlineBody struct {
+	reader   io.Reader
+	deadline *time.Time
+}
+
+func (r slowDeadlineBody) Read(data []byte) (int, error) {
+	time.Sleep(10 * time.Millisecond)
+	if time.Now().After(*r.deadline) {
+		return 0, context.DeadlineExceeded
+	}
+	return r.reader.Read(data)
+}
+
+func (slowDeadlineBody) Close() error { return nil }
+
+func TestCreateBloomExportExtendsDeadlineForSlowReader(t *testing.T) {
+	server, manager, _ := importHandlerServer(t)
+	server.importTransferTimeout = 30 * time.Second
+	body, contentType := bloomMultipart(t, "{}\n")
+	recorder := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder(), readDeadline: time.Now().Add(time.Millisecond)}
+	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
+	request.Body = slowDeadlineBody{reader: bytes.NewReader(body), deadline: &recorder.readDeadline}
+	request.Header.Set("Content-Type", contentType)
+	handler := loggingMiddleware(server.logger, telemetry.NopMetrics{})(http.HandlerFunc(server.handleCreateImport))
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated || manager.upload != "{}\n" || time.Until(recorder.readDeadline) < time.Second {
+		t.Fatalf("slow upload = %d deadline %s body %q", recorder.Code, time.Until(recorder.readDeadline), manager.upload)
+	}
+}
+
+func TestWatchExportExtendsDeadlineForSlowWriter(t *testing.T) {
+	server, _, _ := importHandlerServer(t)
+	server.importTransferTimeout = 30 * time.Second
+	ended := time.Date(2026, 9, 25, 12, 1, 0, 0, time.UTC)
+	server.playbackReader = &fakePlaybackReader{watches: []core.PlaybackWatch{exportHTTPWatch(ended)}}
+	recorder := &deadlineRecorder{
+		ResponseRecorder: httptest.NewRecorder(), writeDeadline: time.Now().Add(time.Millisecond),
+		writeDelay: 10 * time.Millisecond,
+	}
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches?limit=1", "", core.PermissionAdminSettings)
+	handler := loggingMiddleware(server.logger, telemetry.NopMetrics{})(http.HandlerFunc(server.handleExportWatches))
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || recorder.Body.Len() == 0 || time.Until(recorder.writeDeadline) < time.Second {
+		t.Fatalf("slow export = %d deadline %s bytes %d", recorder.Code, time.Until(recorder.writeDeadline), recorder.Body.Len())
+	}
+}
+
+func TestImportTransferOverrideLeavesGlobalDeadlinesConfigured(t *testing.T) {
+	cfg := config.HTTPConfig{
+		Addr: ":0", ReadHeaderTimeout: time.Second, ReadTimeout: 15 * time.Second,
+		WriteTimeout: 15 * time.Second, IdleTimeout: time.Minute,
+	}
+	server := newHTTPServer(cfg, http.NotFoundHandler())
+	if server.ReadTimeout != 15*time.Second || server.WriteTimeout != 15*time.Second {
+		t.Fatalf("global deadlines = read %s write %s", server.ReadTimeout, server.WriteTimeout)
+	}
+}
+
 func importHandlerServer(t *testing.T) (*Server, *fakeImportManager, *recordingAudit) {
 	t.Helper()
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
@@ -312,7 +445,7 @@ func importHandlerServer(t *testing.T) (*Server, *fakeImportManager, *recordingA
 	audit := &recordingAudit{}
 	server := &Server{
 		logger: slog.New(slog.DiscardHandler), maxBodyBytes: 8192, imports: manager,
-		audit: audit, auditFailureMetrics: telemetry.NopMetrics{},
+		audit: audit, auditFailureMetrics: telemetry.NopMetrics{}, importTransferTimeout: 10 * time.Minute,
 	}
 	return server, manager, audit
 }

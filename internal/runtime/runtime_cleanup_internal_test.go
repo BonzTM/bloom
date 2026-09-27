@@ -517,6 +517,7 @@ func cleanupTestConfig(t *testing.T) config.Config {
 		HTTP: config.HTTPConfig{
 			Addr: "127.0.0.1:0", ReadHeaderTimeout: time.Second, ReadTimeout: time.Second,
 			WriteTimeout: time.Second, IdleTimeout: time.Second, MaxBodyBytes: 1 << 20,
+			ImportTransferTimeout: 10 * time.Minute,
 		},
 		Database: config.DatabaseConfig{
 			Driver: config.DriverSQLite,

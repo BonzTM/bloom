@@ -283,16 +283,17 @@ so correcting the mount does not require a restart.
 Pass the `X-Next-Cursor` response trailer back as `cursor` to continue. Import
 that file on another Bloom instance to move watch history between SQLite and
 PostgreSQL. Re-import is idempotent because the original watch ID is the source
-record ID.
+record ID. A transfer that ends without the terminating chunk and
+`X-Next-Cursor` trailer is truncated and must be retried.
 
 Bloom's collected watch wins when an imported and collected watch have the same
 media server, media user, and item and start within
 `BLOOM_PLAYBACK_RESUME_WINDOW`. This rule applies whether collection or import
 commits first. Bloom exports restore the watch snapshot, including device,
 series, library, episode, final-position, stream, and end-time fields. Imported
-watches do not restore segments or position samples. Playback Reporting rows
-with malformed nullable identity or text fields are skipped without blocking
-later rows.
+watches do not restore segments or position samples. After a valid ascending
+row ID, Playback Reporting rows with malformed dates, durations, identity, or
+text fields are skipped without blocking later rows.
 
 An account with `stats.read.all` can also read the statistics dashboards at
 `GET /api/v1/stats/overview`, `/daily`, `/patterns`, `/titles`, `/users`,
@@ -596,6 +597,7 @@ this table.
 | `BLOOM_HTTP_WRITE_TIMEOUT` | duration | no | `15s` | no | Bound on writing a response. |
 | `BLOOM_HTTP_IDLE_TIMEOUT` | duration | no | `60s` | no | Idle keep-alive connection lifetime. |
 | `BLOOM_HTTP_MAX_BODY_BYTES` | int | no | `1048576` | no | Cap on non-streaming request bodies. |
+| `BLOOM_IMPORT_TRANSFER_TIMEOUT` | duration | no | `10m` | no | Per-request deadline for a Bloom export upload or streamed watch export. Valid range: `30s`-`2h`. |
 | `BLOOM_PUBLIC_URL` | HTTP(S) origin | no | `http://localhost:8080` | no | Externally visible Bloom origin used for callback-error redirects and OIDC redirect validation. Limited to 2,048 valid UTF-8 bytes with no control characters. |
 | `BLOOM_DB_DRIVER` | `sqlite` \| `postgres` | no | `sqlite` | no | Database engine. Anything else fails startup. |
 | `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. For compatibility, startup supplies `_pragma=foreign_keys(1)` when a configured SQLite DSN omits a foreign-key pragma; an explicit disable still fails startup. |

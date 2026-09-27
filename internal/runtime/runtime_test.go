@@ -33,6 +33,7 @@ func baseConfig(t *testing.T, addr string) config.Config {
 		HTTP: config.HTTPConfig{
 			Addr: addr, ReadHeaderTimeout: time.Second, ReadTimeout: 5 * time.Second,
 			WriteTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxBodyBytes: 1 << 20,
+			ImportTransferTimeout: 10 * time.Minute,
 		},
 		Database: config.DatabaseConfig{
 			Driver: config.DriverSQLite, DSN: "file:" + filepath.Join(t.TempDir(), "bloom.db") +

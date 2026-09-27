@@ -44,6 +44,39 @@ func TestRequirePermissionPaths(t *testing.T) {
 	}
 }
 
+func TestImportPermissionDenialsUseNamedAuditResources(t *testing.T) {
+	tests := []struct {
+		pattern, resource string
+	}{
+		{pattern: "/api/v1/imports", resource: auditResourceImports},
+		{pattern: "/api/v1/imports/{id}", resource: auditResourceImports},
+		{pattern: "/api/v1/imports/{id}/cancel", resource: auditResourceImports},
+		{pattern: "/api/v1/exports/watches", resource: auditResourceWatchExports},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.pattern, func(t *testing.T) {
+			assertNamedDenialResource(t, testCase.pattern, testCase.resource)
+		})
+	}
+}
+
+func assertNamedDenialResource(t *testing.T, pattern, resource string) {
+	t.Helper()
+	h := newAuthHarness(t, nil)
+	permission, err := core.NewCatalogPermission(core.PermissionAdminSettings)
+	if err != nil {
+		t.Fatalf("NewCatalogPermission: %v", err)
+	}
+	handler := h.server.RequirePermission(permission)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	request := httptest.NewRequest(http.MethodGet, "https://bloom.test"+strings.ReplaceAll(pattern, "{id}", testRequestAccountID), nil)
+	request.Pattern = pattern
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized || h.audit.last(t).Resource != resource {
+		t.Fatalf("denial = %d audit %+v", recorder.Code, h.audit.last(t))
+	}
+}
+
 func assertPermissionGuard(t *testing.T, testCase permissionGuardTestCase) {
 	t.Helper()
 	h := newAuthHarness(t, nil)

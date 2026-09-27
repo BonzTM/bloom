@@ -115,6 +115,11 @@ func (w *Worker) runOnce(ctx context.Context) error {
 }
 
 func (w *Worker) process(ctx context.Context, job core.ImportJob) error {
+	if job.Source == core.ImportSourceBloomExport {
+		if err := w.deps.Staging.checkAvailability(); err != nil {
+			return fmt.Errorf("prepare import staging: %w", err)
+		}
+	}
 	reader, err := w.sources.reader(job.Source)
 	if err != nil {
 		return w.fail(ctx, job, err)
@@ -122,6 +127,9 @@ func (w *Worker) process(ctx context.Context, job core.ImportJob) error {
 	for {
 		records, cursor, skipped, readErr := reader.ReadImportBatch(ctx, job)
 		if readErr != nil {
+			if errors.Is(readErr, errStagingUnavailable) {
+				return fmt.Errorf("read staged import: %w", readErr)
+			}
 			return w.fail(ctx, job, readErr)
 		}
 		if len(records) == 0 && skipped == 0 {

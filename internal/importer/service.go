@@ -67,7 +67,11 @@ func (s *Service) StageBloomExport(ctx context.Context, upload io.Reader) (strin
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	return s.staging.stage(upload)
+	id, err := s.staging.stage(upload)
+	if errors.Is(err, errStagingUnavailable) {
+		return "", uploadUnavailableError()
+	}
+	return id, err
 }
 
 // CheckBloomExportUpload prepares the staging root without consuming an upload.
