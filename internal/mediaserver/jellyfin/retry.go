@@ -78,8 +78,9 @@ func (c *Client) doOnce(
 }
 
 func retryableStatus(status int) bool {
-	return status == http.StatusTooManyRequests || status == http.StatusBadGateway ||
-		status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests ||
+		status == http.StatusBadGateway || status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
 }
 
 func (c *Client) retryDelay(err error, attempt int) time.Duration {

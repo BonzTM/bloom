@@ -248,8 +248,9 @@ func (c *Client) observeRetry(operation, outcome string) {
 func (c *Client) CloseIdleConnections() { c.httpClient.CloseIdleConnections() }
 
 func retryableStatus(status int) bool {
-	return status == http.StatusTooManyRequests || status == http.StatusBadGateway ||
-		status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests ||
+		status == http.StatusBadGateway || status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
 }
 
 func retryDelay(err error, attempt int, random func(int64) int64) time.Duration {

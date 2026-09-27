@@ -21,8 +21,8 @@ import (
 // Responses. It is a dedicated DTO with explicit snake_case json tags. A bare
 // {"error":"..."} string is forbidden: the client gets one human sentence and
 // nothing to branch on. The envelope carries a machine-readable code, a safe
-// human message, optional per-field validation failures, and the correlation
-// request_id in the body.
+// human message, optional upstream-failure reason, optional per-field
+// validation failures, and the correlation request_id in the body.
 type ErrorResponse struct {
 	// Code is a machine-readable string enum the client may branch on. It is NOT
 	// the HTTP status: two 404s with different codes are different failures.
@@ -30,6 +30,9 @@ type ErrorResponse struct {
 	// Message is human-readable and safe to surface. For 5xx it is generic and
 	// never carries internal detail.
 	Message string `json:"message"`
+	// Reason is a safe upstream-failure classification. It is present only for
+	// media_server_failure and download_manager_failure.
+	Reason string `json:"reason,omitzero"`
 	// Fields carries one entry per offending input on a validation failure; it is
 	// omitted when empty.
 	Fields []FieldError `json:"fields,omitzero"`

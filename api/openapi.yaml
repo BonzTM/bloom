@@ -3347,6 +3347,16 @@ components:
         message:
           type: string
           description: Human-readable and safe to surface. Generic for 5xx.
+        reason:
+          type: string
+          description: |
+            Present only for `media_server_failure` and `download_manager_failure`.
+            `unreachable` covers connection failures, timeouts, DNS failures,
+            refused destinations, and retryable upstream statuses;
+            `unauthorized` covers an upstream 401 or 403; `not_found` covers an
+            upstream 404; `malformed` covers anything else, including unexpected
+            statuses, redirects, and responses that do not fit the upstream's contract.
+          enum: [unreachable, unauthorized, not_found, malformed]
         fields:
           type: array
           description: Per-field validation failures. Present only when `code` is `validation_failed`.

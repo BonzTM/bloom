@@ -138,6 +138,43 @@ func TestDownloadManagerRoutesRejectInvalidAndUpstreamFailures(t *testing.T) {
 	}
 }
 
+func TestDownloadManagerRegistrationAndOptionsFailureReasons(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   core.DownloadManagerErrorKind
+		reason string
+		status int
+	}{
+		{name: "unavailable", kind: core.DownloadManagerUnavailable, reason: "unreachable", status: http.StatusServiceUnavailable},
+		{name: "unauthorized", kind: core.DownloadManagerUnauthorized, reason: "unauthorized", status: http.StatusBadGateway},
+		{name: "not found", kind: core.DownloadManagerNotFound, reason: "not_found", status: http.StatusBadGateway},
+		{name: "malformed", kind: core.DownloadManagerMalformed, reason: "malformed", status: http.StatusBadGateway},
+	}
+	requests := []struct {
+		name, method, path, body, contentType string
+	}{
+		{name: "registration", method: http.MethodPost, path: "/api/v1/download-managers", body: `{"kind":"radarr","name":"Main","base_url":"https://radarr.example.test","api_key":"secret"}`, contentType: "application/json"},
+		{name: "options", method: http.MethodGet, path: "/api/v1/download-managers/33333333-3333-4333-8333-333333333333/options"},
+	}
+	for _, request := range requests {
+		for _, testCase := range tests {
+			t.Run(request.name+" "+testCase.name, func(t *testing.T) {
+				h := newAuthHarness(t, nil)
+				cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+				h.downloadManagers.err = &core.DownloadManagerError{
+					Kind: testCase.kind, Operation: "probe", Err: errors.New("private.example.test api-key upstream body"),
+				}
+				recorder := h.requestWithContentType(t, request.method, request.path, request.body, cookie, request.contentType)
+				envelope := decodeEnvelope(t, recorder)
+				if recorder.Code != testCase.status || envelope.Code != codeDownloadManagerFailure ||
+					envelope.Message != http.StatusText(testCase.status) || envelope.Reason != testCase.reason {
+					t.Fatalf("response = %d %+v", recorder.Code, envelope)
+				}
+			})
+		}
+	}
+}
+
 func TestDownloadManagerOptionsEncodeEmptyArraysAndMatchContract(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	h.downloadManagers.options = core.DownloadManagerOptions{}

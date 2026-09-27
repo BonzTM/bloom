@@ -674,6 +674,17 @@ Layout follows the handbook default (`cmd/` + `internal/`):
 - `web/` — the SPA source, built by its own toolchain and embedded per [ADR 0002](decisions/0002-embed-spa-in-binary.md).
 - `scripts/` — operator and CI helper scripts.
 
+### Error handling
+
+Every JSON API failure uses the `ErrorResponse` envelope with a stable `code`,
+a safe `message`, and a `request_id` for log correlation. Media-server and
+download-manager probe failures also include `reason`: `unreachable` for
+connection, timeout, DNS, refused-destination, and retryable-status failures;
+`unauthorized` for upstream 401 or 403 responses; `not_found` for an upstream
+404; and `malformed` for unexpected statuses, redirects, or responses that do
+not match the upstream contract. Other error codes omit `reason`. Upstream
+response bodies, hostnames, and credentials are never included in the envelope.
+
 Authoritative contributor rules: [AGENTS.md](AGENTS.md).
 Change routing by file area: the Change Routing table in [AGENTS.md](AGENTS.md).
 Architecture decisions and their rationale: [decisions/](decisions/).

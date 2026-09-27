@@ -40,7 +40,7 @@ func TestGetJSONClassifiesTerminalStatusesWithoutRetry(t *testing.T) {
 }
 
 func TestGetJSONRetries429AndRetryableServerFailures(t *testing.T) {
-	tests := []int{http.StatusTooManyRequests, http.StatusServiceUnavailable}
+	tests := []int{http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusServiceUnavailable}
 	for _, status := range tests {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var calls atomic.Int32
