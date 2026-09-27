@@ -35,6 +35,7 @@ type mediaServerReader interface {
 	List(ctx context.Context, afterNameKey string, pageSize int) ([]core.MediaServerConnection, error)
 	Get(ctx context.Context, id string) (core.MediaServerConnection, error)
 	Libraries(ctx context.Context, id string) ([]core.Library, error)
+	Users(ctx context.Context, id string) ([]core.MediaUser, error)
 }
 
 type mediaServerManager interface {
@@ -524,7 +525,8 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/roles":
 		return auditResourceRoles
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
-		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries":
+		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries",
+		"/api/v1/media-servers/{id}/users":
 		return auditResourceMediaServers
 	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
 		return auditResourceDownloadManagers

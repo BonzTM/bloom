@@ -84,6 +84,8 @@ contracts) gets an entry here.
   failed: the address could not be reached, the API key was rejected, the API
   was not found at that address, or the answer did not look like the expected
   server.
+- `GET /api/v1/media-servers/{id}/users`, guarded by `admin.settings`, lists
+  bounded media-server user identities for linking Bloom accounts.
 - Stream details on playback watches and bounded position samples, including
   containers, codecs, bitrate, dimensions, framerate, audio channels,
   direct-stream flags, and transcode reasons. Mid-play method and stream

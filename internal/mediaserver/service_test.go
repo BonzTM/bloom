@@ -128,6 +128,30 @@ type fakeAdapter struct {
 	closeCalls   atomic.Int32
 }
 
+type userListingAdapter struct {
+	*fakeAdapter
+	users     []core.MediaUser
+	usersErr  error
+	userCalls atomic.Int32
+}
+
+func (a *userListingAdapter) ListUsers(ctx context.Context) ([]core.MediaUser, error) {
+	a.userCalls.Add(1)
+	_, deadlineSeen := ctx.Deadline()
+	a.deadlineSeen.Store(deadlineSeen)
+	return slices.Clone(a.users), a.usersErr
+}
+
+type fixedAdapterFactory struct{ adapter core.MediaServerAdapter }
+
+func (f fixedAdapterFactory) New(core.MediaServerKind, string, string, bool) (core.MediaServerAdapter, error) {
+	return f.adapter, nil
+}
+
+func (f fixedAdapterFactory) Capabilities(core.MediaServerKind) (core.Capabilities, error) {
+	return f.adapter.Capabilities(), nil
+}
+
 func (a *fakeAdapter) Probe(ctx context.Context) (core.ServerInfo, error) {
 	a.probeCalls.Add(1)
 	_, deadlineSeen := ctx.Deadline()
@@ -336,6 +360,82 @@ func TestServiceBoundaryFailuresRemainMatchable(t *testing.T) {
 				t.Fatalf("error = %v, want sentinel", err)
 			}
 		})
+	}
+}
+
+func TestServiceUsersListsInBinaryNameOrder(t *testing.T) {
+	adapter := &userListingAdapter{
+		fakeAdapter: &fakeAdapter{},
+		users: []core.MediaUser{
+			{ID: "user-3", Name: "zoe"},
+			{ID: "user-2", Name: "alice"},
+			{ID: "user-1", Name: "Alice"},
+		},
+	}
+	store, service := newTestService(t, fixedAdapterFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	users, err := service.Users(context.Background(), store.records[0].ID)
+	if err != nil {
+		t.Fatalf("Users: %v", err)
+	}
+	want := []core.MediaUser{
+		{ID: "user-1", Name: "Alice"},
+		{ID: "user-2", Name: "alice"},
+		{ID: "user-3", Name: "zoe"},
+	}
+	if !slices.Equal(users, want) || !adapter.deadlineSeen.Load() || adapter.userCalls.Load() != 1 {
+		t.Fatalf("Users = %+v, deadline=%t calls=%d", users, adapter.deadlineSeen.Load(), adapter.userCalls.Load())
+	}
+}
+
+func TestServiceUsersRejectsMissingAdapterCapability(t *testing.T) {
+	store, service := newTestService(t, fakeFactory{adapter: &fakeAdapter{}})
+	seedEncryptedRecord(t, store, service)
+	_, err := service.Users(context.Background(), store.records[0].ID)
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("Users error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServiceUsersPreservesAdapterFailure(t *testing.T) {
+	sentinel := errors.New("list users failed")
+	adapter := &userListingAdapter{fakeAdapter: &fakeAdapter{}, usersErr: sentinel}
+	store, service := newTestService(t, fixedAdapterFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	_, err := service.Users(context.Background(), store.records[0].ID)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Users error = %v, want sentinel", err)
+	}
+}
+
+func TestServiceUsersUsesPerServerBulkhead(t *testing.T) {
+	started := make(chan struct{}, maxConcurrentCallsPerServer)
+	release := make(chan struct{})
+	adapter := &userListingAdapter{fakeAdapter: &fakeAdapter{}}
+	store, service := newTestService(t, fixedAdapterFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	id := store.records[0].ID
+	adapter.started, adapter.release = started, release
+	errs := make(chan error, maxConcurrentCallsPerServer)
+	for range maxConcurrentCallsPerServer {
+		go func() {
+			_, err := service.Probe(context.Background(), id)
+			errs <- err
+		}()
+	}
+	for range maxConcurrentCallsPerServer {
+		<-started
+	}
+	_, err := service.Users(context.Background(), id)
+	var mediaErr *core.MediaServerError
+	if !errors.As(err, &mediaErr) || mediaErr.Kind != core.MediaServerSaturated || adapter.userCalls.Load() != 0 {
+		t.Fatalf("Users error = %#v, outbound calls = %d", err, adapter.userCalls.Load())
+	}
+	close(release)
+	for range maxConcurrentCallsPerServer {
+		if err := <-errs; err != nil {
+			t.Errorf("admitted Probe: %v", err)
+		}
 	}
 }
 
@@ -751,7 +851,7 @@ type failingCipher struct {
 func (c failingCipher) Encrypt([]byte, secrets.Context) ([]byte, error) { return nil, c.encryptErr }
 func (c failingCipher) Decrypt([]byte, secrets.Context) ([]byte, error) { return nil, c.decryptErr }
 
-func newTestService(t *testing.T, factory fakeFactory) (*memoryStore, *Service) {
+func newTestService(t *testing.T, factory adapterFactory) (*memoryStore, *Service) {
 	t.Helper()
 	store := &memoryStore{}
 	cipher, err := secrets.New([]byte("0123456789abcdef0123456789abcdef"))

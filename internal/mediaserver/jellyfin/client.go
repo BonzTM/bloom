@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -25,7 +26,6 @@ import (
 
 const (
 	maxResponseBytes            = 1 << 20
-	maxUsers                    = 10000
 	maxSessionMediaStreams      = 256
 	defaultTimeout              = 10 * time.Second
 	sessionsActiveWithinSeconds = 60
@@ -66,6 +66,7 @@ var (
 	_ core.MediaUserProvisioner    = (*Client)(nil)
 	_ core.MediaUserLookup         = (*Client)(nil)
 	_ core.MediaUserIDLookup       = (*Client)(nil)
+	_ core.MediaUserLister         = (*Client)(nil)
 	_ core.MediaAvailabilityLookup = (*Client)(nil)
 	_ core.LibraryResolver         = (*Client)(nil)
 )
@@ -208,7 +209,7 @@ func (c *Client) FindUserByName(ctx context.Context, name string) (core.MediaUse
 	if name == "" || len(name) > core.MaxMediaUsernameBytes {
 		return core.MediaUser{}, false, core.ErrInvalidArgument
 	}
-	return c.findUser(ctx, func(user core.MediaUser) bool { return user.Name == name }, true)
+	return c.findUser(ctx, name, true)
 }
 
 // FindUserByID verifies one Jellyfin user identifier and returns its current username.
@@ -216,42 +217,41 @@ func (c *Client) FindUserByID(ctx context.Context, id string) (core.MediaUser, b
 	if !core.ValidAccountMediaUserID(id) {
 		return core.MediaUser{}, false, core.ErrInvalidArgument
 	}
-	return c.findUser(ctx, func(user core.MediaUser) bool { return user.ID == id }, false)
+	return c.findUser(ctx, id, false)
 }
 
-func (c *Client) findUser(
-	ctx context.Context, matches func(core.MediaUser) bool, rejectAmbiguous bool,
-) (core.MediaUser, bool, error) {
-	var users []jellyfinapi.UserDto
-	started, err := c.getJSON(ctx, "list_users", "/Users", &users)
+// ListUsers returns the bounded identities visible to the configured credential.
+func (c *Client) ListUsers(ctx context.Context) ([]core.MediaUser, error) {
+	users, started, err := c.fetchUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.observe("list_users", "success", started)
+	return users, nil
+}
+
+func (c *Client) findUser(ctx context.Context, value string, byName bool) (core.MediaUser, bool, error) {
+	users, started, err := c.fetchUsers(ctx)
 	if err != nil {
 		return core.MediaUser{}, false, err
-	}
-	if len(users) > maxUsers {
-		c.observe("list_users", "malformed", started)
-		return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("user count exceeds limit"))
 	}
 	var match core.MediaUser
 	found := false
 	ambiguous := false
 	for _, user := range users {
-		if user.Name == nil || user.Id == nil {
+		matches := user.ID == value
+		if byName {
+			matches = user.Name == value
+		}
+		if !matches {
 			continue
 		}
-		candidate := core.MediaUser{ID: user.Id.String(), Name: *user.Name}
-		if !matches(candidate) {
-			continue
-		}
-		if !core.ValidAccountMediaUserID(candidate.ID) || !core.ValidMediaUsername(candidate.Name) {
-			c.observe("list_users", "malformed", started)
-			return core.MediaUser{}, false, mediaError("list_users", core.MediaServerMalformed, errors.New("missing user identity"))
-		}
-		if found && rejectAmbiguous {
+		if found && byName {
 			ambiguous = true
 			continue
 		}
 		if !found {
-			match, found = candidate, true
+			match, found = user, true
 		}
 	}
 	if ambiguous {
@@ -260,6 +260,20 @@ func (c *Client) findUser(
 	}
 	c.observe("list_users", "success", started)
 	return match, found, nil
+}
+
+func (c *Client) fetchUsers(ctx context.Context) ([]core.MediaUser, time.Time, error) {
+	var dto []jellyfinapi.UserDto
+	started, err := c.getJSON(ctx, "list_users", "/Users", &dto)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	users, err := mapUsers(dto)
+	if err != nil {
+		c.observe("list_users", "malformed", started)
+		return nil, time.Time{}, err
+	}
+	return users, started, nil
 }
 
 // SetLibraryAccess reads the current whole policy, changes only folder access,
@@ -424,6 +438,21 @@ func mapLibraries(folders []jellyfinapi.VirtualFolderInfo) ([]core.Library, erro
 		libraries = append(libraries, core.Library{ID: *folder.ItemId, Name: *folder.Name, Type: libraryType})
 	}
 	return libraries, nil
+}
+
+func mapUsers(values []jellyfinapi.UserDto) ([]core.MediaUser, error) {
+	if len(values) > core.MaxMediaServerUsers {
+		return nil, mediaError("list_users", core.MediaServerMalformed, errors.New("user count exceeds limit"))
+	}
+	users := make([]core.MediaUser, 0, len(values))
+	for _, value := range values {
+		user := core.MediaUser{ID: uuidString(value.Id), Name: stringValue(value.Name)}
+		if !core.ValidAccountMediaUserID(user.ID) || !core.ValidMediaUsername(user.Name) {
+			return nil, mediaError("list_users", core.MediaServerMalformed, errors.New("invalid user identity"))
+		}
+		users = append(users, user)
+	}
+	return users, nil
 }
 
 func mapSessions(values []jellyfinapi.SessionInfoDto) ([]core.PlaybackSession, error) {
@@ -681,6 +710,10 @@ func (c *Client) getJSON(ctx context.Context, operation, path string, target any
 	body, started, err := c.getWithRetry(ctx, operation, path)
 	if err != nil {
 		return time.Time{}, err
+	}
+	if !utf8.Valid(body) {
+		c.observe(operation, "malformed", started)
+		return time.Time{}, mediaError(operation, core.MediaServerMalformed, errors.New("response is not valid UTF-8"))
 	}
 	if err := json.Unmarshal(body, target); err != nil {
 		c.observe(operation, "malformed", started)

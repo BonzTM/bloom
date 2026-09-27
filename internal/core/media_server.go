@@ -25,6 +25,8 @@ const (
 	MaxMediaServerBaseURLBytes = 2048
 	// MaxMediaServerLibraries bounds the unpaginated Jellyfin library response.
 	MaxMediaServerLibraries = 256
+	// MaxMediaServerUsers bounds the unpaginated media-user selector response.
+	MaxMediaServerUsers = 1000
 	// MaxLibraryIDBytes matches the persisted invite and watch library identifier bound.
 	MaxLibraryIDBytes = 128
 	// MaxLibraryNameBytes bounds an upstream library display name before persistence.
@@ -116,6 +118,11 @@ type MediaUserLookup interface {
 // MediaUserIDLookup is an optional adapter capability for verifying a user identifier.
 type MediaUserIDLookup interface {
 	FindUserByID(ctx context.Context, id string) (MediaUser, bool, error)
+}
+
+// MediaUserLister is an optional adapter capability for listing linkable users.
+type MediaUserLister interface {
+	ListUsers(ctx context.Context) ([]MediaUser, error)
 }
 
 // LibraryResolver is an optional adapter capability for mapping an item to its collection folder.

@@ -194,7 +194,9 @@ unset JELLYFIN_API_KEY
 
 Use `GET /api/v1/media-servers` to list registrations. Use
 `POST /api/v1/media-servers/{id}/probe` to recheck a connection and
-`GET /api/v1/media-servers/{id}/libraries` to list its libraries. Deleting a
+`GET /api/v1/media-servers/{id}/libraries` to list its libraries. Administrators
+use `GET /api/v1/media-servers/{id}/users` to list a server's users and choose
+one to link to a Bloom account. Deleting a
 registration removes its encrypted credential and its associated playback data.
 
 ### Statistics
