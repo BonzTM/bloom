@@ -85,10 +85,9 @@ type playbackReader interface {
 
 type importManager interface {
 	CreatePlaybackReporting(context.Context, string, string) (core.ImportJob, error)
-	CheckBloomExportUpload() error
 	StageBloomExport(context.Context, io.Reader) (string, error)
 	CreateBloomExport(context.Context, string, string, string) (core.ImportJob, error)
-	DiscardBloomExport(string) error
+	DiscardBloomExport(context.Context, string) error
 	List(context.Context, core.ImportListQuery) ([]core.ImportJob, error)
 	Get(context.Context, string) (core.ImportJob, error)
 	Cancel(context.Context, string) (core.ImportJob, error)

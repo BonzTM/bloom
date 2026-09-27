@@ -26,6 +26,10 @@ func TestImportJobValidationAndSafeErrors(t *testing.T) {
 	if got := SafeImportError(ErrImportPluginMissing); got != "Playback Reporting plugin is not installed" {
 		t.Fatalf("plugin error = %q", got)
 	}
+	if got := SafeImportError(ErrImportRecordCountMismatch); got !=
+		"Bloom export watch record count does not match summary" {
+		t.Fatalf("record count error = %q", got)
+	}
 	if got := SafeImportError(errors.New("credential=secret")); strings.Contains(got, "secret") {
 		t.Fatalf("safe error disclosed cause: %q", got)
 	}

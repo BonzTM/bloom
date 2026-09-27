@@ -64,7 +64,10 @@ func NewWorker(config WorkerConfig, deps WorkerDependencies) (*Worker, error) {
 	}
 	return &Worker{
 		config: config, deps: deps,
-		sources: sourceFactory{reporting: deps.Reporting, staging: deps.Staging},
+		sources: sourceFactory{
+			reporting: deps.Reporting, staging: deps.Staging,
+			storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
+		},
 	}, nil
 }
 
@@ -91,7 +94,7 @@ func cleanWorkerShutdown() error { return nil }
 
 func (w *Worker) runOnce(ctx context.Context) error {
 	if err := w.sweep(ctx); err != nil {
-		return fmt.Errorf("sweep import staging: %w", err)
+		return fmt.Errorf("sweep import uploads: %w", err)
 	}
 	now := core.NormalizeTime(w.deps.Clock.Now())
 	token, err := core.NewID()
@@ -114,21 +117,17 @@ func (w *Worker) runOnce(ctx context.Context) error {
 	return w.process(ctx, job)
 }
 
-func (w *Worker) process(ctx context.Context, job core.ImportJob) error {
-	if job.Source == core.ImportSourceBloomExport {
-		if err := w.deps.Staging.checkAvailability(); err != nil {
-			return fmt.Errorf("prepare import staging: %w", err)
-		}
-	}
+func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error) {
 	reader, err := w.sources.reader(job.Source)
 	if err != nil {
 		return w.fail(ctx, job, err)
 	}
+	defer func() { result = errors.Join(result, reader.Close()) }()
 	for {
 		records, cursor, skipped, readErr := reader.ReadImportBatch(ctx, job)
 		if readErr != nil {
-			if errors.Is(readErr, errStagingUnavailable) {
-				return fmt.Errorf("read staged import: %w", readErr)
+			if errors.Is(readErr, core.ErrImportStore) {
+				return fmt.Errorf("read import batch: %w", readErr)
 			}
 			return w.fail(ctx, job, readErr)
 		}
@@ -164,7 +163,6 @@ func (w *Worker) handleLeaseLoss(ctx context.Context, job core.ImportJob) error 
 	if current.State != core.ImportCancelled {
 		return nil
 	}
-	w.cleanupUpload(ctx, current)
 	return nil
 }
 
@@ -196,7 +194,6 @@ func (w *Worker) complete(ctx context.Context, job core.ImportJob) error {
 		return err
 	}
 	w.deps.Metrics.ObserveImportJob(string(job.Source), string(core.ImportCompleted), "success")
-	w.cleanupUpload(ctx, job)
 	return nil
 }
 
@@ -209,7 +206,6 @@ func (w *Worker) fail(ctx context.Context, job core.ImportJob, cause error) erro
 		return errors.Join(cause, err)
 	}
 	w.deps.Metrics.ObserveImportJob(string(job.Source), string(core.ImportFailed), "error")
-	w.cleanupUpload(ctx, job)
 	return fmt.Errorf("process import: %w", cause)
 }
 
@@ -217,31 +213,11 @@ func (w *Worker) storeContext(parent context.Context) (context.Context, context.
 	return context.WithTimeout(parent, w.config.StoreTimeout)
 }
 
-func (w *Worker) cleanupUpload(ctx context.Context, job core.ImportJob) {
-	if job.Source != core.ImportSourceBloomExport {
-		return
-	}
-	if err := cleanupJobUpload(w.deps.Staging, job); err != nil {
-		w.deps.Logger.WarnContext(ctx, "remove import staging file", "error", err, "import_id", job.ID)
-	}
-}
-
 func (w *Worker) sweep(ctx context.Context) error {
 	storeCtx, cancel := w.storeContext(ctx)
-	cursors, err := w.deps.Store.ListActiveBloomImportCursors(storeCtx)
-	cancel()
-	if err != nil {
-		return err
-	}
-	active := make(map[string]struct{}, len(cursors))
-	for _, value := range cursors {
-		cursor, decodeErr := decodeFileCursor(value)
-		if decodeErr != nil {
-			return decodeErr
-		}
-		active[cursor.ID] = struct{}{}
-	}
-	return w.deps.Staging.sweep(active)
+	defer cancel()
+	_, err := w.deps.Staging.sweep(storeCtx, w.deps.Clock.Now())
+	return err
 }
 
 func waitContext(ctx context.Context, delay time.Duration) error {

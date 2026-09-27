@@ -91,6 +91,14 @@ type Import struct {
 	UpdatedAt      string
 }
 
+type ImportUpload struct {
+	ID         string
+	ImportID   sql.NullString
+	ChunkIndex int64
+	Bytes      []byte
+	CreatedAt  string
+}
+
 type Invite struct {
 	ID                 string
 	MediaServerID      string

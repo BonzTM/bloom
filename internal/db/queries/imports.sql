@@ -16,18 +16,58 @@ INSERT INTO imports (
 -- name: GetImport :one
 SELECT * FROM imports WHERE id = sqlc.arg(id);
 
--- name: ListActiveBloomImportCursors :many
-SELECT cursor FROM imports
-WHERE source = 'bloom_export' AND state IN ('pending', 'running')
-ORDER BY id
-LIMIT 10001;
-
 -- name: ListImports :many
 SELECT * FROM imports
-WHERE (created_at < sqlc.arg(before_created_at)
+WHERE (CAST(sqlc.arg(media_server_id) AS TEXT) = ''
+       OR media_server_id = CAST(sqlc.arg(media_server_id) AS TEXT))
+  AND (created_at < sqlc.arg(before_created_at)
        OR (created_at = sqlc.arg(before_created_at) AND id < sqlc.arg(before_id)))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_size);
+
+-- name: InsertImportUploadChunk :exec
+INSERT INTO import_uploads (id, import_id, chunk_index, bytes, created_at)
+VALUES (sqlc.arg(id), NULL, sqlc.arg(chunk_index), sqlc.arg(bytes), sqlc.arg(created_at));
+
+-- name: GetImportUploadInfo :one
+SELECT id, COUNT(*) AS chunk_count,
+       CAST(COALESCE(SUM(LENGTH(bytes)), 0) AS BIGINT) AS size_bytes
+FROM import_uploads
+WHERE id = sqlc.arg(id)
+GROUP BY id;
+
+-- name: GetImportUploadChunk :one
+SELECT bytes FROM import_uploads
+WHERE id = sqlc.arg(id) AND chunk_index = sqlc.arg(chunk_index);
+
+-- name: LinkImportUpload :execrows
+UPDATE import_uploads SET import_id = sqlc.arg(import_id)
+WHERE id = sqlc.arg(id) AND import_id IS NULL;
+
+-- name: DeleteImportUpload :exec
+DELETE FROM import_uploads
+WHERE id = sqlc.arg(id) AND import_id IS NULL;
+
+-- name: DeleteOrphanImportUploadChunks :execrows
+DELETE FROM import_uploads
+WHERE import_id IS NULL
+  AND (id, chunk_index) IN (
+    SELECT chunks.id, chunks.chunk_index
+    FROM import_uploads AS chunks
+    JOIN (
+        SELECT candidate.id, MAX(candidate.created_at) AS newest_at
+        FROM import_uploads AS candidate
+        WHERE candidate.import_id IS NULL
+        GROUP BY candidate.id
+        HAVING MAX(candidate.created_at) < sqlc.arg(before)
+    ) AS orphans ON orphans.id = chunks.id
+    WHERE chunks.import_id IS NULL
+    ORDER BY orphans.newest_at, chunks.id, chunks.chunk_index
+    LIMIT sqlc.arg(page_size)
+  );
+
+-- name: DeleteImportUploadForJob :exec
+DELETE FROM import_uploads WHERE import_id = sqlc.arg(import_id);
 
 -- name: CancelImport :execrows
 UPDATE imports

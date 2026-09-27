@@ -87,6 +87,7 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteWatchSegmentColumns, expectedWatchSegmentColumns)
 	assertColumns(t, pool, sqliteWatchPositionColumns, expectedWatchPositionColumns)
 	assertColumns(t, pool, sqliteImportColumns, expectedImportColumns)
+	assertColumns(t, pool, sqliteImportUploadColumns, expectedImportUploadColumns)
 	assertColumns(t, pool, sqliteRequestColumns, expectedRequestColumns)
 }
 
@@ -107,6 +108,7 @@ var (
 	expectedInviteProvisioningFailureColumns = []string{"account_id", "attempts", "created_at", "id", "invite_id", "last_error", "lease_expires_at", "lease_token", "media_server_id", "media_user_id", "media_user_owned", "next_attempt_at", "reason", "terminal", "updated_at", "username"}
 	expectedWatchColumns                     = []string{"active_seconds", "client", "created_at", "device_id", "device_name", "ended_at", "episode_number", "id", "import_provenance_guard", "import_record_id", "import_source", "item_id", "item_name", "item_type", "last_position_ms", "last_seen_at", "library_id", "library_name", "media_server_id", "media_user_id", "play_method", "runtime_ms", "season_number", "series_name", "server_session_id", "source", "started_at", "state", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "updated_at", "username"}
 	expectedImportColumns                    = []string{"created_at", "cursor", "duplicate_count", "finished_at", "id", "imported_count", "last_error", "lease_expires_at", "lease_token", "media_server_id", "read_count", "requested_by", "skipped_count", "source", "started_at", "state", "updated_at"}
+	expectedImportUploadColumns              = []string{"bytes", "chunk_index", "created_at", "id", "import_id"}
 	expectedWatchSegmentColumns              = []string{"ended_at", "source", "started_at", "watch_id"}
 	expectedWatchPositionColumns             = []string{"is_transition", "observed_at", "paused", "play_method", "position_ms", "source", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "watch_id"}
 	expectedRequestColumns                   = []string{"created_at", "decided_at", "decided_by_account_id", "decision_reason", "dispatch_lease_expires_at", "dispatch_lease_token", "dispatch_quality_profile", "dispatch_root_folder", "dispatch_tags", "download_manager_id", "download_manager_item_id", "failure_reason", "id", "kind", "last_availability_check_at", "poster_path", "profile_id", "provider", "provider_id", "release_year", "requester_account_id", "status", "title", "updated_at"}
@@ -276,6 +278,10 @@ func sqliteWatchPositionColumns(ctx context.Context, pool *sql.DB) ([]string, er
 
 func sqliteImportColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return sqliteTableColumns(ctx, pool, "imports")
+}
+
+func sqliteImportUploadColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return sqliteTableColumns(ctx, pool, "import_uploads")
 }
 
 func sqliteTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {

@@ -99,9 +99,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Imports.WorkerInterval != defaultImportWorkerInterval {
 		t.Errorf("Import worker interval = %s, want %s", cfg.Imports.WorkerInterval, defaultImportWorkerInterval)
 	}
-	if cfg.DataDirectory != defaultDataDirectory {
-		t.Errorf("DataDirectory = %q, want %q", cfg.DataDirectory, defaultDataDirectory)
-	}
 	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
 		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
 	}
@@ -677,19 +674,15 @@ func TestLoadMigrateMode(t *testing.T) {
 func TestLoadFlagsBeatEnv(t *testing.T) {
 	setRequired(t)
 	t.Setenv("BLOOM_HTTP_ADDR", ":1111")
-	t.Setenv("BLOOM_DATA_DIR", "/environment-data")
 	t.Setenv("BLOOM_LOG_LEVEL", "warn")
 	t.Setenv("BLOOM_LOG_FORMAT", "text")
 
-	cfg, err := Load([]string{"-http-addr", ":2222", "-data-dir", "/flag-data"})
+	cfg, err := Load([]string{"-http-addr", ":2222"})
 	if err != nil {
 		t.Fatalf("Load: unexpected error: %v", err)
 	}
 	if cfg.HTTP.Addr != ":2222" {
 		t.Errorf("Addr = %q, want :2222 (flag beats env)", cfg.HTTP.Addr)
-	}
-	if cfg.DataDirectory != "/flag-data" {
-		t.Errorf("DataDirectory = %q, want /flag-data (flag beats env)", cfg.DataDirectory)
 	}
 	if cfg.Telemetry.LogLevel != slog.LevelWarn {
 		t.Errorf("LogLevel = %v, want warn (from env)", cfg.Telemetry.LogLevel)
@@ -851,7 +844,6 @@ func TestLoadMalformedEnvRejected(t *testing.T) {
 
 func validConfigForTest() Config {
 	return Config{
-		DataDirectory: defaultDataDirectory,
 		HTTP: HTTPConfig{
 			Addr: ":0", ReadHeaderTimeout: time.Second, WriteTimeout: time.Second,
 			MaxBodyBytes: 1, ImportTransferTimeout: defaultImportTransferTimeout,
@@ -897,11 +889,6 @@ func TestValidatePoolInvariants(t *testing.T) {
 	bad.ShutdownGrace = 0
 	if err := bad.Validate(); err == nil {
 		t.Error("ShutdownGrace = 0 accepted, want error")
-	}
-	bad = validConfigForTest()
-	bad.DataDirectory = ""
-	if err := bad.Validate(); err == nil {
-		t.Error("empty DataDirectory accepted, want error")
 	}
 }
 

@@ -1,6 +1,8 @@
 package http
 
 import (
+	"archive/zip"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,9 +11,11 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
+	"github.com/BonzTM/bloom/internal/buildinfo"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
 	"github.com/BonzTM/bloom/internal/importer"
@@ -22,9 +26,8 @@ const (
 	defaultImportPageSize = 50
 	maxImportPageSize     = 100
 	maxImportCursorBytes  = 256
-	defaultExportLimit    = 1000
-	maxExportLimit        = 10000
 	exportBatchSize       = 500
+	maxExportPages        = 1<<31 - 1
 	importMultipartBytes  = core.MaxImportUploadBytes + (1 << 20)
 )
 
@@ -62,6 +65,27 @@ type importCursor struct {
 
 type importValidationError struct{ fields []httputil.FieldError }
 
+type watchExportManifest struct {
+	FormatVersion int       `json:"format_version"`
+	BloomVersion  string    `json:"bloom_version"`
+	ExportedAt    time.Time `json:"exported_at"`
+	MediaServerID string    `json:"media_server_id,omitempty"`
+}
+
+type watchExportSummary struct {
+	WatchRecords  int64 `json:"watch_records"`
+	ImportRecords int64 `json:"import_records"`
+	WatchesBytes  int64 `json:"watches_bytes"`
+	ImportsBytes  int64 `json:"imports_bytes"`
+}
+
+type watchExportStart struct {
+	watches      []core.PlaybackWatch
+	watchCursor  string
+	imports      []core.ImportJob
+	importCursor *core.ImportCursor
+}
+
 func (e *importValidationError) Error() string { return "invalid import request" }
 
 func (s *Server) handleCreateImport(w http.ResponseWriter, r *http.Request) {
@@ -73,9 +97,7 @@ func (s *Server) handleCreateImport(w http.ResponseWriter, r *http.Request) {
 		case "application/json":
 			job, err = s.createReportingImport(w, r, account.ID)
 		case "multipart/form-data":
-			if err = s.imports.CheckBloomExportUpload(); err == nil {
-				job, err = s.createBloomImport(w, r, account.ID)
-			}
+			job, err = s.createBloomImport(w, r, account.ID)
 		default:
 			err = errUnsupportedMediaType
 		}
@@ -123,6 +145,9 @@ func (s *Server) createBloomImport(
 	if err := s.setImportDeadlines(w); err != nil {
 		return core.ImportJob{}, fmt.Errorf("extend import upload deadlines: %w", err)
 	}
+	uploadCtx, cancel := context.WithTimeout(r.Context(), s.importTransferTimeout)
+	defer cancel()
+	r = r.WithContext(uploadCtx)
 	r.Body = http.MaxBytesReader(w, r.Body, importMultipartBytes)
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -185,7 +210,7 @@ func (s *Server) readBloomPart(
 		if fields.stagingID != "" {
 			return invalidImportField("file", "must appear exactly once")
 		}
-		if part.FileName() == "" || part.Header.Get("Content-Type") != "application/x-ndjson" {
+		if part.FileName() == "" || !supportedImportFileType(part.Header.Get("Content-Type")) {
 			return errUnsupportedMediaType
 		}
 		id, err := s.imports.StageBloomExport(r.Context(), part)
@@ -229,9 +254,13 @@ func validateBloomMultipart(fields bloomMultipartFields) (bloomMultipartFields, 
 }
 
 func (s *Server) discardBloomUpload(r *http.Request, stagingID string) {
-	if err := s.imports.DiscardBloomExport(stagingID); err != nil {
-		s.logger.WarnContext(r.Context(), "remove unclaimed import staging file", "error", err)
+	if err := s.imports.DiscardBloomExport(r.Context(), stagingID); err != nil {
+		s.logger.WarnContext(r.Context(), "remove unclaimed import upload", "error", err)
 	}
+}
+
+func supportedImportFileType(value string) bool {
+	return value == "application/x-ndjson" || value == "application/zip" || value == "application/octet-stream"
 }
 
 func invalidImportField(field, message string) error {
@@ -367,7 +396,7 @@ func (s *Server) emitImportAudit(
 }
 
 func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
-	query, limit, fields := exportQuery(r)
+	query, fields := exportQuery(r)
 	if len(fields) > 0 {
 		s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditFailure, "invalid")
 		s.writeValidation(w, r, fields)
@@ -377,20 +406,23 @@ func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
 		s.failWatchExport(w, r, fmt.Errorf("extend watch export deadline: %w", err))
 		return
 	}
-	page, cursor, err := s.watchExportPage(r, query, min(exportBatchSize, limit))
+	exportCtx, cancel := context.WithTimeout(r.Context(), s.importTransferTimeout)
+	defer cancel()
+	start, err := s.loadWatchExportStart(exportCtx, query)
 	if err != nil {
 		s.failWatchExport(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-ndjson")
+	exportedAt := core.NormalizeTime(time.Now().UTC())
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="bloom-export-%s.zip"`, exportedAt.Format(time.DateOnly),
+	))
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Trailer", "X-Next-Cursor")
 	w.WriteHeader(http.StatusOK)
-	cursor, err = s.streamWatchExport(w, r, query, limit, page, cursor)
-	if err != nil {
+	if err := s.streamWatchExportZip(exportCtx, w, query, start, exportedAt); err != nil {
 		s.abortWatchExport(r, err)
 	}
-	w.Header().Set("X-Next-Cursor", cursor)
 	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
 }
 
@@ -405,53 +437,194 @@ func (s *Server) abortWatchExport(r *http.Request, err error) {
 	panic(http.ErrAbortHandler)
 }
 
-func exportQuery(r *http.Request) (core.PlaybackQuery, int, []httputil.FieldError) {
-	query, fields := playbackListQuery(r.URL.RawQuery, core.PlaybackQueryHistory, true)
-	limit := defaultExportLimit
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > maxExportLimit {
-			fields = append(fields, httputil.FieldError{Field: "limit", Code: "invalid", Message: "must be 1 through 10000"})
-		} else {
-			limit = parsed
+func exportQuery(r *http.Request) (core.PlaybackQuery, []httputil.FieldError) {
+	query := core.PlaybackQuery{Mode: core.PlaybackQueryHistory, PageSize: exportBatchSize}
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return query, []httputil.FieldError{{
+			Field: "query", Code: "invalid", Message: "must use valid percent encoding",
+		}}
+	}
+	fields := make([]httputil.FieldError, 0, 3)
+	query.MediaServerID, fields = playbackServerFilter(values["media_server_id"], fields)
+	for _, removed := range []string{"cursor", "limit"} {
+		if _, present := values[removed]; present {
+			fields = append(fields, httputil.FieldError{
+				Field: removed, Code: "invalid", Message: "is not supported for ZIP exports",
+			})
 		}
 	}
-	return query, limit, fields
+	return query, fields
 }
 
-func (s *Server) streamWatchExport(
-	w http.ResponseWriter, r *http.Request, query core.PlaybackQuery, limit int,
-	page []core.PlaybackWatch, cursor string,
-) (string, error) {
-	written := 0
-	for written < limit {
+func (s *Server) loadWatchExportStart(ctx context.Context, query core.PlaybackQuery) (watchExportStart, error) {
+	watches, watchCursor, err := s.watchExportPage(ctx, query, exportBatchSize)
+	if err != nil {
+		return watchExportStart{}, err
+	}
+	imports, importCursor, err := s.importExportPage(ctx, core.ImportListQuery{
+		MediaServerID: query.MediaServerID, PageSize: exportBatchSize + 1,
+	})
+	if err != nil {
+		return watchExportStart{}, err
+	}
+	return watchExportStart{
+		watches: watches, watchCursor: watchCursor, imports: imports, importCursor: importCursor,
+	}, nil
+}
+
+func (s *Server) streamWatchExportZip(
+	ctx context.Context, w io.Writer, query core.PlaybackQuery, start watchExportStart, exportedAt time.Time,
+) error {
+	archive := zip.NewWriter(w)
+	manifest := watchExportManifest{
+		FormatVersion: 1, BloomVersion: buildinfo.Version, ExportedAt: exportedAt,
+		MediaServerID: query.MediaServerID,
+	}
+	if err := writeZipJSON(archive, "manifest.json", manifest, exportedAt); err != nil {
+		return err
+	}
+	watchCount, watchBytes, err := s.writeWatchExportEntry(ctx, archive, query, start, exportedAt)
+	if err != nil {
+		return err
+	}
+	importCount, importBytes, err := s.writeImportExportEntry(ctx, archive, query.MediaServerID, start, exportedAt)
+	if err != nil {
+		return err
+	}
+	if err := writeZipJSON(archive, "summary.json", watchExportSummary{
+		WatchRecords: watchCount, ImportRecords: importCount,
+		WatchesBytes: watchBytes, ImportsBytes: importBytes,
+	}, exportedAt); err != nil {
+		return err
+	}
+	if err := archive.Close(); err != nil {
+		return fmt.Errorf("close watch export archive: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) writeWatchExportEntry(
+	ctx context.Context, archive *zip.Writer, query core.PlaybackQuery,
+	start watchExportStart, modified time.Time,
+) (int64, int64, error) {
+	entry, err := createZipEntryWithMethod(archive, "watches.jsonl", modified, zip.Store)
+	if err != nil {
+		return 0, 0, err
+	}
+	counted := &countingWriter{writer: entry}
+	page, cursor := start.watches, start.watchCursor
+	var count int64
+	for range maxExportPages {
 		for _, watch := range page {
-			if err := importer.EncodeWatchJSONL(w, watch); err != nil {
-				return "", err
+			if encodeErr := importer.EncodeWatchJSONL(counted, watch); encodeErr != nil {
+				return 0, 0, encodeErr
 			}
+			count++
 		}
-		written += len(page)
-		if cursor == "" || written == limit {
-			return cursor, nil
+		if cursor == "" {
+			return count, counted.count, nil
 		}
-		var err error
 		query, err = nextExportQuery(query, cursor)
 		if err != nil {
-			return "", err
+			return 0, 0, err
 		}
-		page, cursor, err = s.watchExportPage(r, query, min(exportBatchSize, limit-written))
+		page, cursor, err = s.watchExportPage(ctx, query, exportBatchSize)
 		if err != nil {
-			return "", err
+			return 0, 0, err
 		}
 	}
-	return "", nil
+	return 0, 0, errors.New("watch export exceeded page safety bound")
+}
+
+func (s *Server) writeImportExportEntry(
+	ctx context.Context, archive *zip.Writer, mediaServerID string,
+	start watchExportStart, modified time.Time,
+) (int64, int64, error) {
+	entry, err := createZipEntry(archive, "imports.jsonl", modified)
+	if err != nil {
+		return 0, 0, err
+	}
+	counted := &countingWriter{writer: entry}
+	page, cursor := start.imports, start.importCursor
+	var count int64
+	for range maxExportPages {
+		for _, job := range page {
+			if encodeErr := json.NewEncoder(counted).Encode(importDTO(job)); encodeErr != nil {
+				return 0, 0, fmt.Errorf("encode import export record: %w", encodeErr)
+			}
+			count++
+		}
+		if cursor == nil {
+			return count, counted.count, nil
+		}
+		page, cursor, err = s.importExportPage(ctx, core.ImportListQuery{
+			Before: cursor, MediaServerID: mediaServerID, PageSize: exportBatchSize + 1,
+		})
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	return 0, 0, errors.New("import export exceeded page safety bound")
+}
+
+type countingWriter struct {
+	writer io.Writer
+	count  int64
+}
+
+func (w *countingWriter) Write(data []byte) (int, error) {
+	written, err := w.writer.Write(data)
+	w.count += int64(written)
+	return written, err
+}
+
+func (s *Server) importExportPage(
+	ctx context.Context, query core.ImportListQuery,
+) ([]core.ImportJob, *core.ImportCursor, error) {
+	jobs, err := s.imports.List(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(jobs) <= exportBatchSize {
+		return jobs, nil, nil
+	}
+	page := jobs[:exportBatchSize]
+	last := page[len(page)-1]
+	return page, &core.ImportCursor{CreatedAt: last.CreatedAt, ID: last.ID}, nil
+}
+
+func writeZipJSON(archive *zip.Writer, name string, value any, modified time.Time) error {
+	entry, err := createZipEntry(archive, name, modified)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(entry).Encode(value); err != nil {
+		return fmt.Errorf("encode %s: %w", name, err)
+	}
+	return nil
+}
+
+func createZipEntry(archive *zip.Writer, name string, modified time.Time) (io.Writer, error) {
+	return createZipEntryWithMethod(archive, name, modified, zip.Deflate)
+}
+
+func createZipEntryWithMethod(
+	archive *zip.Writer, name string, modified time.Time, method uint16,
+) (io.Writer, error) {
+	header := &zip.FileHeader{Name: name, Method: method, Modified: modified}
+	entry, err := archive.CreateHeader(header)
+	if err != nil {
+		return nil, fmt.Errorf("create export entry %s: %w", name, err)
+	}
+	return entry, nil
 }
 
 func (s *Server) watchExportPage(
-	r *http.Request, query core.PlaybackQuery, size int,
+	ctx context.Context, query core.PlaybackQuery, size int,
 ) ([]core.PlaybackWatch, string, error) {
 	query.PageSize = size + 1
-	watches, err := s.playbackReader.ListWatches(r.Context(), query)
+	watches, err := s.playbackReader.ListWatches(ctx, query)
 	if err != nil {
 		return nil, "", err
 	}

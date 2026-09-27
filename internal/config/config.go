@@ -53,8 +53,6 @@ type Config struct {
 	HTTP HTTPConfig
 	// Database holds the engine, connection string, and pool sizing.
 	Database DatabaseConfig
-	// DataDirectory holds node-local runtime data such as staged imports.
-	DataDirectory string
 	// Telemetry holds logging, tracing, and metrics configuration.
 	Telemetry TelemetryConfig
 	// Auth holds browser-session and login-rate-limit settings.
@@ -330,7 +328,6 @@ const (
 	defaultImportWorkerInterval        = 10 * time.Second
 	minImportWorkerInterval            = time.Second
 	maxImportWorkerInterval            = time.Hour
-	defaultDataDirectory               = "."
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -368,24 +365,24 @@ func Load(args []string) (Config, error) {
 // rawFlags holds the parsed flag pointers between bindFlags and build. It exists
 // so Load stays short and each step is testable in isolation.
 type rawFlags struct {
-	addr, dsn, driver, dataDirectory, logLevel, logFormat, otlpEndpoint, publicURL *string
-	bootstrapUsername                                                              *string
-	secretKey, bootstrapPassword                                                   string
-	readHeaderTimeout, readTimeout, writeTimeout, idleTimeout                      *time.Duration
-	importTransferTimeout                                                          *time.Duration
-	connMaxLifetime, connMaxIdleTime, shutdownGrace                                *time.Duration
-	maxBodyBytes                                                                   *int64
-	maxOpenConns, maxIdleConns                                                     *int
-	migrateOnStartup, otlpInsecure, migrateMode                                    *bool
-	traceSampleRatio                                                               *float64
-	auth                                                                           authRawFlags
-	oidc                                                                           oidcRawFlags
-	playback                                                                       playbackRawFlags
-	stats                                                                          statsRawFlags
-	requests                                                                       requestRawFlags
-	notifications                                                                  notificationRawFlags
-	invites                                                                        inviteRawFlags
-	imports                                                                        importRawFlags
+	addr, dsn, driver, logLevel, logFormat, otlpEndpoint, publicURL *string
+	bootstrapUsername                                               *string
+	secretKey, bootstrapPassword                                    string
+	readHeaderTimeout, readTimeout, writeTimeout, idleTimeout       *time.Duration
+	importTransferTimeout                                           *time.Duration
+	connMaxLifetime, connMaxIdleTime, shutdownGrace                 *time.Duration
+	maxBodyBytes                                                    *int64
+	maxOpenConns, maxIdleConns                                      *int
+	migrateOnStartup, otlpInsecure, migrateMode                     *bool
+	traceSampleRatio                                                *float64
+	auth                                                            authRawFlags
+	oidc                                                            oidcRawFlags
+	playback                                                        playbackRawFlags
+	stats                                                           statsRawFlags
+	requests                                                        requestRawFlags
+	notifications                                                   notificationRawFlags
+	invites                                                         inviteRawFlags
+	imports                                                         importRawFlags
 }
 
 type authRawFlags struct {
@@ -444,7 +441,6 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 
 		driver:           fs.String("db-driver", env.string("BLOOM_DB_DRIVER", string(DriverSQLite)), "database engine: sqlite|postgres"),
 		dsn:              fs.String("db-dsn", env.string("BLOOM_DB_DSN", ""), "database DSN (sqlite default: "+DefaultSQLiteDSN+")"),
-		dataDirectory:    fs.String("data-dir", env.string("BLOOM_DATA_DIR", defaultDataDirectory), "node-local data directory"),
 		maxOpenConns:     fs.Int("db-max-open-conns", env.int("BLOOM_DB_MAX_OPEN_CONNS", defaultMaxOpenConns), "max open DB connections"),
 		maxIdleConns:     fs.Int("db-max-idle-conns", env.int("BLOOM_DB_MAX_IDLE_CONNS", defaultMaxIdleConns), "max idle DB connections"),
 		connMaxLifetime:  fs.Duration("db-conn-max-lifetime", env.duration("BLOOM_DB_CONN_MAX_LIFETIME", defaultConnMaxLifetime), "max DB connection lifetime"),
@@ -583,17 +579,16 @@ func (r rawFlags) build() (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		HTTP:          r.httpConfig(),
-		Database:      r.databaseConfig(),
-		DataDirectory: *r.dataDirectory,
-		Telemetry:     r.telemetryConfig(level),
-		Auth:          r.authConfig(trustedProxyCIDRs),
-		Bootstrap:     bootstrap,
-		PublicURL:     *r.publicURL,
-		OIDC:          r.oidcConfig(roleMap),
-		Playback:      r.playbackConfig(),
-		Stats:         StatsConfig{CacheTTL: *r.stats.cacheTTL},
-		Requests:      r.requestConfig(),
+		HTTP:      r.httpConfig(),
+		Database:  r.databaseConfig(),
+		Telemetry: r.telemetryConfig(level),
+		Auth:      r.authConfig(trustedProxyCIDRs),
+		Bootstrap: bootstrap,
+		PublicURL: *r.publicURL,
+		OIDC:      r.oidcConfig(roleMap),
+		Playback:  r.playbackConfig(),
+		Stats:     StatsConfig{CacheTTL: *r.stats.cacheTTL},
+		Requests:  r.requestConfig(),
 		Notifications: NotificationConfig{
 			Retention: *r.notifications.retention, WorkerInterval: *r.notifications.workerInterval,
 		},
@@ -731,9 +726,6 @@ func (c Config) Validate() error {
 	}
 	if err := c.Database.validate(); err != nil {
 		return err
-	}
-	if c.DataDirectory == "" {
-		return errors.New("config: BLOOM_DATA_DIR must not be empty")
 	}
 	if err := c.Telemetry.validate(); err != nil {
 		return err

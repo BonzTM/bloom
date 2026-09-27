@@ -48,7 +48,8 @@ func (s *sqliteImportStore) ListImports(ctx context.Context, query core.ImportLi
 	}
 	before, id := importListCursor(query)
 	rows, err := s.q.ListImports(ctx, sqlite.ListImportsParams{
-		BeforeCreatedAt: formatSQLiteTime(before), BeforeID: id, PageSize: int64(query.PageSize),
+		MediaServerID: query.MediaServerID, BeforeCreatedAt: formatSQLiteTime(before),
+		BeforeID: id, PageSize: int64(query.PageSize),
 	})
 	if err != nil {
 		return nil, importStoreError("list imports", err)
@@ -64,36 +65,46 @@ func (s *sqliteImportStore) ListImports(ctx context.Context, query core.ImportLi
 	return jobs, nil
 }
 
-func (s *sqliteImportStore) ListActiveBloomImportCursors(ctx context.Context) ([]string, error) {
-	cursors, err := s.q.ListActiveBloomImportCursors(ctx)
-	if err != nil {
-		return nil, importStoreError("list active Bloom import cursors", err)
-	}
-	if len(cursors) > core.MaxActiveImportUploads {
-		return nil, importStoreError("list active Bloom import cursors", errors.New("active upload count exceeds safety bound"))
-	}
-	return cursors, nil
-}
-
 func (s *sqliteImportStore) CancelImport(ctx context.Context, id string, now time.Time) (core.ImportJob, error) {
 	if !core.ValidID(id) || now.IsZero() {
 		return core.ImportJob{}, core.ErrInvalidArgument
 	}
-	rows, err := s.q.CancelImport(ctx, sqlite.CancelImportParams{ID: id, Now: sqliteNullableTime(&now)})
+	var job core.ImportJob
+	err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+		q := sqlite.New(conn)
+		rows, err := q.CancelImport(ctx, sqlite.CancelImportParams{ID: id, Now: sqliteNullableTime(&now)})
+		if err != nil || rows == 0 {
+			return sqliteCancelError(ctx, q, id, rows, err)
+		}
+		if cleanupErr := sqliteDeleteJobUpload(ctx, q, id); cleanupErr != nil {
+			return cleanupErr
+		}
+		row, err := q.GetImport(ctx, id)
+		if err != nil {
+			return err
+		}
+		job, err = sqliteImport(row)
+		return err
+	})
 	if err != nil {
 		return core.ImportJob{}, importStoreError("cancel import", err)
 	}
-	if rows == 0 {
-		_, getErr := s.GetImport(ctx, id)
-		if errors.Is(getErr, core.ErrNotFound) {
-			return core.ImportJob{}, core.ErrNotFound
-		}
-		if getErr != nil {
-			return core.ImportJob{}, getErr
-		}
-		return core.ImportJob{}, core.ErrInvalidTransition
+	return job, nil
+}
+
+func sqliteCancelError(ctx context.Context, q *sqlite.Queries, id string, rows int64, queryErr error) error {
+	if queryErr != nil {
+		return queryErr
 	}
-	return s.GetImport(ctx, id)
+	if rows == 1 {
+		return nil
+	}
+	if _, err := q.GetImport(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return core.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return core.ErrInvalidTransition
 }
 
 func (s *sqliteImportStore) ClaimImport(ctx context.Context, lease core.ImportLease, now time.Time) (job core.ImportJob, result error) {
@@ -255,16 +266,17 @@ func (s *sqliteImportStore) FinishImport(ctx context.Context, id, token string, 
 	if !core.ValidID(id) || token == "" || !state.Terminal() || len(lastError) > core.MaxImportErrorBytes || now.IsZero() {
 		return core.ErrInvalidArgument
 	}
-	rows, err := s.q.FinishImport(ctx, sqlite.FinishImportParams{
-		ID: id, Token: token, State: string(state), LastError: lastError, Now: sqliteNullableTime(&now),
+	err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+		q := sqlite.New(conn)
+		rows, err := q.FinishImport(ctx, sqlite.FinishImportParams{
+			ID: id, Token: token, State: string(state), LastError: lastError, Now: sqliteNullableTime(&now),
+		})
+		if finishErr := importRowsError("finish import", rows, err, core.ErrImportLeaseLost); finishErr != nil {
+			return finishErr
+		}
+		return sqliteDeleteJobUpload(ctx, q, id)
 	})
-	if err != nil {
-		return importStoreError("finish import", err)
-	}
-	if rows != 1 {
-		return core.ErrImportLeaseLost
-	}
-	return nil
+	return importStoreError("finish import", err)
 }
 
 func sqliteCreateImportParams(job core.ImportJob) sqlite.CreateImportParams {

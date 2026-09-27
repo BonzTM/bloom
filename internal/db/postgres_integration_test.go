@@ -71,6 +71,7 @@ func TestPostgresEngineSuite(t *testing.T) {
 	assertColumns(t, pool, postgresWatchSegmentColumns, expectedWatchSegmentColumns)
 	assertColumns(t, pool, postgresWatchPositionColumns, expectedWatchPositionColumns)
 	assertColumns(t, pool, postgresImportColumns, expectedImportColumns)
+	assertColumns(t, pool, postgresImportUploadColumns, expectedImportUploadColumns)
 	assertColumns(t, pool, postgresRequestColumns, expectedRequestColumns)
 }
 
@@ -118,6 +119,10 @@ func postgresWatchPositionColumns(ctx context.Context, pool *sql.DB) ([]string, 
 
 func postgresImportColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
 	return postgresTableColumns(ctx, pool, "imports")
+}
+
+func postgresImportUploadColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
+	return postgresTableColumns(ctx, pool, "import_uploads")
 }
 
 func postgresRequestColumns(ctx context.Context, pool *sql.DB) ([]string, error) {

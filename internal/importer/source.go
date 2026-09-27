@@ -3,7 +3,9 @@ package importer
 import (
 	"context"
 	"fmt"
+	"io"
 	"strconv"
+	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
 )
@@ -14,6 +16,8 @@ type PlaybackReportingService interface {
 }
 
 type playbackReportingSource struct{ service PlaybackReportingService }
+
+func (playbackReportingSource) Close() error { return nil }
 
 func (s playbackReportingSource) ReadImportBatch(
 	ctx context.Context, job core.ImportJob,
@@ -33,16 +37,25 @@ func (s playbackReportingSource) ReadImportBatch(
 }
 
 type sourceFactory struct {
-	reporting PlaybackReportingService
-	staging   *Staging
+	reporting    PlaybackReportingService
+	staging      *Staging
+	storeTimeout time.Duration
+	openWatch    watchOpener
 }
 
-func (f sourceFactory) reader(source core.ImportSource) (core.ImportSourceReader, error) {
+type jobSource interface {
+	core.ImportSourceReader
+	io.Closer
+}
+
+func (f sourceFactory) reader(source core.ImportSource) (jobSource, error) {
 	switch source {
 	case core.ImportSourcePlaybackReporting:
 		return playbackReportingSource{service: f.reporting}, nil
 	case core.ImportSourceBloomExport:
-		return jsonlReader{staging: f.staging}, nil
+		return &jsonlReader{
+			staging: f.staging, storeTimeout: f.storeTimeout, openWatch: f.openWatch,
+		}, nil
 	default:
 		return nil, core.ErrInvalidArgument
 	}

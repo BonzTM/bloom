@@ -267,24 +267,34 @@ The `playback_reporting` source reads Jellyfin's Playback Reporting plugin by
 ascending database `rowid`. The plugin must be installed on the selected
 server. Create this job with JSON containing `media_server_id` and
 `source: "playback_reporting"`. The `bloom_export` source accepts a multipart
-`file` part with `Content-Type: application/x-ndjson`, plus `media_server_id`
-and `source: bloom_export` fields. Bloom streams the file once into the private
-`BLOOM_DATA_DIR/imports` staging directory. Uploads are limited to 256 MiB, and
-only one upload is staged at a time per process. Startup and worker scans remove
-staged files that are not referenced by a pending or running job.
+`file` part containing either a Bloom `.zip` export or the previous JSONL shape,
+plus `media_server_id` and `source: bloom_export` fields. Bloom detects ZIP by
+content rather than filename. Uploads are limited to 256 MiB, and only one
+upload is staged at a time per process.
 
-If Bloom cannot create or secure the staging directory, startup continues and
-Playback Reporting imports remain available. Bloom export uploads return `422`
-until `BLOOM_DATA_DIR` is writable. Bloom retries the directory on each upload,
-so correcting the mount does not require a restart.
+An export archive larger than the 256 MiB upload cap cannot be re-imported
+through the browser yet. Its trailing `summary.json` reports the uncompressed
+`watches.jsonl` and `imports.jsonl` byte sizes so an operator can check the
+payload size before attempting an import.
 
-`GET /api/v1/exports/watches` streams Bloom JSONL in newest-first
-`(started_at, id)` order. `limit` defaults to 1000 and accepts 1 through 10000.
-Pass the `X-Next-Cursor` response trailer back as `cursor` to continue. Import
-that file on another Bloom instance to move watch history between SQLite and
-PostgreSQL. Re-import is idempotent because the original watch ID is the source
-record ID. A transfer that ends without the terminating chunk and
-`X-Next-Cursor` trailer is truncated and must be retried.
+Uploads are held in the database as fixed 1 MiB chunks until the job completes,
+fails, or is cancelled. The terminal state change and chunk deletion use the
+same transaction. Each worker scan also deletes a bounded batch of unlinked
+uploads older than `BLOOM_IMPORT_TRANSFER_TIMEOUT`. Bloom does not create an
+import data directory or stage uploads on the pod filesystem.
+
+`GET /api/v1/exports/watches` streams one `application/zip` download directly
+from bounded database pages. The optional `media_server_id` filter remains;
+there are no `cursor` or `limit` parameters. The archive contains
+`manifest.json`, every watch in newest-first `(started_at, id)` order as
+`watches.jsonl`, import-job provenance as `imports.jsonl`, and record counts and
+entry byte sizes in the trailing `summary.json`. Import that ZIP on another
+Bloom instance to move watch history between SQLite and PostgreSQL. Bloom ZIP
+imports require both `manifest.json` and `summary.json`. The importer verifies
+that the number of watch records read matches the count in `summary.json`. The
+previous JSONL shape remains accepted for compatibility. Re-import is idempotent
+because the original watch ID is the source record ID. A transfer that does not
+form a complete ZIP archive is truncated and must be retried.
 
 Bloom's collected watch wins when an imported and collected watch have the same
 media server, media user, and item and start within
@@ -601,7 +611,6 @@ this table.
 | `BLOOM_PUBLIC_URL` | HTTP(S) origin | no | `http://localhost:8080` | no | Externally visible Bloom origin used for callback-error redirects and OIDC redirect validation. Limited to 2,048 valid UTF-8 bytes with no control characters. |
 | `BLOOM_DB_DRIVER` | `sqlite` \| `postgres` | no | `sqlite` | no | Database engine. Anything else fails startup. |
 | `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. For compatibility, startup supplies `_pragma=foreign_keys(1)` when a configured SQLite DSN omits a foreign-key pragma; an explicit disable still fails startup. |
-| `BLOOM_DATA_DIR` | path | no | `.` | no | Node-local runtime data root for Bloom export uploads. Bloom creates a private `imports` staging directory beneath it. An unwritable directory disables only Bloom export uploads and is retried on the next upload. Container images default this to `/data`. |
 | `BLOOM_DB_MAX_OPEN_CONNS` | int | no | `25` | no | Pool cap on open connections. |
 | `BLOOM_DB_MAX_IDLE_CONNS` | int | no | `25` | no | Pool idle floor; must be `<=` max open. |
 | `BLOOM_DB_CONN_MAX_LIFETIME` | duration | no | `30m` | no | Bound on connection age. |
@@ -710,6 +719,10 @@ Migration `00022_history_imports` adds leased import jobs, imported-watch
 provenance, and the per-server/source-record uniqueness index on both engines.
 Its down migration removes import jobs and provenance columns but leaves watch
 rows that were imported before rollback.
+
+Migration `00023_import_uploads` adds fixed-size database upload chunks and
+orphan-cleanup indexes on both engines. Its down migration removes staged
+uploads; terminal jobs and imported watches are unaffected.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

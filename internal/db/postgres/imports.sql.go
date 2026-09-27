@@ -130,6 +130,57 @@ func (q *Queries) CreateImport(ctx context.Context, arg CreateImportParams) erro
 	return err
 }
 
+const deleteImportUpload = `-- name: DeleteImportUpload :exec
+DELETE FROM import_uploads
+WHERE id = $1 AND import_id IS NULL
+`
+
+func (q *Queries) DeleteImportUpload(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteImportUpload, id)
+	return err
+}
+
+const deleteImportUploadForJob = `-- name: DeleteImportUploadForJob :exec
+DELETE FROM import_uploads WHERE import_id = $1
+`
+
+func (q *Queries) DeleteImportUploadForJob(ctx context.Context, importID sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, deleteImportUploadForJob, importID)
+	return err
+}
+
+const deleteOrphanImportUploadChunks = `-- name: DeleteOrphanImportUploadChunks :execrows
+DELETE FROM import_uploads
+WHERE import_id IS NULL
+  AND (id, chunk_index) IN (
+    SELECT chunks.id, chunks.chunk_index
+    FROM import_uploads AS chunks
+    JOIN (
+        SELECT candidate.id, MAX(candidate.created_at) AS newest_at
+        FROM import_uploads AS candidate
+        WHERE candidate.import_id IS NULL
+        GROUP BY candidate.id
+        HAVING MAX(candidate.created_at) < $1
+    ) AS orphans ON orphans.id = chunks.id
+    WHERE chunks.import_id IS NULL
+    ORDER BY orphans.newest_at, chunks.id, chunks.chunk_index
+    LIMIT $2
+  )
+`
+
+type DeleteOrphanImportUploadChunksParams struct {
+	Before   time.Time
+	PageSize int32
+}
+
+func (q *Queries) DeleteOrphanImportUploadChunks(ctx context.Context, arg DeleteOrphanImportUploadChunksParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOrphanImportUploadChunks, arg.Before, arg.PageSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const findCollectedImportDuplicate = `-- name: FindCollectedImportDuplicate :one
 SELECT EXISTS (
     SELECT 1 FROM watches
@@ -220,6 +271,66 @@ func (q *Queries) GetImport(ctx context.Context, id string) (Import, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getImportUploadChunk = `-- name: GetImportUploadChunk :one
+SELECT bytes FROM import_uploads
+WHERE id = $1 AND chunk_index = $2
+`
+
+type GetImportUploadChunkParams struct {
+	ID         string
+	ChunkIndex int64
+}
+
+func (q *Queries) GetImportUploadChunk(ctx context.Context, arg GetImportUploadChunkParams) ([]byte, error) {
+	row := q.db.QueryRowContext(ctx, getImportUploadChunk, arg.ID, arg.ChunkIndex)
+	var bytes []byte
+	err := row.Scan(&bytes)
+	return bytes, err
+}
+
+const getImportUploadInfo = `-- name: GetImportUploadInfo :one
+SELECT id, COUNT(*) AS chunk_count,
+       CAST(COALESCE(SUM(LENGTH(bytes)), 0) AS BIGINT) AS size_bytes
+FROM import_uploads
+WHERE id = $1
+GROUP BY id
+`
+
+type GetImportUploadInfoRow struct {
+	ID         string
+	ChunkCount int64
+	SizeBytes  int64
+}
+
+func (q *Queries) GetImportUploadInfo(ctx context.Context, id string) (GetImportUploadInfoRow, error) {
+	row := q.db.QueryRowContext(ctx, getImportUploadInfo, id)
+	var i GetImportUploadInfoRow
+	err := row.Scan(&i.ID, &i.ChunkCount, &i.SizeBytes)
+	return i, err
+}
+
+const insertImportUploadChunk = `-- name: InsertImportUploadChunk :exec
+INSERT INTO import_uploads (id, import_id, chunk_index, bytes, created_at)
+VALUES ($1, NULL, $2, $3, $4)
+`
+
+type InsertImportUploadChunkParams struct {
+	ID         string
+	ChunkIndex int64
+	Bytes      []byte
+	CreatedAt  time.Time
+}
+
+func (q *Queries) InsertImportUploadChunk(ctx context.Context, arg InsertImportUploadChunkParams) error {
+	_, err := q.db.ExecContext(ctx, insertImportUploadChunk,
+		arg.ID,
+		arg.ChunkIndex,
+		arg.Bytes,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const insertImportedWatch = `-- name: InsertImportedWatch :execrows
@@ -331,52 +442,48 @@ func (q *Queries) InsertImportedWatch(ctx context.Context, arg InsertImportedWat
 	return result.RowsAffected()
 }
 
-const listActiveBloomImportCursors = `-- name: ListActiveBloomImportCursors :many
-SELECT cursor FROM imports
-WHERE source = 'bloom_export' AND state IN ('pending', 'running')
-ORDER BY id
-LIMIT 10001
+const linkImportUpload = `-- name: LinkImportUpload :execrows
+UPDATE import_uploads SET import_id = $1
+WHERE id = $2 AND import_id IS NULL
 `
 
-func (q *Queries) ListActiveBloomImportCursors(ctx context.Context) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listActiveBloomImportCursors)
+type LinkImportUploadParams struct {
+	ImportID sql.NullString
+	ID       string
+}
+
+func (q *Queries) LinkImportUpload(ctx context.Context, arg LinkImportUploadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, linkImportUpload, arg.ImportID, arg.ID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var cursor string
-		if err := rows.Scan(&cursor); err != nil {
-			return nil, err
-		}
-		items = append(items, cursor)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return result.RowsAffected()
 }
 
 const listImports = `-- name: ListImports :many
 SELECT id, media_server_id, source, state, cursor, read_count, imported_count, skipped_count, duplicate_count, last_error, lease_token, lease_expires_at, requested_by, created_at, started_at, finished_at, updated_at FROM imports
-WHERE (created_at < $1
-       OR (created_at = $1 AND id < $2))
+WHERE (CAST($1 AS TEXT) = ''
+       OR media_server_id = CAST($1 AS TEXT))
+  AND (created_at < $2
+       OR (created_at = $2 AND id < $3))
 ORDER BY created_at DESC, id DESC
-LIMIT $3
+LIMIT $4
 `
 
 type ListImportsParams struct {
+	MediaServerID   string
 	BeforeCreatedAt time.Time
 	BeforeID        string
 	PageSize        int32
 }
 
 func (q *Queries) ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error) {
-	rows, err := q.db.QueryContext(ctx, listImports, arg.BeforeCreatedAt, arg.BeforeID, arg.PageSize)
+	rows, err := q.db.QueryContext(ctx, listImports,
+		arg.MediaServerID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.PageSize,
+	)
 	if err != nil {
 		return nil, err
 	}
