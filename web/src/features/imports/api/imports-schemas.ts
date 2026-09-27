@@ -5,6 +5,7 @@ const int64 = () => z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 export const importSourceSchema = z.enum([
   "playback_reporting",
+  "jellystat",
   "bloom_export",
 ]);
 
@@ -63,4 +64,13 @@ export const MAX_IMPORT_UPLOAD_BYTES = 256 * 1024 * 1024;
 
 export type StartImportInput =
   | Readonly<{ source: "playback_reporting"; mediaServerId: string }>
-  | Readonly<{ source: "bloom_export"; mediaServerId: string; file: File }>;
+  | Readonly<{
+      source: "bloom_export" | "jellystat";
+      mediaServerId: string;
+      file: File;
+    }>;
+
+// The sources that arrive as an uploaded file.
+export function isFileSource(source: ImportSource): boolean {
+  return source === "bloom_export" || source === "jellystat";
+}

@@ -2806,7 +2806,11 @@ async function createImport(request: Request) {
       "expected JSON or multipart",
     );
   }
-  if (source !== "playback_reporting" && source !== "bloom_export") {
+  if (
+    source !== "playback_reporting" &&
+    source !== "bloom_export" &&
+    source !== "jellystat"
+  ) {
     return envelope(422, "validation_failed", "invalid source");
   }
   if (
@@ -2815,7 +2819,7 @@ async function createImport(request: Request) {
   ) {
     return envelope(422, "validation_failed", "invalid media_server_id");
   }
-  if (source === "bloom_export" && !(file instanceof File)) {
+  if (source !== "playback_reporting" && !(file instanceof File)) {
     return envelope(422, "validation_failed", "file required");
   }
   if (

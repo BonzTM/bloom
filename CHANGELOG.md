@@ -11,6 +11,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- The Imports page offers a Jellystat backup as a source: choose the server,
+  upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
+  job like any other import.
 - A type-agnostic Jellyfin library catalog now syncs on a durable leased
   schedule or by an authenticated on-demand route. New read routes expose
   library coverage, item metadata and history, recently added items, genre
@@ -23,140 +26,6 @@ contracts) gets an entry here.
   per-user identity for user-data imports to SQLite and PostgreSQL.
   `BLOOM_LIBRARY_SYNC_INTERVAL` controls scheduled walks and defaults to one
   hour.
-
-### Removed
-
-- `BLOOM_DATA_DIR` and filesystem upload staging are removed. Bloom no longer
-  needs a data directory for imports.
-- The image workflow no longer opens deployment pull requests or needs a
-  deployment token; it publishes and promotes images only.
-
-### Changed
-
-- A watch's details page reads as a timeline (started, paused, resumed,
-  seeked, delivery changes, last seen) instead of every polled sample; the
-  raw samples sit behind a disclosure.
-- Discover and search say why TMDB could not be used when the API reports a
-  reason (unreachable, rejected token, unusable answer, not answering) and
-  say so when Bloom itself took too long to answer.
-- The Imports page offers the export as one zip download and accepts that
-  zip, or an older JSON Lines export, for a Bloom export import.
-- Title pages open with a hero: the backdrop behind the poster, name, and
-  overview, with the request form below. Discover shows the search form only
-  with results; searching starts from the top bar.
-- Catalog item, descendant-history, and stale-item routes now use bounded
-  keyset cursors instead of offsets. Cursors are bound to the route, filters,
-  sort, and fixed time window, and mismatched reuse returns `422`. Date ordering
-  is explicit for unknown and never-played items, and genre totals are
-  aggregated in SQL.
-- Catalog lease recovery preserves shutdown checkpoints, replays an interrupted
-  library from its first page, and only archives after every library completes
-  under one generation. Before archival, Bloom revalidates missing identifiers
-  against Jellyfin in bounded batches, so changing page composition cannot
-  archive an item that still exists.
-- Catalog item sorts now use filtered or unfiltered indexes and maintained
-  per-item playback rollups. Collectors and importers refresh affected rollups,
-  and successful catalog completion rebuilds them.
-- Rich history imports supersede an existing Jellyfin user-data synthetic watch
-  for the same user and item regardless of commit order.
-- The app shell is reworked: a sidebar with icons and an Administration
-  section that links straight to each admin page, a top bar with a global
-  title search and the session controls, a drawer on small screens, and a
-  darker palette closer to the apps Bloom replaces.
-- Playback and statistics pages show artwork through the item image proxy:
-  playing-now sessions are cards with the poster, who is watching, where,
-  and a progress bar against the item's runtime; most-watched titles are
-  ranked poster tiles; the statistics page adds most-popular rows ranked by
-  how many different people watched; most active people and libraries are
-  cards instead of bar charts.
-- Watch exports are now one streamed ZIP download containing a manifest, every
-  watch, import-job provenance, and a trailing summary with record counts and
-  entry byte sizes. Bloom export imports accept that ZIP by content while
-  retaining JSONL compatibility. An export larger than the 256 MiB browser
-  upload cap cannot be re-imported through the browser yet; inspect
-  `summary.json` before attempting the round trip.
-- Import uploads now stream into fixed-size database chunks. Terminal job
-  transitions delete linked chunks in the same transaction, and worker scans
-  delete bounded batches of expired orphan uploads.
-- Bloom export imports now retain the complete exported watch snapshot except
-  segments and position samples. Collected watches win import deduplication in
-  either commit order, including runtime, and every malformed Playback Reporting
-  field after a valid ascending row ID is skipped with cursor progress.
-- Large import uploads and streamed watch exports use the bounded
-  `BLOOM_IMPORT_TRANSFER_TIMEOUT` deadline (`10m` by default, valid from `30s`
-  through `2h`) instead of the global 15-second HTTP transfer deadlines.
-- Import batches now fence every write and checkpoint with the active lease.
-  Import persistence failures remain distinguishable from missing jobs and
-  expired leases.
-- Upstream probe failures now say whether the server was unreachable, rejected
-  the credential, was not found, or answered unexpectedly.
-- TMDB metadata authentication now accepts only the v4 API Read Access Token,
-  sends it as a Bearer credential instead of a URL query parameter, and treats
-  previously stored v3 API keys as not configured until they are replaced.
-- The request settings page asks for TMDB's API Read Access Token and refuses
-  a v3 API key before sending it.
-- Invite code preview and acceptance now perform the same bounded database
-  lookup and library-read sequence for malformed, non-canonical, unknown,
-  expired, exhausted, and revoked codes, and verify the selected digest with a
-  constant-time Go comparison (#40).
-- Invite acceptance secrecy coverage now includes application logs, the audit
-  stream, Prometheus output, and panic recovery; recovered panic payloads are
-  no longer logged (#45).
-- Invite provisioning now contains adapter panics inside the compensation path,
-  records users found after ambiguous creation as unowned terminal failures for
-  manual resolution, never deletes or changes policy for those users, bounds
-  every reconciliation database operation, and rejects administrator dismissal
-  with `invite_provisioning_failure_leased` while a worker lease is live.
-- Invite provisioning failure transactions now report a durable row only after
-  commit, retry uncertain outcomes idempotently with the original failure ID,
-  and contain reconciliation provisioner panics as generic retry or terminal
-  outcomes after releasing operation resources.
-- The invites page lists servers through `GET /api/v1/invites/servers`, so an
-  inviter without `admin.settings` can choose a server.
-
-- OIDC configuration now bounds client identifiers, client secrets, scopes,
-  claim names, role-map claim keys, and the public URL, and rejects malformed
-  text before it reaches protocol or claim-lookup boundaries.
-- OIDC issuer configuration now requires its exact canonical URL form and
-  rejects queries, fragments, opaque URLs, and empty query or fragment
-  delimiters.
-- OIDC exchange failures now retain their wrapped cause and produce one
-  bounded boundary log classification with sensitive provider detail redacted.
-- Empty chunked requests to `POST /api/v1/auth/oidc/start` now behave like
-  other requests with an omitted optional body.
-- Media-request responses now include the requester's current display username
-  without copying it into request storage; the field is empty if the account
-  no longer exists.
-- Fulfilment now snapshots each request's manager and dispatch options, polls
-  processing requests fairly, uses expiring exclusive dispatch leases, treats
-  only authoritative Radarr or complete per-season Sonarr file state as
-  availability, and moves structurally malformed availability responses to
-  `failed`.
-  Existing Radarr movies are reconciled and searched, while existing Sonarr
-  monitored seasons are preserved and only newly requested seasons are searched.
-- Download-manager option responses now encode empty quality-profile,
-  root-folder, and tag collections as `[]` instead of `null`.
-- The web UI has a design system: a dark-first palette with a light scheme
-  when the system asks for it, an app shell with a sidebar that becomes a
-  sticky top bar on narrow screens, and shared cards, forms, buttons, badges,
-  and tables. Every page uses it; tables scroll inside their cards.
-- `BLOOM_SECRET_KEY` is read from the environment only and the `-secret-key`
-  flag is removed, so usage output and process arguments can never carry a
-  secret. `BLOOM_OIDC_CLIENT_SECRET` follows the same rule.
-- `create-admin` is now the recovery path for administrator access. Normal
-  first-run setup starts Bloom with `BLOOM_BOOTSTRAP_PASSWORD`, signs in, and
-  then removes the variable from the service environment.
-- Successful login responses now include the account's sorted role names and
-  effective permissions, matching `GET /api/v1/auth/me`.
-- Invite acceptance now rejects invalid, expired, deleted-account, and
-  disabled-account session cookies instead of treating them as anonymous.
-- Administrator link deletion now records a durable suppression that blocks
-  automatic username rematching. Administrator `PUT` clears the suppression,
-  and account-link lists expose suppressed rows only with
-  `include_suppressed=true`.
-
-### Added
-
 - Libraries pages under Administration: cards per library with what it
   holds and how much was watched, a library page with recently added
   items, everything in it sorted by name, date, plays, watch time, or
@@ -431,6 +300,137 @@ contracts) gets an entry here.
   through 1024 Unicode characters, subject to the existing 4096-byte input
   bound and an embedded offline common-password denylist, with no
   character-composition rules.
+
+### Removed
+
+- `BLOOM_DATA_DIR` and filesystem upload staging are removed. Bloom no longer
+  needs a data directory for imports.
+- The image workflow no longer opens deployment pull requests or needs a
+  deployment token; it publishes and promotes images only.
+
+### Changed
+
+- A watch's details page reads as a timeline (started, paused, resumed,
+  seeked, delivery changes, last seen) instead of every polled sample; the
+  raw samples sit behind a disclosure.
+- Discover and search say why TMDB could not be used when the API reports a
+  reason (unreachable, rejected token, unusable answer, not answering) and
+  say so when Bloom itself took too long to answer.
+- The Imports page offers the export as one zip download and accepts that
+  zip, or an older JSON Lines export, for a Bloom export import.
+- Title pages open with a hero: the backdrop behind the poster, name, and
+  overview, with the request form below. Discover shows the search form only
+  with results; searching starts from the top bar.
+- Catalog item, descendant-history, and stale-item routes now use bounded
+  keyset cursors instead of offsets. Cursors are bound to the route, filters,
+  sort, and fixed time window, and mismatched reuse returns `422`. Date ordering
+  is explicit for unknown and never-played items, and genre totals are
+  aggregated in SQL.
+- Catalog lease recovery preserves shutdown checkpoints, replays an interrupted
+  library from its first page, and only archives after every library completes
+  under one generation. Before archival, Bloom revalidates missing identifiers
+  against Jellyfin in bounded batches, so changing page composition cannot
+  archive an item that still exists.
+- Catalog item sorts now use filtered or unfiltered indexes and maintained
+  per-item playback rollups. Collectors and importers refresh affected rollups,
+  and successful catalog completion rebuilds them.
+- Rich history imports supersede an existing Jellyfin user-data synthetic watch
+  for the same user and item regardless of commit order.
+- The app shell is reworked: a sidebar with icons and an Administration
+  section that links straight to each admin page, a top bar with a global
+  title search and the session controls, a drawer on small screens, and a
+  darker palette closer to the apps Bloom replaces.
+- Playback and statistics pages show artwork through the item image proxy:
+  playing-now sessions are cards with the poster, who is watching, where,
+  and a progress bar against the item's runtime; most-watched titles are
+  ranked poster tiles; the statistics page adds most-popular rows ranked by
+  how many different people watched; most active people and libraries are
+  cards instead of bar charts.
+- Watch exports are now one streamed ZIP download containing a manifest, every
+  watch, import-job provenance, and a trailing summary with record counts and
+  entry byte sizes. Bloom export imports accept that ZIP by content while
+  retaining JSONL compatibility. An export larger than the 256 MiB browser
+  upload cap cannot be re-imported through the browser yet; inspect
+  `summary.json` before attempting the round trip.
+- Import uploads now stream into fixed-size database chunks. Terminal job
+  transitions delete linked chunks in the same transaction, and worker scans
+  delete bounded batches of expired orphan uploads.
+- Bloom export imports now retain the complete exported watch snapshot except
+  segments and position samples. Collected watches win import deduplication in
+  either commit order, including runtime, and every malformed Playback Reporting
+  field after a valid ascending row ID is skipped with cursor progress.
+- Large import uploads and streamed watch exports use the bounded
+  `BLOOM_IMPORT_TRANSFER_TIMEOUT` deadline (`10m` by default, valid from `30s`
+  through `2h`) instead of the global 15-second HTTP transfer deadlines.
+- Import batches now fence every write and checkpoint with the active lease.
+  Import persistence failures remain distinguishable from missing jobs and
+  expired leases.
+- Upstream probe failures now say whether the server was unreachable, rejected
+  the credential, was not found, or answered unexpectedly.
+- TMDB metadata authentication now accepts only the v4 API Read Access Token,
+  sends it as a Bearer credential instead of a URL query parameter, and treats
+  previously stored v3 API keys as not configured until they are replaced.
+- The request settings page asks for TMDB's API Read Access Token and refuses
+  a v3 API key before sending it.
+- Invite code preview and acceptance now perform the same bounded database
+  lookup and library-read sequence for malformed, non-canonical, unknown,
+  expired, exhausted, and revoked codes, and verify the selected digest with a
+  constant-time Go comparison (#40).
+- Invite acceptance secrecy coverage now includes application logs, the audit
+  stream, Prometheus output, and panic recovery; recovered panic payloads are
+  no longer logged (#45).
+- Invite provisioning now contains adapter panics inside the compensation path,
+  records users found after ambiguous creation as unowned terminal failures for
+  manual resolution, never deletes or changes policy for those users, bounds
+  every reconciliation database operation, and rejects administrator dismissal
+  with `invite_provisioning_failure_leased` while a worker lease is live.
+- Invite provisioning failure transactions now report a durable row only after
+  commit, retry uncertain outcomes idempotently with the original failure ID,
+  and contain reconciliation provisioner panics as generic retry or terminal
+  outcomes after releasing operation resources.
+- The invites page lists servers through `GET /api/v1/invites/servers`, so an
+  inviter without `admin.settings` can choose a server.
+
+- OIDC configuration now bounds client identifiers, client secrets, scopes,
+  claim names, role-map claim keys, and the public URL, and rejects malformed
+  text before it reaches protocol or claim-lookup boundaries.
+- OIDC issuer configuration now requires its exact canonical URL form and
+  rejects queries, fragments, opaque URLs, and empty query or fragment
+  delimiters.
+- OIDC exchange failures now retain their wrapped cause and produce one
+  bounded boundary log classification with sensitive provider detail redacted.
+- Empty chunked requests to `POST /api/v1/auth/oidc/start` now behave like
+  other requests with an omitted optional body.
+- Media-request responses now include the requester's current display username
+  without copying it into request storage; the field is empty if the account
+  no longer exists.
+- Fulfilment now snapshots each request's manager and dispatch options, polls
+  processing requests fairly, uses expiring exclusive dispatch leases, treats
+  only authoritative Radarr or complete per-season Sonarr file state as
+  availability, and moves structurally malformed availability responses to
+  `failed`.
+  Existing Radarr movies are reconciled and searched, while existing Sonarr
+  monitored seasons are preserved and only newly requested seasons are searched.
+- Download-manager option responses now encode empty quality-profile,
+  root-folder, and tag collections as `[]` instead of `null`.
+- The web UI has a design system: a dark-first palette with a light scheme
+  when the system asks for it, an app shell with a sidebar that becomes a
+  sticky top bar on narrow screens, and shared cards, forms, buttons, badges,
+  and tables. Every page uses it; tables scroll inside their cards.
+- `BLOOM_SECRET_KEY` is read from the environment only and the `-secret-key`
+  flag is removed, so usage output and process arguments can never carry a
+  secret. `BLOOM_OIDC_CLIENT_SECRET` follows the same rule.
+- `create-admin` is now the recovery path for administrator access. Normal
+  first-run setup starts Bloom with `BLOOM_BOOTSTRAP_PASSWORD`, signs in, and
+  then removes the variable from the service environment.
+- Successful login responses now include the account's sorted role names and
+  effective permissions, matching `GET /api/v1/auth/me`.
+- Invite acceptance now rejects invalid, expired, deleted-account, and
+  disabled-account session cookies instead of treating them as anonymous.
+- Administrator link deletion now records a durable suppression that blocks
+  automatic username rematching. Administrator `PUT` clears the suppression,
+  and account-link lists expose suppressed rows only with
+  `include_suppressed=true`.
 
 ### Fixed
 

@@ -209,3 +209,20 @@ it("offers the export as one download", async () => {
     "/api/v1/exports/watches",
   );
 });
+
+it("offers a Jellystat backup as a source and asks for its file", async () => {
+  const user = userEvent.setup();
+  await openImports();
+  const form = screen.getByRole("form", { name: "Start an import" });
+  await user.selectOptions(within(form).getByLabelText("Server"), "Cabin");
+  await user.click(
+    within(form).getByLabelText("A Jellystat backup file for that server"),
+  );
+  expect(
+    within(form).getByLabelText("Backup file"),
+  ).toHaveAccessibleDescription(/Jellystat writes under Settings, Backup/);
+  await user.click(within(form).getByRole("button", { name: "Start import" }));
+  expect(
+    within(form).getByLabelText("Backup file"),
+  ).toHaveAccessibleDescription(/Choose the export file\./);
+});

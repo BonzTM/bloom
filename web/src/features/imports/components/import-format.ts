@@ -2,6 +2,7 @@ import type { ImportSource, ImportState } from "../api/imports-schemas.js";
 
 const SOURCE_LABELS: Readonly<Record<ImportSource, string>> = {
   playback_reporting: "Playback Reporting",
+  jellystat: "Jellystat backup",
   bloom_export: "Bloom export",
 };
 

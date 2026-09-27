@@ -9,6 +9,7 @@ import {
 import { FieldError, fieldErrorId } from "../../auth/components/field-error.js";
 import {
   importSourceSchema,
+  isFileSource,
   MAX_IMPORT_UPLOAD_BYTES,
   mediaServerIdSchema,
   type ImportSource,
@@ -112,6 +113,18 @@ export function StartImportForm({
           <input
             type="radio"
             name="source"
+            value="jellystat"
+            checked={source === "jellystat"}
+            onChange={() => {
+              setSource("jellystat");
+            }}
+          />{" "}
+          A Jellystat backup file for that server
+        </label>
+        <label className="choice">
+          <input
+            type="radio"
+            name="source"
             value="bloom_export"
             checked={source === "bloom_export"}
             onChange={() => {
@@ -122,20 +135,27 @@ export function StartImportForm({
         </label>
         <FieldError formId={formId} field="source" message={errors.source} />
       </fieldset>
-      {source === "bloom_export" ? (
+      {isFileSource(source) ? (
         <div className="field">
-          <label htmlFor={`${formId}-file`}>Export file</label>
+          <label htmlFor={`${formId}-file`}>
+            {source === "jellystat" ? "Backup file" : "Export file"}
+          </label>
           <input
             id={`${formId}-file`}
             type="file"
             name="file"
-            accept=".zip,.jsonl,application/zip,application/x-ndjson"
+            accept={
+              source === "jellystat"
+                ? ".jsonl,application/x-ndjson"
+                : ".zip,.jsonl,application/zip,application/x-ndjson"
+            }
             aria-describedby={`${fieldErrorId(formId, "file")} ${formId}-file-hint`}
             aria-invalid={errors.file !== undefined}
           />
           <p id={`${formId}-file-hint`} className="field-hint">
-            The zip another Bloom exported (or an older JSON Lines export), at
-            most 256 MiB.
+            {source === "jellystat"
+              ? "The .jsonl Jellystat writes under Settings, Backup, at most 256 MiB."
+              : "The zip another Bloom exported (or an older JSON Lines export), at most 256 MiB."}
           </p>
           <FieldError formId={formId} field="file" message={errors.file} />
         </div>
@@ -171,7 +191,7 @@ export function readStartInput(
   if (!source.success) {
     errors.source = "Choose where the history comes from.";
   }
-  if (source.success && source.data === "bloom_export") {
+  if (source.success && isFileSource(source.data)) {
     if (file === undefined || file.size === 0) {
       errors.file = "Choose the export file.";
     } else if (file.size > MAX_IMPORT_UPLOAD_BYTES) {
@@ -181,9 +201,12 @@ export function readStartInput(
   if (!server.success || !source.success || Object.keys(errors).length > 0) {
     return { errors };
   }
-  if (source.data === "bloom_export" && file !== undefined) {
+  if (
+    (source.data === "bloom_export" || source.data === "jellystat") &&
+    file !== undefined
+  ) {
     return {
-      input: { source: "bloom_export", mediaServerId: server.data, file },
+      input: { source: source.data, mediaServerId: server.data, file },
     };
   }
   return {
