@@ -16,6 +16,10 @@ contracts) gets an entry here.
 
 ### Changed
 
+- The app shell is reworked: a sidebar with icons and an Administration
+  section that links straight to each admin page, a top bar with a global
+  title search and the session controls, a drawer on small screens, and a
+  darker palette closer to the apps Bloom replaces.
 - Upstream probe failures now say whether the server was unreachable, rejected
   the credential, was not found, or answered unexpectedly.
 - Invite code preview and acceptance now perform the same bounded database
