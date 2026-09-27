@@ -157,6 +157,12 @@ contracts) gets an entry here.
 
 ### Added
 
+- Libraries pages under Administration: cards per library with what it
+  holds and how much was watched, a library page with recently added
+  items, everything in it sorted by name, date, plays, watch time, or
+  last played, genre charts, and what nobody has played in 90 days, and an
+  item page with artwork, facts, play summary, and who watched it. A
+  "Sync now" button asks for a fresh walk of a server's libraries.
 - The requests page becomes Discover: rows of posters for what is trending
   this week, popular movies and series, upcoming movies, and series on the
   air, each tile carrying your own request state and loading more on demand,

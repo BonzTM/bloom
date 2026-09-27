@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/jest-globals";
 import { afterAll, afterEach, beforeAll } from "@jest/globals";
 import { cleanup } from "@testing-library/react";
 import {
+  resetMockCatalog,
   resetMockImports,
   resetMockInvites,
   resetMockMediaServers,
@@ -27,6 +28,7 @@ afterEach(() => {
   resetMockRoleQuotas();
   resetMockNotifications();
   resetMockImports();
+  resetMockCatalog();
   resetMockOwnLinks();
 });
 
