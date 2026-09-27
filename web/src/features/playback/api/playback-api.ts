@@ -13,6 +13,7 @@ import {
   statsOverviewSchema,
   statsPatternsSchema,
   statsTitleKindSchema,
+  statsTitleOrderSchema,
   statsTitlesSchema,
   statsUserDetailSchema,
   statsUsersSchema,
@@ -26,6 +27,7 @@ import {
   type StatsParams,
   type StatsPatterns,
   type StatsTitleKind,
+  type StatsTitleOrder,
   type StatsTitles,
   type StatsUserDetail,
   type StatsUsers,
@@ -121,10 +123,14 @@ export class PlaybackApi {
   statsTitles(
     params: StatsParams,
     kind: StatsTitleKind,
+    order: StatsTitleOrder,
     signal: AbortSignal,
   ): Promise<StatsTitles> {
     return this.#client.requestJson(
-      statsPath("titles", params, { kind: statsTitleKindSchema.parse(kind) }),
+      statsPath("titles", params, {
+        kind: statsTitleKindSchema.parse(kind),
+        order: statsTitleOrderSchema.parse(order),
+      }),
       statsTitlesSchema,
       { signal },
     );

@@ -4,14 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { signInMockSession, WATCH_WITH_SERIES } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
 
-it("shows the stream on the playback tables and links to the series", async () => {
+it("shows the stream on the playing-now card and links to the series", async () => {
   const user = userEvent.setup();
   signInMockSession();
   renderApp("/admin/playback");
-  const table = await screen.findByRole("table", {
-    name: "Playing now, newest first",
-  });
-  const alice = within(table).getByRole("row", { name: /^alice / });
+  const cards = await screen.findByRole("list", { name: "Playing now" });
+  const alice = within(cards).getByRole("article", { name: "alice" });
   expect(alice).toHaveTextContent("1080p · h264/aac · 8.2 Mbit/s");
 
   await user.click(

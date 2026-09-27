@@ -28,7 +28,9 @@ import {
   useStatsLibraries,
   useStatsOverview,
   useStatsPatterns,
+  useStatsTitles,
 } from "../features/playback/hooks/stats-queries.js";
+import { TitleTiles } from "../features/playback/components/title-tiles.js";
 import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
@@ -88,6 +90,18 @@ function StatisticsPage({
   const daily = useStatsDaily(accountId, params);
   const patterns = useStatsPatterns(accountId, params);
   const libraries = useStatsLibraries(accountId, libraryParams);
+  const popularMovies = useStatsTitles(
+    accountId,
+    params,
+    "movie",
+    "unique_users",
+  );
+  const popularSeries = useStatsTitles(
+    accountId,
+    params,
+    "series",
+    "unique_users",
+  );
   const servers = useMediaServers(canListServers ? accountId : undefined);
   const denial =
     accessDenial(overview.error) ??
@@ -169,6 +183,14 @@ function StatisticsPage({
               </>
             )}
           </section>
+          <section aria-labelledby="popular-heading" className="card">
+            <h2 id="popular-heading">Most popular</h2>
+            <p className="section-intro">
+              Ranked by how many different people watched, not by how often.
+            </p>
+            <PopularTiles kind="movie" query={popularMovies} />
+            <PopularTiles kind="series" query={popularSeries} />
+          </section>
           <section aria-labelledby="libraries-heading" className="card">
             <h2 id="libraries-heading">Libraries</h2>
             {libraries.status === "pending" ? (
@@ -202,5 +224,25 @@ function StatisticsPage({
         </>
       )}
     </>
+  );
+}
+
+function PopularTiles({
+  kind,
+  query,
+}: Readonly<{
+  kind: "movie" | "series";
+  query: ReturnType<typeof useStatsTitles>;
+}>): ReactNode {
+  const title =
+    kind === "movie" ? "Most popular movies" : "Most popular series";
+  if (query.status === "pending") {
+    return <AsyncStatus>Loading {title.toLowerCase()}…</AsyncStatus>;
+  }
+  if (query.status === "error") {
+    return <ReportFailed what={title} onRetry={query.refetch} />;
+  }
+  return (
+    <TitleTiles title={title} titles={query.data.items} metric="unique_users" />
   );
 }

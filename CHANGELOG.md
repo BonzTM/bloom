@@ -20,6 +20,12 @@ contracts) gets an entry here.
   section that links straight to each admin page, a top bar with a global
   title search and the session controls, a drawer on small screens, and a
   darker palette closer to the apps Bloom replaces.
+- Playback and statistics pages show artwork through the item image proxy:
+  playing-now sessions are cards with the poster, who is watching, where,
+  and a progress bar against the item's runtime; most-watched titles are
+  ranked poster tiles; the statistics page adds most-popular rows ranked by
+  how many different people watched; most active people and libraries are
+  cards instead of bar charts.
 - Upstream probe failures now say whether the server was unreachable, rejected
   the credential, was not found, or answered unexpectedly.
 - TMDB metadata authentication now accepts only the v4 API Read Access Token,

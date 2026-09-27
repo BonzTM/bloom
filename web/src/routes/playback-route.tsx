@@ -5,7 +5,7 @@ import {
   useSessionRecheck,
 } from "../features/auth/hooks/auth-queries.js";
 import { HistoryTable } from "../features/playback/components/history-table.js";
-import { NowPlayingTable } from "../features/playback/components/now-playing-table.js";
+import { NowPlaying } from "../features/playback/components/now-playing.js";
 import {
   useNowPlaying,
   usePlaybackHistory,
@@ -72,7 +72,7 @@ function PlaybackPage({
       </p>
       <section aria-labelledby="now-playing-heading" className="card">
         <h2 id="now-playing-heading">Playing now</h2>
-        <NowPlayingTable query={now} />
+        <NowPlaying query={now} />
       </section>
       <section aria-labelledby="history-heading" className="card">
         <h2 id="history-heading">Recent history</h2>

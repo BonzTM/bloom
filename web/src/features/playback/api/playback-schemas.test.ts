@@ -17,6 +17,7 @@ const watch = {
   season_number: 1,
   episode_number: 1,
   position_ms: 754000,
+  runtime_ms: null,
   paused: false,
   play_method: "direct_play",
   active_seconds: 754,

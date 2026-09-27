@@ -14,7 +14,6 @@ it.each([
     "Media servers, ordered by name",
   ],
   ["/admin/invites", "Invites table", "Invites, newest first"],
-  ["/admin/playback", "Playing now table", "Playing now, newest first"],
   [
     "/admin/playback",
     "Finished watches table",

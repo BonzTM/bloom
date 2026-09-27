@@ -48,20 +48,34 @@ it("shows totals, rankings, breakdowns, and charts for the window", async () => 
   expect(totals).toHaveTextContent("Watch time29h 2m");
   expect(totals).toHaveTextContent("People2");
   expect(
-    within(
+    tileFor(
       screen.getByRole("figure", { name: "Most watched movies" }),
-    ).getByRole("row", { name: /^Ronin / }),
-  ).toHaveTextContent("6");
+      "Ronin",
+    ),
+  ).toHaveTextContent("6 plays");
   expect(
-    within(
+    tileFor(
       screen.getByRole("figure", { name: "Most watched series" }),
-    ).getByRole("row", { name: /^The Arrival / }),
-  ).toHaveTextContent("14");
+      "The Arrival",
+    ),
+  ).toHaveTextContent("14 plays");
+  expect(
+    tileFor(
+      screen.getByRole("figure", { name: "Most active people" }),
+      "alice",
+    ),
+  ).toHaveTextContent("18h 2m · 17 plays");
+  expect(
+    tileFor(
+      await screen.findByRole("figure", { name: "Most popular movies" }),
+      "Heat",
+    ),
+  ).toHaveTextContent("2 people");
   expect(
     within(
-      screen.getByRole("figure", { name: "Most active people" }),
-    ).getByRole("row", { name: /^alice / }),
-  ).toHaveTextContent("18h 2m");
+      screen.getByRole("figure", { name: "Most popular movies" }),
+    ).getAllByRole("listitem")[0],
+  ).toHaveTextContent("Heat");
   expect(
     within(screen.getByRole("figure", { name: "Play methods" })).getByRole(
       "row",
@@ -147,12 +161,8 @@ it("ranks libraries and groups watches without a known library", async () => {
   const chart = await screen.findByRole("figure", {
     name: "Most watched libraries",
   });
-  expect(
-    within(chart).getByRole("row", { name: /^Movies / }),
-  ).toHaveTextContent("12");
-  expect(
-    within(chart).getByRole("row", { name: /^Unknown library / }),
-  ).toHaveTextContent("3");
+  expect(tileFor(chart, "Movies")).toHaveTextContent("Plays12");
+  expect(tileFor(chart, "Unknown library")).toHaveTextContent("Plays3");
 });
 
 it("filters every report by one library and clears it when the server changes", async () => {
@@ -189,3 +199,12 @@ it("filters every report by one library and clears it when the server changes", 
   expect(screen.getByLabelText("Library")).toHaveDisplayValue("All libraries");
   expect(screen.getByLabelText("Server")).toHaveDisplayValue("All servers");
 });
+
+// The tile or card that names a title, person, or library.
+function tileFor(figure: HTMLElement, name: string): HTMLElement {
+  const item = within(figure).getByText(name).closest("li");
+  if (item === null) {
+    throw new Error(`no tile named ${name}`);
+  }
+  return item;
+}

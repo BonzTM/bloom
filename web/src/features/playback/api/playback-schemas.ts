@@ -54,6 +54,8 @@ export const watchSchema = z.object({
   season_number: z.int32().nullable(),
   episode_number: z.int32().nullable(),
   position_ms: int64(),
+  // The item\'s length when the server reported one; null otherwise.
+  runtime_ms: int64().nullable(),
   paused: z.boolean(),
   play_method: playMethodSchema,
   active_seconds: int64(),

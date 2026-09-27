@@ -69,8 +69,14 @@ export const statsTitleSchema = z.object({
   name: z.string(),
   plays: int64(),
   watch_seconds: int64(),
+  unique_users: int64(),
   last_watched_at: z.iso.datetime({ offset: true }),
 });
+
+// Titles rank by plays (most watched) or by distinct people (most popular).
+export const statsTitleOrderSchema = z.enum(["plays", "unique_users"]);
+
+export type StatsTitleOrder = z.output<typeof statsTitleOrderSchema>;
 
 export type StatsTitle = z.output<typeof statsTitleSchema>;
 
