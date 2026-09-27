@@ -540,7 +540,7 @@ func largePlaybackMutations(
 
 func newPlaybackTestStore(t *testing.T, pool *sql.DB, driver config.Driver) core.PlaybackPersistence {
 	t.Helper()
-	store, err := db.NewPlaybackStore(pool, driver)
+	store, err := db.NewPlaybackStore(pool, driver, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("NewPlaybackStore: %v", err)
 	}

@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,6 +22,7 @@ import (
 	httpapi "github.com/BonzTM/bloom/internal/api/http"
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
+	importapp "github.com/BonzTM/bloom/internal/importer"
 	oidcadapter "github.com/BonzTM/bloom/internal/oidc"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
@@ -284,6 +287,34 @@ func TestRuntimeShutdownWaitsForAdmittedHandlerBeforeClosingDependencies(t *test
 	}
 }
 
+func TestWarnBloomExportUnavailableOnce(t *testing.T) {
+	dataDirectory := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(dataDirectory, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("block data directory: %v", err)
+	}
+	staging, err := importapp.NewStaging(dataDirectory, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("NewStaging: %v", err)
+	}
+	cause := staging.UnavailableCause()
+	if cause == nil {
+		t.Fatal("staging is available, want unavailable cause")
+	}
+	var logs strings.Builder
+	warnBloomExportUnavailable(slog.New(slog.NewJSONHandler(&logs, nil)), staging)
+	var warning struct {
+		Level, Msg string
+	}
+	if err := json.Unmarshal([]byte(logs.String()), &warning); err != nil {
+		t.Fatalf("decode staging warning: %v", err)
+	}
+	want := "Bloom export uploads are disabled: " + cause.Error() +
+		"; set BLOOM_DATA_DIR to a writable directory"
+	if strings.Count(logs.String(), "\n") != 1 || warning.Level != "WARN" || warning.Msg != want {
+		t.Fatalf("staging warning = %+v, want level WARN and message %q", warning, want)
+	}
+}
+
 func TestServePropagatesPlaybackStartupFailure(t *testing.T) {
 	order := &shutdownOrder{}
 	databaseClosed := &atomic.Bool{}
@@ -482,9 +513,11 @@ func cleanupTestDependencies(resources *startupResources) Dependencies {
 func cleanupTestConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Config{
+		DataDirectory: t.TempDir(),
 		HTTP: config.HTTPConfig{
 			Addr: "127.0.0.1:0", ReadHeaderTimeout: time.Second, ReadTimeout: time.Second,
 			WriteTimeout: time.Second, IdleTimeout: time.Second, MaxBodyBytes: 1 << 20,
+			ImportTransferTimeout: 10 * time.Minute,
 		},
 		Database: config.DatabaseConfig{
 			Driver: config.DriverSQLite,

@@ -27,6 +27,19 @@ var (
 	ErrInvalidArgument = errors.New("invalid argument")
 )
 
+// InvalidArgumentError carries safe field-level detail for invalid input.
+type InvalidArgumentError struct {
+	Field   string
+	Code    string
+	Message string
+}
+
+// Error returns the safe human-readable validation message.
+func (e *InvalidArgumentError) Error() string { return e.Message }
+
+// Unwrap classifies the detailed error as ErrInvalidArgument.
+func (*InvalidArgumentError) Unwrap() error { return ErrInvalidArgument }
+
 // Account is the Bloom principal (ADR 0006 item 1): every human or API caller
 // is an account; media-server users are linked identities on it, never the
 // account itself. This is the minimal shape needed to establish the two-engine

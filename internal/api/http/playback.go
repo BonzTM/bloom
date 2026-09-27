@@ -41,6 +41,8 @@ type playbackWatchResponse struct {
 	PlayMethod      core.PlayMethod        `json:"play_method"`
 	Stream          *streamDetailsResponse `json:"stream,omitempty"`
 	Source          core.WatchSource       `json:"source"`
+	ImportSource    core.ImportSource      `json:"import_source,omitempty"`
+	ImportRecordID  string                 `json:"import_record_id,omitempty"`
 	ActiveSeconds   int64                  `json:"active_seconds"`
 	StartedAt       time.Time              `json:"started_at"`
 	EndedAt         *time.Time             `json:"ended_at,omitempty"`
@@ -246,6 +248,7 @@ func playbackWatchDTO(watch core.PlaybackWatch, now time.Time) playbackWatchResp
 		PositionMS: int64(watch.LastPosition / time.Millisecond), Paused: watch.State == core.WatchPaused,
 		RuntimeMS:  durationMilliseconds(watch.Runtime),
 		PlayMethod: watch.PlayMethod, Source: watch.Source,
+		ImportSource: watch.ImportSource, ImportRecordID: watch.ImportRecordID,
 		Stream:        streamDetailsDTO(watch.Stream),
 		ActiveSeconds: int64(watch.ActiveTimeAt(now) / time.Second),
 		StartedAt:     watch.StartedAt, EndedAt: watch.EndedAt,

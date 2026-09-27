@@ -1513,6 +1513,106 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/exports/watches:
+    get:
+      tags: [imports]
+      operationId: exportWatches
+      summary: Stream one bounded page of watches as Bloom JSON Lines.
+      description: Records are ordered by `(started_at, id)` newest first. Continue with the `X-Next-Cursor` response trailer until it is empty. A response that ends without the terminating chunk and trailer is truncated and must be retried.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, maxLength: 256 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 10000, default: 1000 } }
+        - { name: media_server_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: JSONL watch records. The `X-Next-Cursor` trailer identifies the next page.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+            X-Next-Cursor:
+              description: Cursor for the next page, sent as a response trailer and empty on the final page.
+              schema: { type: string, maxLength: 256 }
+          content:
+            application/x-ndjson:
+              schema: { type: string, description: One `WatchExportRecord` JSON object per line. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/imports:
+    post:
+      tags: [imports]
+      operationId: createImport
+      summary: Create a Playback Reporting or Bloom JSONL import job.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePlaybackReportingImportRequest" }
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/CreateBloomExportImportRequest" }
+            encoding:
+              file:
+                contentType: application/x-ndjson
+      responses:
+        "201": { description: Import job created., content: { application/json: { schema: { $ref: "#/components/schemas/ImportJob" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPostGet" }
+    get:
+      tags: [imports]
+      operationId: listImports
+      summary: List import jobs newest first.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string, maxLength: 256 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { description: Import jobs., content: { application/json: { schema: { $ref: "#/components/schemas/ImportsResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPostGet" }
+  /api/v1/imports/{id}:
+    get:
+      tags: [imports]
+      operationId: getImport
+      summary: Return one import job.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      responses:
+        "200": { description: Import job., content: { application/json: { schema: { $ref: "#/components/schemas/ImportJob" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/imports/{id}/cancel:
+    post:
+      tags: [imports]
+      operationId: cancelImport
+      summary: Request cancellation of a pending or running import.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      responses:
+        "200": { description: Cancelled import job., content: { application/json: { schema: { $ref: "#/components/schemas/ImportJob" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPost" }
   /api/v1/stats/overview:
     get:
       tags: [stats]
@@ -3156,6 +3256,53 @@ components:
     PlaybackSource:
       type: string
       enum: [poll, websocket, webhook, import]
+    ImportSource:
+      type: string
+      enum: [playback_reporting, bloom_export]
+    ImportState:
+      type: string
+      enum: [pending, running, completed, failed, cancelled]
+    CreatePlaybackReportingImportRequest:
+      type: object
+      required: [media_server_id, source]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        source: { type: string, const: playback_reporting }
+    CreateBloomExportImportRequest:
+      type: object
+      required: [media_server_id, source, file]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        source: { type: string, const: bloom_export }
+        file: { type: string, format: binary, x-max-bytes: 268435456, description: "An application/x-ndjson Bloom watch export, at most 256 MiB." }
+    ImportJob:
+      type: object
+      required: [id, media_server_id, source, state, read, imported, skipped, duplicate, last_error, requested_by, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        media_server_id: { type: string, format: uuid }
+        source: { $ref: "#/components/schemas/ImportSource" }
+        state: { $ref: "#/components/schemas/ImportState" }
+        read: { type: integer, format: int64, minimum: 0 }
+        imported: { type: integer, format: int64, minimum: 0 }
+        skipped: { type: integer, format: int64, minimum: 0 }
+        duplicate: { type: integer, format: int64, minimum: 0 }
+        last_error: { type: string, x-max-bytes: 512 }
+        requested_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ImportsResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/ImportJob" } }
+        next_cursor: { type: string, maxLength: 256 }
     StreamDetails:
       type: object
       additionalProperties: false
@@ -3207,7 +3354,7 @@ components:
         media_server_name: { type: string, minLength: 1 }
         media_user_id: { type: string, minLength: 1 }
         username: { type: string }
-        device_id: { type: string, minLength: 1 }
+        device_id: { type: string, maxLength: 256 }
         device_name: { type: string }
         client: { type: string }
         item_id: { type: string, minLength: 1 }
@@ -3224,6 +3371,8 @@ components:
         play_method: { $ref: "#/components/schemas/PlayMethod" }
         stream: { $ref: "#/components/schemas/StreamDetails" }
         source: { $ref: "#/components/schemas/PlaybackSource" }
+        import_source: { $ref: "#/components/schemas/ImportSource" }
+        import_record_id: { type: string, minLength: 1, x-max-bytes: 256 }
         active_seconds: { type: integer, format: int64, minimum: 0 }
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
@@ -3234,6 +3383,10 @@ components:
           required: [ended_at]
           properties:
             ended_at: { type: string, format: date-time }
+    WatchExportRecord:
+      allOf:
+        - $ref: "#/components/schemas/PlaybackHistoryWatch"
+      description: The JSON object written on each export line; imported records also carry `import_source` and `import_record_id`.
     PlaybackNowResponse:
       type: object
       required: [items, next_cursor]
@@ -3671,6 +3824,7 @@ components:
         - notification_channel_failure
         - media_user_not_linked
         - invite_provisioning_failure_leased
+        - import_in_progress
     OIDCCallbackErrorCode:
       type: string
       description: Closed browser-facing OIDC callback failure code set.

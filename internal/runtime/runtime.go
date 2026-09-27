@@ -28,6 +28,7 @@ import (
 	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/downloadmanager"
 	"github.com/BonzTM/bloom/internal/fulfilment"
+	importapp "github.com/BonzTM/bloom/internal/importer"
 	inviteapp "github.com/BonzTM/bloom/internal/invite"
 	"github.com/BonzTM/bloom/internal/mediaserver"
 	"github.com/BonzTM/bloom/internal/metadata"
@@ -141,14 +142,7 @@ func runService(
 		return err
 	}
 	srv, err := assembleHTTPServer(
-		cfg, auditSink, logger, metrics, pool,
-		wiring.accounts, wiring.localIdentities, wiring.authorizer, wiring.roles, wiring.sessions,
-		wiring.mediaServers, wiring.invites, wiring.playbackStore, wiring.stats, clock,
-		wiring.accountMediaUsers,
-		wiring.metadata, wiring.requests,
-		wiring.downloadManagers,
-		wiring.notifications,
-		wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows,
+		cfg, auditSink, logger, metrics, pool, wiring, clock,
 	)
 	if err != nil {
 		return err
@@ -158,6 +152,7 @@ func runService(
 		ctx, srv, wiring.oidcProvider, wiring.playbackManager, wiring.fulfilment,
 		wiring.notificationWorker,
 		wiring.inviteReconciler,
+		wiring.importWorker,
 		connectionGroup{wiring.mediaServers, wiring.metadata, wiring.downloadManagers},
 		pool, tracerProvider, logger, cfg.ShutdownGrace,
 		deps.ListenerReady, deps.listen,
@@ -183,6 +178,8 @@ type serviceWiring struct {
 	notificationWorker *notifyapp.Worker
 	inviteReconciler   *inviteapp.Reconciler
 	invites            *inviteapp.Service
+	imports            *importapp.Service
+	importWorker       *importapp.Worker
 	playbackStore      core.PlaybackStore
 	playbackManager    *playback.Manager
 	stats              *statsapp.Service
@@ -230,7 +227,28 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
+	wiring := serviceWiring{
+		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
+		sessions: sessions, mediaServers: mediaServers, accountMediaUsers: accountMediaUsers,
+		metadata: metadataService, requests: requestService, downloadManagers: downloadManagers,
+		fulfilment: fulfilmentManager, notifications: notifications, notificationWorker: notificationWorker,
+		invites: invites, inviteReconciler: inviteReconciler,
+	}
+	return wirePlaybackAndIdentity(ctx, pool, cfg, logger, metrics, deps, ownership, wiring)
+}
+
+func wirePlaybackAndIdentity(
+	ctx context.Context, pool *sql.DB, cfg config.Config, logger *slog.Logger,
+	metrics *telemetry.PromMetrics, deps Dependencies, ownership *startupOwnership,
+	wiring serviceWiring,
+) (serviceWiring, error) {
+	mediaServers := wiring.mediaServers
 	playbackStore, playbackManager, err := playbackDependencies(pool, cfg, mediaServers, metrics, logger, deps.Clock, deps.newPlaybackManager)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	ownership.playback = playbackManager
+	imports, importWorker, err := importDependencies(pool, cfg, mediaServers, deps.Clock, metrics, logger)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -238,8 +256,7 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	ownership.playback = playbackManager
-	if roleErr := validateOIDCRoles(ctx, roles, cfg.OIDC); roleErr != nil {
+	if roleErr := validateOIDCRoles(ctx, wiring.roles, cfg.OIDC); roleErr != nil {
 		return serviceWiring{}, roleErr
 	}
 	provider, oidcAccounts, oidcFlows, err := oidcDependencies(ctx, pool, cfg, metrics, deps)
@@ -247,17 +264,54 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	ownership.provider = provider
-	return serviceWiring{
-		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
-		sessions: sessions, mediaServers: mediaServers, invites: invites,
-		playbackStore: playbackStore, playbackManager: playbackManager, stats: statsService,
-		accountMediaUsers: accountMediaUsers,
-		metadata:          metadataService, requests: requestService,
-		downloadManagers: downloadManagers, fulfilment: fulfilmentManager,
-		notifications: notifications, notificationWorker: notificationWorker,
-		inviteReconciler: inviteReconciler,
-		oidcProvider:     provider, oidcAccounts: oidcAccounts, oidcFlows: oidcFlows,
-	}, nil
+	wiring.imports, wiring.importWorker = imports, importWorker
+	wiring.playbackStore, wiring.playbackManager, wiring.stats = playbackStore, playbackManager, statsService
+	wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows = provider, oidcAccounts, oidcFlows
+	return wiring, nil
+}
+
+func importDependencies(
+	pool *sql.DB,
+	cfg config.Config,
+	servers *mediaserver.Service,
+	clock core.Clock,
+	metrics *telemetry.PromMetrics,
+	logger *slog.Logger,
+) (*importapp.Service, *importapp.Worker, error) {
+	interval := cfg.Imports.WorkerInterval
+	if interval == 0 {
+		interval = 10 * time.Second
+	}
+	store, err := db.NewImportStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build import store: %w", err)
+	}
+	staging, err := importapp.NewStaging(cfg.DataDirectory, cfg.HTTP.ImportTransferTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build import staging: %w", err)
+	}
+	warnBloomExportUnavailable(logger, staging)
+	service, err := importapp.NewService(store, servers, clock, staging, logger, metrics)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build import service: %w", err)
+	}
+	worker, err := importapp.NewWorker(importapp.WorkerConfig{
+		Interval: interval, ResumeWindow: cfg.Playback.ResumeWindow,
+	}, importapp.WorkerDependencies{
+		Store: store, Reporting: servers, Clock: clock, Metrics: metrics, Logger: logger,
+		Staging: staging,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("build import worker: %w", err)
+	}
+	return service, worker, nil
+}
+
+func warnBloomExportUnavailable(logger *slog.Logger, staging *importapp.Staging) {
+	if cause := staging.UnavailableCause(); cause != nil {
+		logger.Warn("Bloom export uploads are disabled: " + cause.Error() +
+			"; set BLOOM_DATA_DIR to a writable directory")
+	}
 }
 
 func statsDependencies(
@@ -390,24 +444,8 @@ func assembleHTTPServer(
 	logger *slog.Logger,
 	metrics *telemetry.PromMetrics,
 	pool *sql.DB,
-	accounts core.AccountStore,
-	localIdentities core.LocalIdentityStore,
-	authorizer core.Authorizer,
-	roles core.RoleReader,
-	sessions *scs.SessionManager,
-	mediaServers *mediaserver.Service,
-	invites *inviteapp.Service,
-	playbackStore core.PlaybackStore,
-	statsReader core.StatsReader,
+	wiring serviceWiring,
 	clock core.Clock,
-	accountMediaUsers *accountmedia.Service,
-	metadataService *metadata.Service,
-	requestService *requestapp.Service,
-	downloadManagers *downloadmanager.Service,
-	notifications *notifyapp.Service,
-	oidcProvider core.OIDCProvider,
-	oidcAccounts core.OIDCAccountStore,
-	oidcFlows core.OIDCFlowStore,
 ) (*httpapi.Server, error) {
 	dist, err := web.Dist()
 	if err != nil {
@@ -420,34 +458,35 @@ func assembleHTTPServer(
 		Readiness:              telemetry.NewReadiness(false),
 		Pinger:                 pool,
 		Web:                    web.Handler(dist, logger),
-		Identity:               core.NewLocalIdentityProvider(localIdentities),
-		Accounts:               accounts,
-		Authorizer:             authorizer,
-		Roles:                  roles,
-		MediaServerReader:      mediaServers,
-		MediaServerManager:     mediaServers,
-		InviteReader:           invites,
-		InviteManager:          invites,
-		AccountMediaUsers:      accountMediaUsers,
-		PlaybackReader:         playbackStore,
-		StatsReader:            statsReader,
-		MetadataReader:         metadataService,
-		MetadataDiscovery:      metadataService,
-		MetadataManager:        metadataService,
-		RequestService:         requestService,
-		DownloadManagerReader:  downloadManagers,
-		DownloadManagerManager: downloadManagers,
-		NotificationReader:     notifications,
-		NotificationManager:    notifications,
-		NotificationTester:     notifications,
-		Sessions:               sessions,
+		Identity:               core.NewLocalIdentityProvider(wiring.localIdentities),
+		Accounts:               wiring.accounts,
+		Authorizer:             wiring.authorizer,
+		Roles:                  wiring.roles,
+		MediaServerReader:      wiring.mediaServers,
+		MediaServerManager:     wiring.mediaServers,
+		InviteReader:           wiring.invites,
+		InviteManager:          wiring.invites,
+		Imports:                wiring.imports,
+		AccountMediaUsers:      wiring.accountMediaUsers,
+		PlaybackReader:         wiring.playbackStore,
+		StatsReader:            wiring.stats,
+		MetadataReader:         wiring.metadata,
+		MetadataDiscovery:      wiring.metadata,
+		MetadataManager:        wiring.metadata,
+		RequestService:         wiring.requests,
+		DownloadManagerReader:  wiring.downloadManagers,
+		DownloadManagerManager: wiring.downloadManagers,
+		NotificationReader:     wiring.notifications,
+		NotificationManager:    wiring.notifications,
+		NotificationTester:     wiring.notifications,
+		Sessions:               wiring.sessions,
 		Audit:                  audit,
 		AuditCorrelationKey:    cfg.SecretKey.Bytes(),
 		Clock:                  clock,
 		Auth:                   cfg.Auth,
-		OIDC:                   oidcProvider,
-		OIDCAccounts:           oidcAccounts,
-		OIDCFlows:              oidcFlows,
+		OIDC:                   wiring.oidcProvider,
+		OIDCAccounts:           wiring.oidcAccounts,
+		OIDCFlows:              wiring.oidcFlows,
 		OIDCConfig:             cfg.OIDC,
 		PublicURL:              cfg.PublicURL,
 	}), nil
@@ -686,7 +725,7 @@ func playbackDependencies(
 	clock core.Clock,
 	newManager func(playbackManagerDependencies) (*playback.Manager, error),
 ) (core.PlaybackStore, *playback.Manager, error) {
-	store, err := db.NewPlaybackStore(pool, cfg.Database.Driver)
+	store, err := db.NewPlaybackStore(pool, cfg.Database.Driver, cfg.Playback.ResumeWindow)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build playback store: %w", err)
 	}
@@ -895,7 +934,7 @@ func serve(
 	listen func(context.Context, string, string) (net.Listener, error),
 ) (bool, error) {
 	return serveWithFulfilment(
-		ctx, srv, oidcProvider, playbackManager, nil, nil, nil, media, pool, tp, logger, grace, listenerReady, listen,
+		ctx, srv, oidcProvider, playbackManager, nil, nil, nil, nil, media, pool, tp, logger, grace, listenerReady, listen,
 	)
 }
 
@@ -907,6 +946,7 @@ func serveWithFulfilment(
 	fulfilmentManager *fulfilment.Manager,
 	notificationWorker *notifyapp.Worker,
 	inviteReconciler *inviteapp.Reconciler,
+	importWorker *importapp.Worker,
 	media mediaConnectionCloser,
 	pool *sql.DB,
 	tp tracerLifecycle,
@@ -929,7 +969,7 @@ func serveWithFulfilment(
 	serving := make(chan struct{})
 	startRuntimeWorkers(
 		gctx, g, serving, listener, srv, oidcProvider, playbackManager,
-		fulfilmentManager, notificationWorker, inviteReconciler,
+		fulfilmentManager, notificationWorker, inviteReconciler, importWorker,
 		media, pool, tp, logger, grace, listenerReady,
 	)
 	<-serving
@@ -946,6 +986,7 @@ func startRuntimeWorkers(
 	srv *httpapi.Server, oidcProvider oidcLifecycle, playbackManager playbackLifecycle,
 	fulfilmentManager *fulfilment.Manager, notificationWorker *notifyapp.Worker,
 	inviteReconciler *inviteapp.Reconciler,
+	importWorker *importapp.Worker,
 	media mediaConnectionCloser, pool *sql.DB,
 	tp tracerLifecycle, logger *slog.Logger, grace time.Duration, listenerReady func(net.Addr),
 ) {
@@ -984,6 +1025,12 @@ func startRuntimeWorkers(
 		g.Go(func() error {
 			<-serving
 			return inviteReconciler.Run(ctx)
+		})
+	}
+	if importWorker != nil {
+		g.Go(func() error {
+			<-serving
+			return importWorker.Run(ctx)
 		})
 	}
 }

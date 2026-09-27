@@ -29,9 +29,11 @@ const testSecret = "0123456789abcdef0123456789abcdef"
 func baseConfig(t *testing.T, addr string) config.Config {
 	t.Helper()
 	return config.Config{
+		DataDirectory: t.TempDir(),
 		HTTP: config.HTTPConfig{
 			Addr: addr, ReadHeaderTimeout: time.Second, ReadTimeout: 5 * time.Second,
 			WriteTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxBodyBytes: 1 << 20,
+			ImportTransferTimeout: 10 * time.Minute,
 		},
 		Database: config.DatabaseConfig{
 			Driver: config.DriverSQLite, DSN: "file:" + filepath.Join(t.TempDir(), "bloom.db") +

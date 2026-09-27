@@ -75,8 +75,37 @@ func (q *Queries) CreateWatchSegment(ctx context.Context, arg CreateWatchSegment
 	return err
 }
 
+const deleteOverlappingImportedWatches = `-- name: DeleteOverlappingImportedWatches :exec
+DELETE FROM watches
+WHERE media_server_id = $1
+  AND media_user_id = $2
+  AND item_id = $3
+  AND source = 'import'
+  AND started_at >= $4
+  AND started_at <= $5
+`
+
+type DeleteOverlappingImportedWatchesParams struct {
+	MediaServerID string
+	MediaUserID   string
+	ItemID        string
+	StartAfter    time.Time
+	StartBefore   time.Time
+}
+
+func (q *Queries) DeleteOverlappingImportedWatches(ctx context.Context, arg DeleteOverlappingImportedWatchesParams) error {
+	_, err := q.db.ExecContext(ctx, deleteOverlappingImportedWatches,
+		arg.MediaServerID,
+		arg.MediaUserID,
+		arg.ItemID,
+		arg.StartAfter,
+		arg.StartBefore,
+	)
+	return err
+}
+
 const findRecentPlaybackWatch = `-- name: FindRecentPlaybackWatch :one
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -139,6 +168,9 @@ type FindRecentPlaybackWatchRow struct {
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
+	ImportSource              sql.NullString
+	ImportRecordID            sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
 	MediaServerName           string
 }
 
@@ -191,6 +223,9 @@ func (q *Queries) FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPla
 		&i.StreamIsAudioDirect,
 		&i.StreamTranscodeReasons,
 		&i.RuntimeMs,
+		&i.ImportSource,
+		&i.ImportRecordID,
+		&i.ImportProvenanceGuard,
 		&i.MediaServerName,
 	)
 	return i, err
@@ -208,7 +243,7 @@ func (q *Queries) GetPlaybackWatchID(ctx context.Context, id string) (string, er
 }
 
 const listNowPlaying = `-- name: ListNowPlaying :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state <> 'stopped'
@@ -263,6 +298,9 @@ type ListNowPlayingRow struct {
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
+	ImportSource              sql.NullString
+	ImportRecordID            sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
 	MediaServerName           string
 }
 
@@ -314,6 +352,9 @@ func (q *Queries) ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) 
 			&i.StreamIsAudioDirect,
 			&i.StreamTranscodeReasons,
 			&i.RuntimeMs,
+			&i.ImportSource,
+			&i.ImportRecordID,
+			&i.ImportProvenanceGuard,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -330,7 +371,7 @@ func (q *Queries) ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) 
 }
 
 const listOpenPlaybackWatches = `-- name: ListOpenPlaybackWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.media_server_id = $1 AND w.state <> 'stopped'
@@ -377,6 +418,9 @@ type ListOpenPlaybackWatchesRow struct {
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
+	ImportSource              sql.NullString
+	ImportRecordID            sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
 	MediaServerName           string
 }
 
@@ -428,6 +472,9 @@ func (q *Queries) ListOpenPlaybackWatches(ctx context.Context, mediaServerID str
 			&i.StreamIsAudioDirect,
 			&i.StreamTranscodeReasons,
 			&i.RuntimeMs,
+			&i.ImportSource,
+			&i.ImportRecordID,
+			&i.ImportProvenanceGuard,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -444,7 +491,7 @@ func (q *Queries) ListOpenPlaybackWatches(ctx context.Context, mediaServerID str
 }
 
 const listPlaybackHistory = `-- name: ListPlaybackHistory :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -502,6 +549,9 @@ type ListPlaybackHistoryRow struct {
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
+	ImportSource              sql.NullString
+	ImportRecordID            sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
 	MediaServerName           string
 }
 
@@ -558,6 +608,9 @@ func (q *Queries) ListPlaybackHistory(ctx context.Context, arg ListPlaybackHisto
 			&i.StreamIsAudioDirect,
 			&i.StreamTranscodeReasons,
 			&i.RuntimeMs,
+			&i.ImportSource,
+			&i.ImportRecordID,
+			&i.ImportProvenanceGuard,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -574,7 +627,7 @@ func (q *Queries) ListPlaybackHistory(ctx context.Context, arg ListPlaybackHisto
 }
 
 const listRecentPlaybackWatches = `-- name: ListRecentPlaybackWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -629,6 +682,9 @@ type ListRecentPlaybackWatchesRow struct {
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
+	ImportSource              sql.NullString
+	ImportRecordID            sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
 	MediaServerName           string
 }
 
@@ -680,6 +736,9 @@ func (q *Queries) ListRecentPlaybackWatches(ctx context.Context, arg ListRecentP
 			&i.StreamIsAudioDirect,
 			&i.StreamTranscodeReasons,
 			&i.RuntimeMs,
+			&i.ImportSource,
+			&i.ImportRecordID,
+			&i.ImportProvenanceGuard,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err

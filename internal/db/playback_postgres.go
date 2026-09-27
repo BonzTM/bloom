@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
@@ -12,8 +13,9 @@ import (
 )
 
 type postgresPlaybackStore struct {
-	pool *sql.DB
-	q    *postgres.Queries
+	pool         *sql.DB
+	q            *postgres.Queries
+	resumeWindow time.Duration
 }
 
 var (
@@ -21,8 +23,8 @@ var (
 	_ core.PlaybackLibraryStore = (*postgresPlaybackStore)(nil)
 )
 
-func newPostgresPlaybackStore(pool *sql.DB) *postgresPlaybackStore {
-	return &postgresPlaybackStore{pool: pool, q: postgres.New(pool)}
+func newPostgresPlaybackStore(pool *sql.DB, resumeWindow time.Duration) *postgresPlaybackStore {
+	return &postgresPlaybackStore{pool: pool, q: postgres.New(pool), resumeWindow: resumeWindow}
 }
 
 func (s *postgresPlaybackStore) LoadOpenWatches(
@@ -91,8 +93,11 @@ func (s *postgresPlaybackStore) SaveWatches(
 	}
 	defer rollbackPlayback(tx, &result)
 	queries := s.q.WithTx(tx)
+	if err := lockPostgresCollectedKeys(ctx, queries, mutations); err != nil {
+		return err
+	}
 	for _, mutation := range mutations {
-		if err := savePostgresMutation(ctx, queries, mutation); err != nil {
+		if err := s.savePostgresMutation(ctx, queries, mutation); err != nil {
 			return err
 		}
 	}
@@ -102,7 +107,7 @@ func (s *postgresPlaybackStore) SaveWatches(
 	return nil
 }
 
-func savePostgresMutation(
+func (s *postgresPlaybackStore) savePostgresMutation(
 	ctx context.Context,
 	queries *postgres.Queries,
 	mutation core.PlaybackMutation,
@@ -113,6 +118,9 @@ func savePostgresMutation(
 	}
 	if err := queries.UpsertPlaybackWatch(ctx, params); err != nil {
 		return playbackStoreError("upsert playback watch", err)
+	}
+	if err := s.deletePostgresImportDuplicates(ctx, queries, mutation.Watch); err != nil {
+		return err
 	}
 	if mutation.SegmentEnd != nil {
 		params := postgres.CloseOpenWatchSegmentParams{
@@ -132,6 +140,41 @@ func savePostgresMutation(
 		}
 	}
 	return savePostgresPosition(ctx, queries, mutation.Position)
+}
+
+func lockPostgresCollectedKeys(
+	ctx context.Context, queries *postgres.Queries, mutations []core.PlaybackMutation,
+) error {
+	keys := make([]string, 0, len(mutations))
+	for _, mutation := range mutations {
+		watch := mutation.Watch
+		if watch.Source != core.WatchSourceImport {
+			keys = append(keys, watchDedupKey(watch.MediaServerID, watch.MediaUserID, watch.ItemID))
+		}
+	}
+	slices.Sort(keys)
+	for _, key := range slices.Compact(keys) {
+		if err := queries.LockWatchDedup(ctx, key); err != nil {
+			return playbackStoreError("lock watch deduplication key", err)
+		}
+	}
+	return nil
+}
+
+func (s *postgresPlaybackStore) deletePostgresImportDuplicates(
+	ctx context.Context, queries *postgres.Queries, watch core.PlaybackWatch,
+) error {
+	if watch.Source == core.WatchSourceImport {
+		return nil
+	}
+	err := queries.DeleteOverlappingImportedWatches(ctx, postgres.DeleteOverlappingImportedWatchesParams{
+		MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID, ItemID: watch.ItemID,
+		StartAfter: watch.StartedAt.Add(-s.resumeWindow), StartBefore: watch.StartedAt.Add(s.resumeWindow),
+	})
+	if err != nil {
+		return playbackStoreError("delete overlapping imported watches", err)
+	}
+	return nil
 }
 
 func savePostgresPosition(
@@ -351,6 +394,7 @@ func postgresStoredWatch(
 	activeSeconds, positionMS int64, runtimeMS sql.NullInt64,
 	source string,
 	created, updated time.Time,
+	importSource, importRecordID sql.NullString,
 	stream storedStreamDetails,
 ) (core.PlaybackWatch, error) {
 	details, err := stream.domain()
@@ -373,6 +417,7 @@ func postgresStoredWatch(
 		endedAt: timeFromNull(ended), activeSeconds: activeSeconds, lastPositionMS: positionMS,
 		runtime: runtime,
 		source:  core.WatchSource(source), createdAt: core.NormalizeTime(created), updatedAt: core.NormalizeTime(updated),
+		importSource: core.ImportSource(importSource.String), importRecordID: importRecordID.String,
 	}.domain(), nil
 }
 
@@ -384,6 +429,7 @@ func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) (core.PlaybackWa
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -398,6 +444,7 @@ func postgresNowWatch(row postgres.ListNowPlayingRow) (core.PlaybackWatch, error
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -412,6 +459,7 @@ func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) (core.PlaybackWat
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -426,6 +474,7 @@ func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) (core.Playback
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -440,6 +489,7 @@ func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) (core.
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),

@@ -26,6 +26,21 @@ contracts) gets an entry here.
   ranked poster tiles; the statistics page adds most-popular rows ranked by
   how many different people watched; most active people and libraries are
   cards instead of bar charts.
+- Bloom JSONL uploads now stream once into a private, bounded staging area.
+  Terminal jobs and periodic worker sweeps remove staged files best-effort.
+  An unavailable staging directory no longer prevents startup or Playback
+  Reporting imports; Bloom export uploads report an actionable validation error
+  and retry the directory lazily after the mount is fixed.
+- Bloom export imports now retain the complete exported watch snapshot except
+  segments and position samples. Collected watches win import deduplication in
+  either commit order, including runtime, and every malformed Playback Reporting
+  field after a valid ascending row ID is skipped with cursor progress.
+- Large import uploads and streamed watch exports use the bounded
+  `BLOOM_IMPORT_TRANSFER_TIMEOUT` deadline (`10m` by default, valid from `30s`
+  through `2h`) instead of the global 15-second HTTP transfer deadlines.
+- Import batches now fence every write and checkpoint with the active lease.
+  Import persistence failures remain distinguishable from missing jobs and
+  expired leases.
 - Upstream probe failures now say whether the server was unreachable, rejected
   the credential, was not found, or answered unexpectedly.
 - TMDB metadata authentication now accepts only the v4 API Read Access Token,
@@ -104,6 +119,10 @@ contracts) gets an entry here.
   caller-specific request state, plus day-cached movie and series genre lists.
 - The shared `MetadataTitle` and `MetadataSeries` API responses now require a
   `backdrop_path` field.
+- Resumable Playback Reporting and Bloom JSONL history imports, cursor-paged
+  JSONL watch export, audited administrator import routes, worker metrics,
+  `BLOOM_IMPORT_WORKER_INTERVAL`, `BLOOM_DATA_DIR`, and SQLite/PostgreSQL migration
+  `00022_history_imports`.
 - Registration pages say which way a media-server or download-manager probe
   failed: the address could not be reached, the API key was rejected, the API
   was not found at that address, or the answer did not look like the expected

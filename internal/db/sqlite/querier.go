@@ -6,6 +6,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
@@ -13,6 +14,9 @@ type Querier interface {
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
 	BackfillWatchLibrary(ctx context.Context, arg BackfillWatchLibraryParams) (int64, error)
+	CancelImport(ctx context.Context, arg CancelImportParams) (int64, error)
+	CheckpointImport(ctx context.Context, arg CheckpointImportParams) (int64, error)
+	ClaimImport(ctx context.Context, arg ClaimImportParams) (int64, error)
 	ClaimInviteProvisioningFailure(ctx context.Context, arg ClaimInviteProvisioningFailureParams) (ClaimInviteProvisioningFailureRow, error)
 	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (NotificationOutbox, error)
 	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
@@ -35,6 +39,8 @@ type Querier interface {
 	CreateAccountMediaUserIfAbsent(ctx context.Context, arg CreateAccountMediaUserIfAbsentParams) (int64, error)
 	// Download-manager registration queries shared by both engines.
 	CreateDownloadManager(ctx context.Context, arg CreateDownloadManagerParams) error
+	// History-import queries shared by SQLite and PostgreSQL.
+	CreateImport(ctx context.Context, arg CreateImportParams) error
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateInviteLibrary(ctx context.Context, arg CreateInviteLibraryParams) error
 	// Media-server queries are portable across SQLite and PostgreSQL.
@@ -54,6 +60,7 @@ type Querier interface {
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
 	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
+	DeleteOverlappingImportedWatches(ctx context.Context, arg DeleteOverlappingImportedWatchesParams) error
 	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
 	DeleteRequestProfileTags(ctx context.Context, profileID string) error
 	DeleteRoleRequestQuota(ctx context.Context, roleID string) (int64, error)
@@ -62,7 +69,10 @@ type Querier interface {
 	FailExpiredExhaustedNotificationOutbox(ctx context.Context, updatedAt string) (int64, error)
 	FailPendingNotificationDeliveriesForChannel(ctx context.Context, arg FailPendingNotificationDeliveriesForChannelParams) (int64, error)
 	FailRequestDispatch(ctx context.Context, arg FailRequestDispatchParams) (int64, error)
+	FenceImportBatch(ctx context.Context, arg FenceImportBatchParams) (int64, error)
+	FindCollectedImportDuplicate(ctx context.Context, arg FindCollectedImportDuplicateParams) (bool, error)
 	FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPlaybackWatchParams) (FindRecentPlaybackWatchRow, error)
+	FinishImport(ctx context.Context, arg FinishImportParams) (int64, error)
 	GetAccount(ctx context.Context, id string) (GetAccountRow, error)
 	GetAccountByUsername(ctx context.Context, usernameKey string) (GetAccountByUsernameRow, error)
 	// OIDC identity queries are shared by SQLite and PostgreSQL.
@@ -73,6 +83,7 @@ type Querier interface {
 	GetClaimedInviteProvisioningFailure(ctx context.Context, arg GetClaimedInviteProvisioningFailureParams) (GetClaimedInviteProvisioningFailureRow, error)
 	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
 	GetDownloadManagerByName(ctx context.Context, nameKey string) (GetDownloadManagerByNameRow, error)
+	GetImport(ctx context.Context, id string) (Import, error)
 	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
 	GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
@@ -87,6 +98,7 @@ type Querier interface {
 	GetRoleRequestQuota(ctx context.Context, roleID string) (RoleRequestQuota, error)
 	GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error)
 	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
+	InsertImportedWatch(ctx context.Context, arg InsertImportedWatchParams) (int64, error)
 	InsertInviteProvisioningFailureIfAbsent(ctx context.Context, arg InsertInviteProvisioningFailureIfAbsentParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
 	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
@@ -96,7 +108,9 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListActiveBloomImportCursors(ctx context.Context) ([]string, error)
 	ListDownloadManagers(ctx context.Context, arg ListDownloadManagersParams) ([]ListDownloadManagersRow, error)
+	ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error)
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
 	ListInviteProvisioningFailures(ctx context.Context, arg ListInviteProvisioningFailuresParams) ([]ListInviteProvisioningFailuresRow, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
@@ -126,6 +140,7 @@ type Querier interface {
 	LockNotificationChannelForClaim(ctx context.Context, dueAt string) (string, error)
 	LockRequestTitle(ctx context.Context, lockKey interface{}) error
 	LockTombstonedNotificationChannels(ctx context.Context, arg LockTombstonedNotificationChannelsParams) ([]string, error)
+	LockWatchDedup(ctx context.Context) (int64, error)
 	MarkNotificationEventFanned(ctx context.Context, arg MarkNotificationEventFannedParams) (int64, error)
 	MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error)
 	NotificationOutboxDepth(ctx context.Context) (int64, error)
@@ -135,9 +150,12 @@ type Querier interface {
 	RecordNotificationChannelTerminalFailure(ctx context.Context, arg RecordNotificationChannelTerminalFailureParams) (int64, error)
 	RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
+	RenewImportLease(ctx context.Context, arg RenewImportLeaseParams) (int64, error)
 	RescheduleInviteProvisioningFailure(ctx context.Context, arg RescheduleInviteProvisioningFailureParams) (int64, error)
 	RescheduleNotificationOutbox(ctx context.Context, arg RescheduleNotificationOutboxParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
+	// SQLite claim rechecks eligibility in the guarded update inside one transaction.
+	SelectClaimableImport(ctx context.Context, now sql.NullString) (Import, error)
 	SetAccountMediaUser(ctx context.Context, arg SetAccountMediaUserParams) error
 	StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error)
 	StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams) ([]StatsBucketRowsRow, error)

@@ -175,3 +175,12 @@ func (NopMetrics) ObserveNotificationDelivery(string, string) {}
 
 // SetNotificationOutboxDepth discards the current pending delivery count.
 func (NopMetrics) SetNotificationOutboxDepth(int64) {}
+
+// ObserveImportJob does nothing.
+func (NopMetrics) ObserveImportJob(string, string, string) {}
+
+// AddImportedRecords does nothing.
+func (NopMetrics) AddImportedRecords(string, int64) {}
+
+// SetRunningImports does nothing.
+func (NopMetrics) SetRunningImports(int) {}

@@ -15,12 +15,17 @@ import (
 const maxPlaybackPageSize = 1025
 
 // NewPlaybackStore returns the playback persistence seam for the configured engine.
-func NewPlaybackStore(pool *sql.DB, driver config.Driver) (core.PlaybackPersistence, error) {
+func NewPlaybackStore(
+	pool *sql.DB, driver config.Driver, resumeWindow time.Duration,
+) (core.PlaybackPersistence, error) {
+	if resumeWindow <= 0 {
+		return nil, fmt.Errorf("playback resume window: %w", core.ErrInvalidArgument)
+	}
 	switch driver {
 	case config.DriverSQLite:
-		return newSQLitePlaybackStore(pool), nil
+		return newSQLitePlaybackStore(pool, resumeWindow), nil
 	case config.DriverPostgres:
-		return newPostgresPlaybackStore(pool), nil
+		return newPostgresPlaybackStore(pool, resumeWindow), nil
 	default:
 		return nil, fmt.Errorf("unsupported database driver %q", driver)
 	}
@@ -40,6 +45,8 @@ type storedPlaybackWatch struct {
 	activeSeconds, lastPositionMS                             int64
 	runtime                                                   *time.Duration
 	source                                                    core.WatchSource
+	importSource                                              core.ImportSource
+	importRecordID                                            string
 	createdAt, updatedAt                                      time.Time
 }
 
@@ -58,7 +65,8 @@ func (row storedPlaybackWatch) domain() core.PlaybackWatch {
 		ActiveTime:   time.Duration(row.activeSeconds) * time.Second,
 		LastPosition: time.Duration(row.lastPositionMS) * time.Millisecond,
 		Runtime:      row.runtime,
-		Source:       row.source, CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
+		Source:       row.source, ImportSource: row.importSource, ImportRecordID: row.importRecordID,
+		CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
 	}
 }
 
