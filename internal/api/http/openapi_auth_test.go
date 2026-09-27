@@ -583,7 +583,7 @@ func TestOpenAPIValidationRejectsEnumAndBounds(t *testing.T) {
 		value  any
 	}{
 		{schema: errorSchema, value: map[string]any{"code": "invented", "message": "bad", "request_id": "request-1"}},
-		{schema: errorSchema, value: map[string]any{"code": codeMediaServerFailure, "message": "bad", "reason": "unavailable", "request_id": "request-1"}},
+		{schema: errorSchema, value: map[string]any{"code": codeMediaServerFailure, "message": "bad", "reason": "invented", "request_id": "request-1"}},
 		{schema: "#/components/schemas/LoginRequest", value: map[string]any{"username": strings.Repeat("x", core.MaxSubmittedUsernameCharacters+1), "password": "secret"}},
 	}
 	for _, testCase := range tests {
@@ -602,6 +602,10 @@ func TestErrorResponseContractAcceptsOptionalFailureReason(t *testing.T) {
 		{"code": codeMediaServerFailure, "message": "Bad Gateway", "request_id": "request-3", "reason": "unauthorized"},
 		{"code": codeDownloadManagerFailure, "message": "Bad Gateway", "request_id": "request-4", "reason": "not_found"},
 		{"code": codeDownloadManagerFailure, "message": "Bad Gateway", "request_id": "request-5", "reason": "malformed"},
+		{"code": codeMetadataProviderFailure, "message": "Bad Gateway", "request_id": "request-6", "reason": "unreachable"},
+		{"code": codeMetadataProviderFailure, "message": "Bad Gateway", "request_id": "request-7", "reason": "unauthorized"},
+		{"code": codeMetadataProviderFailure, "message": "Bad Gateway", "request_id": "request-8", "reason": "malformed"},
+		{"code": codeMetadataProviderFailure, "message": "Service Unavailable", "request_id": "request-9", "reason": "unavailable"},
 	}
 	for _, fixture := range fixtures {
 		if err := validateOpenAPIValue(document, errorSchema, fixture); err != nil {

@@ -57,6 +57,7 @@ const (
 	reasonUnauthorized          = "unauthorized"
 	reasonNotFound              = "not_found"
 	reasonMalformed             = "malformed"
+	reasonUnavailable           = "unavailable"
 	oidcFailureClassification   = "OpenID Connect callback failure"
 	maxLoggedErrorBytes         = 512
 )
@@ -76,12 +77,6 @@ func errorClass(err error) (status int, code string) {
 	switch {
 	case errors.Is(err, core.ErrQuotaExceeded):
 		return http.StatusUnprocessableEntity, codeQuotaExceeded
-	case errors.Is(err, core.ErrMetadataNotConfigured):
-		return http.StatusServiceUnavailable, codeMetadataNotConfigured
-	case errors.Is(err, core.ErrMetadataUnauthorized), errors.Is(err, core.ErrMetadataMalformed):
-		return http.StatusBadGateway, codeMetadataProviderFailure
-	case errors.Is(err, core.ErrMetadataUnavailable):
-		return http.StatusServiceUnavailable, codeMetadataProviderFailure
 	case errors.Is(err, core.ErrProfileInUse):
 		return http.StatusConflict, codeProfileInUse
 	case errors.Is(err, core.ErrImportInProgress):
@@ -126,6 +121,9 @@ func errorClass(err error) (status int, code string) {
 }
 
 func specializedErrorClass(err error) (int, string, bool) {
+	if status, code, ok := metadataErrorClass(err); ok {
+		return status, code, true
+	}
 	if status, code, ok := inviteErrorClass(err); ok {
 		return status, code, true
 	}
@@ -133,6 +131,21 @@ func specializedErrorClass(err error) (int, string, bool) {
 		return http.StatusNotFound, codeMediaUserNotLinked, true
 	}
 	return downloadManagerErrorClass(err)
+}
+
+func metadataErrorClass(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, core.ErrMetadataNotConfigured):
+		return http.StatusServiceUnavailable, codeMetadataNotConfigured, true
+	case errors.Is(err, core.ErrMetadataUnreachable):
+		return http.StatusBadGateway, codeMetadataProviderFailure, true
+	case errors.Is(err, core.ErrMetadataUnauthorized), errors.Is(err, core.ErrMetadataMalformed):
+		return http.StatusBadGateway, codeMetadataProviderFailure, true
+	case errors.Is(err, core.ErrMetadataUnavailable):
+		return http.StatusServiceUnavailable, codeMetadataProviderFailure, true
+	default:
+		return 0, "", false
+	}
 }
 
 func inviteErrorClass(err error) (int, string, bool) {
@@ -217,6 +230,23 @@ func upstreamFailureReason(err error, code string) string {
 		return mediaServerFailureReason(err)
 	case codeDownloadManagerFailure:
 		return downloadManagerFailureReason(err)
+	case codeMetadataProviderFailure:
+		return metadataProviderFailureReason(err)
+	default:
+		return ""
+	}
+}
+
+func metadataProviderFailureReason(err error) string {
+	switch {
+	case errors.Is(err, core.ErrMetadataUnreachable):
+		return reasonUnreachable
+	case errors.Is(err, core.ErrMetadataUnauthorized):
+		return reasonUnauthorized
+	case errors.Is(err, core.ErrMetadataMalformed):
+		return reasonMalformed
+	case errors.Is(err, core.ErrMetadataUnavailable):
+		return reasonUnavailable
 	default:
 		return ""
 	}
