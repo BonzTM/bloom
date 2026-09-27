@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,6 +57,102 @@ func TestClientSearchMovieAndSeries(t *testing.T) {
 		t.Fatalf("Series = %+v, %v", series, err)
 	}
 }
+
+func TestClientDiscoverLists(t *testing.T) {
+	client := newDiscoveryTestClient(t)
+	lists := []core.MetadataDiscoverList{
+		core.MetadataTrending, core.MetadataMoviesPopular, core.MetadataSeriesPopular,
+		core.MetadataMoviesUpcoming, core.MetadataSeriesUpcoming,
+	}
+	for _, list := range lists {
+		page, err := client.Discover(t.Context(), core.MetadataDiscover{List: list, Page: 2})
+		if err != nil || page.Page != 2 || page.TotalPages != core.MaxMetadataPage || len(page.Items) == 0 {
+			t.Fatalf("Discover(%s) = %+v, %v", list, page, err)
+		}
+		if page.Items[0].BackdropPath != "/backdrop.jpg" {
+			t.Fatalf("Discover(%s) backdrop = %q", list, page.Items[0].BackdropPath)
+		}
+	}
+}
+
+func TestClientGenres(t *testing.T) {
+	client := newDiscoveryTestClient(t)
+	for _, testCase := range []struct {
+		kind core.MediaKind
+		name string
+	}{{kind: core.MediaKindMovie, name: "Action"}, {kind: core.MediaKindSeries, name: "Drama"}} {
+		genres, err := client.Genres(t.Context(), testCase.kind)
+		if err != nil || len(genres) != 1 || genres[0].Name != testCase.name {
+			t.Fatalf("Genres(%s) = %+v, %v", testCase.kind, genres, err)
+		}
+	}
+}
+
+func newDiscoveryTestClient(t *testing.T) *Client {
+	t.Helper()
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Has("api_key") || strings.Contains(r.URL.RawQuery, testReadAccessToken) {
+			t.Errorf("credential leaked in query %q", r.URL.RawQuery)
+		}
+		var body string
+		switch r.URL.Path {
+		case "/3/trending/all/week":
+			if r.URL.Query().Get("page") != "2" {
+				t.Errorf("trending page = %q, want 2", r.URL.Query().Get("page"))
+			}
+			body = discoverMixedFixture
+		case "/3/movie/popular", "/3/movie/upcoming":
+			assertDiscoverPage(t, r)
+			body = discoverMovieFixture
+		case "/3/tv/popular", "/3/tv/on_the_air":
+			assertDiscoverPage(t, r)
+			body = discoverSeriesFixture
+		case "/3/genre/movie/list":
+			body = `{"genres":[{"id":28,"name":"Action"}]}`
+		case "/3/genre/tv/list":
+			body = `{"genres":[{"id":18,"name":"Drama"}]}`
+		default:
+			return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: http.NoBody, Request: r}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(body)), Request: r,
+		}, nil
+	})
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	client, err := New(testReadAccessToken, Dependencies{
+		BaseURL: "https://tmdb.test", Clock: clock, HTTPClient: &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return client
+}
+
+func assertDiscoverPage(t *testing.T, request *http.Request) {
+	t.Helper()
+	if request.URL.Query().Get("page") != "2" {
+		t.Errorf("%s page = %q, want 2", request.URL.Path, request.URL.Query().Get("page"))
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+const (
+	discoverMixedFixture = `{"page":2,"total_pages":50,"results":[` +
+		`{"id":11,"media_type":"movie","title":"Film","release_date":"2024-01-02","backdrop_path":"/backdrop.jpg"},` +
+		`{"id":12,"media_type":"tv","name":"Show","first_air_date":"2023-04-05","backdrop_path":"/show.jpg"},` +
+		`{"id":13,"media_type":"person","name":"Ignored"}]}`
+	discoverMovieFixture  = `{"page":2,"total_pages":50,"results":[{"id":11,"title":"Film","release_date":"2024-01-02","backdrop_path":"/backdrop.jpg"}]}`
+	discoverSeriesFixture = `{"page":2,"total_pages":50,"results":[{"id":12,"name":"Show","first_air_date":"2023-04-05","backdrop_path":"/backdrop.jpg"}]}`
+)
 
 func TestClientProbeClassifiesUnauthorized(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -95,6 +95,11 @@ contracts) gets an entry here.
 
 ### Added
 
+- Cursor-paged TMDB discovery routes for weekly trending titles, popular
+  movies and series, upcoming movies, and on-the-air series, with each title's
+  caller-specific request state, plus day-cached movie and series genre lists.
+- The shared `MetadataTitle` and `MetadataSeries` API responses now require a
+  `backdrop_path` field.
 - Registration pages say which way a media-server or download-manager probe
   failed: the address could not be reached, the API key was rejected, the API
   was not found at that address, or the answer did not look like the expected

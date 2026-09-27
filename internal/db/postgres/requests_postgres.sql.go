@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 )
 
 const listRequestsForAvailability = `-- name: ListRequestsForAvailability :many
@@ -81,4 +82,66 @@ SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
 func (q *Queries) LockRequestTitle(ctx context.Context, lockKey string) error {
 	_, err := q.db.ExecContext(ctx, lockRequestTitle, lockKey)
 	return err
+}
+
+const metadataRequestStates = `-- name: MetadataRequestStates :many
+WITH title_keys AS (
+    SELECT
+        split_part(value, ':', 1) AS kind,
+        split_part(value, ':', 2) AS provider_id
+    FROM jsonb_array_elements_text(CAST($2 AS jsonb)) AS keys(value)
+)
+SELECT request.kind, request.provider, request.provider_id, request.status
+FROM title_keys
+CROSS JOIN LATERAL (
+    SELECT latest.kind, latest.provider, latest.provider_id, latest.status
+    FROM requests AS latest
+    WHERE latest.requester_account_id = $1
+      AND latest.provider = 'tmdb'
+      AND latest.kind = title_keys.kind
+      AND latest.provider_id = title_keys.provider_id
+    ORDER BY latest.created_at DESC, latest.id DESC
+    LIMIT 1
+) AS request
+ORDER BY request.kind, request.provider_id
+`
+
+type MetadataRequestStatesParams struct {
+	RequesterAccountID string
+	TitleKeysJson      json.RawMessage
+}
+
+type MetadataRequestStatesRow struct {
+	Kind       string
+	Provider   string
+	ProviderID string
+	Status     string
+}
+
+func (q *Queries) MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, metadataRequestStates, arg.RequesterAccountID, arg.TitleKeysJson)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MetadataRequestStatesRow{}
+	for rows.Next() {
+		var i MetadataRequestStatesRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Provider,
+			&i.ProviderID,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

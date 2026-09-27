@@ -87,3 +87,65 @@ func (q *Queries) LockRequestTitle(ctx context.Context, lockKey interface{}) err
 	_, err := q.db.ExecContext(ctx, lockRequestTitle, lockKey)
 	return err
 }
+
+const metadataRequestStates = `-- name: MetadataRequestStates :many
+WITH title_keys AS (
+    SELECT
+        substr(value, 1, instr(value, ':') - 1) AS kind,
+        substr(value, instr(value, ':') + 1) AS provider_id
+    FROM json_each(CAST(?2 AS TEXT))
+)
+SELECT request.kind, request.provider, request.provider_id, request.status
+FROM title_keys
+JOIN requests AS request ON request.id = (
+    SELECT latest.id
+    FROM requests AS latest
+    WHERE latest.requester_account_id = ?1
+      AND latest.provider = 'tmdb'
+      AND latest.kind = title_keys.kind
+      AND latest.provider_id = title_keys.provider_id
+    ORDER BY latest.created_at DESC, latest.id DESC
+    LIMIT 1
+)
+ORDER BY request.kind, request.provider_id
+`
+
+type MetadataRequestStatesParams struct {
+	RequesterAccountID string
+	TitleKeysJson      string
+}
+
+type MetadataRequestStatesRow struct {
+	Kind       string
+	Provider   string
+	ProviderID string
+	Status     string
+}
+
+func (q *Queries) MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, metadataRequestStates, arg.RequesterAccountID, arg.TitleKeysJson)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MetadataRequestStatesRow{}
+	for rows.Next() {
+		var i MetadataRequestStatesRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Provider,
+			&i.ProviderID,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

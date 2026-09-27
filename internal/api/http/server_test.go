@@ -293,7 +293,13 @@ func expectedAPIRoutes() []apiRoute {
 
 func expectedRequestAPIRoutes() []apiRoute {
 	return []apiRoute{
-		{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/trending", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/series/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/series/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/genres", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},

@@ -236,7 +236,7 @@ func (c *Client) Movie(ctx context.Context, providerID string) (core.MetadataTit
 		Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB,
 		ProviderID: strconv.Itoa(*response.JSON200.Id), Title: *response.JSON200.Title,
 		Year: yearFromDate(value(response.JSON200.ReleaseDate)), Overview: value(response.JSON200.Overview),
-		PosterPath: value(response.JSON200.PosterPath),
+		PosterPath: value(response.JSON200.PosterPath), BackdropPath: value(response.JSON200.BackdropPath),
 	}
 	if err := core.ValidateMetadataTitle(title); err != nil {
 		return core.MetadataTitle{}, classifyError("movie", response.StatusCode(), errors.Join(core.ErrMetadataMalformed, err))

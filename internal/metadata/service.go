@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/secrets"
@@ -19,6 +22,7 @@ const (
 	providerBaseURL   = "https://api.themoviedb.org"
 	cacheCapacity     = 512
 	cacheTTL          = 15 * time.Minute
+	genreCacheTTL     = 24 * time.Hour
 )
 
 type credentialCipher interface {
@@ -38,11 +42,13 @@ type idleCloser interface{ CloseIdleConnections() }
 type Service struct {
 	reader      core.MetadataProviderReader
 	writer      core.MetadataProviderWriter
+	states      core.MetadataRequestStateReader
 	cipher      credentialCipher
 	factory     providerFactory
 	clock       core.Clock
 	logger      *slog.Logger
 	cache       *detailCache
+	loads       singleflight.Group
 	mu          sync.Mutex
 	warnInvalid sync.Once
 	provider    core.MetadataProvider
@@ -51,14 +57,14 @@ type Service struct {
 
 // NewService creates a metadata service with explicit storage and clock dependencies.
 func NewService(
-	reader core.MetadataProviderReader, writer core.MetadataProviderWriter, cipher credentialCipher,
+	reader core.MetadataProviderReader, writer core.MetadataProviderWriter, states core.MetadataRequestStateReader, cipher credentialCipher,
 	factory providerFactory, clock core.Clock, logger *slog.Logger,
 ) (*Service, error) {
-	if reader == nil || writer == nil || cipher == nil || factory == nil || clock == nil || logger == nil {
+	if reader == nil || writer == nil || states == nil || cipher == nil || factory == nil || clock == nil || logger == nil {
 		return nil, errors.New("metadata service: all dependencies are required")
 	}
 	return &Service{
-		reader: reader, writer: writer, cipher: cipher, factory: factory, clock: clock, logger: logger,
+		reader: reader, writer: writer, states: states, cipher: cipher, factory: factory, clock: clock, logger: logger,
 		cache: newDetailCache(clock, cacheCapacity, cacheTTL),
 	}, nil
 }
@@ -177,6 +183,125 @@ func (s *Service) Series(ctx context.Context, providerID string, includeSpecials
 	}
 	s.cache.put(key, cacheValue{series: series})
 	return filterSpecials(series, includeSpecials), nil
+}
+
+// Discover returns a cached provider page enriched with the caller's current request state.
+func (s *Service) Discover(
+	ctx context.Context, accountID string, input core.MetadataDiscover,
+) (core.MetadataDiscoverPage, error) {
+	if !core.ValidID(accountID) || core.ValidateMetadataDiscover(input) != nil {
+		return core.MetadataDiscoverPage{}, core.ErrInvalidArgument
+	}
+	page, err := s.discoverPage(ctx, input)
+	if err != nil {
+		return core.MetadataDiscoverPage{}, err
+	}
+	states, err := s.states.MetadataRequestStates(ctx, accountID, page.Items)
+	if err != nil {
+		return core.MetadataDiscoverPage{}, fmt.Errorf("load metadata request states: %w", err)
+	}
+	return discoverPageWithStates(page, states), nil
+}
+
+func (s *Service) discoverPage(ctx context.Context, input core.MetadataDiscover) (core.MetadataPage, error) {
+	key := cacheKey{
+		provider: core.MetadataProviderTMDB, resource: "discover", id: string(input.List) + ":" + strconv.Itoa(input.Page),
+	}
+	value, err := s.cachedLoad(key, cacheTTL, func() (cacheValue, error) {
+		provider, providerErr := s.discoveryProvider(ctx)
+		if providerErr != nil {
+			return cacheValue{}, providerErr
+		}
+		page, discoverErr := provider.Discover(ctx, input)
+		if discoverErr != nil {
+			return cacheValue{}, fmt.Errorf("discover metadata: %w", discoverErr)
+		}
+		return cacheValue{page: page}, nil
+	})
+	if err != nil {
+		return core.MetadataPage{}, err
+	}
+	return value.page, nil
+}
+
+func discoverPageWithStates(
+	page core.MetadataPage, states map[core.MetadataTitleKey]core.RequestStatus,
+) core.MetadataDiscoverPage {
+	items := make([]core.MetadataDiscoverItem, 0, len(page.Items))
+	for _, title := range page.Items {
+		state := core.MetadataRequestNone
+		if status, ok := states[core.MetadataKey(title)]; ok {
+			state = core.MetadataRequestState(status)
+		}
+		items = append(items, core.MetadataDiscoverItem{MetadataTitle: title, RequestState: state})
+	}
+	return core.MetadataDiscoverPage{Items: items, Page: page.Page, TotalPages: page.TotalPages}
+}
+
+// Genres returns a provider genre list cached for one day.
+func (s *Service) Genres(ctx context.Context, kind core.MediaKind) ([]core.MetadataGenre, error) {
+	if !kind.Valid() {
+		return nil, core.ErrInvalidArgument
+	}
+	key := cacheKey{provider: core.MetadataProviderTMDB, resource: "genres", kind: kind}
+	value, err := s.cachedLoad(key, genreCacheTTL, func() (cacheValue, error) {
+		provider, providerErr := s.discoveryProvider(ctx)
+		if providerErr != nil {
+			return cacheValue{}, providerErr
+		}
+		genres, genreErr := provider.Genres(ctx, kind)
+		if genreErr != nil {
+			return cacheValue{}, fmt.Errorf("load metadata genres: %w", genreErr)
+		}
+		return cacheValue{genres: genres}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.genres, nil
+}
+
+func (s *Service) cachedLoad(
+	key cacheKey, ttl time.Duration, load func() (cacheValue, error),
+) (cacheValue, error) {
+	if cached, ok := s.cache.get(key); ok {
+		return cached, nil
+	}
+	loaded, err, _ := s.loads.Do(key.flightKey(), func() (any, error) {
+		if cached, ok := s.cache.get(key); ok {
+			return cached, nil
+		}
+		value, loadErr := load()
+		if loadErr != nil {
+			return cacheValue{}, loadErr
+		}
+		s.cache.putFor(key, value, ttl)
+		return value, nil
+	})
+	if err != nil {
+		return cacheValue{}, err
+	}
+	value, ok := loaded.(cacheValue)
+	if !ok {
+		return cacheValue{}, errors.New("metadata cache load returned an invalid value")
+	}
+	return cloneCacheValue(value), nil
+}
+
+func (k cacheKey) flightKey() string {
+	return string(k.provider) + "\x00" + k.resource + "\x00" + string(k.kind) + "\x00" + k.id
+}
+
+func (s *Service) discoveryProvider(ctx context.Context) (core.MetadataDiscoveryProvider, error) {
+	provider, err := s.loadProvider(ctx, core.MetadataProviderTMDB)
+	if err != nil {
+		return nil, err
+	}
+	discovery, ok := provider.(core.MetadataDiscoveryProvider)
+	if !ok {
+		return nil, errors.New("metadata provider does not support discovery")
+	}
+	return discovery, nil
 }
 
 func (s *Service) loadProvider(ctx context.Context, kind core.MetadataProviderKind) (core.MetadataProvider, error) {

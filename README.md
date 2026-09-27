@@ -404,8 +404,19 @@ folder, and tags. List profiles from the collection and update a profile with
 `PUT /api/v1/request-profiles/{id}`. Delete a profile with `DELETE` on the same
 item route. Bloom refuses deletion after a request references the profile.
 
-Accounts with `requests.create` can search TMDB, open movie or series details,
-and submit a movie or selected series seasons to `POST /api/v1/requests`.
+Accounts with `requests.create` or `requests.read.own` can search TMDB and
+browse the cursor-paged discover rows at `/api/v1/metadata/discover/`: weekly
+trending movies and series from TMDB `/trending/all/week`, popular movies from
+`/movie/popular`, popular series from `/tv/popular`, upcoming movies from
+`/movie/upcoming`, and upcoming series from `/tv/on_the_air`. TMDB does not
+publish a direct upcoming-series list, so its on-the-air list is the closest
+equivalent. Bloom exposes at most 20 TMDB pages with 20 titles per page and
+adds the signed-in account's latest request state to every title. Movie and
+series genre lists are available from `GET /api/v1/metadata/genres?kind=...`
+and are cached for one day; discover pages use the existing metadata cache
+TTL.
+Accounts with `requests.create` can open movie or series details and submit a
+movie or selected series seasons to `POST /api/v1/requests`.
 Accounts with `requests.approve` are exempt from quotas and their own requests
 are approved immediately. Other requests remain pending until an approver uses
 the request's `/approve` or `/decline` route. Approved requests are dispatched

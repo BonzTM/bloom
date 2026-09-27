@@ -127,6 +127,7 @@ type Querier interface {
 	LockRequestTitle(ctx context.Context, lockKey interface{}) error
 	LockTombstonedNotificationChannels(ctx context.Context, arg LockTombstonedNotificationChannelsParams) ([]string, error)
 	MarkNotificationEventFanned(ctx context.Context, arg MarkNotificationEventFannedParams) (int64, error)
+	MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error)
 	NotificationOutboxDepth(ctx context.Context) (int64, error)
 	PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error)
 	PruneNotificationOutbox(ctx context.Context, arg PruneNotificationOutboxParams) (int64, error)

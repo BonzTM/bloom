@@ -11,3 +11,10 @@ output-options:
     - search-tv
     - movie-details
     - tv-series-details
+    - trending-all
+    - movie-popular-list
+    - tv-series-popular-list
+    - movie-upcoming-list
+    - tv-series-on-the-air-list
+    - genre-movie-list
+    - genre-tv-list

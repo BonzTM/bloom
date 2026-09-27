@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,6 +57,7 @@ type serviceTestFactory struct {
 	probeErr   error
 	probeCalls int
 	newCalls   int
+	provider   core.MetadataProvider
 }
 
 func (f *serviceTestFactory) Probe(context.Context, core.MetadataProviderKind, string) error {
@@ -64,21 +67,80 @@ func (f *serviceTestFactory) Probe(context.Context, core.MetadataProviderKind, s
 
 func (f *serviceTestFactory) New(core.MetadataProviderKind, string) (core.MetadataProvider, error) {
 	f.newCalls++
-	return serviceTestProvider{}, nil
+	if f.provider != nil {
+		return f.provider, nil
+	}
+	return &serviceTestProvider{}, nil
 }
 
-type serviceTestProvider struct{}
+type serviceTestProvider struct {
+	discoverCalls   atomic.Int32
+	genreCalls      atomic.Int32
+	discoverEntered chan<- struct{}
+	genreEntered    chan<- struct{}
+	release         <-chan struct{}
+}
 
-func (serviceTestProvider) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
+func (*serviceTestProvider) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
 	return []core.MetadataTitle{}, nil
 }
 
-func (serviceTestProvider) Movie(context.Context, string) (core.MetadataTitle, error) {
+func (*serviceTestProvider) Movie(context.Context, string) (core.MetadataTitle, error) {
 	return core.MetadataTitle{}, nil
 }
 
-func (serviceTestProvider) Series(context.Context, string, bool) (core.MetadataSeries, error) {
+func (*serviceTestProvider) Series(context.Context, string, bool) (core.MetadataSeries, error) {
 	return core.MetadataSeries{}, nil
+}
+
+func (p *serviceTestProvider) Discover(context.Context, core.MetadataDiscover) (core.MetadataPage, error) {
+	p.discoverCalls.Add(1)
+	blockServiceTestProvider(p.discoverEntered, p.release)
+	return core.MetadataPage{Items: []core.MetadataTitle{{
+		Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "11", Title: "Film",
+	}}, Page: 1, TotalPages: 2}, nil
+}
+
+func (p *serviceTestProvider) Genres(context.Context, core.MediaKind) ([]core.MetadataGenre, error) {
+	p.genreCalls.Add(1)
+	blockServiceTestProvider(p.genreEntered, p.release)
+	return []core.MetadataGenre{{ID: 28, Name: "Action"}}, nil
+}
+
+func blockServiceTestProvider(entered chan<- struct{}, release <-chan struct{}) {
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if release != nil {
+		<-release
+	}
+}
+
+type serviceTestStates struct {
+	mu        sync.Mutex
+	calls     int
+	byAccount map[string]core.RequestStatus
+}
+
+func (s *serviceTestStates) MetadataRequestStates(
+	_ context.Context, accountID string, _ []core.MetadataTitle,
+) (map[core.MetadataTitleKey]core.RequestStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	status := core.RequestPending
+	if configured, ok := s.byAccount[accountID]; ok {
+		status = configured
+	}
+	return map[core.MetadataTitleKey]core.RequestStatus{
+		{Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "11"}: status,
+	}, nil
+}
+
+func (s *serviceTestStates) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }
 
 func TestSetKeyValidatesAndProbesBeforeStore(t *testing.T) {
@@ -140,12 +202,141 @@ func TestStoredInvalidCredentialIsNotConfiguredAndWarnsOnce(t *testing.T) {
 	}
 }
 
+func TestDiscoverCachesProviderPageAndIsolatesCallerState(t *testing.T) {
+	const firstAccount = "11111111-1111-4111-8111-111111111111"
+	const secondAccount = "22222222-2222-4222-8222-222222222222"
+	provider := &serviceTestProvider{}
+	states := &serviceTestStates{byAccount: map[string]core.RequestStatus{
+		firstAccount: core.RequestPending, secondAccount: core.RequestDeclined,
+	}}
+	store := &serviceTestStore{record: core.MetadataProviderRecord{
+		Kind: core.MetadataProviderTMDB, CredentialCiphertext: []byte(serviceTestReadAccessToken), KeyID: "test-key",
+	}}
+	factory := &serviceTestFactory{provider: provider}
+	service := newServiceTestServiceWithStates(t, store, factory, states, slog.New(slog.DiscardHandler))
+	input := core.MetadataDiscover{List: core.MetadataTrending, Page: 1}
+	first, firstErr := service.Discover(t.Context(), firstAccount, input)
+	second, secondErr := service.Discover(t.Context(), secondAccount, input)
+	if firstErr != nil || len(first.Items) != 1 || first.Items[0].RequestState != core.MetadataRequestPending {
+		t.Fatalf("first Discover = %+v, %v", first, firstErr)
+	}
+	if secondErr != nil || len(second.Items) != 1 || second.Items[0].RequestState != core.MetadataRequestDeclined {
+		t.Fatalf("second Discover = %+v, %v", second, secondErr)
+	}
+	if provider.discoverCalls.Load() != 1 || states.callCount() != 2 {
+		t.Fatalf("calls = provider %d states %d, want 1 and 2", provider.discoverCalls.Load(), states.callCount())
+	}
+}
+
+func TestGenresCachesProviderList(t *testing.T) {
+	provider := &serviceTestProvider{}
+	store := &serviceTestStore{record: core.MetadataProviderRecord{
+		Kind: core.MetadataProviderTMDB, CredentialCiphertext: []byte(serviceTestReadAccessToken), KeyID: "test-key",
+	}}
+	service := newServiceTestServiceWithStates(
+		t, store, &serviceTestFactory{provider: provider}, &serviceTestStates{}, slog.New(slog.DiscardHandler),
+	)
+	for range 2 {
+		genres, err := service.Genres(t.Context(), core.MediaKindMovie)
+		if err != nil || len(genres) != 1 || genres[0].Name != "Action" {
+			t.Fatalf("Genres = %+v, %v", genres, err)
+		}
+	}
+	if provider.genreCalls.Load() != 1 {
+		t.Fatalf("genre provider calls = %d, want 1", provider.genreCalls.Load())
+	}
+}
+
+func TestConcurrentCacheMissesCollapseProviderLoads(t *testing.T) {
+	t.Run("discovery", func(t *testing.T) {
+		entered, release := make(chan struct{}, 8), make(chan struct{})
+		provider := &serviceTestProvider{discoverEntered: entered, release: release}
+		service := newCachingServiceTestService(t, provider)
+		input := core.MetadataDiscover{List: core.MetadataTrending, Page: 1}
+		call := func() error {
+			_, err := service.Discover(t.Context(), "11111111-1111-4111-8111-111111111111", input)
+			return err
+		}
+		assertConcurrentLoadCollapsed(t, entered, release, call)
+		if provider.discoverCalls.Load() != 1 {
+			t.Fatalf("discovery provider calls = %d, want 1", provider.discoverCalls.Load())
+		}
+	})
+	t.Run("genres", func(t *testing.T) {
+		entered, release := make(chan struct{}, 8), make(chan struct{})
+		provider := &serviceTestProvider{genreEntered: entered, release: release}
+		service := newCachingServiceTestService(t, provider)
+		call := func() error {
+			_, err := service.Genres(t.Context(), core.MediaKindMovie)
+			return err
+		}
+		assertConcurrentLoadCollapsed(t, entered, release, call)
+		if provider.genreCalls.Load() != 1 {
+			t.Fatalf("genre provider calls = %d, want 1", provider.genreCalls.Load())
+		}
+	})
+}
+
+func assertConcurrentLoadCollapsed(
+	t *testing.T, entered <-chan struct{}, release chan struct{}, call func() error,
+) {
+	t.Helper()
+	const callers = 8
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			results <- call()
+		}()
+	}
+	close(start)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("provider load did not start")
+	}
+	duplicate := false
+	select {
+	case <-entered:
+		duplicate = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	for range callers {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent cached load: %v", err)
+		}
+	}
+	if duplicate {
+		t.Fatal("duplicate provider load started for one cache key")
+	}
+}
+
+func newCachingServiceTestService(t *testing.T, provider *serviceTestProvider) *Service {
+	t.Helper()
+	store := &serviceTestStore{record: core.MetadataProviderRecord{
+		Kind: core.MetadataProviderTMDB, CredentialCiphertext: []byte(serviceTestReadAccessToken), KeyID: "test-key",
+	}}
+	return newServiceTestServiceWithStates(
+		t, store, &serviceTestFactory{provider: provider}, &serviceTestStates{}, slog.New(slog.DiscardHandler),
+	)
+}
+
 func newServiceTestService(
 	t *testing.T, store *serviceTestStore, factory *serviceTestFactory, logger *slog.Logger,
 ) *Service {
 	t.Helper()
+	return newServiceTestServiceWithStates(t, store, factory, &serviceTestStates{}, logger)
+}
+
+func newServiceTestServiceWithStates(
+	t *testing.T, store *serviceTestStore, factory *serviceTestFactory,
+	states core.MetadataRequestStateReader, logger *slog.Logger,
+) *Service {
+	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
-	service, err := NewService(store, store, serviceTestCipher{}, factory, clock, logger)
+	service, err := NewService(store, store, states, serviceTestCipher{}, factory, clock, logger)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}

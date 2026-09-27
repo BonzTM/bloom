@@ -59,22 +59,28 @@ func concreteRequestPath(pattern string) string {
 func TestRequestSliceOpenAPIDocumentsRequiredFailures(t *testing.T) {
 	document := loadOpenAPI(t)
 	expected := map[string]map[string][]string{
-		"/api/v1/download-managers":              {"get": {"401", "403", "422"}, "post": {"401", "403", "409", "415", "422", "502", "503"}},
-		"/api/v1/download-managers/{id}":         {"delete": {"401", "403", "404", "409", "422"}},
-		"/api/v1/download-managers/{id}/options": {"get": {"401", "403", "404", "422", "502", "503"}},
-		"/api/v1/metadata/search":                {"get": {"401", "403", "422", "502", "503"}},
-		"/api/v1/metadata/movies/{id}":           {"get": {"401", "403", "404", "422", "502", "503"}},
-		"/api/v1/metadata/series/{id}":           {"get": {"401", "403", "404", "422", "502", "503"}},
-		"/api/v1/metadata/providers/tmdb/key":    {"get": {"401", "403"}, "put": {"401", "403", "415", "422", "502", "503"}, "delete": {"401", "403", "404"}},
-		"/api/v1/request-profiles":               {"get": {"401", "403"}, "post": {"401", "403", "409", "415", "422"}},
-		"/api/v1/request-profiles/{id}":          {"put": {"401", "403", "404", "409", "415", "422"}, "delete": {"401", "403", "404", "409"}},
-		"/api/v1/requests":                       {"get": {"401", "403", "422"}, "post": {"401", "403", "404", "409", "415", "422", "502", "503"}},
-		"/api/v1/requests/{id}":                  {"get": {"401", "403", "404"}},
-		"/api/v1/requests/{id}/progress":         {"get": {"401", "403", "404", "502", "503"}},
-		"/api/v1/requests/{id}/approve":          {"post": {"401", "403", "404", "409", "415", "422"}},
-		"/api/v1/requests/{id}/decline":          {"post": {"401", "403", "404", "409", "415", "422"}},
-		"/api/v1/roles/{id}/request-quota":       quotaContractStatuses(),
-		"/api/v1/accounts/{id}/request-quota":    quotaContractStatuses(),
+		"/api/v1/download-managers":                 {"get": {"401", "403", "422"}, "post": {"401", "403", "409", "415", "422", "502", "503"}},
+		"/api/v1/download-managers/{id}":            {"delete": {"401", "403", "404", "409", "422"}},
+		"/api/v1/download-managers/{id}/options":    {"get": {"401", "403", "404", "422", "502", "503"}},
+		"/api/v1/metadata/search":                   {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/discover/trending":        {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/discover/movies/popular":  {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/discover/series/popular":  {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/discover/movies/upcoming": {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/discover/series/upcoming": {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/genres":                   {"get": {"401", "403", "422", "502", "503"}},
+		"/api/v1/metadata/movies/{id}":              {"get": {"401", "403", "404", "422", "502", "503"}},
+		"/api/v1/metadata/series/{id}":              {"get": {"401", "403", "404", "422", "502", "503"}},
+		"/api/v1/metadata/providers/tmdb/key":       {"get": {"401", "403"}, "put": {"401", "403", "415", "422", "502", "503"}, "delete": {"401", "403", "404"}},
+		"/api/v1/request-profiles":                  {"get": {"401", "403"}, "post": {"401", "403", "409", "415", "422"}},
+		"/api/v1/request-profiles/{id}":             {"put": {"401", "403", "404", "409", "415", "422"}, "delete": {"401", "403", "404", "409"}},
+		"/api/v1/requests":                          {"get": {"401", "403", "422"}, "post": {"401", "403", "404", "409", "415", "422", "502", "503"}},
+		"/api/v1/requests/{id}":                     {"get": {"401", "403", "404"}},
+		"/api/v1/requests/{id}/progress":            {"get": {"401", "403", "404", "502", "503"}},
+		"/api/v1/requests/{id}/approve":             {"post": {"401", "403", "404", "409", "415", "422"}},
+		"/api/v1/requests/{id}/decline":             {"post": {"401", "403", "404", "409", "415", "422"}},
+		"/api/v1/roles/{id}/request-quota":          quotaContractStatuses(),
+		"/api/v1/accounts/{id}/request-quota":       quotaContractStatuses(),
 	}
 	for path, methods := range expected {
 		for method, statuses := range methods {
@@ -170,10 +176,12 @@ func TestRequestStateChangingRoutesHaveCSRFAuditResources(t *testing.T) {
 func TestRequestSliceResponseSchemasAcceptWireFixtures(t *testing.T) {
 	document := loadOpenAPI(t)
 	fixtures := map[string]string{
-		"#/components/schemas/MetadataSeries": `{"kind":"series","provider":"tmdb","provider_id":"12","title":"Show","year":2026,"overview":"Plot","poster_path":"/show.jpg","seasons":[{"number":1,"name":"Season 1","episode_count":8,"air_date":"2026-01-02T00:00:00Z"}]}`,
-		"#/components/schemas/RequestProfile": `{"id":"33333333-3333-4333-8333-333333333333","name":"Default","kinds":["movie"],"download_manager_kind":"radarr","download_manager_instance":"main","quality_profile":"Any","root_folder":"/media","tags":[],"created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
-		"#/components/schemas/MediaRequest":   `{"id":"33333333-3333-4333-8333-333333333333","kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"poster_path":"/film.jpg","requester_account_id":"11111111-1111-4111-8111-111111111111","requester_username":"alice","profile_id":"22222222-2222-4222-8222-222222222222","status":"pending","seasons":[],"decision_reason":"","failure_reason":"","download_manager_id":"","download_manager_item_id":"","dispatch_quality_profile":"","dispatch_root_folder":"","dispatch_tags":[],"decided_by_account_id":"","created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
-		"#/components/schemas/RequestQuota":   `{"scope_id":"33333333-3333-4333-8333-333333333333","movie_limit":5,"movie_period_days":30,"season_limit":10,"season_period_days":30}`,
+		"#/components/schemas/MetadataSeries":           `{"kind":"series","provider":"tmdb","provider_id":"12","title":"Show","year":2026,"overview":"Plot","poster_path":"/show.jpg","backdrop_path":"/show-wide.jpg","seasons":[{"number":1,"name":"Season 1","episode_count":8,"air_date":"2026-01-02T00:00:00Z"}]}`,
+		"#/components/schemas/MetadataDiscoverResponse": `{"items":[{"kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"overview":"Plot","poster_path":"/film.jpg","backdrop_path":"/film-wide.jpg","request_state":"pending"}],"next_cursor":"Mg"}`,
+		"#/components/schemas/MetadataGenresResponse":   `{"items":[{"id":28,"name":"Action"}]}`,
+		"#/components/schemas/RequestProfile":           `{"id":"33333333-3333-4333-8333-333333333333","name":"Default","kinds":["movie"],"download_manager_kind":"radarr","download_manager_instance":"main","quality_profile":"Any","root_folder":"/media","tags":[],"created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
+		"#/components/schemas/MediaRequest":             `{"id":"33333333-3333-4333-8333-333333333333","kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"poster_path":"/film.jpg","requester_account_id":"11111111-1111-4111-8111-111111111111","requester_username":"alice","profile_id":"22222222-2222-4222-8222-222222222222","status":"pending","seasons":[],"decision_reason":"","failure_reason":"","download_manager_id":"","download_manager_item_id":"","dispatch_quality_profile":"","dispatch_root_folder":"","dispatch_tags":[],"decided_by_account_id":"","created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,
+		"#/components/schemas/RequestQuota":             `{"scope_id":"33333333-3333-4333-8333-333333333333","movie_limit":5,"movie_period_days":30,"season_limit":10,"season_period_days":30}`,
 	}
 	for schema, fixture := range fixtures {
 		assertJSONMatchesSchema(t, document, []byte(fixture), schema)

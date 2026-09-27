@@ -88,6 +88,11 @@ type metadataReader interface {
 	Series(context.Context, string, bool) (core.MetadataSeries, error)
 }
 
+type metadataDiscoveryReader interface {
+	Discover(context.Context, string, core.MetadataDiscover) (core.MetadataDiscoverPage, error)
+	Genres(context.Context, core.MediaKind) ([]core.MetadataGenre, error)
+}
+
 type metadataManager interface {
 	SetKey(context.Context, core.MetadataProviderKind, string) error
 	HasKey(context.Context, core.MetadataProviderKind) (bool, error)
@@ -151,6 +156,7 @@ type Server struct {
 	playbackReader         playbackReader
 	statsReader            core.StatsReader
 	metadataReader         metadataReader
+	metadataDiscovery      metadataDiscoveryReader
 	metadataManager        metadataManager
 	requestService         *requestapp.Service
 	notificationReader     notificationReader
@@ -208,6 +214,8 @@ type Deps struct {
 	StatsReader core.StatsReader
 	// MetadataReader supplies provider-backed search and detail reads.
 	MetadataReader metadataReader
+	// MetadataDiscovery supplies caller-aware discovery and genre reads.
+	MetadataDiscovery metadataDiscoveryReader
 	// MetadataManager supplies write-only provider credential administration.
 	MetadataManager metadataManager
 	// RequestService supplies request profiles, quotas, and request lifecycle policy.
@@ -347,6 +355,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		playbackReader:         deps.PlaybackReader,
 		statsReader:            deps.StatsReader,
 		metadataReader:         deps.MetadataReader,
+		metadataDiscovery:      deps.MetadataDiscovery,
 		metadataManager:        deps.MetadataManager,
 		requestService:         deps.RequestService,
 		notificationReader:     deps.NotificationReader,
