@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	defaultBaseURL         = "https://api.themoviedb.org"
-	requestTimeout         = 5 * time.Second
-	maxResponseBytes int64 = 2 << 20
-	maxAttempts            = 3
-	ratePerSecond          = 40
-	rateBurst              = 40
+	defaultBaseURL                 = "https://api.themoviedb.org"
+	attemptTimeout                 = 5 * time.Second
+	metadataOperationTimeout       = 6 * time.Second
+	maxResponseBytes         int64 = 2 << 20
+	maxAttempts                    = 3
+	ratePerSecond                  = 40
+	rateBurst                      = 40
 )
 
 // Metrics observes bounded outbound TMDB requests and retries.
@@ -51,10 +52,11 @@ type Dependencies struct {
 
 // Client implements the metadata provider seam with TMDB's v3 API and v4 Read Access Token.
 type Client struct {
-	api     *tmdbapi.ClientWithResponses
-	http    *http.Client
-	metrics Metrics
-	clock   core.Clock
+	api              *tmdbapi.ClientWithResponses
+	http             *http.Client
+	metrics          Metrics
+	clock            core.Clock
+	operationTimeout time.Duration
 }
 
 // New constructs a TMDB client with bounded network behavior.
@@ -84,7 +86,10 @@ func New(token string, deps Dependencies) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("construct generated TMDB client: %w", err)
 	}
-	return &Client{api: generated, http: httpClient, metrics: metrics, clock: deps.Clock}, nil
+	return &Client{
+		api: generated, http: httpClient, metrics: metrics, clock: deps.Clock,
+		operationTimeout: metadataOperationTimeout,
+	}, nil
 }
 
 func newHTTPClient(
@@ -110,7 +115,7 @@ func newHTTPClient(
 	limiter := newTokenBucket(clock, ratePerSecond, rateBurst)
 	retrying := &retryTransport{next: transport, metrics: metrics, clock: clock, wait: wait, randomInt64N: randomInt64N, limiter: limiter}
 	authenticated := &bearerTransport{next: retrying, token: token, baseURL: baseURL}
-	client := &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: requestTimeout}
+	client := &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: metadataOperationTimeout}
 	client.CheckRedirect = redirectPolicy(baseURL, nil)
 	return client
 }
@@ -144,6 +149,8 @@ func withBearerToken(client *http.Client, token string, baseURL *url.URL) *http.
 
 // Probe verifies the configured Read Access Token with TMDB.
 func (c *Client) Probe(ctx context.Context) error {
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
 	started := c.clock.Now()
 	response, err := c.api.AuthenticationValidateKeyWithResponse(ctx)
 	status := 0
@@ -191,6 +198,8 @@ func (c *Client) Search(ctx context.Context, input core.MetadataSearch) ([]core.
 	if err := core.ValidateMetadataSearch(input); err != nil {
 		return nil, err
 	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
 	started := c.clock.Now()
 	response, err := c.api.SearchMultiWithResponse(ctx, &tmdbapi.SearchMultiParams{Query: input.Query})
 	status := 0
@@ -216,6 +225,8 @@ func (c *Client) Movie(ctx context.Context, providerID string) (core.MetadataTit
 	if err != nil {
 		return core.MetadataTitle{}, err
 	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
 	started := c.clock.Now()
 	response, err := c.api.MovieDetailsWithResponse(ctx, id, nil)
 	status := 0
@@ -250,6 +261,8 @@ func (c *Client) Series(ctx context.Context, providerID string, includeSpecials 
 	if err != nil {
 		return core.MetadataSeries{}, err
 	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
 	started := c.clock.Now()
 	response, err := c.api.TvSeriesDetailsWithResponse(ctx, id, nil)
 	status := 0
@@ -279,6 +292,10 @@ func (c *Client) CloseIdleConnections() {
 	c.http.CloseIdleConnections()
 }
 
+func (c *Client) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, c.operationTimeout)
+}
+
 func parseProviderID(value string) (int32, error) {
 	if err := core.ValidateProviderID(value); err != nil {
 		return 0, err
@@ -298,9 +315,13 @@ func validateStatus(operation string, status int) error {
 		return classifyError(operation, status, core.ErrMetadataUnauthorized)
 	case http.StatusNotFound:
 		return core.ErrNotFound
-	default:
+	case http.StatusTooManyRequests:
 		return classifyError(operation, status, core.ErrMetadataUnavailable)
 	}
+	if status >= http.StatusInternalServerError && status <= 599 {
+		return classifyError(operation, status, core.ErrMetadataUnavailable)
+	}
+	return classifyError(operation, status, core.ErrMetadataMalformed)
 }
 
 func classifyError(operation string, status int, err error) error {
@@ -309,7 +330,7 @@ func classifyError(operation string, status int, err error) error {
 
 func classifyCallError(operation string, err error) error {
 	if retryableError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return classifyError(operation, 0, errors.Join(core.ErrMetadataUnavailable, err))
+		return classifyError(operation, 0, errors.Join(core.ErrMetadataUnreachable, err))
 	}
 	return classifyError(operation, 0, errors.Join(core.ErrMetadataMalformed, err))
 }
@@ -355,8 +376,7 @@ func retryAfter(response *http.Response) time.Duration {
 }
 
 func retryableStatus(status int) bool {
-	return status == http.StatusTooManyRequests || status == http.StatusBadGateway ||
-		status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError && status <= 599
 }
 
 func retryableError(err error) bool {

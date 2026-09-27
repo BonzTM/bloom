@@ -31,7 +31,7 @@ type ErrorResponse struct {
 	// never carries internal detail.
 	Message string `json:"message"`
 	// Reason is a safe upstream-failure classification. It is present only for
-	// media_server_failure and download_manager_failure.
+	// media_server_failure, download_manager_failure, and metadata_provider_failure.
 	Reason string `json:"reason,omitzero"`
 	// Fields carries one entry per offending input on a validation failure; it is
 	// omitted when empty.

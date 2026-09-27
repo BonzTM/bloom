@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	credentialPurpose = "metadata-provider-api-key"
-	providerBaseURL   = "https://api.themoviedb.org"
-	cacheCapacity     = 512
-	cacheTTL          = 15 * time.Minute
-	genreCacheTTL     = 24 * time.Hour
+	credentialPurpose       = "metadata-provider-api-key"
+	providerBaseURL         = "https://api.themoviedb.org"
+	cacheCapacity           = 512
+	cacheTTL                = 15 * time.Minute
+	genreCacheTTL           = 24 * time.Hour
+	providerWarningInterval = time.Minute
 )
 
 type credentialCipher interface {
@@ -51,6 +52,9 @@ type Service struct {
 	loads       singleflight.Group
 	mu          sync.Mutex
 	warnInvalid sync.Once
+	warnMu      sync.Mutex
+	warnedAt    [4]time.Time
+	warned      [4]bool
 	provider    core.MetadataProvider
 	fingerprint [sha256.Size]byte
 }
@@ -75,7 +79,7 @@ func (s *Service) SetKey(ctx context.Context, kind core.MetadataProviderKind, cr
 		return core.ErrInvalidArgument
 	}
 	if err := s.factory.Probe(ctx, kind, credential); err != nil {
-		return fmt.Errorf("probe metadata provider credential: %w", err)
+		return s.providerError(ctx, "probe metadata provider credential", err)
 	}
 	now := core.NormalizeTime(s.clock.Now())
 	existing, err := s.reader.GetMetadataProvider(ctx, kind)
@@ -144,7 +148,7 @@ func (s *Service) Search(ctx context.Context, input core.MetadataSearch) ([]core
 	}
 	results, err := provider.Search(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("search metadata: %w", err)
+		return nil, s.providerError(ctx, "search metadata", err)
 	}
 	return results, nil
 }
@@ -161,7 +165,7 @@ func (s *Service) Movie(ctx context.Context, providerID string) (core.MetadataTi
 	}
 	title, err := provider.Movie(ctx, providerID)
 	if err != nil {
-		return core.MetadataTitle{}, fmt.Errorf("load movie metadata: %w", err)
+		return core.MetadataTitle{}, s.providerError(ctx, "load movie metadata", err)
 	}
 	s.cache.put(key, cacheValue{title: title})
 	return title, nil
@@ -179,7 +183,7 @@ func (s *Service) Series(ctx context.Context, providerID string, includeSpecials
 	}
 	series, err := provider.Series(ctx, providerID, true)
 	if err != nil {
-		return core.MetadataSeries{}, fmt.Errorf("load series metadata: %w", err)
+		return core.MetadataSeries{}, s.providerError(ctx, "load series metadata", err)
 	}
 	s.cache.put(key, cacheValue{series: series})
 	return filterSpecials(series, includeSpecials), nil
@@ -214,7 +218,7 @@ func (s *Service) discoverPage(ctx context.Context, input core.MetadataDiscover)
 		}
 		page, discoverErr := provider.Discover(ctx, input)
 		if discoverErr != nil {
-			return cacheValue{}, fmt.Errorf("discover metadata: %w", discoverErr)
+			return cacheValue{}, s.providerError(ctx, "discover metadata", discoverErr)
 		}
 		return cacheValue{page: page}, nil
 	})
@@ -251,7 +255,7 @@ func (s *Service) Genres(ctx context.Context, kind core.MediaKind) ([]core.Metad
 		}
 		genres, genreErr := provider.Genres(ctx, kind)
 		if genreErr != nil {
-			return cacheValue{}, fmt.Errorf("load metadata genres: %w", genreErr)
+			return cacheValue{}, s.providerError(ctx, "load metadata genres", genreErr)
 		}
 		return cacheValue{genres: genres}, nil
 	})
@@ -347,6 +351,45 @@ func (s *Service) decryptCredential(
 		return nil, core.ErrMetadataNotConfigured
 	}
 	return plaintext, nil
+}
+
+func (s *Service) providerError(ctx context.Context, action string, err error) error {
+	s.warnProviderFailure(ctx, err)
+	return fmt.Errorf("%s: %w", action, err)
+}
+
+func (s *Service) warnProviderFailure(ctx context.Context, err error) {
+	reason, index := metadataFailureReason(err)
+	if index < 0 || !s.admitProviderWarning(index) {
+		return
+	}
+	s.logger.WarnContext(ctx, "metadata provider request failed", "provider", core.MetadataProviderTMDB, "reason", reason)
+}
+
+func (s *Service) admitProviderWarning(index int) bool {
+	s.warnMu.Lock()
+	defer s.warnMu.Unlock()
+	now := s.clock.Now()
+	if s.warned[index] && now.Sub(s.warnedAt[index]) < providerWarningInterval {
+		return false
+	}
+	s.warned[index], s.warnedAt[index] = true, now
+	return true
+}
+
+func metadataFailureReason(err error) (string, int) {
+	switch {
+	case errors.Is(err, core.ErrMetadataUnreachable):
+		return "unreachable", 0
+	case errors.Is(err, core.ErrMetadataUnauthorized):
+		return "unauthorized", 1
+	case errors.Is(err, core.ErrMetadataMalformed):
+		return "malformed", 2
+	case errors.Is(err, core.ErrMetadataUnavailable):
+		return "unavailable", 3
+	default:
+		return "", -1
+	}
 }
 
 func (s *Service) resetProvider() {

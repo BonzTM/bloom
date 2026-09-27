@@ -76,13 +76,65 @@ func (f *serviceTestFactory) New(core.MetadataProviderKind, string) (core.Metada
 type serviceTestProvider struct {
 	discoverCalls   atomic.Int32
 	genreCalls      atomic.Int32
+	searchErr       error
 	discoverEntered chan<- struct{}
 	genreEntered    chan<- struct{}
 	release         <-chan struct{}
 }
 
-func (*serviceTestProvider) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
-	return []core.MetadataTitle{}, nil
+func (p *serviceTestProvider) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
+	return []core.MetadataTitle{}, p.searchErr
+}
+
+func TestProviderFailureWarningsAreLimitedPerReason(t *testing.T) {
+	provider := &serviceTestProvider{}
+	store := &serviceTestStore{record: core.MetadataProviderRecord{
+		Kind: core.MetadataProviderTMDB, CredentialCiphertext: []byte(serviceTestReadAccessToken), KeyID: "test-key",
+	}}
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+	var logs bytes.Buffer
+	service, err := NewService(
+		store, store, &serviceTestStates{}, serviceTestCipher{}, &serviceTestFactory{provider: provider},
+		clock, slog.New(slog.NewTextHandler(&logs, nil)),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	for _, failure := range []error{
+		core.ErrMetadataUnreachable, core.ErrMetadataUnauthorized, core.ErrMetadataMalformed, core.ErrMetadataUnavailable,
+	} {
+		provider.searchErr = failure
+		for range 2 {
+			_, searchErr := service.Search(t.Context(), core.MetadataSearch{Query: "movie"})
+			if !errors.Is(searchErr, failure) {
+				t.Fatalf("Search error = %v, want %v", searchErr, failure)
+			}
+		}
+	}
+	assertMetadataWarningCounts(t, logs.String(), 1)
+	clock.Advance(time.Minute)
+	for _, failure := range []error{
+		core.ErrMetadataUnreachable, core.ErrMetadataUnauthorized, core.ErrMetadataMalformed, core.ErrMetadataUnavailable,
+	} {
+		provider.searchErr = failure
+		_, searchErr := service.Search(t.Context(), core.MetadataSearch{Query: "movie"})
+		if !errors.Is(searchErr, failure) {
+			t.Fatalf("Search error = %v, want %v", searchErr, failure)
+		}
+	}
+	assertMetadataWarningCounts(t, logs.String(), 2)
+}
+
+func assertMetadataWarningCounts(t *testing.T, logs string, want int) {
+	t.Helper()
+	if got := strings.Count(logs, "level=WARN"); got != want*4 {
+		t.Fatalf("warning records = %d, want %d: %s", got, want*4, logs)
+	}
+	for _, reason := range []string{"unreachable", "unauthorized", "malformed", "unavailable"} {
+		if got := strings.Count(logs, "reason="+reason); got != want {
+			t.Errorf("reason %s warnings = %d, want %d: %s", reason, got, want, logs)
+		}
+	}
 }
 
 func (*serviceTestProvider) Movie(context.Context, string) (core.MetadataTitle, error) {

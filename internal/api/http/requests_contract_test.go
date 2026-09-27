@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,6 +110,7 @@ func TestRequestSliceErrorCodes(t *testing.T) {
 		err    error
 		status int
 		code   string
+		reason string
 	}{
 		{err: core.ErrNotFound, status: http.StatusNotFound, code: codeNotFound},
 		{err: core.ErrAlreadyExists, status: http.StatusConflict, code: codeAlreadyExists},
@@ -116,25 +118,29 @@ func TestRequestSliceErrorCodes(t *testing.T) {
 		{err: core.ErrInvalidTransition, status: http.StatusConflict, code: codeInvalidTransition},
 		{err: core.ErrQuotaExceeded, status: http.StatusUnprocessableEntity, code: codeQuotaExceeded},
 		{err: core.ErrMetadataNotConfigured, status: http.StatusServiceUnavailable, code: codeMetadataNotConfigured},
-		{err: core.ErrMetadataMalformed, status: http.StatusBadGateway, code: codeMetadataProviderFailure},
+		{err: core.ErrMetadataUnreachable, status: http.StatusBadGateway, code: codeMetadataProviderFailure, reason: reasonUnreachable},
+		{err: core.ErrMetadataUnauthorized, status: http.StatusBadGateway, code: codeMetadataProviderFailure, reason: reasonUnauthorized},
+		{err: core.ErrMetadataMalformed, status: http.StatusBadGateway, code: codeMetadataProviderFailure, reason: reasonMalformed},
 		{err: core.ErrDownloadItemMissing, status: http.StatusNotFound, code: codeDownloadManagerNotFound},
 		{err: core.ErrDownloadManagerInUse, status: http.StatusConflict, code: codeDownloadManagerInUse},
-		{err: &core.DownloadManagerError{Kind: core.DownloadManagerUnauthorized}, status: http.StatusBadGateway, code: codeDownloadManagerFailure},
-		{err: &core.DownloadManagerError{Kind: core.DownloadManagerUnavailable}, status: http.StatusServiceUnavailable, code: codeDownloadManagerFailure},
-		{err: core.ErrMetadataUnavailable, status: http.StatusServiceUnavailable, code: codeMetadataProviderFailure},
+		{err: &core.DownloadManagerError{Kind: core.DownloadManagerUnauthorized}, status: http.StatusBadGateway, code: codeDownloadManagerFailure, reason: reasonUnauthorized},
+		{err: &core.DownloadManagerError{Kind: core.DownloadManagerUnavailable}, status: http.StatusServiceUnavailable, code: codeDownloadManagerFailure, reason: reasonUnreachable},
+		{err: core.ErrMetadataUnavailable, status: http.StatusServiceUnavailable, code: codeMetadataProviderFailure, reason: reasonUnavailable},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.code, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "https://bloom.test/api/v1/requests", nil)
+			request = request.WithContext(context.WithValue(request.Context(), requestIDKey, "request-1"))
 			writeError(recorder, request, slog.New(slog.DiscardHandler), errors.Join(errors.New("boundary"), testCase.err))
 			var response httputil.ErrorResponse
 			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 				t.Fatalf("decode error response: %v", err)
 			}
-			if recorder.Code != testCase.status || response.Code != testCase.code {
-				t.Fatalf("response = %d %s, want %d %s", recorder.Code, response.Code, testCase.status, testCase.code)
+			if recorder.Code != testCase.status || response.Code != testCase.code || response.Reason != testCase.reason {
+				t.Fatalf("response = %d %+v, want %d %s reason %q", recorder.Code, response, testCase.status, testCase.code, testCase.reason)
 			}
+			assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
 		})
 	}
 }

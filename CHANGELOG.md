@@ -393,6 +393,9 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- TMDB operations now have a six-second total deadline across retries. Metadata
+  failures include an actionable `reason`, and repeated provider warnings are
+  limited to once per minute for each reason.
 - Playback startup now remains available when the initial media-server listing
   fails, reports the failure once, and retries during the bounded refresh loop.
 - SQLite database startup now supplies the foreign-key pragma when the

@@ -466,6 +466,8 @@ adds the signed-in account's latest request state to every title. Movie and
 series genre lists are available from `GET /api/v1/metadata/genres?kind=...`
 and are cached for one day; discover pages use the existing metadata cache
 TTL.
+If a metadata error reports the `unreachable` reason, the Bloom server cannot
+reach `api.themoviedb.org`; a firewall or network policy is the usual cause.
 Accounts with `requests.create` can open movie or series details and submit a
 movie or selected series seasons to `POST /api/v1/requests`.
 Accounts with `requests.approve` are exempt from quotas and their own requests
@@ -776,8 +778,12 @@ Layout follows the handbook default (`cmd/` + `internal/`):
 ### Error handling
 
 Every JSON API failure uses the `ErrorResponse` envelope with a stable `code`,
-a safe `message`, and a `request_id` for log correlation. Media-server and
-download-manager probe failures also include `reason`: `unreachable` for
+a safe `message`, and a `request_id` for log correlation. Media-server,
+download-manager, and metadata-provider failures also include `reason`.
+Metadata uses `unreachable` for connection, DNS, or timeout failures before a
+response; `unauthorized` for TMDB 401; `malformed` for an unusable response;
+and `unavailable` for TMDB 429 or 5xx responses after bounded retries.
+Media-server and download-manager failures use `unreachable` for
 connection, timeout, DNS, refused-destination, and retryable-status failures;
 `unauthorized` for upstream 401 or 403 responses; `not_found` for an upstream
 404; and `malformed` for unexpected statuses, redirects, or responses that do

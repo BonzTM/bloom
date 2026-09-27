@@ -49,6 +49,8 @@ func (c *Client) Discover(ctx context.Context, input core.MetadataDiscover) (cor
 	if err := core.ValidateMetadataDiscover(input); err != nil {
 		return core.MetadataPage{}, err
 	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
 	operation := "discover_" + string(input.List)
 	started := c.clock.Now()
 	response, err := c.callDiscover(ctx, input)
@@ -143,6 +145,8 @@ func (c *Client) Genres(ctx context.Context, kind core.MediaKind) ([]core.Metada
 	if !kind.Valid() {
 		return nil, core.ErrInvalidArgument
 	}
+	ctx, cancel := c.operationContext(ctx)
+	defer cancel()
 	operation := "genres_" + string(kind)
 	started := c.clock.Now()
 	response, err := c.callGenres(ctx, kind)
