@@ -43,8 +43,9 @@ func TestResultCacheKeySeparatesReportSubtypes(t *testing.T) {
 	}
 	keys := make(map[cacheKey]bool)
 	for _, query := range []core.StatsQuery{
-		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleMovie},
-		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleSeries},
+		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleMovie, TitleOrder: core.StatsTitleOrderPlays},
+		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleMovie, TitleOrder: core.StatsTitleOrderUniqueUsers},
+		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleSeries, TitleOrder: core.StatsTitleOrderPlays},
 		{Window: window, Report: core.StatsReportUser, UserServerID: "11111111-1111-4111-8111-111111111111", MediaUserID: "one"},
 		{Window: window, Report: core.StatsReportUser, UserServerID: "11111111-1111-4111-8111-111111111111", MediaUserID: "two"},
 	} {
@@ -78,6 +79,25 @@ func TestResultCacheClonesWatchStreamDetails(t *testing.T) {
 	if second.Watches[0].Stream.VideoCodec != "h264" ||
 		second.Watches[0].Stream.TranscodeReasons[0] != "VideoCodecNotSupported" {
 		t.Fatalf("cached stream was aliased: %+v", second.Watches[0].Stream)
+	}
+}
+
+func TestResultCacheClonesWatchRuntime(t *testing.T) {
+	t.Parallel()
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	cache := newResultCache(clock, 1, time.Minute)
+	key := cacheKey{kind: "user"}
+	runtime := 45 * time.Minute
+	cache.put(key, core.StatsResult{Watches: []core.PlaybackWatch{{Runtime: &runtime}}})
+	runtime = time.Hour
+	first, ok := cache.get(key)
+	if !ok || first.Watches[0].Runtime == nil || *first.Watches[0].Runtime != 45*time.Minute {
+		t.Fatalf("cached runtime = %+v, found = %t", first.Watches[0].Runtime, ok)
+	}
+	*first.Watches[0].Runtime = 90 * time.Minute
+	second, _ := cache.get(key)
+	if second.Watches[0].Runtime == nil || *second.Watches[0].Runtime != 45*time.Minute {
+		t.Fatalf("cached runtime was aliased: %+v", second.Watches[0].Runtime)
 	}
 }
 

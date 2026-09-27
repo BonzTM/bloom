@@ -313,7 +313,8 @@ func routeResource(r *http.Request) string {
 		return auditResourceRoles
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
 		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries",
-		"/api/v1/media-servers/{id}/users":
+		"/api/v1/media-servers/{id}/users",
+		"/api/v1/media-servers/{id}/items/{item_id}/image":
 		return auditResourceMediaServers
 	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
 		return auditResourceDownloadManagers

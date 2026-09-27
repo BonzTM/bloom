@@ -46,7 +46,7 @@ func newResultCache(clock core.Clock, capacity int, ttl time.Duration) *resultCa
 func resultCacheKey(query core.StatsQuery) cacheKey {
 	kind := string(query.Report)
 	if query.Report == core.StatsReportTitles {
-		kind += ":" + string(query.TitleKind)
+		kind += ":" + string(query.TitleKind) + ":" + string(query.TitleOrder)
 	}
 	if query.Report == core.StatsReportUser {
 		kind += fmt.Sprintf(":%s:%s", query.UserServerID, query.MediaUserID)
@@ -149,6 +149,7 @@ func cloneResult(value core.StatsResult) core.StatsResult {
 func clonePlaybackWatches(values []core.PlaybackWatch) []core.PlaybackWatch {
 	result := append([]core.PlaybackWatch(nil), values...)
 	for index := range result {
+		result[index].Runtime = cloneCacheDuration(result[index].Runtime)
 		if result[index].Stream == nil {
 			continue
 		}
@@ -159,6 +160,14 @@ func clonePlaybackWatches(values []core.PlaybackWatch) []core.PlaybackWatch {
 		result[index].Stream = &stream
 	}
 	return result
+}
+
+func cloneCacheDuration(value *time.Duration) *time.Duration {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneCacheBool(value *bool) *bool {

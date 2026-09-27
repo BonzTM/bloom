@@ -38,6 +38,9 @@ func (s *sqliteStatsBackend) titles(
 	ctx context.Context, query core.StatsQuery, kind core.StatsTitleKind, limit int32,
 ) ([]core.StatsTitle, error) {
 	filter := sqliteStatsFilter(query)
+	if query.TitleOrder == core.StatsTitleOrderUniqueUsers {
+		return s.titlesByUniqueUsers(ctx, filter, kind, limit)
+	}
 	switch kind {
 	case core.StatsTitleMovie:
 		rows, err := s.q.StatsMovieTitles(ctx, sqlite.StatsMovieTitlesParams{
@@ -60,6 +63,29 @@ func (s *sqliteStatsBackend) titles(
 			MediaUserFilter: filter.user, RowLimit: int64(limit),
 		})
 		return mapSQLiteOtherTitles(rows, err)
+	default:
+		return nil, core.ErrInvalidArgument
+	}
+}
+
+func (s *sqliteStatsBackend) titlesByUniqueUsers(
+	ctx context.Context, filter sqliteStatsFilterValues, kind core.StatsTitleKind, limit int32,
+) ([]core.StatsTitle, error) {
+	params := sqlite.StatsMovieTitlesByUniqueUsersParams{
+		WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
+		LibraryFilter: filter.library, UserServerFilter: filter.userServer,
+		MediaUserFilter: filter.user, RowLimit: int64(limit),
+	}
+	switch kind {
+	case core.StatsTitleMovie:
+		rows, err := s.q.StatsMovieTitlesByUniqueUsers(ctx, params)
+		return mapSQLiteMovieTitlesByUniqueUsers(rows, err)
+	case core.StatsTitleSeries:
+		rows, err := s.q.StatsSeriesTitlesByUniqueUsers(ctx, sqlite.StatsSeriesTitlesByUniqueUsersParams(params))
+		return mapSQLiteSeriesTitlesByUniqueUsers(rows, err)
+	case core.StatsTitleOther:
+		rows, err := s.q.StatsOtherTitlesByUniqueUsers(ctx, sqlite.StatsOtherTitlesByUniqueUsersParams(params))
+		return mapSQLiteOtherTitlesByUniqueUsers(rows, err)
 	default:
 		return nil, core.ErrInvalidArgument
 	}

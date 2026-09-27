@@ -16,6 +16,8 @@ import (
 	"github.com/BonzTM/bloom/internal/testutil"
 )
 
+const testMediaItemID = "0123456789abcdef0123456789abcdef"
+
 type memoryStore struct {
 	mu          sync.Mutex
 	records     []core.MediaServerRecord
@@ -119,12 +121,15 @@ func (s *memoryStore) recordDeadline(ctx context.Context) {
 type fakeAdapter struct {
 	probeErr     error
 	librariesErr error
+	imageErr     error
+	image        core.ItemImage
 	deadlineSeen atomic.Bool
 	afterProbe   func()
 	started      chan<- struct{}
 	release      <-chan struct{}
 	probeCalls   atomic.Int32
 	libraryCalls atomic.Int32
+	imageCalls   atomic.Int32
 	closeCalls   atomic.Int32
 }
 
@@ -133,6 +138,20 @@ type userListingAdapter struct {
 	users     []core.MediaUser
 	usersErr  error
 	userCalls atomic.Int32
+}
+
+type adapterWithoutItemImage struct{ delegate *fakeAdapter }
+
+func (a *adapterWithoutItemImage) Probe(ctx context.Context) (core.ServerInfo, error) {
+	return a.delegate.Probe(ctx)
+}
+
+func (a *adapterWithoutItemImage) ListLibraries(ctx context.Context) ([]core.Library, error) {
+	return a.delegate.ListLibraries(ctx)
+}
+
+func (a *adapterWithoutItemImage) Capabilities() core.Capabilities {
+	return a.delegate.Capabilities()
 }
 
 func (a *userListingAdapter) ListUsers(ctx context.Context) ([]core.MediaUser, error) {
@@ -171,6 +190,19 @@ func (a *fakeAdapter) ListLibraries(ctx context.Context) ([]core.Library, error)
 	_, deadlineSeen := ctx.Deadline()
 	a.deadlineSeen.Store(deadlineSeen)
 	return []core.Library{{ID: "lib-1", Name: "Movies"}}, a.librariesErr
+}
+
+func (a *fakeAdapter) ItemImage(
+	ctx context.Context, _ string, _ core.ItemImageType, _ int, _ string,
+) (core.ItemImage, error) {
+	a.imageCalls.Add(1)
+	_, deadlineSeen := ctx.Deadline()
+	a.deadlineSeen.Store(deadlineSeen)
+	if a.started != nil {
+		a.started <- struct{}{}
+		<-a.release
+	}
+	return a.image, a.imageErr
 }
 
 func (*fakeAdapter) Capabilities() core.Capabilities {
@@ -529,6 +561,61 @@ func TestServiceReusesAndInvalidatesRegisteredAdapter(t *testing.T) {
 	service.CloseIdleConnections()
 	if got := adapter.closeCalls.Load(); got != 2 {
 		t.Fatalf("idle closes after shutdown = %d, want 2", got)
+	}
+}
+
+func TestServiceItemImageMapsMissingAndUsesDependencyDeadline(t *testing.T) {
+	adapter := &fakeAdapter{image: core.ItemImage{Body: []byte("image"), ContentType: "image/jpeg"}}
+	store, service := newTestService(t, fakeFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	id := store.records[0].ID
+	image, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
+	if err != nil || string(image.Body) != "image" || !adapter.deadlineSeen.Load() {
+		t.Fatalf("ItemImage = %+v, %v; deadline = %t", image, err, adapter.deadlineSeen.Load())
+	}
+	adapter.imageErr = &core.MediaServerError{Kind: core.MediaServerNotFound, Operation: "item_image"}
+	if _, err := service.ItemImage(context.Background(), id, "missing", core.ItemImagePrimary, 400, ""); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("missing image error = %v", err)
+	}
+}
+
+func TestServiceItemImageMapsMissingAdapterCapabilityToNotFound(t *testing.T) {
+	adapter := &adapterWithoutItemImage{delegate: &fakeAdapter{}}
+	store, service := newTestService(t, fixedAdapterFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	_, err := service.ItemImage(context.Background(), store.records[0].ID, testMediaItemID, core.ItemImagePrimary, 400, "")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ItemImage error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServiceItemImageUsesPerServerBulkhead(t *testing.T) {
+	adapter := &fakeAdapter{image: core.ItemImage{Body: []byte("image"), ContentType: "image/jpeg"}}
+	store, service := newTestService(t, fakeFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	id := store.records[0].ID
+	started, release := make(chan struct{}, maxConcurrentCallsPerServer), make(chan struct{})
+	adapter.started, adapter.release = started, release
+	errs := make(chan error, maxConcurrentCallsPerServer)
+	for range maxConcurrentCallsPerServer {
+		go func() {
+			_, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
+			errs <- err
+		}()
+	}
+	for range maxConcurrentCallsPerServer {
+		<-started
+	}
+	_, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
+	var mediaErr *core.MediaServerError
+	if !errors.As(err, &mediaErr) || mediaErr.Kind != core.MediaServerSaturated {
+		t.Fatalf("fifth ItemImage error = %#v, want saturation", err)
+	}
+	close(release)
+	for range maxConcurrentCallsPerServer {
+		if err := <-errs; err != nil {
+			t.Errorf("admitted ItemImage: %v", err)
+		}
 	}
 }
 

@@ -39,7 +39,13 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 			t.Fatalf("SaveWatches(start): %v", err)
 		}
 		assertPlaybackRowSources(t, pool, watch.ID)
-		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID)
+		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID, 90*time.Minute)
+		updatedRuntime := 95 * time.Minute
+		watch.Runtime = &updatedRuntime
+		if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+			t.Fatalf("SaveWatches(runtime update): %v", err)
+		}
+		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID, updatedRuntime)
 		writePlaybackPositions(t, store, watch, now)
 		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 512)
 		assertPlaybackPositions(t, store, watch.ID)
@@ -543,6 +549,7 @@ func newPlaybackTestStore(t *testing.T, pool *sql.DB, driver config.Driver) core
 
 func playbackStoreWatch(t *testing.T, serverID string, now time.Time) core.PlaybackWatch {
 	t.Helper()
+	runtime := 90 * time.Minute
 	return core.PlaybackWatch{
 		ID: mustID(t), MediaServerID: serverID, MediaUserID: "user-1", Username: "alice",
 		DeviceID: "device-1", DeviceName: "Living Room", Client: "Jellyfin Web",
@@ -550,7 +557,8 @@ func playbackStoreWatch(t *testing.T, serverID string, now time.Time) core.Playb
 		ItemType: "Episode", SeriesName: "Series", PlayMethod: core.PlayMethodDirectPlay,
 		Stream: playbackStoreStream(),
 		State:  core.WatchPlaying, StartedAt: now, LastSeenAt: now,
-		LastPosition: time.Minute, Source: core.WatchSourcePoll, CreatedAt: now, UpdatedAt: now,
+		LastPosition: time.Minute, Runtime: &runtime,
+		Source: core.WatchSourcePoll, CreatedAt: now, UpdatedAt: now,
 	}
 }
 
@@ -559,6 +567,7 @@ func assertPlaybackRestart(
 	pool *sql.DB,
 	driver config.Driver,
 	serverID, watchID string,
+	wantRuntime time.Duration,
 ) {
 	t.Helper()
 	restarted := newPlaybackTestStore(t, pool, driver)
@@ -567,6 +576,7 @@ func assertPlaybackRestart(
 		t.Fatalf("LoadOpenWatches after restart = %+v, %v", watches, err)
 	}
 	if watches[0].MediaServerName == "" || watches[0].LastPosition != time.Minute ||
+		watches[0].Runtime == nil || *watches[0].Runtime != wantRuntime ||
 		watches[0].Stream == nil || watches[0].Stream.VideoCodec != "h264" {
 		t.Fatalf("restored watch = %+v", watches[0])
 	}

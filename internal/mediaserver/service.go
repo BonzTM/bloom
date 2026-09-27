@@ -32,6 +32,36 @@ type playbackSessionLister interface {
 	ListSessions(ctx context.Context) ([]core.PlaybackSession, error)
 }
 
+// ItemImage fetches one bounded image through a registered server adapter.
+func (s *Service) ItemImage(
+	ctx context.Context, id, itemID string, imageType core.ItemImageType, maxWidth int, ifNoneMatch string,
+) (core.ItemImage, error) {
+	call, err := s.adapter(ctx, id, "item_image")
+	if err != nil {
+		return core.ItemImage{}, err
+	}
+	defer call.release()
+	reader, ok := call.entry.adapter.(core.MediaItemImageReader)
+	if !ok {
+		return core.ItemImage{}, fmt.Errorf("read media server item image: capability unavailable: %w", core.ErrNotFound)
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	image, err := reader.ItemImage(callCtx, itemID, imageType, maxWidth, ifNoneMatch)
+	if mediaImageNotFound(err) {
+		return core.ItemImage{}, core.ErrNotFound
+	}
+	if err != nil {
+		return core.ItemImage{}, fmt.Errorf("read media server item image: %w", err)
+	}
+	return image, nil
+}
+
+func mediaImageNotFound(err error) bool {
+	var mediaErr *core.MediaServerError
+	return errors.As(err, &mediaErr) && mediaErr.Kind == core.MediaServerNotFound
+}
+
 // PlaybackLifecycle coordinates collector shutdown around server deletion.
 type PlaybackLifecycle interface {
 	StopServer(ctx context.Context, id string) error

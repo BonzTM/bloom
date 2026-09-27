@@ -30,6 +30,7 @@ func runStatsEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertStatsLibraryFilter(t, reader, fixture)
 		assertStatsLibraries(t, pool, driver, reader, fixture.end)
 		assertStatsRejectsUnsafeUserIDs(t, reader, fixture)
+		assertStatsTitleOrdering(t, pool, driver, reader, fixture)
 	})
 }
 
@@ -153,11 +154,59 @@ func assertStatsTitleQueries(t *testing.T, reader core.StatsReader, fixture stat
 	} {
 		query := statsQuery(t, fixture, core.StatsReportTitles, "UTC")
 		query.TitleKind = test.kind
+		query.TitleOrder = core.StatsTitleOrderPlays
 		result, err := reader.ReadStats(t.Context(), query)
 		if err != nil || len(result.Titles) != 1 || result.Titles[0].Key != test.key {
 			t.Fatalf("titles %s = %+v, %v", test.kind, result.Titles, err)
 		}
 	}
+}
+
+func assertStatsTitleOrdering(
+	t *testing.T, pool *sql.DB, driver config.Driver, reader core.StatsReader, fixture statsFixture,
+) {
+	t.Helper()
+	serverID := seedTitleOrderFixture(t, pool, driver, fixture.end)
+	query := statsQuery(t, fixture, core.StatsReportTitles, "UTC")
+	query.Window.MediaServerID, query.TitleKind = serverID, core.StatsTitleMovie
+	query.TitleOrder = core.StatsTitleOrderPlays
+	byPlays, err := reader.ReadStats(t.Context(), query)
+	if err != nil || len(byPlays.Titles) != 2 || byPlays.Titles[0].Key != "viewed" {
+		t.Fatalf("titles by plays = %+v, %v", byPlays.Titles, err)
+	}
+	query.TitleOrder = core.StatsTitleOrderUniqueUsers
+	byUsers, err := reader.ReadStats(t.Context(), query)
+	if err != nil || byUsers.Titles[0].Key != "popular" || byUsers.Titles[0].UniqueUsers != 2 {
+		t.Fatalf("titles by unique users = %+v, %v", byUsers.Titles, err)
+	}
+}
+
+func seedTitleOrderFixture(t *testing.T, pool *sql.DB, driver config.Driver, now time.Time) string {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := mediaServerRecord(t, "Title ordering "+mustID(t), "https://title-order.example.test", now)
+	if err := writer.CreateMediaServer(t.Context(), server); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := writer.DeleteMediaServer(context.Background(), server.ID); err != nil {
+			t.Errorf("DeleteMediaServer: %v", err)
+		}
+	})
+	watches := []core.PlaybackWatch{
+		statsWatch(t, server.ID, "user-a", "a", now.Add(-time.Hour), "viewed", "Viewed", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 10),
+		statsWatch(t, server.ID, "user-a", "a", now.Add(-50*time.Minute), "viewed", "Viewed", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 10),
+		statsWatch(t, server.ID, "user-a", "a", now.Add(-40*time.Minute), "viewed", "Viewed", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 10),
+		statsWatch(t, server.ID, "user-a", "a", now.Add(-30*time.Minute), "popular", "Popular", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 10),
+		statsWatch(t, server.ID, "user-b", "b", now.Add(-20*time.Minute), "popular", "Popular", "Movie", "", "Web", "TV", core.PlayMethodDirectPlay, 10),
+	}
+	if err := newPlaybackTestStore(t, pool, driver).SaveWatches(t.Context(), playbackMutations(watches...)); err != nil {
+		t.Fatal(err)
+	}
+	return server.ID
 }
 
 func assertStatsUsers(t *testing.T, reader core.StatsReader, fixture statsFixture) {
@@ -336,6 +385,7 @@ func assertStatsBinaryRanking(
 	query := statsQuery(t, fixture, core.StatsReportTitles, "UTC")
 	query.Window.MediaServerID = serverID
 	query.TitleKind = core.StatsTitleMovie
+	query.TitleOrder = core.StatsTitleOrderPlays
 	titles, err := reader.ReadStats(t.Context(), query)
 	if err != nil {
 		t.Fatalf("binary title ranking: %v", err)

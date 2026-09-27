@@ -126,6 +126,7 @@ type PlaybackSession struct {
 	SeasonNumber    *int32
 	EpisodeNumber   *int32
 	Position        time.Duration
+	Runtime         *time.Duration
 	Paused          bool
 	PlayMethod      PlayMethod
 	Stream          *StreamDetails
@@ -197,6 +198,7 @@ type PlaybackWatch struct {
 	EndedAt         *time.Time
 	ActiveTime      time.Duration
 	LastPosition    time.Duration
+	Runtime         *time.Duration
 	Source          WatchSource
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -483,7 +485,16 @@ func clonePlaybackWatch(watch PlaybackWatch) PlaybackWatch {
 		watch.EndedAt = timePointer(*watch.EndedAt)
 	}
 	watch.Stream = cloneStreamDetails(watch.Stream)
+	watch.Runtime = cloneDuration(watch.Runtime)
 	return watch
+}
+
+func cloneDuration(value *time.Duration) *time.Duration {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneStreamDetails(stream *StreamDetails) *StreamDetails {
@@ -654,6 +665,7 @@ func applySession(watch *PlaybackWatch, session PlaybackSession) {
 	watch.PlayMethod = session.PlayMethod
 	watch.Stream = cloneStreamDetails(session.Stream)
 	watch.LastPosition = session.Position
+	watch.Runtime = cloneDuration(session.Runtime)
 	if session.Paused {
 		watch.State = WatchPaused
 	} else {
@@ -819,6 +831,9 @@ func ValidatePlaybackWatch(watch PlaybackWatch) error {
 		return ErrInvalidArgument
 	}
 	if watch.Stream != nil && !watch.Stream.Valid() {
+		return ErrInvalidArgument
+	}
+	if watch.Runtime != nil && *watch.Runtime < 0 {
 		return ErrInvalidArgument
 	}
 	if (watch.LibraryID == "") != (watch.LibraryName == "") ||

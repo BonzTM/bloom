@@ -39,6 +39,9 @@ func (s *postgresStatsBackend) titles(
 	ctx context.Context, query core.StatsQuery, kind core.StatsTitleKind, limit int32,
 ) ([]core.StatsTitle, error) {
 	filter := postgresStatsFilter(query)
+	if query.TitleOrder == core.StatsTitleOrderUniqueUsers {
+		return s.titlesByUniqueUsers(ctx, filter, kind, limit)
+	}
 	switch kind {
 	case core.StatsTitleMovie:
 		rows, err := s.q.StatsMovieTitles(ctx, postgres.StatsMovieTitlesParams{
@@ -61,6 +64,29 @@ func (s *postgresStatsBackend) titles(
 			MediaUserFilter: filter.user, RowLimit: limit,
 		})
 		return mapPostgresOtherTitles(rows, err)
+	default:
+		return nil, core.ErrInvalidArgument
+	}
+}
+
+func (s *postgresStatsBackend) titlesByUniqueUsers(
+	ctx context.Context, filter postgresStatsFilterValues, kind core.StatsTitleKind, limit int32,
+) ([]core.StatsTitle, error) {
+	params := postgres.StatsMovieTitlesByUniqueUsersParams{
+		WindowStart: filter.start, WindowEnd: filter.end, MediaServerFilter: filter.server,
+		LibraryFilter: filter.library, UserServerFilter: filter.userServer,
+		MediaUserFilter: filter.user, RowLimit: limit,
+	}
+	switch kind {
+	case core.StatsTitleMovie:
+		rows, err := s.q.StatsMovieTitlesByUniqueUsers(ctx, params)
+		return mapPostgresMovieTitlesByUniqueUsers(rows, err)
+	case core.StatsTitleSeries:
+		rows, err := s.q.StatsSeriesTitlesByUniqueUsers(ctx, postgres.StatsSeriesTitlesByUniqueUsersParams(params))
+		return mapPostgresSeriesTitlesByUniqueUsers(rows, err)
+	case core.StatsTitleOther:
+		rows, err := s.q.StatsOtherTitlesByUniqueUsers(ctx, postgres.StatsOtherTitlesByUniqueUsersParams(params))
+		return mapPostgresOtherTitlesByUniqueUsers(rows, err)
 	default:
 		return nil, core.ErrInvalidArgument
 	}

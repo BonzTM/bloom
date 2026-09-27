@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +42,7 @@ func TestStatsRoutesReturnEmptyWindowsAndParsedQueries(t *testing.T) {
 		{"/api/v1/stats/overview?days=7&tz=America%2FLos_Angeles", core.StatsReportOverview},
 		{"/api/v1/stats/daily", core.StatsReportDaily},
 		{"/api/v1/stats/patterns", core.StatsReportPatterns},
-		{"/api/v1/stats/titles?kind=movie", core.StatsReportTitles},
+		{"/api/v1/stats/titles?kind=movie&order=unique_users", core.StatsReportTitles},
 		{"/api/v1/stats/users", core.StatsReportUsers},
 		{"/api/v1/stats/libraries", core.StatsReportLibraries},
 		{"/api/v1/stats/users/33333333-3333-4333-8333-333333333333/user-1", core.StatsReportUser},
@@ -67,6 +68,9 @@ func TestStatsRoutesReturnEmptyWindowsAndParsedQueries(t *testing.T) {
 			if test.report == core.StatsReportUser && query.Window.MediaServerID != query.UserServerID {
 				t.Fatalf("user query does not resolve path server: %+v", query)
 			}
+			if test.report == core.StatsReportTitles && query.TitleOrder != core.StatsTitleOrderUniqueUsers {
+				t.Fatalf("title order = %q", query.TitleOrder)
+			}
 		})
 	}
 }
@@ -84,6 +88,8 @@ func TestStatsRoutesRejectBadParameters(t *testing.T) {
 		"/api/v1/stats/overview?tz=Local",
 		"/api/v1/stats/overview?tz=UTC&tz=UTC",
 		"/api/v1/stats/titles?kind=bad",
+		"/api/v1/stats/titles?kind=movie&order=bad",
+		"/api/v1/stats/titles?kind=movie&order=plays&order=unique_users",
 		"/api/v1/stats/titles",
 		"/api/v1/stats/users/bad/user-1",
 		"/api/v1/stats/users/33333333-3333-4333-8333-333333333333/user-1?media_server_id=44444444-4444-4444-8444-444444444444",
@@ -215,6 +221,25 @@ func TestStatsResponseDTOIncludesStoredWatchSeconds(t *testing.T) {
 	}
 }
 
+func TestStatsTitleResponseIncludesUniqueUsers(t *testing.T) {
+	t.Parallel()
+	h := newAuthHarness(t, nil)
+	h.stats.result.Titles = []core.StatsTitle{{
+		Kind: core.StatsTitleMovie, MediaServerID: playbackTestServerID,
+		Key: "movie-1", Name: "Movie", Plays: 3, UniqueUsers: 2,
+		LastWatchedAt: h.clock.Now(),
+	}}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	recorder := h.request(t, http.MethodGet, "/api/v1/stats/titles?kind=movie", "", cookie)
+	var response statsTitlesResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Items) != 1 || response.Items[0].UniqueUsers != 2 {
+		t.Fatalf("titles response = %+v", response)
+	}
+}
+
 func TestStatsUserDetailIncludesLatestStream(t *testing.T) {
 	t.Parallel()
 	h := newAuthHarness(t, nil)
@@ -279,6 +304,22 @@ func TestStatsOpenAPIContract(t *testing.T) {
 			assertOperationContract(t, document, "get "+test.pattern, observed)
 		})
 	}
+}
+
+func TestStatsTitlesOpenAPIDocumentsOrdering(t *testing.T) {
+	operation := loadOpenAPI(t).validator.Paths.Find("/api/v1/stats/titles").Get
+	for _, reference := range operation.Parameters {
+		parameter := reference.Value
+		if parameter.Name != "order" {
+			continue
+		}
+		schema := parameter.Schema.Value
+		if !slices.Equal(schema.Enum, []any{"plays", "unique_users"}) || schema.Default != "plays" {
+			t.Fatalf("order schema = %+v", schema)
+		}
+		return
+	}
+	t.Fatal("order parameter is missing")
 }
 
 func statsContractRequest(t *testing.T, h authHarness, target string, status int) *httptest.ResponseRecorder {

@@ -9,7 +9,7 @@ INSERT INTO watches (
     stream_audio_codec, stream_bitrate, stream_width, stream_height,
     stream_framerate_hundredths, stream_audio_channels, stream_is_video_direct,
     stream_is_audio_direct, stream_transcode_reasons, state, started_at, last_seen_at, ended_at,
-    active_seconds, last_position_ms, source, created_at, updated_at
+    active_seconds, last_position_ms, runtime_ms, source, created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(media_user_id), sqlc.arg(username),
     sqlc.arg(device_id), sqlc.arg(device_name), sqlc.arg(client), sqlc.arg(server_session_id),
@@ -22,7 +22,7 @@ INSERT INTO watches (
     sqlc.narg(stream_is_video_direct), sqlc.narg(stream_is_audio_direct),
     sqlc.narg(stream_transcode_reasons), sqlc.arg(state),
     sqlc.arg(started_at), sqlc.arg(last_seen_at), sqlc.narg(ended_at), sqlc.arg(active_seconds),
-    sqlc.arg(last_position_ms), sqlc.arg(source), sqlc.arg(created_at), sqlc.arg(updated_at)
+    sqlc.arg(last_position_ms), sqlc.narg(runtime_ms), sqlc.arg(source), sqlc.arg(created_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     username = excluded.username,
@@ -53,6 +53,7 @@ ON CONFLICT (id) DO UPDATE SET
     ended_at = excluded.ended_at,
     active_seconds = excluded.active_seconds,
     last_position_ms = excluded.last_position_ms,
+    runtime_ms = excluded.runtime_ms,
     updated_at = excluded.updated_at;
 
 -- name: ListOpenPlaybackWatches :many

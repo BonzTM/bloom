@@ -38,6 +38,7 @@ type storedPlaybackWatch struct {
 	startedAt, lastSeenAt                                     time.Time
 	endedAt                                                   *time.Time
 	activeSeconds, lastPositionMS                             int64
+	runtime                                                   *time.Duration
 	source                                                    core.WatchSource
 	createdAt, updatedAt                                      time.Time
 }
@@ -56,6 +57,7 @@ func (row storedPlaybackWatch) domain() core.PlaybackWatch {
 		StartedAt: row.startedAt, LastSeenAt: row.lastSeenAt, EndedAt: row.endedAt,
 		ActiveTime:   time.Duration(row.activeSeconds) * time.Second,
 		LastPosition: time.Duration(row.lastPositionMS) * time.Millisecond,
+		Runtime:      row.runtime,
 		Source:       row.source, CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
 	}
 }
@@ -210,6 +212,24 @@ func playbackStoreError(operation string, err error) error {
 
 func durationSeconds(value time.Duration) int64      { return int64(value / time.Second) }
 func durationMilliseconds(value time.Duration) int64 { return int64(value / time.Millisecond) }
+
+func nullableDurationMilliseconds(value *time.Duration) sql.NullInt64 {
+	if value == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: durationMilliseconds(*value), Valid: true}
+}
+
+func durationFromNullMilliseconds(value sql.NullInt64) (*time.Duration, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	if value.Int64 < 0 || value.Int64 > int64(math.MaxInt64/time.Millisecond) {
+		return nil, errors.New("stored playback runtime is out of range")
+	}
+	runtime := time.Duration(value.Int64) * time.Millisecond
+	return &runtime, nil
+}
 
 func nullableInt32(value *int32) sql.NullInt32 {
 	if value == nil {

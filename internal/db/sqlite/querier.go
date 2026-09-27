@@ -144,9 +144,12 @@ type Querier interface {
 	StatsDevices(ctx context.Context, arg StatsDevicesParams) ([]StatsDevicesRow, error)
 	StatsLibraries(ctx context.Context, arg StatsLibrariesParams) ([]StatsLibrariesRow, error)
 	StatsMovieTitles(ctx context.Context, arg StatsMovieTitlesParams) ([]StatsMovieTitlesRow, error)
+	StatsMovieTitlesByUniqueUsers(ctx context.Context, arg StatsMovieTitlesByUniqueUsersParams) ([]StatsMovieTitlesByUniqueUsersRow, error)
 	StatsOtherTitles(ctx context.Context, arg StatsOtherTitlesParams) ([]StatsOtherTitlesRow, error)
+	StatsOtherTitlesByUniqueUsers(ctx context.Context, arg StatsOtherTitlesByUniqueUsersParams) ([]StatsOtherTitlesByUniqueUsersRow, error)
 	StatsPlayMethods(ctx context.Context, arg StatsPlayMethodsParams) ([]StatsPlayMethodsRow, error)
 	StatsSeriesTitles(ctx context.Context, arg StatsSeriesTitlesParams) ([]StatsSeriesTitlesRow, error)
+	StatsSeriesTitlesByUniqueUsers(ctx context.Context, arg StatsSeriesTitlesByUniqueUsersParams) ([]StatsSeriesTitlesByUniqueUsersRow, error)
 	// Statistics queries are portable across SQLite and PostgreSQL.
 	StatsTotals(ctx context.Context, arg StatsTotalsParams) (StatsTotalsRow, error)
 	StatsUserRecentWatches(ctx context.Context, arg StatsUserRecentWatchesParams) ([]StatsUserRecentWatchesRow, error)
