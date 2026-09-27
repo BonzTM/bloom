@@ -100,7 +100,7 @@ func TestStatsQueryValidate(t *testing.T) {
 	valid := []StatsQuery{
 		{Window: window, Report: StatsReportOverview},
 		{Window: window, Report: StatsReportLibraries},
-		{Window: window, Report: StatsReportTitles, TitleKind: StatsTitleMovie},
+		{Window: window, Report: StatsReportTitles, TitleKind: StatsTitleMovie, TitleOrder: StatsTitleOrderPlays},
 		{Window: window, Report: StatsReportUser, UserServerID: "11111111-1111-4111-8111-111111111111", MediaUserID: "user"},
 	}
 	for _, query := range valid {
@@ -111,6 +111,7 @@ func TestStatsQueryValidate(t *testing.T) {
 	invalid := []StatsQuery{
 		{},
 		{Window: window, Report: StatsReportTitles},
+		{Window: window, Report: StatsReportTitles, TitleKind: StatsTitleMovie, TitleOrder: "bad"},
 		{Window: window, Report: StatsReportUser, UserServerID: "bad", MediaUserID: "user"},
 		{Window: window, Report: StatsReportOverview, LibraryID: "library"},
 		{Window: window, Report: StatsReportOverview, LibraryID: "nul\x00library"},

@@ -333,6 +333,7 @@ func sqliteWatchParams(w core.PlaybackWatch) (sqlite.UpsertPlaybackWatchParams, 
 		StartedAt: formatSQLiteTime(w.StartedAt), LastSeenAt: formatSQLiteTime(w.LastSeenAt),
 		EndedAt: sqliteNullableTime(w.EndedAt), ActiveSeconds: durationSeconds(w.ActiveTime),
 		LastPositionMs: durationMilliseconds(w.LastPosition), Source: string(w.Source),
+		RuntimeMs: nullableDurationMilliseconds(w.Runtime),
 		CreatedAt: formatSQLiteTime(w.CreatedAt), UpdatedAt: formatSQLiteTime(w.UpdatedAt),
 	}, nil
 }
@@ -372,7 +373,7 @@ func sqliteStoredWatch(
 	season, episode sql.NullInt64,
 	method, state, started, lastSeen string,
 	ended sql.NullString,
-	activeSeconds, positionMS int64,
+	activeSeconds, positionMS int64, runtimeMS sql.NullInt64,
 	source, created, updated string,
 	stream storedStreamDetails,
 ) (core.PlaybackWatch, error) {
@@ -408,6 +409,10 @@ func sqliteStoredWatch(
 	if err != nil {
 		return core.PlaybackWatch{}, err
 	}
+	runtime, err := durationFromNullMilliseconds(runtimeMS)
+	if err != nil {
+		return core.PlaybackWatch{}, err
+	}
 	return storedPlaybackWatch{
 		id: id, mediaServerID: serverID, mediaServerName: serverName, mediaUserID: userID,
 		username: username, deviceID: deviceID, deviceName: deviceName, client: client,
@@ -417,7 +422,8 @@ func sqliteStoredWatch(
 		playMethod: core.PlayMethod(method), state: core.WatchState(state),
 		stream:    details,
 		startedAt: startedAt, lastSeenAt: lastSeenAt, endedAt: endedAt,
-		activeSeconds: activeSeconds, lastPositionMS: positionMS, source: core.WatchSource(source),
+		activeSeconds: activeSeconds, lastPositionMS: positionMS, runtime: runtime,
+		source:    core.WatchSource(source),
 		createdAt: createdAt, updatedAt: updatedAt,
 	}.domain(), nil
 }
@@ -429,7 +435,7 @@ func sqliteOpenWatch(row sqlite.ListOpenPlaybackWatchesRow) (core.PlaybackWatch,
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -443,7 +449,7 @@ func sqliteNowWatch(row sqlite.ListNowPlayingRow) (core.PlaybackWatch, error) {
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -457,7 +463,7 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -471,7 +477,7 @@ func sqliteRecentWatch(row sqlite.FindRecentPlaybackWatchRow) (core.PlaybackWatc
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -485,7 +491,7 @@ func sqliteRecentServerWatch(row sqlite.ListRecentPlaybackWatchesRow) (core.Play
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),

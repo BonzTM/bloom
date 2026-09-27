@@ -50,6 +50,9 @@ const (
 // StatsTitleKind selects Bloom's stable title grouping rule.
 type StatsTitleKind string
 
+// StatsTitleOrder selects the primary title ranking metric.
+type StatsTitleOrder string
+
 const (
 	// StatsTitleMovie groups movies by media-server item ID.
 	StatsTitleMovie StatsTitleKind = "movie"
@@ -57,11 +60,20 @@ const (
 	StatsTitleSeries StatsTitleKind = "series"
 	// StatsTitleOther groups remaining watches by item type.
 	StatsTitleOther StatsTitleKind = "other"
+	// StatsTitleOrderPlays ranks titles by total watch rows.
+	StatsTitleOrderPlays StatsTitleOrder = "plays"
+	// StatsTitleOrderUniqueUsers ranks titles by distinct media users.
+	StatsTitleOrderUniqueUsers StatsTitleOrder = "unique_users"
 )
 
 // Valid reports whether kind is a supported title grouping.
 func (k StatsTitleKind) Valid() bool {
 	return k == StatsTitleMovie || k == StatsTitleSeries || k == StatsTitleOther
+}
+
+// Valid reports whether order is a supported title ranking.
+func (o StatsTitleOrder) Valid() bool {
+	return o == StatsTitleOrderPlays || o == StatsTitleOrderUniqueUsers
 }
 
 // StatsWindow is a bounded half-open interval [Start, End) and bucket zone.
@@ -101,6 +113,7 @@ type StatsQuery struct {
 	Window       StatsWindow
 	Report       StatsReport
 	TitleKind    StatsTitleKind
+	TitleOrder   StatsTitleOrder
 	MediaUserID  string
 	UserServerID string
 	LibraryID    string
@@ -122,7 +135,7 @@ func (q StatsQuery) Validate() error {
 	case StatsReportOverview, StatsReportDaily, StatsReportPatterns, StatsReportUsers, StatsReportLibraries:
 		return nil
 	case StatsReportTitles:
-		if !q.TitleKind.Valid() {
+		if !q.TitleKind.Valid() || !q.TitleOrder.Valid() {
 			return ErrInvalidArgument
 		}
 		return nil
@@ -169,6 +182,7 @@ type StatsTitle struct {
 	Name          string
 	Plays         int64
 	WatchSeconds  int64
+	UniqueUsers   int64
 	LastWatchedAt time.Time
 }
 

@@ -336,6 +336,7 @@ func postgresWatchParams(w core.PlaybackWatch) (postgres.UpsertPlaybackWatchPara
 		StartedAt:              core.NormalizeTime(w.StartedAt), LastSeenAt: core.NormalizeTime(w.LastSeenAt),
 		EndedAt: nullableTime(w.EndedAt), ActiveSeconds: durationSeconds(w.ActiveTime),
 		LastPositionMs: durationMilliseconds(w.LastPosition), Source: string(w.Source),
+		RuntimeMs: nullableDurationMilliseconds(w.Runtime),
 		CreatedAt: core.NormalizeTime(w.CreatedAt), UpdatedAt: core.NormalizeTime(w.UpdatedAt),
 	}, nil
 }
@@ -347,12 +348,16 @@ func postgresStoredWatch(
 	method, state string,
 	started, lastSeen time.Time,
 	ended sql.NullTime,
-	activeSeconds, positionMS int64,
+	activeSeconds, positionMS int64, runtimeMS sql.NullInt64,
 	source string,
 	created, updated time.Time,
 	stream storedStreamDetails,
 ) (core.PlaybackWatch, error) {
 	details, err := stream.domain()
+	if err != nil {
+		return core.PlaybackWatch{}, err
+	}
+	runtime, err := durationFromNullMilliseconds(runtimeMS)
 	if err != nil {
 		return core.PlaybackWatch{}, err
 	}
@@ -366,7 +371,8 @@ func postgresStoredWatch(
 		stream:    details,
 		startedAt: core.NormalizeTime(started), lastSeenAt: core.NormalizeTime(lastSeen),
 		endedAt: timeFromNull(ended), activeSeconds: activeSeconds, lastPositionMS: positionMS,
-		source: core.WatchSource(source), createdAt: core.NormalizeTime(created), updatedAt: core.NormalizeTime(updated),
+		runtime: runtime,
+		source:  core.WatchSource(source), createdAt: core.NormalizeTime(created), updatedAt: core.NormalizeTime(updated),
 	}.domain(), nil
 }
 
@@ -377,7 +383,7 @@ func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) (core.PlaybackWa
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -391,7 +397,7 @@ func postgresNowWatch(row postgres.ListNowPlayingRow) (core.PlaybackWatch, error
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -405,7 +411,7 @@ func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) (core.PlaybackWat
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -419,7 +425,7 @@ func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) (core.Playback
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -433,7 +439,7 @@ func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) (core.
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
-		row.ActiveSeconds, row.LastPositionMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),

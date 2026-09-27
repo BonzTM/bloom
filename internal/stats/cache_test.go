@@ -43,8 +43,9 @@ func TestResultCacheKeySeparatesReportSubtypes(t *testing.T) {
 	}
 	keys := make(map[cacheKey]bool)
 	for _, query := range []core.StatsQuery{
-		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleMovie},
-		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleSeries},
+		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleMovie, TitleOrder: core.StatsTitleOrderPlays},
+		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleMovie, TitleOrder: core.StatsTitleOrderUniqueUsers},
+		{Window: window, Report: core.StatsReportTitles, TitleKind: core.StatsTitleSeries, TitleOrder: core.StatsTitleOrderPlays},
 		{Window: window, Report: core.StatsReportUser, UserServerID: "11111111-1111-4111-8111-111111111111", MediaUserID: "one"},
 		{Window: window, Report: core.StatsReportUser, UserServerID: "11111111-1111-4111-8111-111111111111", MediaUserID: "two"},
 	} {

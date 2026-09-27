@@ -199,6 +199,15 @@ use `GET /api/v1/media-servers/{id}/users` to list a server's users and choose
 one to link to a Bloom account. Deleting a
 registration removes its encrypted credential and its associated playback data.
 
+Signed-in accounts with `stats.read.all`, `stats.read.own`, or
+`requests.read.own` can load registered-server artwork from
+`GET /api/v1/media-servers/{id}/items/{item_id}/image`. The required `type`
+is `Primary`, `Backdrop`, or `Thumb`; `max_width` defaults to 400 and accepts
+64 through 1280. Bloom builds the Jellyfin image URL, keeps the API key on the
+server, accepts only JPEG, PNG, or WebP responses up to 4 MiB, and privately
+caches successful images for one day. The route forwards Jellyfin ETags and
+honors `If-None-Match`.
+
 ### Statistics
 
 Bloom polls `GET /Sessions` on every registered Jellyfin server and records
@@ -215,8 +224,10 @@ flags, and transcode reasons. A position, pause, play-method, or stream-detail
 change creates a sample; an otherwise unchanged observation does not. The
 direct-play audio fields follow Jellyfin's selected audio-stream index and fall
 back to the default track; framerates are rounded to hundredths. The latest
-stream details are also stored on the watch for list responses. Open
-watches are persisted on every observation and restored after a
+stream details are also stored on the watch for list responses. Each watch
+also stores Jellyfin's nullable item runtime in milliseconds and updates it
+when Jellyfin reports a change; position samples do not duplicate the runtime.
+Open watches are persisted on every observation and restored after a
 restart. Bloom resolves each item's Jellyfin `CollectionFolder` ancestor and
 stores that library on the watch. A per-server cache bounds ancestor lookups to
 4096 entries for 24 hours. After each successful poll, Bloom also attempts up to
@@ -239,7 +250,8 @@ An authenticated account with `stats.read.all` can use cursor-paged
 `media_server_id` filter. `GET /api/v1/playback/watches/{id}/positions`
 returns that watch's retained samples, up to 512, in newest-first order. Watch list and
 per-user statistics detail responses include the latest stream details when
-available. Successful reads emit no playback audit event;
+available. Those watch responses also include nullable `runtime_ms` so clients
+can calculate progress and remaining time. Successful reads emit no playback audit event;
 authorization denials continue to use the shared security audit stream.
 
 An account with `stats.read.all` can also read the statistics dashboards at
@@ -253,6 +265,11 @@ query to one server. Every report also accepts `library_id` when
 `media_server_id` is present. The `/libraries` report returns at most 50 ranked
 library rows. Watches whose library is unresolved appear in one row with empty
 `library_id` and `library_name` values.
+
+Title rows include `unique_users`, the distinct media-user count for that
+title. `GET /api/v1/stats/titles` accepts `order=plays|unique_users` and
+defaults to `plays`, so clients can request most-viewed and most-popular title
+rankings separately. The selected order is part of the statistics cache key.
 
 Every response states its resolved window and time zone. `tz` defaults to UTC
 and accepts an IANA time-zone name of at most 64 bytes; the host-dependent
@@ -629,6 +646,10 @@ to watches and watch-position samples, plus the position-sample transition
 marker used for retention, on both engines. Apply it before enabling
 stream-detail collection. Its down migration removes those columns and loses
 the recorded stream-detail series.
+
+Migration `00020_watch_runtime` adds the nullable, bounded `runtime_ms` column
+to watches on both engines. Its down migration removes the column and loses
+the recorded runtimes.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

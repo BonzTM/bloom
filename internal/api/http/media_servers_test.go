@@ -26,24 +26,30 @@ import (
 )
 
 type fakeMediaServerService struct {
-	mu           sync.Mutex
-	servers      []core.MediaServer
-	connection   core.MediaServerConnection
-	info         core.ServerInfo
-	libraries    []core.Library
-	users        []core.MediaUser
-	err          error
-	registered   int
-	getCalls     int
-	probeCalls   int
-	libraryCalls int
-	userCalls    int
-	deleted      int
-	deadlineSeen bool
-	lastAPIKey   string
-	lastInsecure bool
-	lastAfter    string
-	lastPageSize int
+	mu              sync.Mutex
+	servers         []core.MediaServer
+	connection      core.MediaServerConnection
+	info            core.ServerInfo
+	libraries       []core.Library
+	users           []core.MediaUser
+	image           core.ItemImage
+	err             error
+	registered      int
+	getCalls        int
+	probeCalls      int
+	libraryCalls    int
+	userCalls       int
+	imageCalls      int
+	deleted         int
+	deadlineSeen    bool
+	lastAPIKey      string
+	lastInsecure    bool
+	lastAfter       string
+	lastPageSize    int
+	lastItemID      string
+	lastImageType   core.ItemImageType
+	lastMaxWidth    int
+	lastIfNoneMatch string
 }
 
 func newFakeMediaServerService() *fakeMediaServerService {
@@ -117,6 +123,18 @@ func (f *fakeMediaServerService) Users(ctx context.Context, _ string) ([]core.Me
 	f.userCalls++
 	_, f.deadlineSeen = ctx.Deadline()
 	return slices.Clone(f.users), f.err
+}
+
+func (f *fakeMediaServerService) ItemImage(
+	ctx context.Context, _, itemID string, imageType core.ItemImageType, maxWidth int, ifNoneMatch string,
+) (core.ItemImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.imageCalls++
+	_, f.deadlineSeen = ctx.Deadline()
+	f.lastItemID, f.lastImageType = itemID, imageType
+	f.lastMaxWidth, f.lastIfNoneMatch = maxWidth, ifNoneMatch
+	return f.image, f.err
 }
 
 func (f *fakeMediaServerService) Delete(ctx context.Context, _ string) (core.MediaServer, error) {

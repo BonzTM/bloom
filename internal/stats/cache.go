@@ -46,7 +46,7 @@ func newResultCache(clock core.Clock, capacity int, ttl time.Duration) *resultCa
 func resultCacheKey(query core.StatsQuery) cacheKey {
 	kind := string(query.Report)
 	if query.Report == core.StatsReportTitles {
-		kind += ":" + string(query.TitleKind)
+		kind += ":" + string(query.TitleKind) + ":" + string(query.TitleOrder)
 	}
 	if query.Report == core.StatsReportUser {
 		kind += fmt.Sprintf(":%s:%s", query.UserServerID, query.MediaUserID)

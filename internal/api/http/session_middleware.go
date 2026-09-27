@@ -22,13 +22,14 @@ const (
 )
 
 type sessionRequestState struct {
-	inbound          bool
-	resolved         bool
-	clearCookie      bool
-	replacementReady bool
-	afterCommit      func()
-	onCommitFailed   func(error)
-	authDeadline     time.Time
+	inbound           bool
+	resolved          bool
+	clearCookie       bool
+	replacementReady  bool
+	afterCommit       func()
+	onCommitFailed    func(error)
+	authDeadline      time.Time
+	privateImageCache bool
 }
 
 type bufferedResponse struct {
@@ -187,11 +188,20 @@ func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, 
 		s.sessions.WriteSessionCookie(r.Context(), buffer, "", time.Time{})
 	case scs.Unmodified:
 	}
-	buffer.Header().Set("Cache-Control", "no-store")
+	if !state.privateImageCache {
+		buffer.Header().Set("Cache-Control", "no-store")
+	}
 	if state.afterCommit != nil {
 		state.afterCommit()
 	}
 	return true
+}
+
+func permitPrivateImageCache(ctx context.Context) {
+	state := sessionState(ctx)
+	if state != nil {
+		state.privateImageCache = true
+	}
 }
 
 func (s *sessionRequestState) contextForCommit(fallback context.Context) (context.Context, context.CancelFunc) {

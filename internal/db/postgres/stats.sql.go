@@ -282,8 +282,9 @@ func (q *Queries) StatsLibraries(ctx context.Context, arg StatsLibrariesParams) 
 
 const statsMovieTitles = `-- name: StatsMovieTitles :many
 SELECT w.media_server_id, w.item_id AS title_key, MAX(w.item_name) AS title_name,
-       COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
-       MAX(w.started_at) AS last_watched_at
+	   COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+	   COUNT(DISTINCT w.media_user_id) AS unique_users,
+	   MAX(w.started_at) AS last_watched_at
 FROM watches w
 WHERE w.started_at >= $1
   AND w.started_at < $2
@@ -316,6 +317,7 @@ type StatsMovieTitlesRow struct {
 	TitleName     interface{}
 	Plays         int64
 	WatchSeconds  interface{}
+	UniqueUsers   int64
 	LastWatchedAt interface{}
 }
 
@@ -342,6 +344,88 @@ func (q *Queries) StatsMovieTitles(ctx context.Context, arg StatsMovieTitlesPara
 			&i.TitleName,
 			&i.Plays,
 			&i.WatchSeconds,
+			&i.UniqueUsers,
+			&i.LastWatchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const statsMovieTitlesByUniqueUsers = `-- name: StatsMovieTitlesByUniqueUsers :many
+SELECT w.media_server_id, w.item_id AS title_key, MAX(w.item_name) AS title_name,
+	   COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+	   COUNT(DISTINCT w.media_user_id) AS unique_users,
+	   MAX(w.started_at) AS last_watched_at
+FROM watches w
+WHERE w.started_at >= $1
+  AND w.started_at < $2
+  AND LOWER(w.item_type) = 'movie'
+  AND (CAST($3 AS TEXT) = ''
+       OR w.media_server_id = CAST($3 AS TEXT))
+  AND (CAST($4 AS TEXT) = ''
+       OR w.library_id = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = ''
+       OR (w.media_server_id = CAST($5 AS TEXT)
+           AND w.media_user_id = CAST($6 AS TEXT)))
+GROUP BY w.media_server_id, w.item_id
+ORDER BY unique_users DESC, plays DESC, watch_seconds DESC,
+         title_key ASC, w.media_server_id ASC
+LIMIT $7
+`
+
+type StatsMovieTitlesByUniqueUsersParams struct {
+	WindowStart       time.Time
+	WindowEnd         time.Time
+	MediaServerFilter string
+	LibraryFilter     string
+	UserServerFilter  string
+	MediaUserFilter   string
+	RowLimit          int32
+}
+
+type StatsMovieTitlesByUniqueUsersRow struct {
+	MediaServerID string
+	TitleKey      string
+	TitleName     interface{}
+	Plays         int64
+	WatchSeconds  interface{}
+	UniqueUsers   int64
+	LastWatchedAt interface{}
+}
+
+func (q *Queries) StatsMovieTitlesByUniqueUsers(ctx context.Context, arg StatsMovieTitlesByUniqueUsersParams) ([]StatsMovieTitlesByUniqueUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, statsMovieTitlesByUniqueUsers,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.MediaServerFilter,
+		arg.LibraryFilter,
+		arg.UserServerFilter,
+		arg.MediaUserFilter,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StatsMovieTitlesByUniqueUsersRow{}
+	for rows.Next() {
+		var i StatsMovieTitlesByUniqueUsersRow
+		if err := rows.Scan(
+			&i.MediaServerID,
+			&i.TitleKey,
+			&i.TitleName,
+			&i.Plays,
+			&i.WatchSeconds,
+			&i.UniqueUsers,
 			&i.LastWatchedAt,
 		); err != nil {
 			return nil, err
@@ -359,8 +443,9 @@ func (q *Queries) StatsMovieTitles(ctx context.Context, arg StatsMovieTitlesPara
 
 const statsOtherTitles = `-- name: StatsOtherTitles :many
 SELECT w.media_server_id, w.item_type AS title_key, w.item_type AS title_name,
-       COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
-       MAX(w.started_at) AS last_watched_at
+	   COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+	   COUNT(DISTINCT w.media_user_id) AS unique_users,
+	   MAX(w.started_at) AS last_watched_at
 FROM watches w
 WHERE w.started_at >= $1
   AND w.started_at < $2
@@ -394,6 +479,7 @@ type StatsOtherTitlesRow struct {
 	TitleName     string
 	Plays         int64
 	WatchSeconds  interface{}
+	UniqueUsers   int64
 	LastWatchedAt interface{}
 }
 
@@ -420,6 +506,89 @@ func (q *Queries) StatsOtherTitles(ctx context.Context, arg StatsOtherTitlesPara
 			&i.TitleName,
 			&i.Plays,
 			&i.WatchSeconds,
+			&i.UniqueUsers,
+			&i.LastWatchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const statsOtherTitlesByUniqueUsers = `-- name: StatsOtherTitlesByUniqueUsers :many
+SELECT w.media_server_id, w.item_type AS title_key, w.item_type AS title_name,
+	   COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+	   COUNT(DISTINCT w.media_user_id) AS unique_users,
+	   MAX(w.started_at) AS last_watched_at
+FROM watches w
+WHERE w.started_at >= $1
+  AND w.started_at < $2
+  AND LOWER(w.item_type) <> 'movie'
+  AND w.series_name = ''
+  AND (CAST($3 AS TEXT) = ''
+       OR w.media_server_id = CAST($3 AS TEXT))
+  AND (CAST($4 AS TEXT) = ''
+       OR w.library_id = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = ''
+       OR (w.media_server_id = CAST($5 AS TEXT)
+           AND w.media_user_id = CAST($6 AS TEXT)))
+GROUP BY w.media_server_id, w.item_type
+ORDER BY unique_users DESC, plays DESC, watch_seconds DESC,
+         title_key ASC, w.media_server_id ASC
+LIMIT $7
+`
+
+type StatsOtherTitlesByUniqueUsersParams struct {
+	WindowStart       time.Time
+	WindowEnd         time.Time
+	MediaServerFilter string
+	LibraryFilter     string
+	UserServerFilter  string
+	MediaUserFilter   string
+	RowLimit          int32
+}
+
+type StatsOtherTitlesByUniqueUsersRow struct {
+	MediaServerID string
+	TitleKey      string
+	TitleName     string
+	Plays         int64
+	WatchSeconds  interface{}
+	UniqueUsers   int64
+	LastWatchedAt interface{}
+}
+
+func (q *Queries) StatsOtherTitlesByUniqueUsers(ctx context.Context, arg StatsOtherTitlesByUniqueUsersParams) ([]StatsOtherTitlesByUniqueUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, statsOtherTitlesByUniqueUsers,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.MediaServerFilter,
+		arg.LibraryFilter,
+		arg.UserServerFilter,
+		arg.MediaUserFilter,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StatsOtherTitlesByUniqueUsersRow{}
+	for rows.Next() {
+		var i StatsOtherTitlesByUniqueUsersRow
+		if err := rows.Scan(
+			&i.MediaServerID,
+			&i.TitleKey,
+			&i.TitleName,
+			&i.Plays,
+			&i.WatchSeconds,
+			&i.UniqueUsers,
 			&i.LastWatchedAt,
 		); err != nil {
 			return nil, err
@@ -500,8 +669,9 @@ func (q *Queries) StatsPlayMethods(ctx context.Context, arg StatsPlayMethodsPara
 
 const statsSeriesTitles = `-- name: StatsSeriesTitles :many
 SELECT w.media_server_id, w.series_name AS title_key, w.series_name AS title_name,
-       COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
-       MAX(w.started_at) AS last_watched_at
+	   COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+	   COUNT(DISTINCT w.media_user_id) AS unique_users,
+	   MAX(w.started_at) AS last_watched_at
 FROM watches w
 WHERE w.started_at >= $1
   AND w.started_at < $2
@@ -535,6 +705,7 @@ type StatsSeriesTitlesRow struct {
 	TitleName     string
 	Plays         int64
 	WatchSeconds  interface{}
+	UniqueUsers   int64
 	LastWatchedAt interface{}
 }
 
@@ -561,6 +732,89 @@ func (q *Queries) StatsSeriesTitles(ctx context.Context, arg StatsSeriesTitlesPa
 			&i.TitleName,
 			&i.Plays,
 			&i.WatchSeconds,
+			&i.UniqueUsers,
+			&i.LastWatchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const statsSeriesTitlesByUniqueUsers = `-- name: StatsSeriesTitlesByUniqueUsers :many
+SELECT w.media_server_id, w.series_name AS title_key, w.series_name AS title_name,
+	   COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
+	   COUNT(DISTINCT w.media_user_id) AS unique_users,
+	   MAX(w.started_at) AS last_watched_at
+FROM watches w
+WHERE w.started_at >= $1
+  AND w.started_at < $2
+  AND LOWER(w.item_type) <> 'movie'
+  AND w.series_name <> ''
+  AND (CAST($3 AS TEXT) = ''
+       OR w.media_server_id = CAST($3 AS TEXT))
+  AND (CAST($4 AS TEXT) = ''
+       OR w.library_id = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = ''
+       OR (w.media_server_id = CAST($5 AS TEXT)
+           AND w.media_user_id = CAST($6 AS TEXT)))
+GROUP BY w.media_server_id, w.series_name
+ORDER BY unique_users DESC, plays DESC, watch_seconds DESC,
+         title_key ASC, w.media_server_id ASC
+LIMIT $7
+`
+
+type StatsSeriesTitlesByUniqueUsersParams struct {
+	WindowStart       time.Time
+	WindowEnd         time.Time
+	MediaServerFilter string
+	LibraryFilter     string
+	UserServerFilter  string
+	MediaUserFilter   string
+	RowLimit          int32
+}
+
+type StatsSeriesTitlesByUniqueUsersRow struct {
+	MediaServerID string
+	TitleKey      string
+	TitleName     string
+	Plays         int64
+	WatchSeconds  interface{}
+	UniqueUsers   int64
+	LastWatchedAt interface{}
+}
+
+func (q *Queries) StatsSeriesTitlesByUniqueUsers(ctx context.Context, arg StatsSeriesTitlesByUniqueUsersParams) ([]StatsSeriesTitlesByUniqueUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, statsSeriesTitlesByUniqueUsers,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.MediaServerFilter,
+		arg.LibraryFilter,
+		arg.UserServerFilter,
+		arg.MediaUserFilter,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StatsSeriesTitlesByUniqueUsersRow{}
+	for rows.Next() {
+		var i StatsSeriesTitlesByUniqueUsersRow
+		if err := rows.Scan(
+			&i.MediaServerID,
+			&i.TitleKey,
+			&i.TitleName,
+			&i.Plays,
+			&i.WatchSeconds,
+			&i.UniqueUsers,
 			&i.LastWatchedAt,
 		); err != nil {
 			return nil, err
@@ -639,7 +893,7 @@ func (q *Queries) StatsTotals(ctx context.Context, arg StatsTotalsParams) (Stats
 }
 
 const statsUserRecentWatches = `-- name: StatsUserRecentWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at >= $1
@@ -698,6 +952,7 @@ type StatsUserRecentWatchesRow struct {
 	StreamIsVideoDirect       sql.NullBool
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
+	RuntimeMs                 sql.NullInt64
 	MediaServerName           string
 }
 
@@ -754,6 +1009,7 @@ func (q *Queries) StatsUserRecentWatches(ctx context.Context, arg StatsUserRecen
 			&i.StreamIsVideoDirect,
 			&i.StreamIsAudioDirect,
 			&i.StreamTranscodeReasons,
+			&i.RuntimeMs,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err

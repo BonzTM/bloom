@@ -98,6 +98,19 @@ contracts) gets an entry here.
 - Administrators can link their own account to a media-server user from the
   My statistics page when nothing is linked yet, choosing the server and the
   user from lists.
+- A registered-server item image proxy at
+  `GET /api/v1/media-servers/{id}/items/{item_id}/image`, available to signed-in
+  accounts with statistics or own-request read access. It bounds dimensions
+  and response size, restricts image types, supports private caching and ETags,
+  and never exposes media-server credentials.
+- Nullable item runtime on playback-now, playback-history, and per-user
+  statistics watches, updated when Jellyfin reports a runtime change without
+  duplicating it in position samples.
+- Distinct `unique_users` counts on title statistics and
+  `order=plays|unique_users` on `GET /api/v1/stats/titles`, with the selected
+  order isolated in statistics cache keys.
+- SQLite/PostgreSQL migration `00020_watch_runtime` adds nullable, bounded
+  `runtime_ms` storage to watches.
 - Stream details on playback watches and bounded position samples, including
   containers, codecs, bitrate, dimensions, framerate, audio channels,
   direct-stream flags, and transcode reasons. Mid-play method and stream

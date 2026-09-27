@@ -79,6 +79,7 @@ type statsTitleResponse struct {
 	Name          string              `json:"name"`
 	Plays         int64               `json:"plays"`
 	WatchSeconds  int64               `json:"watch_seconds"`
+	UniqueUsers   int64               `json:"unique_users"`
 	LastWatchedAt time.Time           `json:"last_watched_at"`
 }
 
@@ -200,7 +201,25 @@ func (s *Server) handleStatsTitles(w http.ResponseWriter, r *http.Request) {
 			Field: "kind", Code: "invalid", Message: "must be one of movie, series, or other",
 		})
 	}
+	order, fields := statsTitleOrder(values["order"], fields)
+	values.Set("order", string(order))
 	s.handleParsedStats(w, r, values, fields, core.StatsReportTitles, kind, "", "")
+}
+
+func statsTitleOrder(
+	values []string, fields []httputil.FieldError,
+) (core.StatsTitleOrder, []httputil.FieldError) {
+	if len(values) == 0 {
+		return core.StatsTitleOrderPlays, fields
+	}
+	order := core.StatsTitleOrder(values[0])
+	if len(values) != 1 || !order.Valid() {
+		fields = append(fields, httputil.FieldError{
+			Field: "order", Code: "invalid", Message: "must be one of plays or unique_users",
+		})
+		return core.StatsTitleOrderPlays, fields
+	}
+	return order, fields
 }
 
 func (s *Server) handleStatsUser(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +266,9 @@ func (s *Server) handleParsedStats(
 	query := core.StatsQuery{
 		Window: window, Report: report, TitleKind: kind,
 		UserServerID: userServerID, MediaUserID: userID, LibraryID: libraryID,
+	}
+	if report == core.StatsReportTitles {
+		query.TitleOrder = core.StatsTitleOrder(firstValue(values["order"]))
 	}
 	result, err := s.statsReader.ReadStats(r.Context(), query)
 	if err != nil {

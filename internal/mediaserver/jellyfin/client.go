@@ -69,6 +69,7 @@ var (
 	_ core.MediaUserLister         = (*Client)(nil)
 	_ core.MediaAvailabilityLookup = (*Client)(nil)
 	_ core.LibraryResolver         = (*Client)(nil)
+	_ core.MediaItemImageReader    = (*Client)(nil)
 )
 
 // New validates cfg and returns a bounded Jellyfin client.
@@ -484,6 +485,10 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 	if err != nil {
 		return core.PlaybackSession{}, err
 	}
+	runtime, err := optionalDurationFromTicks(item.RunTimeTicks)
+	if err != nil {
+		return core.PlaybackSession{}, err
+	}
 	stream, err := mapStreamDetails(value)
 	if err != nil {
 		return core.PlaybackSession{}, err
@@ -494,7 +499,7 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 		DeviceName: stringValue(value.DeviceName), Client: stringValue(value.Client),
 		ItemID: item.Id.String(), ItemName: *item.Name, ItemType: string(*item.Type),
 		SeriesName: stringValue(item.SeriesName), SeasonNumber: cloneInt32(item.ParentIndexNumber),
-		EpisodeNumber: cloneInt32(item.IndexNumber), Position: position,
+		EpisodeNumber: cloneInt32(item.IndexNumber), Position: position, Runtime: runtime,
 		Paused: boolValue(value.PlayState.IsPaused), PlayMethod: mapPlayMethod(value.PlayState.PlayMethod),
 		Stream:         stream,
 		LastActivityAt: core.NormalizeTime(*value.LastActivityDate),
@@ -663,6 +668,17 @@ func positionFromTicks(ticks *int64) (time.Duration, error) {
 		return 0, errors.New("session position ticks are out of range")
 	}
 	return time.Duration(*ticks) * 100 * time.Nanosecond, nil
+}
+
+func optionalDurationFromTicks(ticks *int64) (*time.Duration, error) {
+	if ticks == nil {
+		return nil, nil
+	}
+	value, err := positionFromTicks(ticks)
+	if err != nil {
+		return nil, errors.New("session runtime ticks are out of range")
+	}
+	return &value, nil
 }
 
 func mapPlayMethod(value *jellyfinapi.PlayMethod) core.PlayMethod {

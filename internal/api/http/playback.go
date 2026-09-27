@@ -36,6 +36,7 @@ type playbackWatchResponse struct {
 	SeasonNumber    *int32                 `json:"season_number"`
 	EpisodeNumber   *int32                 `json:"episode_number"`
 	PositionMS      int64                  `json:"position_ms"`
+	RuntimeMS       *int64                 `json:"runtime_ms"`
 	Paused          bool                   `json:"paused"`
 	PlayMethod      core.PlayMethod        `json:"play_method"`
 	Stream          *streamDetailsResponse `json:"stream,omitempty"`
@@ -243,11 +244,20 @@ func playbackWatchDTO(watch core.PlaybackWatch, now time.Time) playbackWatchResp
 		SeriesName: watch.SeriesName, LibraryID: watch.LibraryID, LibraryName: watch.LibraryName,
 		SeasonNumber: watch.SeasonNumber, EpisodeNumber: watch.EpisodeNumber,
 		PositionMS: int64(watch.LastPosition / time.Millisecond), Paused: watch.State == core.WatchPaused,
+		RuntimeMS:  durationMilliseconds(watch.Runtime),
 		PlayMethod: watch.PlayMethod, Source: watch.Source,
 		Stream:        streamDetailsDTO(watch.Stream),
 		ActiveSeconds: int64(watch.ActiveTimeAt(now) / time.Second),
 		StartedAt:     watch.StartedAt, EndedAt: watch.EndedAt,
 	}
+}
+
+func durationMilliseconds(value *time.Duration) *int64 {
+	if value == nil {
+		return nil
+	}
+	milliseconds := int64(*value / time.Millisecond)
+	return &milliseconds
 }
 
 func playbackPositionDTO(position core.PlaybackPosition) playbackPositionResponse {

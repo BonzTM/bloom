@@ -725,6 +725,29 @@ paths:
         "502": { $ref: "#/components/responses/MediaServerFailure" }
         "503": { $ref: "#/components/responses/MediaServerBusy" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/items/{item_id}/image:
+    get:
+      tags: [media-servers]
+      operationId: getMediaServerItemImage
+      summary: Stream bounded artwork from a registered media server.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/MediaItemID" }
+        - { $ref: "#/components/parameters/MediaItemImageType" }
+        - { $ref: "#/components/parameters/MediaItemImageMaxWidth" }
+        - { $ref: "#/components/parameters/IfNoneMatch" }
+      responses:
+        "200": { $ref: "#/components/responses/MediaItemImageReturned" }
+        "304": { $ref: "#/components/responses/MediaItemImageNotModified" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
   /api/v1/download-managers:
     post:
       tags: [download-managers]
@@ -1448,6 +1471,7 @@ paths:
         - { $ref: "#/components/parameters/StatsLibraryID" }
         - { $ref: "#/components/parameters/StatsTimeZone" }
         - { $ref: "#/components/parameters/StatsTitleKind" }
+        - { $ref: "#/components/parameters/StatsTitleOrder" }
       responses:
         <<: *StatsOverviewResponses
         "200": { $ref: "#/components/responses/StatsTitlesReturned" }
@@ -1597,6 +1621,10 @@ components:
       in: query
       required: true
       schema: { $ref: "#/components/schemas/StatsTitleKind" }
+    StatsTitleOrder:
+      name: order
+      in: query
+      schema: { type: string, enum: [plays, unique_users], default: plays }
     StatsPathMediaServerID:
       name: media_server_id
       in: path
@@ -1617,6 +1645,24 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    MediaItemID:
+      name: item_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+    MediaItemImageType:
+      name: type
+      in: query
+      required: true
+      schema: { type: string, enum: [Primary, Backdrop, Thumb] }
+    MediaItemImageMaxWidth:
+      name: max_width
+      in: query
+      schema: { type: integer, minimum: 64, maximum: 1280, default: 400 }
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      schema: { type: string }
     InviteID:
       name: id
       in: path
@@ -1648,6 +1694,14 @@ components:
       schema:
         type: string
         const: public, max-age=3600
+    CacheControlPrivateImage:
+      description: Allows private browser caching of media-server artwork for one day.
+      schema:
+        type: string
+        const: private, max-age=86400
+    ETag:
+      description: Upstream media-server image entity tag when available.
+      schema: { type: string }
     VaryCookie:
       description: Marks the response as varying on the inbound Cookie header.
       schema:
@@ -1892,6 +1946,21 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
+    MediaItemImageReturned:
+      description: Bounded media-server artwork. Only JPEG, PNG, and WebP are passed through.
+      headers: &MediaItemImageHeaders
+        Cache-Control: { $ref: "#/components/headers/CacheControlPrivateImage" }
+        ETag: { $ref: "#/components/headers/ETag" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        image/jpeg: { schema: { type: string, format: binary, maxLength: 4194304 } }
+        image/png: { schema: { type: string, format: binary, maxLength: 4194304 } }
+        image/webp: { schema: { type: string, format: binary, maxLength: 4194304 } }
+    MediaItemImageNotModified:
+      description: The caller's entity tag still identifies the current image.
+      headers: *MediaItemImageHeaders
     PlaybackNowListed:
       description: A stable cursor page of open watches ordered by start time and identifier, newest first.
       headers:
@@ -2981,6 +3050,7 @@ components:
         - season_number
         - episode_number
         - position_ms
+        - runtime_ms
         - paused
         - play_method
         - source
@@ -3005,6 +3075,7 @@ components:
         season_number: { type: [integer, "null"], format: int32 }
         episode_number: { type: [integer, "null"], format: int32 }
         position_ms: { type: integer, format: int64, minimum: 0 }
+        runtime_ms: { type: [integer, "null"], format: int64, minimum: 0, maximum: 9223372036854 }
         paused: { type: boolean }
         play_method: { $ref: "#/components/schemas/PlayMethod" }
         stream: { $ref: "#/components/schemas/StreamDetails" }
@@ -3090,7 +3161,7 @@ components:
         unique_titles: { type: integer, format: int64, minimum: 0 }
     StatsTitle:
       type: object
-      required: [kind, media_server_id, key, name, plays, watch_seconds, last_watched_at]
+      required: [kind, media_server_id, key, name, plays, watch_seconds, unique_users, last_watched_at]
       additionalProperties: false
       properties:
         kind: { $ref: "#/components/schemas/StatsTitleKind" }
@@ -3099,6 +3170,7 @@ components:
         name: { type: string }
         plays: { type: integer, format: int64, minimum: 1 }
         watch_seconds: { type: integer, format: int64, minimum: 0 }
+        unique_users: { type: integer, format: int64, minimum: 1 }
         last_watched_at: { type: string, format: date-time }
     StatsUser:
       type: object

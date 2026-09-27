@@ -15,7 +15,7 @@ import (
 	jellyfinapi "github.com/BonzTM/bloom/internal/mediaserver/jellyfin/api"
 )
 
-const validSessionJSON = `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","UserName":"alice","DeviceId":"device-1","DeviceName":"TV","Client":"Jellyfin Web","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Pilot","Type":"Episode","SeriesName":"Show","ParentIndexNumber":1,"IndexNumber":2},"PlayState":{"PositionTicks":12340000,"IsPaused":false,"PlayMethod":"DirectStream"}},{"Id":"idle"}]`
+const validSessionJSON = `[{"Id":"session-1","UserId":"11111111-1111-4111-8111-111111111111","UserName":"alice","DeviceId":"device-1","DeviceName":"TV","Client":"Jellyfin Web","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Pilot","Type":"Episode","SeriesName":"Show","ParentIndexNumber":1,"IndexNumber":2,"RunTimeTicks":36000000000},"PlayState":{"PositionTicks":12340000,"IsPaused":false,"PlayMethod":"DirectStream"}},{"Id":"idle"}]`
 
 func TestListSessionsMapsPlayingItemsAndDropsIdleSessions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,10 +32,20 @@ func TestListSessionsMapsPlayingItemsAndDropsIdleSessions(t *testing.T) {
 	}
 	got := sessions[0]
 	if got.Position != 1234*time.Millisecond || got.PlayMethod != core.PlayMethodDirectStream ||
+		got.Runtime == nil || *got.Runtime != time.Hour ||
 		got.SeriesName != "Show" || got.SeasonNumber == nil || *got.SeasonNumber != 1 ||
 		got.EpisodeNumber == nil || *got.EpisodeNumber != 2 {
 		t.Fatalf("mapped session = %+v", got)
 	}
+}
+
+func TestListSessionsRejectsMalformedRuntimeTicks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `[{"UserId":"11111111-1111-4111-8111-111111111111","DeviceId":"device","LastActivityDate":"2026-09-23T12:00:00Z","NowPlayingItem":{"Id":"22222222-2222-4222-8222-222222222222","Name":"Movie","Type":"Movie","RunTimeTicks":-1},"PlayState":{}}]`)
+	}))
+	defer server.Close()
+	_, err := newTestClient(t, server, nil).ListSessions(t.Context())
+	assertMediaError(t, err, core.MediaServerMalformed)
 }
 
 func TestListSessionsRejectsMalformedTicks(t *testing.T) {

@@ -15,7 +15,7 @@ func mapSQLiteMovieTitles(rows []sqlite.StatsMovieTitlesRow, queryErr error) ([]
 	result := make([]core.StatsTitle, 0, len(rows))
 	for _, row := range rows {
 		mapped, err := mapStatsTitle(core.StatsTitleMovie, row.MediaServerID, row.TitleKey,
-			row.TitleName, row.Plays, row.WatchSeconds, row.LastWatchedAt)
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
 		if err != nil {
 			return nil, statsStoreError("map statistics movie titles", err)
 		}
@@ -31,7 +31,7 @@ func mapSQLiteSeriesTitles(rows []sqlite.StatsSeriesTitlesRow, queryErr error) (
 	result := make([]core.StatsTitle, 0, len(rows))
 	for _, row := range rows {
 		mapped, err := mapStatsTitle(core.StatsTitleSeries, row.MediaServerID, row.TitleKey,
-			row.TitleName, row.Plays, row.WatchSeconds, row.LastWatchedAt)
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
 		if err != nil {
 			return nil, statsStoreError("map statistics series titles", err)
 		}
@@ -47,7 +47,61 @@ func mapSQLiteOtherTitles(rows []sqlite.StatsOtherTitlesRow, queryErr error) ([]
 	result := make([]core.StatsTitle, 0, len(rows))
 	for _, row := range rows {
 		mapped, err := mapStatsTitle(core.StatsTitleOther, row.MediaServerID, row.TitleKey,
-			row.TitleName, row.Plays, row.WatchSeconds, row.LastWatchedAt)
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
+		if err != nil {
+			return nil, statsStoreError("map statistics other titles", err)
+		}
+		result = append(result, mapped)
+	}
+	return result, nil
+}
+
+func mapSQLiteMovieTitlesByUniqueUsers(
+	rows []sqlite.StatsMovieTitlesByUniqueUsersRow, queryErr error,
+) ([]core.StatsTitle, error) {
+	if queryErr != nil {
+		return nil, statsStoreError("query statistics movie titles", queryErr)
+	}
+	result := make([]core.StatsTitle, 0, len(rows))
+	for _, row := range rows {
+		mapped, err := mapStatsTitle(core.StatsTitleMovie, row.MediaServerID, row.TitleKey,
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
+		if err != nil {
+			return nil, statsStoreError("map statistics movie titles", err)
+		}
+		result = append(result, mapped)
+	}
+	return result, nil
+}
+
+func mapSQLiteSeriesTitlesByUniqueUsers(
+	rows []sqlite.StatsSeriesTitlesByUniqueUsersRow, queryErr error,
+) ([]core.StatsTitle, error) {
+	if queryErr != nil {
+		return nil, statsStoreError("query statistics series titles", queryErr)
+	}
+	result := make([]core.StatsTitle, 0, len(rows))
+	for _, row := range rows {
+		mapped, err := mapStatsTitle(core.StatsTitleSeries, row.MediaServerID, row.TitleKey,
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
+		if err != nil {
+			return nil, statsStoreError("map statistics series titles", err)
+		}
+		result = append(result, mapped)
+	}
+	return result, nil
+}
+
+func mapSQLiteOtherTitlesByUniqueUsers(
+	rows []sqlite.StatsOtherTitlesByUniqueUsersRow, queryErr error,
+) ([]core.StatsTitle, error) {
+	if queryErr != nil {
+		return nil, statsStoreError("query statistics other titles", queryErr)
+	}
+	result := make([]core.StatsTitle, 0, len(rows))
+	for _, row := range rows {
+		mapped, err := mapStatsTitle(core.StatsTitleOther, row.MediaServerID, row.TitleKey,
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
 		if err != nil {
 			return nil, statsStoreError("map statistics other titles", err)
 		}
@@ -58,7 +112,7 @@ func mapSQLiteOtherTitles(rows []sqlite.StatsOtherTitlesRow, queryErr error) ([]
 
 func mapStatsTitle(
 	kind core.StatsTitleKind, serverID, key string, name any,
-	plays int64, watchSeconds, lastWatched any,
+	plays int64, watchSeconds any, uniqueUsers int64, lastWatched any,
 ) (core.StatsTitle, error) {
 	mappedName, err := statsValueString(name)
 	if err != nil {
@@ -74,7 +128,7 @@ func mapStatsTitle(
 	}
 	return core.StatsTitle{
 		Kind: kind, MediaServerID: serverID, Key: key, Name: mappedName,
-		Plays: plays, WatchSeconds: seconds, LastWatchedAt: watched,
+		Plays: plays, WatchSeconds: seconds, UniqueUsers: uniqueUsers, LastWatchedAt: watched,
 	}, nil
 }
 
@@ -159,6 +213,10 @@ func sqliteStatsWatch(row sqlite.StatsUserRecentWatchesRow) (core.PlaybackWatch,
 	if err != nil {
 		return core.PlaybackWatch{}, fmt.Errorf("stream details: %w", err)
 	}
+	runtime, err := durationFromNullMilliseconds(row.RuntimeMs)
+	if err != nil {
+		return core.PlaybackWatch{}, fmt.Errorf("runtime: %w", err)
+	}
 	return core.PlaybackWatch{
 		ID: row.ID, MediaServerID: row.MediaServerID, MediaServerName: row.MediaServerName,
 		MediaUserID: row.MediaUserID, Username: row.Username, DeviceID: row.DeviceID,
@@ -170,7 +228,7 @@ func sqliteStatsWatch(row sqlite.StatsUserRecentWatchesRow) (core.PlaybackWatch,
 		Stream:    stream,
 		StartedAt: started, LastSeenAt: lastSeen, EndedAt: ended,
 		ActiveTime:   time.Duration(row.ActiveSeconds) * time.Second,
-		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond,
-		Source:       core.WatchSource(row.Source), CreatedAt: created, UpdatedAt: updated,
+		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond, Runtime: runtime,
+		Source: core.WatchSource(row.Source), CreatedAt: created, UpdatedAt: updated,
 	}, nil
 }

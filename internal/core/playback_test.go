@@ -45,11 +45,32 @@ func (s *idSequence) New() (string, error) {
 }
 
 func playbackSession() core.PlaybackSession {
+	runtime := 45 * time.Minute
 	return core.PlaybackSession{
 		ServerSessionID: "session-1", MediaUserID: "user-1", Username: "alice",
 		DeviceID: "device-1", DeviceName: "TV", Client: "Jellyfin Web",
 		ItemID: "item-1", ItemName: "Pilot", ItemType: "Episode", SeriesName: "Show",
-		Position: time.Minute, PlayMethod: core.PlayMethodDirectPlay,
+		Position: time.Minute, Runtime: &runtime, PlayMethod: core.PlayMethodDirectPlay,
+	}
+}
+
+func TestPlaybackTrackerUpdatesWatchRuntimeWithoutAddingPositionSample(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	tracker, err := core.NewPlaybackTracker(playbackServerID, core.PlaybackTrackerConfig{
+		MissedPolls: 3, ResumeWindow: time.Minute,
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := &idSequence{}
+	session := playbackSession()
+	started := onlyMutation(t, observe(t, tracker, ids, now, session))
+	updatedRuntime := 46 * time.Minute
+	session.Runtime = &updatedRuntime
+	updated := onlyMutation(t, observe(t, tracker, ids, now.Add(time.Second), session))
+	if started.Watch.Runtime == nil || *started.Watch.Runtime != 45*time.Minute ||
+		updated.Watch.Runtime == nil || *updated.Watch.Runtime != updatedRuntime || updated.Position != nil {
+		t.Fatalf("runtime mutations = start %+v update %+v", started, updated)
 	}
 }
 

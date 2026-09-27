@@ -88,6 +88,7 @@ func TestPlaybackNowReturnsCurrentActiveTime(t *testing.T) {
 		t.Fatalf("decode playback now: %v", err)
 	}
 	if len(response.Items) != 1 || response.Items[0].ActiveSeconds != 15 ||
+		response.Items[0].RuntimeMS == nil || *response.Items[0].RuntimeMS != 45*60*1000 ||
 		response.Items[0].MediaServerName != "Home" || response.Items[0].Source != core.WatchSourcePoll ||
 		response.Items[0].Stream == nil || response.Items[0].Stream.VideoCodec != "h264" {
 		t.Fatalf("playback now response = %+v", response)
@@ -440,6 +441,7 @@ func assertPlaybackContractResponse(
 
 func playbackHTTPWatch(now time.Time, state core.WatchState) core.PlaybackWatch {
 	endedAt := now.Add(-time.Second)
+	runtime := 45 * time.Minute
 	watch := core.PlaybackWatch{
 		ID: "22222222-2222-4222-8222-222222222222", MediaServerID: playbackTestServerID,
 		MediaServerName: "Home", MediaUserID: "user-1", Username: "alice",
@@ -448,7 +450,7 @@ func playbackHTTPWatch(now time.Time, state core.WatchState) core.PlaybackWatch 
 		PlayMethod: core.PlayMethodDirectPlay, State: state, StartedAt: now.Add(-time.Minute),
 		Stream:     playbackHTTPStream(),
 		LastSeenAt: now.Add(-5 * time.Second), ActiveTime: 10 * time.Second,
-		LastPosition: time.Minute, Source: core.WatchSourcePoll,
+		LastPosition: time.Minute, Runtime: &runtime, Source: core.WatchSourcePoll,
 	}
 	if state == core.WatchStopped {
 		watch.EndedAt = &endedAt

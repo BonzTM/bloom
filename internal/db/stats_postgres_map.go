@@ -14,7 +14,7 @@ func mapPostgresMovieTitles(rows []postgres.StatsMovieTitlesRow, queryErr error)
 	result := make([]core.StatsTitle, 0, len(rows))
 	for _, row := range rows {
 		mapped, err := mapStatsTitle(core.StatsTitleMovie, row.MediaServerID, row.TitleKey,
-			row.TitleName, row.Plays, row.WatchSeconds, row.LastWatchedAt)
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
 		if err != nil {
 			return nil, statsStoreError("map statistics movie titles", err)
 		}
@@ -30,7 +30,7 @@ func mapPostgresSeriesTitles(rows []postgres.StatsSeriesTitlesRow, queryErr erro
 	result := make([]core.StatsTitle, 0, len(rows))
 	for _, row := range rows {
 		mapped, err := mapStatsTitle(core.StatsTitleSeries, row.MediaServerID, row.TitleKey,
-			row.TitleName, row.Plays, row.WatchSeconds, row.LastWatchedAt)
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
 		if err != nil {
 			return nil, statsStoreError("map statistics series titles", err)
 		}
@@ -46,7 +46,61 @@ func mapPostgresOtherTitles(rows []postgres.StatsOtherTitlesRow, queryErr error)
 	result := make([]core.StatsTitle, 0, len(rows))
 	for _, row := range rows {
 		mapped, err := mapStatsTitle(core.StatsTitleOther, row.MediaServerID, row.TitleKey,
-			row.TitleName, row.Plays, row.WatchSeconds, row.LastWatchedAt)
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
+		if err != nil {
+			return nil, statsStoreError("map statistics other titles", err)
+		}
+		result = append(result, mapped)
+	}
+	return result, nil
+}
+
+func mapPostgresMovieTitlesByUniqueUsers(
+	rows []postgres.StatsMovieTitlesByUniqueUsersRow, queryErr error,
+) ([]core.StatsTitle, error) {
+	if queryErr != nil {
+		return nil, statsStoreError("query statistics movie titles", queryErr)
+	}
+	result := make([]core.StatsTitle, 0, len(rows))
+	for _, row := range rows {
+		mapped, err := mapStatsTitle(core.StatsTitleMovie, row.MediaServerID, row.TitleKey,
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
+		if err != nil {
+			return nil, statsStoreError("map statistics movie titles", err)
+		}
+		result = append(result, mapped)
+	}
+	return result, nil
+}
+
+func mapPostgresSeriesTitlesByUniqueUsers(
+	rows []postgres.StatsSeriesTitlesByUniqueUsersRow, queryErr error,
+) ([]core.StatsTitle, error) {
+	if queryErr != nil {
+		return nil, statsStoreError("query statistics series titles", queryErr)
+	}
+	result := make([]core.StatsTitle, 0, len(rows))
+	for _, row := range rows {
+		mapped, err := mapStatsTitle(core.StatsTitleSeries, row.MediaServerID, row.TitleKey,
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
+		if err != nil {
+			return nil, statsStoreError("map statistics series titles", err)
+		}
+		result = append(result, mapped)
+	}
+	return result, nil
+}
+
+func mapPostgresOtherTitlesByUniqueUsers(
+	rows []postgres.StatsOtherTitlesByUniqueUsersRow, queryErr error,
+) ([]core.StatsTitle, error) {
+	if queryErr != nil {
+		return nil, statsStoreError("query statistics other titles", queryErr)
+	}
+	result := make([]core.StatsTitle, 0, len(rows))
+	for _, row := range rows {
+		mapped, err := mapStatsTitle(core.StatsTitleOther, row.MediaServerID, row.TitleKey,
+			row.TitleName, row.Plays, row.WatchSeconds, row.UniqueUsers, row.LastWatchedAt)
 		if err != nil {
 			return nil, statsStoreError("map statistics other titles", err)
 		}
@@ -100,6 +154,10 @@ func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) (core.PlaybackWa
 	if err != nil {
 		return core.PlaybackWatch{}, err
 	}
+	runtime, err := durationFromNullMilliseconds(row.RuntimeMs)
+	if err != nil {
+		return core.PlaybackWatch{}, err
+	}
 	return core.PlaybackWatch{
 		ID: row.ID, MediaServerID: row.MediaServerID, MediaServerName: row.MediaServerName,
 		MediaUserID: row.MediaUserID, Username: row.Username, DeviceID: row.DeviceID,
@@ -111,8 +169,8 @@ func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) (core.PlaybackWa
 		Stream:    stream,
 		StartedAt: core.NormalizeTime(row.StartedAt), LastSeenAt: core.NormalizeTime(row.LastSeenAt),
 		EndedAt: timeFromNull(row.EndedAt), ActiveTime: time.Duration(row.ActiveSeconds) * time.Second,
-		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond,
-		Source:       core.WatchSource(row.Source), CreatedAt: core.NormalizeTime(row.CreatedAt),
+		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond, Runtime: runtime,
+		Source: core.WatchSource(row.Source), CreatedAt: core.NormalizeTime(row.CreatedAt),
 		UpdatedAt: core.NormalizeTime(row.UpdatedAt),
 	}, nil
 }
