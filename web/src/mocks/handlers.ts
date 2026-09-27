@@ -811,6 +811,7 @@ function watch(patch: Partial<Watch> & Pick<Watch, "id">): Watch {
     season_number: 1,
     episode_number: 1,
     position_ms: 754_000,
+    runtime_ms: 2_700_000,
     paused: false,
     play_method: "direct_play",
     active_seconds: 754,
@@ -894,6 +895,7 @@ export const mockNowPlaying: readonly Watch[] = [
     client: "Findroid",
     item_id: "i-2",
     item_name: "Heat",
+    runtime_ms: 10_200_000,
     item_type: "Movie",
     series_name: "",
     season_number: null,
@@ -1866,6 +1868,7 @@ const statsTitles = [
     name: "Ronin",
     plays: 6,
     watch_seconds: 39_600,
+    unique_users: 1,
     last_watched_at: "2026-09-22T22:02:00Z",
   },
   {
@@ -1875,6 +1878,7 @@ const statsTitles = [
     name: "Heat",
     plays: 3,
     watch_seconds: 28_800,
+    unique_users: 2,
     last_watched_at: "2026-09-20T21:00:00Z",
   },
   {
@@ -1884,6 +1888,7 @@ const statsTitles = [
     name: "The Arrival",
     plays: 14,
     watch_seconds: 36_120,
+    unique_users: 2,
     last_watched_at: "2026-09-23T21:44:00Z",
   },
 ] as const;
@@ -2155,10 +2160,16 @@ const statsHandlers = [
       if (kind !== "movie" && kind !== "series" && kind !== "other") {
         return envelope(422, "validation_failed", "invalid kind");
       }
+      const order = url.searchParams.get("order") ?? "plays";
+      if (order !== "plays" && order !== "unique_users") {
+        return envelope(422, "validation_failed", "invalid order");
+      }
       return statsReport(url, (window) => ({
         window,
         kind,
-        items: statsTitles.filter((title) => title.kind === kind),
+        items: [...statsTitles]
+          .filter((title) => title.kind === kind)
+          .sort((a, b) => b[order] - a[order] || b.plays - a.plays),
       }));
     }),
   ),
@@ -2600,6 +2611,17 @@ const notificationHandlers = [
   ),
 ];
 
+function mockImageLabel(
+  known: Pick<Watch, "series_name" | "item_name"> | undefined,
+  itemId: string,
+): string {
+  if (known === undefined) {
+    return itemId.slice(0, 12);
+  }
+  const name = known.series_name === "" ? known.item_name : known.series_name;
+  return (name === "" ? itemId : name).slice(0, 12);
+}
+
 export const handlers = [
   ...notificationHandlers,
   ...statsHandlers,
@@ -2624,6 +2646,35 @@ export const handlers = [
       }
       return HttpResponse.json({ items });
     }),
+  ),
+  // The real proxy passes only JPEG, PNG, and WebP through; the preview
+  // gets a drawn stand-in so tiles and cards can be looked at.
+  http.get(
+    "*/api/v1/media-servers/:serverId/items/:itemId/image",
+    ({ params, request }) => {
+      if (playbackDenial() !== undefined) {
+        return new HttpResponse(null, { status: 403 });
+      }
+      const itemId = String(params.itemId);
+      const wide = new URL(request.url).searchParams.get("max_width") === "640";
+      const known = [...mockNowPlaying, ...mockPlaybackHistory].find(
+        (candidate) => candidate.item_id === itemId,
+      );
+      const label = mockImageLabel(known, itemId);
+      let hue = 0;
+      for (let index = 0; index < itemId.length; index += 1) {
+        hue = (hue + itemId.charCodeAt(index)) % 360;
+      }
+      const [w, h] = wide ? [640, 360] : [400, 600];
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${String(w)}" height="${String(h)}" viewBox="0 0 ${String(w)} ${String(h)}"><rect width="100%" height="100%" fill="hsl(${String(hue)} 40% 28%)"/><text x="50%" y="52%" text-anchor="middle" font-family="sans-serif" font-size="36" fill="white">${label}</text></svg>`;
+      return new HttpResponse(svg, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "private, max-age=86400",
+        },
+      });
+    },
   ),
   http.get(
     "*/api/v1/playback/now",

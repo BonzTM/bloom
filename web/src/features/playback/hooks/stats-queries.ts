@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { StatsParams, StatsTitleKind } from "../api/stats-schemas.js";
+import type {
+  StatsParams,
+  StatsTitleKind,
+  StatsTitleOrder,
+} from "../api/stats-schemas.js";
 import { usePlaybackApi } from "../playback-context.js";
 
 // Keys carry the account id and every parameter the report was computed
@@ -61,11 +65,12 @@ export function useStatsTitles(
   accountId: string,
   params: StatsParams,
   kind: StatsTitleKind,
+  order: StatsTitleOrder = "plays",
 ) {
   const api = usePlaybackApi();
   return useQuery({
-    queryKey: statsKeys.report(accountId, "titles", params, kind),
-    queryFn: ({ signal }) => api.statsTitles(params, kind, signal),
+    queryKey: statsKeys.report(accountId, "titles", params, `${kind}/${order}`),
+    queryFn: ({ signal }) => api.statsTitles(params, kind, order, signal),
     staleTime: STALE_MS,
     meta: { sessionScoped: true },
   });

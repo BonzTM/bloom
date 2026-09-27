@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import {
   envelope,
   jsonApi,
+  mockNowPlaying,
   mockPlaybackHistory,
   setMockPermissions,
   signInMockSession,
@@ -15,7 +16,7 @@ import { server } from "../test/server.js";
 async function openPlayback(): Promise<HTMLElement> {
   signInMockSession();
   renderApp("/admin/playback");
-  return screen.findByRole("table", { name: "Playing now, newest first" });
+  return screen.findByRole("list", { name: "Playing now" });
 }
 
 it("offers the playback page from the administration index", async () => {
@@ -39,21 +40,41 @@ it("hides the playback link without stats.read.all", async () => {
   ).not.toBeInTheDocument();
 });
 
-it("shows who is watching what, where, and how", async () => {
-  const table = await openPlayback();
-  const alice = within(table).getByRole("row", { name: /^alice / });
+it("shows who is watching what, where, and how far along", async () => {
+  const cards = await openPlayback();
+  const alice = within(cards).getByRole("article", { name: "alice" });
   expect(alice).toHaveTextContent("Fringe S01E01 · Pilot");
   expect(alice).toHaveTextContent("Episode");
-  expect(alice).toHaveTextContent("Living room TV (Jellyfin Web)");
-  expect(alice).toHaveTextContent("Cabin");
-  expect(alice).toHaveTextContent("12:34");
-  expect(alice).toHaveTextContent("Direct play");
-  expect(alice).toHaveTextContent("12 min 34 s");
-  const bob = within(table).getByRole("row", { name: /^bob / });
+  expect(alice).toHaveTextContent("Living room TV (Jellyfin Web) · Cabin");
+  expect(alice).toHaveTextContent("12:34 of 45:00");
+  expect(
+    within(alice).getByRole("progressbar", {
+      name: "Progress through Fringe S01E01 · Pilot",
+    }),
+  ).toHaveAttribute("aria-valuetext", "12:34 of 45:00");
+  expect(alice).toHaveTextContent("Direct play · watched 12 min 34 s");
+  const bob = within(cards).getByRole("article", { name: "bob" });
   expect(bob).toHaveTextContent("Heat");
-  expect(bob).toHaveTextContent("1:30:00 paused");
+  expect(bob).toHaveTextContent("1:30:00 of 2:50:00 paused");
   expect(bob).toHaveTextContent("Transcode");
   expect(bob).toHaveTextContent("1 h 0 min");
+});
+
+it("shows the bare position when the server reported no runtime", async () => {
+  server.use(
+    http.get(
+      "*/api/v1/playback/now",
+      jsonApi(() =>
+        HttpResponse.json({
+          items: [{ ...mockNowPlaying[0], runtime_ms: null }],
+        }),
+      ),
+    ),
+  );
+  const cards = await openPlayback();
+  const alice = within(cards).getByRole("article", { name: "alice" });
+  expect(alice).toHaveTextContent("12:34");
+  expect(within(alice).queryByRole("progressbar")).not.toBeInTheDocument();
 });
 
 it("lists finished watches and filters them by server", async () => {
@@ -142,9 +163,7 @@ it("keeps the last rows and says so when a refresh fails, then recovers", async 
   );
   signInMockSession();
   const { queryClient } = renderApp("/admin/playback");
-  const nowTable = await screen.findByRole("table", {
-    name: "Playing now, newest first",
-  });
+  const nowCards = await screen.findByRole("list", { name: "Playing now" });
 
   failing = true;
   // The same path a timed refresh takes.
@@ -153,14 +172,18 @@ it("keeps the last rows and says so when a refresh fails, then recovers", async 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "What is playing could not be refreshed. What is shown may be out of date.",
   );
-  expect(within(nowTable).getByRole("row", { name: /^alice / })).toBeVisible();
+  expect(
+    within(nowCards).getByRole("article", { name: "alice" }),
+  ).toBeVisible();
 
   failing = false;
   await user.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
-  expect(within(nowTable).getByRole("row", { name: /^alice / })).toBeVisible();
+  expect(
+    within(nowCards).getByRole("article", { name: "alice" }),
+  ).toBeVisible();
 });
 
 it("offers a retry when what is playing cannot be loaded at all", async () => {
@@ -180,7 +203,7 @@ it("offers a retry when what is playing cannot be loaded at all", async () => {
   failing = false;
   await user.click(screen.getByRole("button", { name: "Retry" }));
   expect(
-    await screen.findByRole("table", { name: "Playing now, newest first" }),
+    await screen.findByRole("list", { name: "Playing now" }),
   ).toBeVisible();
 });
 

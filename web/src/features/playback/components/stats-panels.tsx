@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AsyncStatus } from "../../../components/async-status.js";
 import { BarChart } from "../../../components/charts/bar-chart.js";
@@ -17,6 +17,7 @@ import type {
   StatsTotals,
   StatsUser,
 } from "../api/stats-schemas.js";
+import { TitleTiles, type TitleMetric } from "./title-tiles.js";
 import { playMethodLabel } from "./watch-format.js";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -101,60 +102,94 @@ export function PatternCharts({
   );
 }
 
-export function TitleCharts({
+// Ranked artwork rows, one per kind. Series have no item of their own
+// until the library catalog lands, so they show a lettered tile.
+export function TitleTileRows({
   titles,
-}: Readonly<{ titles: readonly StatsTitle[] }>): ReactNode {
-  const byKind = (kind: StatsTitle["kind"]): ChartPoint[] =>
-    titles
-      .filter((t) => t.kind === kind)
-      .map((t) => ({ label: t.name, value: t.plays }));
+  metric,
+  heading,
+}: Readonly<{
+  titles: readonly StatsTitle[];
+  metric: TitleMetric;
+  heading: (kind: "movie" | "series") => string;
+}>): ReactNode {
+  const byKind = (kind: StatsTitle["kind"]): StatsTitle[] =>
+    titles.filter((t) => t.kind === kind);
   return (
-    <div className="chart-grid">
-      <BarChart
-        title="Most watched movies"
-        labelHeading="Movie"
-        valueHeading="Plays"
-        points={byKind("movie")}
+    <>
+      <TitleTiles
+        title={heading("movie")}
+        titles={byKind("movie")}
+        metric={metric}
       />
-      <BarChart
-        title="Most watched series"
-        labelHeading="Series"
-        valueHeading="Plays"
-        points={byKind("series")}
+      <TitleTiles
+        title={heading("series")}
+        titles={byKind("series")}
+        metric={metric}
       />
-    </div>
+    </>
   );
 }
 
-// Users link to their own page; the server id is part of the address
-// because a media user exists per server.
+export function TitleCharts({
+  titles,
+}: Readonly<{ titles: readonly StatsTitle[] }>): ReactNode {
+  return (
+    <TitleTileRows
+      titles={titles}
+      metric="plays"
+      heading={(kind) =>
+        kind === "movie" ? "Most watched movies" : "Most watched series"
+      }
+    />
+  );
+}
+
+// People ranked by watch time, each card linking to that person's page;
+// the server id is part of the address because a media user exists per
+// server.
 export function UsersChart({
   users,
 }: Readonly<{ users: readonly StatsUser[] }>): ReactNode {
+  const id = useId();
   return (
-    <>
-      <BarChart
-        title="Most active people"
-        labelHeading="Person"
-        valueHeading="Watch time"
-        points={users.map((u) => ({
-          label: u.username || u.media_user_id,
-          value: u.watch_seconds,
-        }))}
-        format={formatDuration}
-      />
-      {users.length === 0 ? null : (
-        <ul className="user-links" aria-label="People with statistics">
-          {users.map((u) => (
-            <li key={`${u.media_server_id}/${u.media_user_id}`}>
-              <Link to={userStatsPath(u.media_server_id, u.media_user_id)}>
-                {u.username || u.media_user_id}
-              </Link>
-            </li>
-          ))}
-        </ul>
+    <figure className="tile-figure" aria-labelledby={id}>
+      <figcaption id={id}>Most active people</figcaption>
+      {users.length === 0 ? (
+        <p className="chart-empty">Nothing recorded in this window.</p>
+      ) : (
+        <ol className="people-grid" aria-label="People with statistics">
+          {users.map((u, index) => {
+            const name = u.username || u.media_user_id;
+            return (
+              <li
+                key={`${u.media_server_id}/${u.media_user_id}`}
+                className="person-card"
+              >
+                <span className="avatar" aria-hidden="true">
+                  {name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="person-card-body">
+                  <Link
+                    to={userStatsPath(u.media_server_id, u.media_user_id)}
+                    className="person-card-name"
+                  >
+                    {name}
+                  </Link>
+                  <span className="person-card-metric">
+                    {formatDuration(u.watch_seconds)} · {formatCount(u.plays)}{" "}
+                    {u.plays === 1 ? "play" : "plays"}
+                  </span>
+                </span>
+                <span className="tile-rank" aria-hidden="true">
+                  {index + 1}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
       )}
-    </>
+    </figure>
   );
 }
 
@@ -165,18 +200,47 @@ export const UNKNOWN_LIBRARY = "Unknown library";
 export function LibrariesChart({
   libraries,
 }: Readonly<{ libraries: readonly StatsLibrary[] }>): ReactNode {
+  const id = useId();
   return (
-    <BarChart
-      title="Most watched libraries"
-      labelHeading="Library"
-      valueHeading="Plays"
-      points={libraries.map((library) => ({
-        label:
-          library.library_id === "" ? UNKNOWN_LIBRARY : library.library_name,
-        value: library.plays,
-      }))}
-      format={formatCount}
-    />
+    <figure className="tile-figure" aria-labelledby={id}>
+      <figcaption id={id}>Most watched libraries</figcaption>
+      {libraries.length === 0 ? (
+        <p className="chart-empty">Nothing recorded in this window.</p>
+      ) : (
+        <ol className="library-grid">
+          {libraries.map((library) => (
+            <li
+              key={`${library.media_server_id}/${library.library_id}`}
+              className="library-card"
+            >
+              <span className="library-card-name">
+                {library.library_id === ""
+                  ? UNKNOWN_LIBRARY
+                  : library.library_name}
+              </span>
+              <dl className="library-card-stats">
+                <div>
+                  <dt>Plays</dt>
+                  <dd>{formatCount(library.plays)}</dd>
+                </div>
+                <div>
+                  <dt>Watch time</dt>
+                  <dd>{formatDuration(library.watch_seconds)}</dd>
+                </div>
+                <div>
+                  <dt>People</dt>
+                  <dd>{formatCount(library.unique_users)}</dd>
+                </div>
+                <div>
+                  <dt>Titles</dt>
+                  <dd>{formatCount(library.unique_titles)}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ol>
+      )}
+    </figure>
   );
 }
 
