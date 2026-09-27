@@ -137,7 +137,7 @@ func (s *sqliteCatalogStore) sqliteItemPlaySummary(
 	ctx context.Context, item core.LibraryItem,
 ) (core.CatalogItemStats, error) {
 	row, err := s.q.CatalogItemPlaySummary(ctx, sqlite.CatalogItemPlaySummaryParams{
-		MediaServerID: item.MediaServerID, ItemID: item.ItemID,
+		ServerKey: item.MediaServerID, CatalogKey: item.ItemID,
 	})
 	if err != nil {
 		return core.CatalogItemStats{}, catalogStoreError("summarize catalog item", err)
@@ -156,7 +156,7 @@ func (s *sqliteCatalogStore) ListCatalogHistory(
 		return nil, core.ErrInvalidArgument
 	}
 	rows, err := s.q.ListCatalogItemHistory(ctx, sqlite.ListCatalogItemHistoryParams{
-		MediaServerID: query.MediaServerID, ItemID: query.ItemID,
+		ServerKey: query.MediaServerID, CatalogKey: query.ItemID,
 		AfterStartedAt: sqliteHistoryAfterTime(query.After),
 		AfterID:        catalogHistoryAfterID(query.After), PageSize: int64(query.Limit),
 	})

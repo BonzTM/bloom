@@ -89,7 +89,7 @@ CREATE INDEX library_items_archived_idx
 CREATE INDEX library_items_stale_idx
     ON library_items (media_server_id, library_id, archived, (last_played_at IS NOT NULL), last_played_at, name, item_id);
 CREATE INDEX watches_server_item_started_idx
-    ON watches (media_server_id, item_id, started_at DESC);
+    ON watches (media_server_id, item_id, started_at DESC, id DESC);
 CREATE INDEX watches_catalog_aggregate_idx
     ON watches (media_server_id, item_id, started_at, active_seconds, media_user_id);
 
@@ -119,6 +119,8 @@ CREATE INDEX library_syncs_claim_idx ON library_syncs (state, lease_expires_at, 
 
 ALTER TABLE watches ADD COLUMN series_id TEXT
     CHECK (series_id IS NULL OR length(CAST(series_id AS BLOB)) <= 128);
+CREATE INDEX watches_server_series_started_idx
+    ON watches (media_server_id, series_id, started_at DESC, id DESC);
 
 DROP INDEX watches_import_record_idx;
 ALTER TABLE watches DROP COLUMN import_provenance_guard;
@@ -172,6 +174,7 @@ ALTER TABLE watches ADD COLUMN import_provenance_guard INTEGER
 CREATE UNIQUE INDEX watches_import_record_idx
     ON watches (media_server_id, import_source, import_record_id)
     WHERE import_record_id IS NOT NULL;
+DROP INDEX watches_server_series_started_idx;
 ALTER TABLE watches DROP COLUMN series_id;
 DROP TABLE library_syncs;
 DROP TABLE library_item_genres;

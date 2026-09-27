@@ -130,10 +130,14 @@ func (w *Worker) walk(ctx context.Context, sync core.LibrarySync) error {
 	started := time.Now()
 	w.deps.Metrics.SetLibraryCatalogRunning(1)
 	defer w.deps.Metrics.SetLibraryCatalogRunning(0)
-	libraries, err := w.deps.Source.Libraries(ctx, sync.MediaServerID)
-	if err == nil {
-		libraries = orderedLibraries(libraries)
-		err = w.walkLibraries(ctx, &sync, libraries)
+	cursor, err := decodeCursor(sync.Cursor)
+	if err == nil && cursor.Phase != syncPhaseRevalidation {
+		var libraries []core.Library
+		libraries, err = w.deps.Source.Libraries(ctx, sync.MediaServerID)
+		if err == nil {
+			libraries = orderedLibraries(libraries)
+			err = w.walkLibraries(ctx, &sync, libraries)
+		}
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -241,7 +245,18 @@ func (w *Worker) finish(ctx context.Context, sync core.LibrarySync) (core.Librar
 }
 
 func (w *Worker) revalidateMissing(ctx context.Context, sync core.LibrarySync) (core.LibrarySync, error) {
-	after := ""
+	cursor, err := decodeCursor(sync.Cursor)
+	if err != nil {
+		return sync, err
+	}
+	if cursor.Phase != syncPhaseRevalidation {
+		sync, err = w.checkpointRevalidation(ctx, sync, nil, "")
+		if err != nil {
+			return sync, err
+		}
+		cursor = syncCursor{Phase: syncPhaseRevalidation}
+	}
+	after := cursor.AfterItemID
 	for range core.MaxCatalogPagesPerLibrary {
 		ids, err := w.missingIDs(ctx, sync, after)
 		if err != nil || len(ids) == 0 {
@@ -252,13 +267,11 @@ func (w *Worker) revalidateMissing(ctx context.Context, sync core.LibrarySync) (
 			return sync, err
 		}
 		absent := absentCatalogIDs(ids, present)
-		if len(absent) > 0 {
-			sync, err = w.archiveIDs(ctx, sync, absent)
-			if err != nil {
-				return sync, err
-			}
-		}
 		after = ids[len(ids)-1]
+		sync, err = w.checkpointRevalidation(ctx, sync, absent, after)
+		if err != nil {
+			return sync, err
+		}
 	}
 	return sync, errors.New("catalog archival revalidation bound exceeded")
 }
@@ -269,11 +282,19 @@ func (w *Worker) missingIDs(ctx context.Context, sync core.LibrarySync, after st
 	return w.deps.Store.ListLibrarySyncMissingIDs(storeCtx, sync, after, core.CatalogUserDataBatchSize)
 }
 
-func (w *Worker) archiveIDs(ctx context.Context, sync core.LibrarySync, ids []string) (core.LibrarySync, error) {
+func (w *Worker) checkpointRevalidation(
+	ctx context.Context, sync core.LibrarySync, ids []string, after string,
+) (core.LibrarySync, error) {
 	now := core.NormalizeTime(w.deps.Clock.Now())
+	expires := now.Add(w.config.LeaseDuration)
+	sync.LeaseExpiresAt = &expires
+	cursor, err := encodeCursor(syncCursor{Phase: syncPhaseRevalidation, AfterItemID: after})
+	if err != nil {
+		return core.LibrarySync{}, err
+	}
 	storeCtx, cancel := context.WithTimeout(ctx, w.config.StoreTimeout)
 	defer cancel()
-	return w.deps.Store.CommitLibrarySyncArchives(storeCtx, sync, ids, now)
+	return w.deps.Store.CommitLibrarySyncArchives(storeCtx, sync, ids, cursor, now)
 }
 
 func absentCatalogIDs(requested, present []string) []string {
@@ -300,9 +321,13 @@ func (w *Worker) fail(ctx context.Context, sync core.LibrarySync, cause error) e
 }
 
 type syncCursor struct {
-	LibraryID string `json:"library_id,omitempty"`
-	Start     int    `json:"start,omitempty"`
+	Phase       string `json:"phase,omitempty"`
+	LibraryID   string `json:"library_id,omitempty"`
+	AfterItemID string `json:"after_item_id,omitempty"`
+	Start       int    `json:"start,omitempty"`
 }
+
+const syncPhaseRevalidation = "revalidation"
 
 func decodeCursor(value string) (syncCursor, error) {
 	if value == "" {
@@ -310,7 +335,7 @@ func decodeCursor(value string) (syncCursor, error) {
 	}
 	var cursor syncCursor
 	if len(value) > core.MaxCatalogCursorBytes || json.Unmarshal([]byte(value), &cursor) != nil ||
-		!core.ValidLibraryID(cursor.LibraryID) || cursor.Start < 0 ||
+		!validSyncCursor(cursor) || cursor.Start < 0 ||
 		cursor.Start > core.MaxCatalogPagesPerLibrary*core.CatalogPageSize {
 		return syncCursor{}, errors.New("library sync cursor is invalid")
 	}
@@ -318,7 +343,7 @@ func decodeCursor(value string) (syncCursor, error) {
 }
 
 func encodeCursor(cursor syncCursor) (string, error) {
-	if cursor.LibraryID == "" {
+	if cursor == (syncCursor{}) {
 		return "", nil
 	}
 	encoded, err := json.Marshal(cursor)
@@ -326,6 +351,18 @@ func encodeCursor(cursor syncCursor) (string, error) {
 		return "", errors.New("library sync cursor exceeds bound")
 	}
 	return string(encoded), nil
+}
+
+func validSyncCursor(cursor syncCursor) bool {
+	switch cursor.Phase {
+	case "":
+		return core.ValidLibraryID(cursor.LibraryID) && cursor.AfterItemID == ""
+	case syncPhaseRevalidation:
+		return cursor.LibraryID == "" && cursor.Start == 0 &&
+			(cursor.AfterItemID == "" || core.ValidCatalogID(cursor.AfterItemID))
+	default:
+		return false
+	}
 }
 
 func cursorLibraryIndex(cursor syncCursor, libraries []core.Library) (int, error) {
@@ -347,7 +384,7 @@ func nextCursor(libraries []core.Library, index, next, total int) syncCursor {
 	if index+1 < len(libraries) {
 		return syncCursor{LibraryID: libraries[index+1].ID}
 	}
-	return syncCursor{}
+	return syncCursor{Phase: syncPhaseRevalidation}
 }
 
 func validatePage(page core.LibraryCatalogPage, start int) error {

@@ -117,7 +117,7 @@ func (s *postgresCatalogStore) postgresItemPlaySummary(
 	ctx context.Context, item core.LibraryItem,
 ) (core.CatalogItemStats, error) {
 	row, err := s.q.CatalogItemPlaySummary(ctx, postgres.CatalogItemPlaySummaryParams{
-		MediaServerID: item.MediaServerID, ItemID: item.ItemID,
+		ServerKey: item.MediaServerID, CatalogKey: item.ItemID,
 	})
 	if err != nil {
 		return core.CatalogItemStats{}, catalogStoreError("summarize catalog item", err)
@@ -136,7 +136,7 @@ func (s *postgresCatalogStore) ListCatalogHistory(
 		return nil, core.ErrInvalidArgument
 	}
 	rows, err := s.q.ListCatalogItemHistory(ctx, postgres.ListCatalogItemHistoryParams{
-		MediaServerID: query.MediaServerID, ItemID: query.ItemID,
+		ServerKey: query.MediaServerID, CatalogKey: query.ItemID,
 		AfterStartedAt: postgresHistoryAfterTime(query.After),
 		AfterID:        catalogHistoryAfterID(query.After), PageSize: int64(query.Limit),
 	})

@@ -111,20 +111,45 @@ func (q *Queries) CatalogChildSummary(ctx context.Context, arg CatalogChildSumma
 }
 
 const catalogItemPlaySummary = `-- name: CatalogItemPlaySummary :one
-SELECT COUNT(*) AS plays, COALESCE(SUM(watches.active_seconds), 0) AS watch_seconds,
-       COUNT(DISTINCT watches.media_user_id) AS unique_users,
-       MIN(watches.started_at) AS first_played_at, MAX(watches.started_at) AS last_played_at
-FROM watches
-WHERE watches.media_server_id = $1
-  AND (watches.item_id = $2 OR EXISTS (
-      SELECT 1 FROM library_items li
-      WHERE li.media_server_id = watches.media_server_id AND li.item_id = watches.item_id
-        AND (li.series_id = $2 OR li.season_id = $2)))
+WITH root AS (
+    SELECT library_items.item_id, library_items.item_type FROM library_items
+    WHERE library_items.media_server_id = $1
+      AND library_items.item_id = $2
+), target_items AS (
+    SELECT item_id, item_type AS root_type FROM root
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = $1
+        AND li.season_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Season'
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = $1
+        AND li.series_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Series'
+), target_watches AS (
+    SELECT w.active_seconds, w.media_user_id, w.started_at FROM target_items ti
+    JOIN watches w ON w.media_server_id = $1 AND w.item_id = ti.item_id
+    WHERE ti.root_type <> 'Series'
+    UNION ALL
+    SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
+    JOIN watches w ON w.media_server_id = $1 AND w.item_id = root.item_id
+    WHERE root.item_type = 'Series'
+    UNION ALL
+    SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
+    JOIN watches w ON w.media_server_id = $1 AND w.series_id = root.item_id
+    JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
+    WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
+)
+SELECT COUNT(*) AS plays, COALESCE(SUM(active_seconds), 0) AS watch_seconds,
+       COUNT(DISTINCT media_user_id) AS unique_users,
+       MIN(started_at) AS first_played_at, MAX(started_at) AS last_played_at
+FROM target_watches
 `
 
 type CatalogItemPlaySummaryParams struct {
-	MediaServerID string
-	ItemID        string
+	ServerKey  string
+	CatalogKey string
 }
 
 type CatalogItemPlaySummaryRow struct {
@@ -136,7 +161,7 @@ type CatalogItemPlaySummaryRow struct {
 }
 
 func (q *Queries) CatalogItemPlaySummary(ctx context.Context, arg CatalogItemPlaySummaryParams) (CatalogItemPlaySummaryRow, error) {
-	row := q.db.QueryRowContext(ctx, catalogItemPlaySummary, arg.MediaServerID, arg.ItemID)
+	row := q.db.QueryRowContext(ctx, catalogItemPlaySummary, arg.ServerKey, arg.CatalogKey)
 	var i CatalogItemPlaySummaryRow
 	err := row.Scan(
 		&i.Plays,
@@ -295,13 +320,15 @@ func (q *Queries) CheckpointLibrarySync(ctx context.Context, arg CheckpointLibra
 
 const checkpointLibrarySyncArchives = `-- name: CheckpointLibrarySyncArchives :execrows
 UPDATE library_syncs
-SET archived_count = archived_count + $1, lease_expires_at = $2
-WHERE media_server_id = $3
-  AND state = 'running' AND lease_token = $4
+SET archived_count = archived_count + $1, cursor = $2,
+    lease_expires_at = $3
+WHERE media_server_id = $4
+  AND state = 'running' AND lease_token = $5
 `
 
 type CheckpointLibrarySyncArchivesParams struct {
 	ArchivedDelta int64
+	Cursor        string
 	ExpiresAt     sql.NullTime
 	MediaServerID string
 	Token         string
@@ -310,6 +337,7 @@ type CheckpointLibrarySyncArchivesParams struct {
 func (q *Queries) CheckpointLibrarySyncArchives(ctx context.Context, arg CheckpointLibrarySyncArchivesParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, checkpointLibrarySyncArchives,
 		arg.ArchivedDelta,
+		arg.Cursor,
 		arg.ExpiresAt,
 		arg.MediaServerID,
 		arg.Token,
@@ -678,26 +706,51 @@ func (q *Queries) ListCatalogImportItems(ctx context.Context, arg ListCatalogImp
 }
 
 const listCatalogItemHistory = `-- name: ListCatalogItemHistory :many
+WITH root AS (
+    SELECT library_items.item_id, library_items.item_type FROM library_items
+    WHERE library_items.media_server_id = $4
+      AND library_items.item_id = $5
+), target_items AS (
+    SELECT item_id, item_type AS root_type FROM root
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = $4
+        AND li.season_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Season'
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = $4
+        AND li.series_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Series'
+), target_watches AS (
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id FROM target_items ti
+    JOIN watches w ON w.media_server_id = $4 AND w.item_id = ti.item_id
+    WHERE ti.root_type <> 'Series'
+    UNION ALL
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id FROM root
+    JOIN watches w ON w.media_server_id = $4 AND w.item_id = root.item_id
+    WHERE root.item_type = 'Series'
+    UNION ALL
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id FROM root
+    JOIN watches w ON w.media_server_id = $4 AND w.series_id = root.item_id
+    JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
+    WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
+)
 SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id, ms.name AS media_server_name
-FROM watches w
+FROM target_watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
-WHERE w.media_server_id = $1
-  AND (w.item_id = $2 OR EXISTS (
-      SELECT 1 FROM library_items li
-      WHERE li.media_server_id = w.media_server_id AND li.item_id = w.item_id
-        AND (li.series_id = $2 OR li.season_id = $2)))
-  AND (w.started_at < $3
-       OR (w.started_at = $3 AND w.id < $4))
+WHERE w.started_at < $1
+   OR (w.started_at = $1 AND w.id < $2)
 ORDER BY w.started_at DESC, w.id DESC
-LIMIT CAST($5 AS BIGINT)
+LIMIT CAST($3 AS BIGINT)
 `
 
 type ListCatalogItemHistoryParams struct {
-	MediaServerID  string
-	ItemID         string
 	AfterStartedAt time.Time
 	AfterID        string
 	PageSize       int64
+	ServerKey      string
+	CatalogKey     string
 }
 
 type ListCatalogItemHistoryRow struct {
@@ -748,11 +801,11 @@ type ListCatalogItemHistoryRow struct {
 
 func (q *Queries) ListCatalogItemHistory(ctx context.Context, arg ListCatalogItemHistoryParams) ([]ListCatalogItemHistoryRow, error) {
 	rows, err := q.db.QueryContext(ctx, listCatalogItemHistory,
-		arg.MediaServerID,
-		arg.ItemID,
 		arg.AfterStartedAt,
 		arg.AfterID,
 		arg.PageSize,
+		arg.ServerKey,
+		arg.CatalogKey,
 	)
 	if err != nil {
 		return nil, err

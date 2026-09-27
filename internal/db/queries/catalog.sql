@@ -101,7 +101,8 @@ WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id
 
 -- name: CheckpointLibrarySyncArchives :execrows
 UPDATE library_syncs
-SET archived_count = archived_count + sqlc.arg(archived_delta), lease_expires_at = sqlc.arg(expires_at)
+SET archived_count = archived_count + sqlc.arg(archived_delta), cursor = sqlc.arg(cursor),
+    lease_expires_at = sqlc.arg(expires_at)
 WHERE media_server_id = sqlc.arg(media_server_id)
   AND state = 'running' AND lease_token = sqlc.arg(token);
 
@@ -412,15 +413,40 @@ SELECT * FROM library_items
 WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id);
 
 -- name: CatalogItemPlaySummary :one
-SELECT COUNT(*) AS plays, COALESCE(SUM(watches.active_seconds), 0) AS watch_seconds,
-       COUNT(DISTINCT watches.media_user_id) AS unique_users,
-       MIN(watches.started_at) AS first_played_at, MAX(watches.started_at) AS last_played_at
-FROM watches
-WHERE watches.media_server_id = sqlc.arg(media_server_id)
-  AND (watches.item_id = sqlc.arg(item_id) OR EXISTS (
-      SELECT 1 FROM library_items li
-      WHERE li.media_server_id = watches.media_server_id AND li.item_id = watches.item_id
-        AND (li.series_id = sqlc.arg(item_id) OR li.season_id = sqlc.arg(item_id))));
+WITH root AS (
+    SELECT library_items.item_id, library_items.item_type FROM library_items
+    WHERE library_items.media_server_id = sqlc.arg(server_key)
+      AND library_items.item_id = sqlc.arg(catalog_key)
+), target_items AS (
+    SELECT item_id, item_type AS root_type FROM root
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = sqlc.arg(server_key)
+        AND li.season_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Season'
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = sqlc.arg(server_key)
+        AND li.series_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Series'
+), target_watches AS (
+    SELECT w.active_seconds, w.media_user_id, w.started_at FROM target_items ti
+    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
+    WHERE ti.root_type <> 'Series'
+    UNION ALL
+    SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
+    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
+    WHERE root.item_type = 'Series'
+    UNION ALL
+    SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
+    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
+    JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
+    WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
+)
+SELECT COUNT(*) AS plays, COALESCE(SUM(active_seconds), 0) AS watch_seconds,
+       COUNT(DISTINCT media_user_id) AS unique_users,
+       MIN(started_at) AS first_played_at, MAX(started_at) AS last_played_at
+FROM target_watches;
 
 -- name: CatalogChildSummary :many
 SELECT item_type, COUNT(*) AS item_count
@@ -430,16 +456,41 @@ WHERE media_server_id = sqlc.arg(media_server_id) AND archived = FALSE
 GROUP BY item_type ORDER BY item_type LIMIT 100;
 
 -- name: ListCatalogItemHistory :many
+WITH root AS (
+    SELECT library_items.item_id, library_items.item_type FROM library_items
+    WHERE library_items.media_server_id = sqlc.arg(server_key)
+      AND library_items.item_id = sqlc.arg(catalog_key)
+), target_items AS (
+    SELECT item_id, item_type AS root_type FROM root
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = sqlc.arg(server_key)
+        AND li.season_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Season'
+    UNION ALL
+    SELECT li.item_id, root.item_type FROM root
+    JOIN library_items li ON li.media_server_id = sqlc.arg(server_key)
+        AND li.series_id = root.item_id AND li.item_id <> root.item_id
+    WHERE root.item_type = 'Series'
+), target_watches AS (
+    SELECT w.* FROM target_items ti
+    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
+    WHERE ti.root_type <> 'Series'
+    UNION ALL
+    SELECT w.* FROM root
+    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
+    WHERE root.item_type = 'Series'
+    UNION ALL
+    SELECT w.* FROM root
+    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
+    JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
+    WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
+)
 SELECT w.*, ms.name AS media_server_name
-FROM watches w
+FROM target_watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
-WHERE w.media_server_id = sqlc.arg(media_server_id)
-  AND (w.item_id = sqlc.arg(item_id) OR EXISTS (
-      SELECT 1 FROM library_items li
-      WHERE li.media_server_id = w.media_server_id AND li.item_id = w.item_id
-        AND (li.series_id = sqlc.arg(item_id) OR li.season_id = sqlc.arg(item_id))))
-  AND (w.started_at < sqlc.arg(after_started_at)
-       OR (w.started_at = sqlc.arg(after_started_at) AND w.id < sqlc.arg(after_id)))
+WHERE w.started_at < sqlc.arg(after_started_at)
+   OR (w.started_at = sqlc.arg(after_started_at) AND w.id < sqlc.arg(after_id))
 ORDER BY w.started_at DESC, w.id DESC
 LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 

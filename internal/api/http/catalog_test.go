@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,25 @@ func TestCatalogOpenAPIDocumentsEveryRoute(t *testing.T) {
 	for _, path := range paths {
 		if document.validator.Paths.Find(path) == nil {
 			t.Errorf("OpenAPI path %q is missing", path)
+		}
+	}
+}
+
+func TestCatalogDetailRoutesUseOpaqueItemIDContract(t *testing.T) {
+	document := loadOpenAPI(t)
+	for _, path := range []string{
+		"/api/v1/media-servers/{id}/items/{item_id}",
+		"/api/v1/media-servers/{id}/items/{item_id}/history",
+	} {
+		operation := document.validator.Paths.Find(path).Get
+		parameter := operation.Parameters.GetByInAndName("path", "item_id")
+		if parameter == nil || parameter.Schema == nil || parameter.Schema.Value == nil {
+			t.Fatalf("%s item_id parameter is missing", path)
+		}
+		schema := parameter.Schema.Value
+		if !parameter.Required || schema.MinLength != 1 ||
+			fmt.Sprint(schema.Extensions["x-max-bytes"]) != "128" || schema.Pattern != `^[^\x00-\x1F\x7F-\x9F]+$` {
+			t.Errorf("%s item_id schema = %+v", path, schema)
 		}
 	}
 }

@@ -2,13 +2,17 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
+	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/testutil"
 )
 
@@ -31,12 +35,13 @@ type fakeCatalogStore struct {
 }
 
 func (f *fakeCatalogStore) ClaimLibrarySync(
-	context.Context, core.LibrarySyncLease, time.Time, time.Time,
+	_ context.Context, lease core.LibrarySyncLease, _, _ time.Time,
 ) (core.LibrarySync, error) {
 	if f.claimed {
 		return core.LibrarySync{}, core.ErrNotFound
 	}
 	f.claimed = true
+	f.sync.LeaseToken, f.sync.LeaseExpiresAt = lease.Token, &lease.ExpiresAt
 	return f.sync, nil
 }
 
@@ -61,9 +66,10 @@ func (f *fakeCatalogStore) ListLibrarySyncMissingIDs(
 }
 
 func (f *fakeCatalogStore) CommitLibrarySyncArchives(
-	_ context.Context, sync core.LibrarySync, itemIDs []string, _ time.Time,
+	_ context.Context, sync core.LibrarySync, itemIDs []string, cursor string, _ time.Time,
 ) (core.LibrarySync, error) {
 	f.archivedIDs = append(f.archivedIDs, itemIDs...)
+	f.cursor, sync.Cursor = cursor, cursor
 	sync.Archived += int64(len(itemIDs))
 	return sync, nil
 }
@@ -105,6 +111,172 @@ func TestWorkerArchivesOnlyRevalidatedMissingItems(t *testing.T) {
 	if !store.finished || !slices.Equal(store.archivedIDs, []string{"deleted"}) {
 		t.Fatalf("archive result = finished %t, ids %v", store.finished, store.archivedIDs)
 	}
+}
+
+type leaseBoundaryCatalogSource struct {
+	clock             *testutil.FakeClock
+	cancel            context.CancelFunc
+	libraryCalls      int
+	revalidationCalls int
+}
+
+func (s *leaseBoundaryCatalogSource) Libraries(context.Context, string) ([]core.Library, error) {
+	s.libraryCalls++
+	return []core.Library{{ID: "library", Name: "Library"}}, nil
+}
+
+func (*leaseBoundaryCatalogSource) CatalogItems(
+	_ context.Context, _, _ string, start, _ int,
+) (core.LibraryCatalogPage, error) {
+	return core.LibraryCatalogPage{StartIndex: start}, nil
+}
+
+func (s *leaseBoundaryCatalogSource) CatalogItemIDs(
+	ctx context.Context, _ string, itemIDs []string,
+) ([]string, error) {
+	s.revalidationCalls++
+	if s.revalidationCalls == 4 {
+		s.cancel()
+		return nil, ctx.Err()
+	}
+	s.clock.Advance(20 * time.Second)
+	return itemIDs, nil
+}
+
+func TestWorkerRenewsAndResumesArchivalRevalidationWithRealStore(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	pool, store := catalogWorkerRealStore(t, now)
+	clock := testutil.NewFakeClock(now.Add(time.Second))
+	firstCtx, cancel := context.WithCancel(t.Context())
+	source := &leaseBoundaryCatalogSource{clock: clock, cancel: cancel}
+	worker := newLeaseBoundaryWorker(t, store, source, clock)
+	if err := worker.runOnce(firstCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first runOnce = %v, want context cancellation", err)
+	}
+	assertRevalidationCheckpoint(t, pool, now.Add(91*time.Second))
+	clock.Advance(31 * time.Second)
+	worker = newLeaseBoundaryWorker(t, store, source, clock)
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("resumed runOnce: %v", err)
+	}
+	if source.libraryCalls != 1 || source.revalidationCalls != 5 {
+		t.Fatalf("source calls = libraries %d, revalidation %d; want 1/5",
+			source.libraryCalls, source.revalidationCalls)
+	}
+	var state, cursor string
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT state,cursor FROM library_syncs WHERE media_server_id=$1", catalogWorkerServerID,
+	).Scan(&state, &cursor); err != nil || state != string(core.LibrarySyncCompleted) || cursor != "" {
+		t.Fatalf("completed sync = %q/%q, %v", state, cursor, err)
+	}
+}
+
+func newLeaseBoundaryWorker(
+	t *testing.T, store core.LibraryCatalogStore, source Source, clock core.Clock,
+) *Worker {
+	t.Helper()
+	worker, err := NewWorker(WorkerConfig{
+		Interval: time.Hour, StoreTimeout: time.Second, LeaseDuration: 30 * time.Second,
+	}, WorkerDependencies{
+		Store: store, Source: source, Clock: clock, Metrics: &fakeCatalogMetrics{},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	return worker
+}
+
+func assertRevalidationCheckpoint(t *testing.T, pool *sql.DB, wantExpiry time.Time) {
+	t.Helper()
+	var cursor, expiry string
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT cursor,lease_expires_at FROM library_syncs WHERE media_server_id=$1", catalogWorkerServerID,
+	).Scan(&cursor, &expiry); err != nil {
+		t.Fatalf("read revalidation checkpoint: %v", err)
+	}
+	gotExpiry, err := time.Parse("2006-01-02T15:04:05.000000Z", expiry)
+	if err != nil || cursor != `{"phase":"revalidation","after_item_id":"old-299"}` || !gotExpiry.Equal(wantExpiry) {
+		t.Fatalf("revalidation checkpoint = %q/%q, %v; want cursor through old-299 and expiry %s",
+			cursor, expiry, err, wantExpiry)
+	}
+}
+
+func catalogWorkerRealStore(t *testing.T, now time.Time) (*sql.DB, core.LibraryCatalogStore) {
+	t.Helper()
+	pool, err := db.Open(t.Context(), config.DatabaseConfig{
+		Driver: config.DriverSQLite, DSN: "file:catalog-worker-lease?mode=memory&cache=shared",
+		MaxOpenConns: 1, MaxIdleConns: 1, ConnMaxLifetime: time.Hour, ConnMaxIdleTime: time.Hour,
+	}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("open catalog worker store: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	if err = db.Migrate(t.Context(), pool, config.DriverSQLite); err != nil {
+		t.Fatalf("migrate catalog worker store: %v", err)
+	}
+	seedCatalogWorkerServer(t, pool, now)
+	store, err := db.NewLibraryCatalogStore(pool, config.DriverSQLite)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	seedCatalogWorkerItems(t, store, now)
+	return pool, store
+}
+
+func seedCatalogWorkerServer(t *testing.T, pool *sql.DB, now time.Time) {
+	t.Helper()
+	_, writer, err := db.NewMediaServerStores(pool, config.DriverSQLite)
+	if err != nil {
+		t.Fatalf("NewMediaServerStores: %v", err)
+	}
+	record := core.MediaServerRecord{MediaServer: core.MediaServer{
+		ID: catalogWorkerServerID, Kind: core.MediaServerKindJellyfin, Name: "Catalog Worker",
+		BaseURL: "https://catalog-worker.invalid", CreatedAt: now, UpdatedAt: now,
+	}, CredentialCiphertext: []byte("encrypted")}
+	if err := writer.CreateMediaServer(t.Context(), record); err != nil {
+		t.Fatalf("CreateMediaServer: %v", err)
+	}
+}
+
+func seedCatalogWorkerItems(t *testing.T, store core.LibraryCatalogStore, now time.Time) {
+	t.Helper()
+	if _, err := store.RequestLibrarySync(t.Context(), catalogWorkerServerID); err != nil {
+		t.Fatalf("request seed sync: %v", err)
+	}
+	sync, err := store.ClaimLibrarySync(t.Context(), core.LibrarySyncLease{
+		Token: "seed-lease", ExpiresAt: now.Add(time.Minute),
+	}, now, now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("claim seed sync: %v", err)
+	}
+	items := make([]core.LibraryItem, 350)
+	for index := range items {
+		items[index] = core.LibraryItem{
+			MediaServerID: catalogWorkerServerID, ItemID: fmt.Sprintf("old-%03d", index),
+			LibraryID: "library", ItemType: "Movie", Name: fmt.Sprintf("Old %03d", index),
+			Genres: []string{}, FirstSeenAt: now, LastSeenAt: now, UpdatedAt: now,
+		}
+	}
+	sync = commitCatalogWorkerSeedPage(t, store, sync, items[:core.CatalogPageSize], now)
+	sync = commitCatalogWorkerSeedPage(t, store, sync, items[core.CatalogPageSize:], now)
+	if _, err = store.FinishLibrarySync(t.Context(), sync, now); err != nil {
+		t.Fatalf("finish seed sync: %v", err)
+	}
+	if _, err = store.RequestLibrarySync(t.Context(), catalogWorkerServerID); err != nil {
+		t.Fatalf("request worker sync: %v", err)
+	}
+}
+
+func commitCatalogWorkerSeedPage(
+	t *testing.T, store core.LibraryCatalogStore, sync core.LibrarySync, items []core.LibraryItem, now time.Time,
+) core.LibrarySync {
+	t.Helper()
+	updated, err := store.CommitLibrarySyncPage(t.Context(), sync, items, "", now)
+	if err != nil {
+		t.Fatalf("commit seed page: %v", err)
+	}
+	return updated
 }
 
 func (f *fakeCatalogStore) FinishLibrarySync(

@@ -33,6 +33,12 @@ func runCatalogEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("every catalog sort plan is index backed", func(t *testing.T) {
 		testCatalogPlans(t, pool, driver)
 	})
+	t.Run("catalog detail and history plans seek target watches", func(t *testing.T) {
+		testCatalogDetailHistoryPlans(t, pool, driver)
+	})
+	t.Run("catalog detail and history include scoped descendants", func(t *testing.T) {
+		testCatalogDescendantReads(t, pool, driver)
+	})
 	t.Run("sync completion rebuilds catalog rollups", func(t *testing.T) {
 		testCatalogRollupRebuild(t, pool, driver)
 	})
@@ -91,7 +97,7 @@ func archiveMissingCatalogItem(t *testing.T, store core.LibraryCatalogStore, ser
 	if err != nil || !slices.Equal(missing, []string{"item-b"}) {
 		t.Fatalf("missing ids = %v, %v", missing, err)
 	}
-	sync, err = store.CommitLibrarySyncArchives(t.Context(), sync, missing, now.Add(2*time.Hour+time.Minute))
+	sync, err = store.CommitLibrarySyncArchives(t.Context(), sync, missing, `{"phase":"revalidation","after_item_id":"item-b"}`, now.Add(2*time.Hour+time.Minute))
 	if err != nil {
 		t.Fatalf("CommitLibrarySyncArchives: %v", err)
 	}
@@ -123,7 +129,7 @@ func testCatalogLeaseFencing(t *testing.T, pool *sql.DB, driver config.Driver) {
 	}
 	workerA, workerB := reclaimCatalogLease(t, store, serverID, now.Add(time.Hour))
 	assertStaleCatalogWorkerRejected(t, store, workerA, now.Add(2*time.Hour))
-	workerB, err = store.CommitLibrarySyncArchives(t.Context(), workerB, []string{"old-item"}, now.Add(2*time.Hour))
+	workerB, err = store.CommitLibrarySyncArchives(t.Context(), workerB, []string{"old-item"}, `{"phase":"revalidation","after_item_id":"old-item"}`, now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatalf("worker B archive: %v", err)
 	}
@@ -165,6 +171,66 @@ first_played_at=NULL,last_played_at=NULL WHERE media_server_id=$1 AND item_id=$2
 		t.Fatalf("FinishLibrarySync(rebuild): %v", err)
 	}
 	assertLibraryItemRollup(t, pool, driver, serverID, item.ItemID, 1, 180, 1, now.Add(time.Hour), now.Add(time.Hour))
+}
+
+func testCatalogDescendantReads(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	now := time.Date(2026, 9, 27, 22, 0, 0, 0, time.UTC)
+	serverID := "86000000-0000-4000-8000-000000000001"
+	createCatalogServer(t, pool, driver, serverID, "Catalog Descendants", now)
+	store, err := db.NewLibraryCatalogStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	sync := claimCatalogSync(t, store, serverID, now)
+	items := catalogDescendantItems(serverID, now)
+	sync, err = store.CommitLibrarySyncPage(t.Context(), sync, items, "", now)
+	if err != nil {
+		t.Fatalf("seed descendants: %v", err)
+	}
+	if _, err = store.FinishLibrarySync(t.Context(), sync, now); err != nil {
+		t.Fatalf("finish descendants: %v", err)
+	}
+	seedCatalogDescendantWatches(t, pool, driver, serverID, now)
+	for _, itemID := range []string{"series", "season"} {
+		detail, detailErr := store.GetCatalogItem(t.Context(), serverID, itemID)
+		history, historyErr := store.ListCatalogHistory(t.Context(), core.CatalogHistoryQuery{
+			MediaServerID: serverID, ItemID: itemID, Limit: 10,
+		})
+		if detailErr != nil || historyErr != nil || detail.Item.Plays != 2 || len(history) != 2 {
+			t.Errorf("%s detail/history = %d/%d, %v/%v; want 2/2",
+				itemID, detail.Item.Plays, len(history), detailErr, historyErr)
+		}
+	}
+}
+
+func catalogDescendantItems(serverID string, now time.Time) []core.LibraryItem {
+	series := catalogSuiteItem(serverID, "series", "Series", now)
+	series.ItemType = "Series"
+	season := catalogSuiteItem(serverID, "season", "Season", now)
+	season.ItemType, season.ParentID, season.SeriesID = "Season", series.ItemID, series.ItemID
+	first := catalogSuiteItem(serverID, "episode-1", "Episode 1", now)
+	first.ItemType, first.SeriesID, first.SeasonID = "Episode", series.ItemID, season.ItemID
+	second := catalogSuiteItem(serverID, "episode-2", "Episode 2", now)
+	second.ItemType, second.SeriesID, second.SeasonID = "Episode", series.ItemID, season.ItemID
+	return []core.LibraryItem{series, season, first, second}
+}
+
+func seedCatalogDescendantWatches(
+	t *testing.T, pool *sql.DB, driver config.Driver, serverID string, now time.Time,
+) {
+	t.Helper()
+	playback := newPlaybackTestStore(t, pool, driver)
+	mutations := make([]core.PlaybackMutation, 0, 2)
+	for index, itemID := range []string{"episode-1", "episode-2"} {
+		watch := playbackStoreWatch(t, serverID, now.Add(time.Duration(index)*time.Minute))
+		watch.ItemID, watch.SeriesID = itemID, "series"
+		watch.ServerSessionID = fmt.Sprintf("descendant-session-%d", index)
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch})
+	}
+	if err := playback.SaveWatches(t.Context(), mutations); err != nil {
+		t.Fatalf("seed descendant watches: %v", err)
+	}
 }
 
 func assertLibraryItemRollup(
@@ -236,7 +302,7 @@ func assertStaleCatalogWorkerRejected(
 	if _, err := store.CommitLibrarySyncPage(t.Context(), sync, []core.LibraryItem{item}, "", now); !errors.Is(err, core.ErrLibrarySyncLeaseLost) {
 		t.Fatalf("worker A page commit = %v", err)
 	}
-	if _, err := store.CommitLibrarySyncArchives(t.Context(), sync, []string{"old-item"}, now); !errors.Is(err, core.ErrLibrarySyncLeaseLost) {
+	if _, err := store.CommitLibrarySyncArchives(t.Context(), sync, []string{"old-item"}, `{"phase":"revalidation"}`, now); !errors.Is(err, core.ErrLibrarySyncLeaseLost) {
 		t.Fatalf("worker A archive = %v", err)
 	}
 	if _, err := store.FinishLibrarySync(t.Context(), sync, now); !errors.Is(err, core.ErrLibrarySyncLeaseLost) {
@@ -528,6 +594,58 @@ func testCatalogPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
 				assertCatalogPlan(t, pool, driver, field, direction, filtered)
 			}
 		}
+	}
+}
+
+const catalogTargetPlanCTE = `WITH root AS (
+    SELECT item_id,item_type FROM library_items WHERE media_server_id=$1 AND item_id=$2
+), target_items AS (
+    SELECT item_id,item_type AS root_type FROM root
+    UNION ALL
+    SELECT li.item_id,root.item_type FROM root
+    JOIN library_items li ON li.media_server_id=$1 AND li.season_id=root.item_id AND li.item_id<>root.item_id
+    WHERE root.item_type='Season'
+    UNION ALL
+    SELECT li.item_id,root.item_type FROM root
+    JOIN library_items li ON li.media_server_id=$1 AND li.series_id=root.item_id AND li.item_id<>root.item_id
+    WHERE root.item_type='Series'
+), target_watches AS (
+    SELECT w.id,w.media_server_id,w.item_id,w.started_at FROM target_items ti
+    JOIN watches w ON w.media_server_id=$1 AND w.item_id=ti.item_id WHERE ti.root_type<>'Series'
+    UNION ALL
+    SELECT w.id,w.media_server_id,w.item_id,w.started_at FROM root
+    JOIN watches w ON w.media_server_id=$1 AND w.item_id=root.item_id WHERE root.item_type='Series'
+    UNION ALL
+    SELECT w.id,w.media_server_id,w.item_id,w.started_at FROM root
+    JOIN watches w ON w.media_server_id=$1 AND w.series_id=root.item_id
+    JOIN target_items ti ON ti.item_id=w.item_id AND ti.root_type='Series'
+    WHERE root.item_type='Series' AND w.item_id<>root.item_id
+)
+`
+
+func testCatalogDetailHistoryPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	detail := explainCatalogQuery(t, pool, driver, catalogTargetPlanCTE+`SELECT COUNT(*) FROM target_watches`,
+		catalogPagingServerID, "item-b")
+	assertCatalogWatchSeeks(t, detail, "detail", false)
+	history := explainCatalogQuery(t, pool, driver, catalogTargetPlanCTE+`SELECT * FROM target_watches
+WHERE started_at<$3 OR (started_at=$3 AND id<$4)
+ORDER BY started_at DESC,id DESC LIMIT 10`, catalogPagingServerID, "item-b",
+		time.Date(2026, 9, 27, 23, 0, 0, 0, time.UTC), "z")
+	assertCatalogWatchSeeks(t, history, "history", true)
+}
+
+func assertCatalogWatchSeeks(t *testing.T, plan, query string, ordered bool) {
+	t.Helper()
+	itemSeek := strings.Contains(plan, "watches_server_item_started_idx")
+	if !ordered {
+		itemSeek = itemSeek || strings.Contains(plan, "watches_catalog_aggregate_idx")
+	}
+	if !itemSeek || !strings.Contains(plan, "watches_server_series_started_idx") {
+		t.Errorf("%s plan = %q; want item and series index seeks", query, plan)
+	}
+	if strings.Contains(plan, "SCAN w") || strings.Contains(plan, "Seq Scan on watches") {
+		t.Errorf("%s plan scans watches: %q", query, plan)
 	}
 }
 

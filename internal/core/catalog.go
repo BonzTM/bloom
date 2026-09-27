@@ -351,7 +351,7 @@ type LibraryCatalogStore interface {
 	ClaimLibrarySync(context.Context, LibrarySyncLease, time.Time, time.Time) (LibrarySync, error)
 	CommitLibrarySyncPage(context.Context, LibrarySync, []LibraryItem, string, time.Time) (LibrarySync, error)
 	ListLibrarySyncMissingIDs(context.Context, LibrarySync, string, int) ([]string, error)
-	CommitLibrarySyncArchives(context.Context, LibrarySync, []string, time.Time) (LibrarySync, error)
+	CommitLibrarySyncArchives(context.Context, LibrarySync, []string, string, time.Time) (LibrarySync, error)
 	FinishLibrarySync(context.Context, LibrarySync, time.Time) (LibrarySync, error)
 	FailLibrarySync(context.Context, LibrarySync, string, time.Time) error
 	ListCatalogLibraries(context.Context, string, CatalogWindow) ([]CatalogLibrarySummary, error)

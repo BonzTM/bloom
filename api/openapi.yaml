@@ -814,7 +814,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/MediaServerID" }
-        - { $ref: "#/components/parameters/MediaItemID" }
+        - { $ref: "#/components/parameters/CatalogItemID" }
       responses:
         "200": { description: Catalog item detail., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemDetailResponse" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -831,7 +831,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/MediaServerID" }
-        - { $ref: "#/components/parameters/MediaItemID" }
+        - { $ref: "#/components/parameters/CatalogItemID" }
         - { $ref: "#/components/parameters/CatalogLimit" }
         - { $ref: "#/components/parameters/CatalogCursor" }
       responses:
@@ -1936,6 +1936,11 @@ components:
   parameters:
     CatalogLibraryID:
       name: library_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+    CatalogItemID:
+      name: item_id
       in: path
       required: true
       schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }

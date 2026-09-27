@@ -135,6 +135,12 @@ var (
 var expectedCatalogIndexes = map[string][]string{
 	"library_item_genres": {"library_item_genres_summary_idx"},
 	"library_syncs":       {"library_syncs_claim_idx"},
+	"watches": {
+		"watches_catalog_aggregate_idx", "watches_import_record_idx", "watches_key_idx",
+		"watches_server_item_started_idx", "watches_server_library_started_idx",
+		"watches_server_series_started_idx", "watches_server_started_idx", "watches_server_state_idx",
+		"watches_started_idx", "watches_userdata_import_record_idx",
+	},
 	"library_items": {
 		"library_items_archived_idx", "library_items_date_asc_idx", "library_items_date_desc_idx",
 		"library_items_last_played_asc_idx", "library_items_last_played_desc_idx", "library_items_name_asc_idx",

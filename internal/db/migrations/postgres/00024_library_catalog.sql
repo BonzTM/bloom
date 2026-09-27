@@ -79,7 +79,7 @@ CREATE INDEX library_items_archived_idx
 CREATE INDEX library_items_stale_idx
     ON library_items (media_server_id, library_id, archived, (last_played_at IS NOT NULL), last_played_at, name, item_id);
 CREATE INDEX watches_server_item_started_idx
-    ON watches (media_server_id, item_id, started_at DESC);
+    ON watches (media_server_id, item_id, started_at DESC, id DESC);
 CREATE INDEX watches_catalog_aggregate_idx
     ON watches (media_server_id, item_id, started_at, active_seconds, media_user_id);
 
@@ -109,6 +109,8 @@ CREATE INDEX library_syncs_claim_idx ON library_syncs (state, lease_expires_at, 
 
 ALTER TABLE watches ADD COLUMN series_id TEXT COLLATE "C"
     CHECK (series_id IS NULL OR octet_length(series_id) <= 128);
+CREATE INDEX watches_server_series_started_idx
+    ON watches (media_server_id, series_id, started_at DESC, id DESC);
 ALTER TABLE watches DROP CONSTRAINT watches_import_source_check;
 ALTER TABLE watches ADD CONSTRAINT watches_import_source_check
     CHECK (import_source IS NULL OR import_source IN ('playback_reporting', 'bloom_export', 'jellyfin_userdata'));
@@ -139,6 +141,7 @@ CREATE UNIQUE INDEX watches_import_record_idx
 ALTER TABLE watches DROP CONSTRAINT watches_import_source_check;
 ALTER TABLE watches ADD CONSTRAINT watches_import_source_check
     CHECK (import_source IS NULL OR import_source IN ('playback_reporting', 'bloom_export'));
+DROP INDEX watches_server_series_started_idx;
 ALTER TABLE watches DROP COLUMN series_id;
 DROP TABLE library_syncs;
 DROP TABLE library_item_genres;

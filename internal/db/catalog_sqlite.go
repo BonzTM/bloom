@@ -125,9 +125,9 @@ func (s *sqliteCatalogStore) ListLibrarySyncMissingIDs(
 }
 
 func (s *sqliteCatalogStore) CommitLibrarySyncArchives(
-	ctx context.Context, sync core.LibrarySync, itemIDs []string, now time.Time,
+	ctx context.Context, sync core.LibrarySync, itemIDs []string, cursor string, now time.Time,
 ) (updated core.LibrarySync, result error) {
-	if err := validateCatalogArchive(sync, itemIDs, now); err != nil {
+	if err := validateCatalogArchive(sync, itemIDs, cursor, now); err != nil {
 		return updated, err
 	}
 	tx, err := s.pool.BeginTx(ctx, nil)
@@ -143,7 +143,7 @@ func (s *sqliteCatalogStore) CommitLibrarySyncArchives(
 	if err != nil {
 		return updated, err
 	}
-	return s.checkpointSQLiteArchives(ctx, tx, q, sync, archived)
+	return s.checkpointSQLiteArchives(ctx, tx, q, sync, archived, cursor)
 }
 
 func archiveSQLiteCatalogIDs(
@@ -164,10 +164,10 @@ func archiveSQLiteCatalogIDs(
 }
 
 func (s *sqliteCatalogStore) checkpointSQLiteArchives(
-	ctx context.Context, tx *sql.Tx, q *sqlite.Queries, sync core.LibrarySync, archived int64,
+	ctx context.Context, tx *sql.Tx, q *sqlite.Queries, sync core.LibrarySync, archived int64, cursor string,
 ) (core.LibrarySync, error) {
 	rows, err := q.CheckpointLibrarySyncArchives(ctx, sqlite.CheckpointLibrarySyncArchivesParams{
-		ArchivedDelta: archived, ExpiresAt: sqliteNullableTime(sync.LeaseExpiresAt),
+		ArchivedDelta: archived, ExpiresAt: sqliteNullableTime(sync.LeaseExpiresAt), Cursor: cursor,
 		MediaServerID: sync.MediaServerID, Token: sync.LeaseToken,
 	})
 	if rows != 1 || err != nil {

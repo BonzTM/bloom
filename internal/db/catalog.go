@@ -54,9 +54,9 @@ func validateCatalogCommit(sync core.LibrarySync, items []core.LibraryItem, curs
 	return nil
 }
 
-func validateCatalogArchive(sync core.LibrarySync, itemIDs []string, now time.Time) error {
+func validateCatalogArchive(sync core.LibrarySync, itemIDs []string, cursor string, now time.Time) error {
 	if !sync.Valid() || sync.State != core.LibrarySyncRunning || sync.StartedAt == nil || now.IsZero() ||
-		len(itemIDs) < 1 || len(itemIDs) > core.CatalogUserDataBatchSize {
+		len(itemIDs) > core.CatalogUserDataBatchSize || len(cursor) > core.MaxCatalogCursorBytes {
 		return core.ErrInvalidArgument
 	}
 	for _, itemID := range itemIDs {
