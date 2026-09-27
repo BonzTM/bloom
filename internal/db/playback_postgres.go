@@ -122,6 +122,11 @@ func (s *postgresPlaybackStore) savePostgresMutation(
 	if err := s.deletePostgresImportDuplicates(ctx, queries, mutation.Watch); err != nil {
 		return err
 	}
+	if err := queries.RebuildLibraryItemRollup(ctx, postgres.RebuildLibraryItemRollupParams{
+		MediaServerID: mutation.Watch.MediaServerID, ItemID: mutation.Watch.ItemID,
+	}); err != nil {
+		return playbackStoreError("rebuild catalog item rollup", err)
+	}
 	if mutation.SegmentEnd != nil {
 		params := postgres.CloseOpenWatchSegmentParams{
 			WatchID: mutation.Watch.ID, EndedAt: nullableTime(mutation.SegmentEnd),
@@ -166,6 +171,11 @@ func (s *postgresPlaybackStore) deletePostgresImportDuplicates(
 ) error {
 	if watch.Source == core.WatchSourceImport {
 		return nil
+	}
+	if err := queries.DeleteJellyfinUserDataDuplicate(ctx, postgres.DeleteJellyfinUserDataDuplicateParams{
+		MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID, ItemID: watch.ItemID,
+	}); err != nil {
+		return playbackStoreError("delete Jellyfin user-data duplicate", err)
 	}
 	err := queries.DeleteOverlappingImportedWatches(ctx, postgres.DeleteOverlappingImportedWatchesParams{
 		MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID, ItemID: watch.ItemID,
@@ -365,7 +375,7 @@ func postgresWatchParams(w core.PlaybackWatch) (postgres.UpsertPlaybackWatchPara
 		ID: w.ID, MediaServerID: w.MediaServerID, MediaUserID: w.MediaUserID,
 		Username: w.Username, DeviceID: w.DeviceID, DeviceName: w.DeviceName, Client: w.Client,
 		ServerSessionID: w.ServerSessionID, ItemID: w.ItemID, ItemName: w.ItemName,
-		ItemType: w.ItemType, SeriesName: w.SeriesName,
+		ItemType: w.ItemType, SeriesID: optionalStreamString(w.SeriesID), SeriesName: w.SeriesName,
 		LibraryID: w.LibraryID, LibraryName: w.LibraryName,
 		SeasonNumber: nullableInt32(w.SeasonNumber), EpisodeNumber: nullableInt32(w.EpisodeNumber),
 		PlayMethod: string(w.PlayMethod), State: string(w.State),
@@ -386,7 +396,7 @@ func postgresWatchParams(w core.PlaybackWatch) (postgres.UpsertPlaybackWatchPara
 
 func postgresStoredWatch(
 	id, serverID, serverName, userID, username, deviceID, deviceName, client, sessionID string,
-	itemID, itemName, itemType, seriesName, libraryID, libraryName string,
+	itemID, itemName, itemType string, seriesID sql.NullString, seriesName, libraryID, libraryName string,
 	season, episode sql.NullInt32,
 	method, state string,
 	started, lastSeen time.Time,
@@ -409,7 +419,7 @@ func postgresStoredWatch(
 		id: id, mediaServerID: serverID, mediaServerName: serverName, mediaUserID: userID,
 		username: username, deviceID: deviceID, deviceName: deviceName, client: client,
 		serverSessionID: sessionID, itemID: itemID, itemName: itemName, itemType: itemType,
-		seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
+		seriesID: seriesID.String, seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
 		seasonNumber: int32FromNull(season), episodeNumber: int32FromNull(episode),
 		playMethod: core.PlayMethod(method), state: core.WatchState(state),
 		stream:    details,
@@ -425,7 +435,7 @@ func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) (core.PlaybackWa
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -440,7 +450,7 @@ func postgresNowWatch(row postgres.ListNowPlayingRow) (core.PlaybackWatch, error
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -455,7 +465,7 @@ func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) (core.PlaybackWat
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -470,7 +480,7 @@ func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) (core.Playback
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -485,7 +495,7 @@ func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) (core.
 	return postgresStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,

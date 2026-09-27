@@ -147,6 +147,56 @@ type InviteRedemption struct {
 	RedeemedAt    time.Time
 }
 
+type LibraryItem struct {
+	MediaServerID   string
+	ItemID          string
+	LibraryID       string
+	ParentID        string
+	ItemType        string
+	Name            string
+	SeriesID        string
+	SeriesName      string
+	SeasonID        string
+	SeasonNumber    sql.NullInt32
+	IndexNumber     sql.NullInt32
+	RuntimeMs       sql.NullInt64
+	PremiereDate    sql.NullTime
+	ProductionYear  sql.NullInt32
+	CommunityRating sql.NullFloat64
+	Genres          string
+	PrimaryImageTag string
+	DateCreated     sql.NullTime
+	Archived        bool
+	Plays           int64
+	WatchSeconds    int64
+	UniqueUsers     int64
+	FirstPlayedAt   sql.NullTime
+	LastPlayedAt    sql.NullTime
+	FirstSeenAt     time.Time
+	LastSeenAt      time.Time
+	UpdatedAt       time.Time
+}
+
+type LibraryItemGenre struct {
+	MediaServerID string
+	ItemID        string
+	Genre         string
+}
+
+type LibrarySync struct {
+	MediaServerID  string
+	State          string
+	Cursor         string
+	SeenCount      int64
+	UpsertedCount  int64
+	ArchivedCount  int64
+	LastError      string
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	StartedAt      sql.NullTime
+	FinishedAt     sql.NullTime
+}
+
 type MediaServer struct {
 	ID                   string
 	Kind                 string
@@ -344,6 +394,7 @@ type Watch struct {
 	ImportSource              sql.NullString
 	ImportRecordID            sql.NullString
 	ImportProvenanceGuard     sql.NullInt32
+	SeriesID                  sql.NullString
 }
 
 type WatchPosition struct {

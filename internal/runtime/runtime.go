@@ -23,6 +23,7 @@ import (
 	httpapi "github.com/BonzTM/bloom/internal/api/http"
 	"github.com/BonzTM/bloom/internal/api/web"
 	"github.com/BonzTM/bloom/internal/buildinfo"
+	catalogapp "github.com/BonzTM/bloom/internal/catalog"
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
@@ -153,6 +154,7 @@ func runService(
 		wiring.notificationWorker,
 		wiring.inviteReconciler,
 		wiring.importWorker,
+		wiring.catalogWorker,
 		connectionGroup{wiring.mediaServers, wiring.metadata, wiring.downloadManagers},
 		pool, tracerProvider, logger, cfg.ShutdownGrace,
 		deps.ListenerReady, deps.listen,
@@ -180,6 +182,8 @@ type serviceWiring struct {
 	invites            *inviteapp.Service
 	imports            *importapp.Service
 	importWorker       *importapp.Worker
+	catalog            *catalogapp.Service
+	catalogWorker      *catalogapp.Worker
 	playbackStore      core.PlaybackStore
 	playbackManager    *playback.Manager
 	stats              *statsapp.Service
@@ -248,7 +252,11 @@ func wirePlaybackAndIdentity(
 		return serviceWiring{}, err
 	}
 	ownership.playback = playbackManager
-	imports, importWorker, err := importDependencies(pool, cfg, mediaServers, deps.Clock, metrics, logger)
+	catalog, catalogWorker, userData, err := catalogDependencies(pool, cfg, mediaServers, deps.Clock, metrics, logger)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	imports, importWorker, err := importDependencies(pool, cfg, mediaServers, userData, deps.Clock, metrics, logger)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -265,6 +273,7 @@ func wirePlaybackAndIdentity(
 	}
 	ownership.provider = provider
 	wiring.imports, wiring.importWorker = imports, importWorker
+	wiring.catalog, wiring.catalogWorker = catalog, catalogWorker
 	wiring.playbackStore, wiring.playbackManager, wiring.stats = playbackStore, playbackManager, statsService
 	wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows = provider, oidcAccounts, oidcFlows
 	return wiring, nil
@@ -274,6 +283,7 @@ func importDependencies(
 	pool *sql.DB,
 	cfg config.Config,
 	servers *mediaserver.Service,
+	userData importapp.UserDataService,
 	clock core.Clock,
 	metrics *telemetry.PromMetrics,
 	logger *slog.Logger,
@@ -297,13 +307,43 @@ func importDependencies(
 	worker, err := importapp.NewWorker(importapp.WorkerConfig{
 		Interval: interval, ResumeWindow: cfg.Playback.ResumeWindow,
 	}, importapp.WorkerDependencies{
-		Store: store, Reporting: servers, Clock: clock, Metrics: metrics, Logger: logger,
+		Store: store, Reporting: servers, UserData: userData, Clock: clock, Metrics: metrics, Logger: logger,
 		Staging: staging,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("build import worker: %w", err)
 	}
 	return service, worker, nil
+}
+
+func catalogDependencies(
+	pool *sql.DB, cfg config.Config, servers *mediaserver.Service, clock core.Clock,
+	metrics *telemetry.PromMetrics, logger *slog.Logger,
+) (*catalogapp.Service, *catalogapp.Worker, *catalogapp.UserDataSource, error) {
+	interval := cfg.Catalog.SyncInterval
+	if interval == 0 {
+		interval = time.Hour
+	}
+	store, err := db.NewLibraryCatalogStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build library catalog store: %w", err)
+	}
+	wake := make(chan struct{}, 1)
+	service, err := catalogapp.NewService(store, servers, wake, clock, cfg.Stats.CacheTTL)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build library catalog service: %w", err)
+	}
+	worker, err := catalogapp.NewWorker(catalogapp.WorkerConfig{Interval: interval}, catalogapp.WorkerDependencies{
+		Store: store, Source: servers, Clock: clock, Metrics: metrics, Logger: logger, Wake: wake,
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build library catalog worker: %w", err)
+	}
+	userData, err := catalogapp.NewUserDataSource(store, servers)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build Jellyfin user-data source: %w", err)
+	}
+	return service, worker, userData, nil
 }
 
 func statsDependencies(
@@ -459,6 +499,7 @@ func assembleHTTPServer(
 		InviteReader:           wiring.invites,
 		InviteManager:          wiring.invites,
 		Imports:                wiring.imports,
+		Catalog:                wiring.catalog,
 		AccountMediaUsers:      wiring.accountMediaUsers,
 		PlaybackReader:         wiring.playbackStore,
 		StatsReader:            wiring.stats,
@@ -926,7 +967,7 @@ func serve(
 	listen func(context.Context, string, string) (net.Listener, error),
 ) (bool, error) {
 	return serveWithFulfilment(
-		ctx, srv, oidcProvider, playbackManager, nil, nil, nil, nil, media, pool, tp, logger, grace, listenerReady, listen,
+		ctx, srv, oidcProvider, playbackManager, nil, nil, nil, nil, nil, media, pool, tp, logger, grace, listenerReady, listen,
 	)
 }
 
@@ -939,6 +980,7 @@ func serveWithFulfilment(
 	notificationWorker *notifyapp.Worker,
 	inviteReconciler *inviteapp.Reconciler,
 	importWorker *importapp.Worker,
+	catalogWorker *catalogapp.Worker,
 	media mediaConnectionCloser,
 	pool *sql.DB,
 	tp tracerLifecycle,
@@ -961,7 +1003,7 @@ func serveWithFulfilment(
 	serving := make(chan struct{})
 	startRuntimeWorkers(
 		gctx, g, serving, listener, srv, oidcProvider, playbackManager,
-		fulfilmentManager, notificationWorker, inviteReconciler, importWorker,
+		fulfilmentManager, notificationWorker, inviteReconciler, importWorker, catalogWorker,
 		media, pool, tp, logger, grace, listenerReady,
 	)
 	<-serving
@@ -979,6 +1021,7 @@ func startRuntimeWorkers(
 	fulfilmentManager *fulfilment.Manager, notificationWorker *notifyapp.Worker,
 	inviteReconciler *inviteapp.Reconciler,
 	importWorker *importapp.Worker,
+	catalogWorker *catalogapp.Worker,
 	media mediaConnectionCloser, pool *sql.DB,
 	tp tracerLifecycle, logger *slog.Logger, grace time.Duration, listenerReady func(net.Addr),
 ) {
@@ -1023,6 +1066,12 @@ func startRuntimeWorkers(
 		g.Go(func() error {
 			<-serving
 			return importWorker.Run(ctx)
+		})
+	}
+	if catalogWorker != nil {
+		g.Go(func() error {
+			<-serving
+			return catalogWorker.Run(ctx)
 		})
 	}
 }

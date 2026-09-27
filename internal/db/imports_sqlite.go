@@ -202,16 +202,18 @@ func commitSQLiteImportBatch(
 func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		dupe, err := q.FindCollectedImportDuplicate(ctx, sqlite.FindCollectedImportDuplicateParams{
-			MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
-			StartAfter:  formatSQLiteTime(record.StartedAt.Add(-batch.ResumeWindow)),
-			StartBefore: formatSQLiteTime(record.StartedAt.Add(batch.ResumeWindow)),
-		})
+		if err := supersedeSQLiteUserData(ctx, q, batch, record); err != nil {
+			return 0, 0, importStoreError("supersede Jellyfin user-data watch", err)
+		}
+		dupe, err := sqliteImportDuplicate(ctx, q, batch, record)
 		if err != nil {
 			return 0, 0, importStoreError("find collected import duplicate", err)
 		}
 		if dupe {
 			duplicate++
+			if rebuildErr := rebuildSQLiteImportRollup(ctx, q, batch.MediaServerID, record.ItemID); rebuildErr != nil {
+				return 0, 0, rebuildErr
+			}
 			continue
 		}
 		id, err := core.NewID()
@@ -231,8 +233,44 @@ func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch cor
 		} else {
 			duplicate++
 		}
+		if err := rebuildSQLiteImportRollup(ctx, q, batch.MediaServerID, record.ItemID); err != nil {
+			return 0, 0, err
+		}
 	}
 	return imported, duplicate, nil
+}
+
+func rebuildSQLiteImportRollup(ctx context.Context, q *sqlite.Queries, serverID, itemID string) error {
+	err := q.RebuildLibraryItemRollup(ctx, sqlite.RebuildLibraryItemRollupParams{
+		MediaServerID: serverID, ItemID: itemID,
+	})
+	return importStoreError("rebuild catalog item rollup", err)
+}
+
+func supersedeSQLiteUserData(
+	ctx context.Context, q *sqlite.Queries, batch core.ImportBatch, record core.ImportedWatch,
+) error {
+	if batch.Source == core.ImportSourceJellyfinUserData {
+		return nil
+	}
+	return q.DeleteJellyfinUserDataDuplicate(ctx, sqlite.DeleteJellyfinUserDataDuplicateParams{
+		MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
+	})
+}
+
+func sqliteImportDuplicate(
+	ctx context.Context, q *sqlite.Queries, batch core.ImportBatch, record core.ImportedWatch,
+) (bool, error) {
+	if batch.Source == core.ImportSourceJellyfinUserData {
+		return q.FindAnyWatchForUserItem(ctx, sqlite.FindAnyWatchForUserItemParams{
+			MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
+		})
+	}
+	return q.FindCollectedImportDuplicate(ctx, sqlite.FindCollectedImportDuplicateParams{
+		MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
+		StartAfter:  formatSQLiteTime(record.StartedAt.Add(-batch.ResumeWindow)),
+		StartBefore: formatSQLiteTime(record.StartedAt.Add(batch.ResumeWindow)),
+	})
 }
 
 func sqliteImportedWatchParams(
@@ -246,7 +284,7 @@ func sqliteImportedWatchParams(
 		ID: id, MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID,
 		Username: record.Username, DeviceID: record.DeviceID, DeviceName: record.DeviceName, Client: record.Client,
 		ItemID: record.ItemID, ItemName: record.ItemName, ItemType: record.ItemType,
-		SeriesName: record.SeriesName, LibraryID: record.LibraryID, LibraryName: record.LibraryName,
+		SeriesID: optionalStreamString(record.SeriesID), SeriesName: record.SeriesName, LibraryID: record.LibraryID, LibraryName: record.LibraryName,
 		SeasonNumber: sqliteNullableInt32(record.SeasonNumber), EpisodeNumber: sqliteNullableInt32(record.EpisodeNumber),
 		PlayMethod: string(record.PlayMethod), StartedAt: formatSQLiteTime(record.StartedAt),
 		EndedAt: formatSQLiteTime(importEndedAt(record)), ActiveSeconds: int64(record.Duration / time.Second),

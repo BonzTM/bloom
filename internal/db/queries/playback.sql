@@ -3,7 +3,7 @@
 -- name: UpsertPlaybackWatch :exec
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,
-    server_session_id, item_id, item_name, item_type, series_name, library_id,
+    server_session_id, item_id, item_name, item_type, series_id, series_name, library_id,
     library_name, season_number,
     episode_number, play_method, stream_container, stream_video_codec,
     stream_audio_codec, stream_bitrate, stream_width, stream_height,
@@ -13,7 +13,7 @@ INSERT INTO watches (
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(media_user_id), sqlc.arg(username),
     sqlc.arg(device_id), sqlc.arg(device_name), sqlc.arg(client), sqlc.arg(server_session_id),
-    sqlc.arg(item_id), sqlc.arg(item_name), sqlc.arg(item_type), sqlc.arg(series_name),
+    sqlc.arg(item_id), sqlc.arg(item_name), sqlc.arg(item_type), sqlc.narg(series_id), sqlc.arg(series_name),
     sqlc.arg(library_id), sqlc.arg(library_name),
     sqlc.narg(season_number), sqlc.narg(episode_number), sqlc.arg(play_method),
     sqlc.narg(stream_container), sqlc.narg(stream_video_codec), sqlc.narg(stream_audio_codec),
@@ -31,6 +31,7 @@ ON CONFLICT (id) DO UPDATE SET
     server_session_id = excluded.server_session_id,
     item_name = excluded.item_name,
     item_type = excluded.item_type,
+    series_id = COALESCE(watches.series_id, excluded.series_id),
     series_name = excluded.series_name,
     library_id = CASE WHEN watches.library_id = '' THEN excluded.library_id ELSE watches.library_id END,
     library_name = CASE WHEN watches.library_id = '' THEN excluded.library_name ELSE watches.library_name END,
@@ -64,6 +65,13 @@ WHERE media_server_id = sqlc.arg(media_server_id)
   AND source = 'import'
   AND started_at >= sqlc.arg(start_after)
   AND started_at <= sqlc.arg(start_before);
+
+-- name: DeleteJellyfinUserDataDuplicate :exec
+DELETE FROM watches
+WHERE media_server_id = sqlc.arg(media_server_id)
+  AND media_user_id = sqlc.arg(media_user_id)
+  AND item_id = sqlc.arg(item_id)
+  AND source = 'import' AND import_source = 'jellyfin_userdata';
 
 -- name: ListOpenPlaybackWatches :many
 SELECT w.*, ms.name AS media_server_name

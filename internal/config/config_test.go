@@ -99,6 +99,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Imports.WorkerInterval != defaultImportWorkerInterval {
 		t.Errorf("Import worker interval = %s, want %s", cfg.Imports.WorkerInterval, defaultImportWorkerInterval)
 	}
+	if cfg.Catalog.SyncInterval != defaultLibrarySyncInterval {
+		t.Errorf("Library sync interval = %s, want %s", cfg.Catalog.SyncInterval, defaultLibrarySyncInterval)
+	}
 	if cfg.Bootstrap.Username != "admin" || cfg.Bootstrap.Password.Len() != 0 {
 		t.Errorf("Bootstrap defaults = username %q password length %d", cfg.Bootstrap.Username, cfg.Bootstrap.Password.Len())
 	}
@@ -265,6 +268,24 @@ func TestLoadImportWorkerConfiguration(t *testing.T) {
 			t.Setenv("BLOOM_IMPORT_WORKER_INTERVAL", value)
 			if _, err := Load(nil); err == nil {
 				t.Fatal("Load accepted invalid import worker interval")
+			}
+		})
+	}
+}
+
+func TestLoadLibrarySyncConfiguration(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BLOOM_LIBRARY_SYNC_INTERVAL", "2h")
+	cfg, err := Load(nil)
+	if err != nil || cfg.Catalog.SyncInterval != 2*time.Hour {
+		t.Fatalf("library sync configuration = %+v, %v", cfg.Catalog, err)
+	}
+	for _, value := range []string{"4m59s", "24h1m"} {
+		t.Run(value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("BLOOM_LIBRARY_SYNC_INTERVAL", value)
+			if _, err := Load(nil); err == nil {
+				t.Fatal("Load accepted invalid library sync interval")
 			}
 		})
 	}

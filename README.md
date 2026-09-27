@@ -266,7 +266,15 @@ counters. A stopped process resumes after the last committed batch.
 The `playback_reporting` source reads Jellyfin's Playback Reporting plugin by
 ascending database `rowid`. The plugin must be installed on the selected
 server. Create this job with JSON containing `media_server_id` and
-`source: "playback_reporting"`. The `bloom_export` source accepts a multipart
+`source: "playback_reporting"`. The `jellyfin_userdata` source enumerates every
+user reported by Jellyfin in media-user ID order, including users without a
+Bloom account, then walks the synced catalog for each user. It checkpoints the
+user and item cursors and creates at most one synthetic watch per user and item,
+at `LastPlayedDate`, when `PlayCount` is positive. The synthetic watch records
+the Jellyfin user ID and name. Its watch time is zero because Jellyfin user data
+does not retain session duration. A Playback Reporting, Jellystat-style, Bloom
+export, or collected watch for the same user and item supersedes the synthetic
+watch regardless of commit order. The `bloom_export` source accepts a multipart
 `file` part containing either a Bloom `.zip` export or the previous JSONL shape,
 plus `media_server_id` and `source: bloom_export` fields. Bloom detects ZIP by
 content rather than filename. Uploads are limited to 256 MiB, and only one
@@ -304,6 +312,39 @@ series, library, episode, final-position, stream, and end-time fields. Imported
 watches do not restore segments or position samples. After a valid ascending
 row ID, Playback Reporting rows with malformed dates, durations, identity, or
 text fields are skipped without blocking later rows.
+
+### Library catalog
+
+Bloom keeps a type-agnostic local catalog for every registered media server.
+The catalog stores Jellyfin's item type, hierarchy, display metadata, genres,
+runtime, dates, rating, and primary image tag. Missing items are archived only
+after a complete successful walk and a final Jellyfin lookup, in batches of at
+most 100 identifiers, confirms that each item is absent. Bloom never deletes
+them during sync.
+
+The catalog worker performs a bounded full walk when Bloom starts and every
+`BLOOM_LIBRARY_SYNC_INTERVAL` thereafter. The default is `1h`; accepted values
+range from `5m` through `24h`. An account with `admin.settings` can request an
+immediate walk with
+`POST /api/v1/media-servers/{id}/catalog/sync`. The route returns `202`, `404`
+for an unknown server, and `409` when that server already has a pending or
+running walk. A shutdown leaves the leased row and checkpoint intact. Lease
+recovery replays the current library from its first page. Items are archived
+only when every library completes under the same sync generation.
+
+Accounts with `stats.read.all` can read catalog coverage, paged library items,
+item details and descendant history, recently added items, genre totals, and
+stale items through the `/api/v1/media-servers/{id}/libraries` and
+`/api/v1/media-servers/{id}/items` routes documented in `api/openapi.yaml`.
+Item, history, and stale routes use bounded keyset pagination: pass `limit`,
+then pass the returned `next_cursor` as `cursor`; these routes do not accept an
+offset. Each cursor is bound to its server, library or item, filters, sort, and
+fixed time window. Reusing it with another query returns `422`.
+Descending date sorts place unknown dates last, while stale results place
+never-played items first. Genre totals are aggregated from the normalized
+catalog genre index rather than by loading the library into memory. Item-list
+activity sorts use maintained all-time rollups. The optional `days` window
+limits the play totals returned for each item without changing that ordering.
 
 An account with `stats.read.all` can also read the statistics dashboards at
 `GET /api/v1/stats/overview`, `/daily`, `/patterns`, `/titles`, `/users`,
@@ -650,6 +691,7 @@ this table.
 | `BLOOM_PLAYBACK_RESUME_WINDOW` | duration | no | `5m` | no | Window in which a matching stopped watch reopens. Valid range: `1s`-`24h`. |
 | `BLOOM_PLAYBACK_STORE_TIMEOUT` | duration | no | `5s` | no | Per-operation deadline for playback database loads, lookups, and saves. Valid range: `100ms`-`30s`. |
 | `BLOOM_IMPORT_WORKER_INTERVAL` | duration | no | `10s` | no | Interval between history-import job scans. Valid range: `1s`-`1h`. |
+| `BLOOM_LIBRARY_SYNC_INTERVAL` | duration | no | `1h` | no | Interval between bounded full library-catalog walks. Valid range: `5m`-`24h`. |
 | `BLOOM_STATS_CACHE_TTL` | duration | no | `30s` | no | TTL for the bounded in-process statistics result cache. Must be at least `0`; `0` disables caching. |
 | `BLOOM_REQUEST_AVAILABILITY_SOURCE` | `media_server` \| `download_manager` | no | `media_server` | no | Authority used to mark processing requests available. Queue progress is never the authority. |
 | `BLOOM_REQUEST_AVAILABILITY_INTERVAL` | duration | no | `5m` | no | Poll interval while processing requests exist. Valid range: `1m`-`24h`. |
@@ -725,6 +767,13 @@ rows that were imported before rollback.
 Migration `00023_import_uploads` adds fixed-size database upload chunks and
 orphan-cleanup indexes on both engines. Its down migration removes staged
 uploads; terminal jobs and imported watches are unaffected.
+
+Migration `00024_library_catalog` adds the type-agnostic catalog, normalized
+item genres, durable per-server sync state, indexed per-item playback rollups,
+keyset-listing indexes, and nullable watch `series_id` on both engines. It also
+admits the `jellyfin_userdata` import source and changes that source's
+imported-watch identity to include the media user. Its down migration removes
+catalog data and the new provenance while preserving other watch rows.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

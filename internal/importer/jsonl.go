@@ -60,6 +60,7 @@ type bloomExportRecord struct {
 	ItemID          string            `json:"item_id"`
 	ItemName        string            `json:"item_name"`
 	ItemType        string            `json:"item_type"`
+	SeriesID        string            `json:"series_id"`
 	SeriesName      string            `json:"series_name"`
 	LibraryID       string            `json:"library_id"`
 	LibraryName     string            `json:"library_name"`
@@ -113,7 +114,7 @@ func watchWire(watch core.PlaybackWatch) bloomExportRecord {
 		ID: watch.ID, MediaServerID: watch.MediaServerID, MediaServerName: watch.MediaServerName,
 		MediaUserID: watch.MediaUserID, Username: watch.Username, DeviceID: watch.DeviceID,
 		DeviceName: watch.DeviceName, Client: watch.Client, ItemID: watch.ItemID,
-		ItemName: watch.ItemName, ItemType: watch.ItemType, SeriesName: watch.SeriesName,
+		ItemName: watch.ItemName, ItemType: watch.ItemType, SeriesID: watch.SeriesID, SeriesName: watch.SeriesName,
 		LibraryID: watch.LibraryID, LibraryName: watch.LibraryName, SeasonNumber: watch.SeasonNumber,
 		EpisodeNumber: watch.EpisodeNumber, PositionMS: int64(watch.LastPosition / time.Millisecond),
 		RuntimeMS: runtimeMilliseconds(watch.Runtime),
@@ -738,7 +739,7 @@ func DecodeWatchJSONL(line []byte) (core.ImportedWatch, error) {
 		RecordID: wire.ID, MediaUserID: wire.MediaUserID, Username: wire.Username,
 		DeviceID: wire.DeviceID, DeviceName: wire.DeviceName, Client: wire.Client,
 		ItemID: wire.ItemID, ItemName: wire.ItemName, ItemType: wire.ItemType,
-		SeriesName: wire.SeriesName, LibraryID: wire.LibraryID, LibraryName: wire.LibraryName,
+		SeriesID: wire.SeriesID, SeriesName: wire.SeriesName, LibraryID: wire.LibraryID, LibraryName: wire.LibraryName,
 		SeasonNumber: wire.SeasonNumber, EpisodeNumber: wire.EpisodeNumber,
 		PlayMethod: wire.PlayMethod, Stream: importedStream(wire.Stream),
 		StartedAt: core.NormalizeTime(wire.StartedAt), EndedAt: normalizedTime(wire.EndedAt),

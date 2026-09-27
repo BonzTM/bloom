@@ -107,10 +107,18 @@ SELECT EXISTS (
       AND started_at <= sqlc.arg(start_before)
 );
 
+-- name: FindAnyWatchForUserItem :one
+SELECT EXISTS (
+    SELECT 1 FROM watches
+    WHERE media_server_id = sqlc.arg(media_server_id)
+      AND media_user_id = sqlc.arg(media_user_id)
+      AND item_id = sqlc.arg(item_id)
+);
+
 -- name: InsertImportedWatch :execrows
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,
-    server_session_id, item_id, item_name, item_type, series_name, library_id,
+    server_session_id, item_id, item_name, item_type, series_id, series_name, library_id,
     library_name, season_number, episode_number, play_method,
     stream_container, stream_video_codec, stream_audio_codec, stream_bitrate,
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
@@ -120,7 +128,7 @@ INSERT INTO watches (
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(media_user_id), sqlc.arg(username),
     sqlc.arg(device_id), sqlc.arg(device_name), sqlc.arg(client), '', sqlc.arg(item_id), sqlc.arg(item_name),
-    sqlc.arg(item_type), sqlc.arg(series_name), sqlc.arg(library_id), sqlc.arg(library_name),
+    sqlc.arg(item_type), sqlc.narg(series_id), sqlc.arg(series_name), sqlc.arg(library_id), sqlc.arg(library_name),
     sqlc.narg(season_number), sqlc.narg(episode_number), sqlc.arg(play_method),
     sqlc.narg(stream_container), sqlc.narg(stream_video_codec), sqlc.narg(stream_audio_codec),
     sqlc.narg(stream_bitrate), sqlc.narg(stream_width), sqlc.narg(stream_height),
@@ -130,5 +138,4 @@ INSERT INTO watches (
     sqlc.arg(ended_at), sqlc.arg(active_seconds), sqlc.arg(last_position_ms), sqlc.narg(runtime_ms), 'import',
     sqlc.arg(now), sqlc.arg(now), sqlc.arg(import_source), sqlc.arg(import_record_id)
 )
-ON CONFLICT (media_server_id, import_source, import_record_id)
-WHERE import_record_id IS NOT NULL DO NOTHING;
+ON CONFLICT DO NOTHING;

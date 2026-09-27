@@ -69,7 +69,7 @@ func (q *Queries) LockWatchDedup(ctx context.Context) (int64, error) {
 
 const selectClaimableImport = `-- name: SelectClaimableImport :one
 
-SELECT id, media_server_id, source, state, cursor, read_count, imported_count, skipped_count, duplicate_count, last_error, lease_token, lease_expires_at, requested_by, created_at, started_at, finished_at, updated_at FROM imports
+SELECT id, media_server_id, state, cursor, read_count, imported_count, skipped_count, duplicate_count, last_error, lease_token, lease_expires_at, requested_by, created_at, started_at, finished_at, updated_at, source FROM imports
 WHERE state = 'pending' OR (state = 'running' AND lease_expires_at <= ?1)
 ORDER BY created_at, id
 LIMIT 1
@@ -82,7 +82,6 @@ func (q *Queries) SelectClaimableImport(ctx context.Context, now sql.NullString)
 	err := row.Scan(
 		&i.ID,
 		&i.MediaServerID,
-		&i.Source,
 		&i.State,
 		&i.Cursor,
 		&i.ReadCount,
@@ -97,6 +96,7 @@ func (q *Queries) SelectClaimableImport(ctx context.Context, now sql.NullString)
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.UpdatedAt,
+		&i.Source,
 	)
 	return i, err
 }

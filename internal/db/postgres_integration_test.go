@@ -48,6 +48,11 @@ func TestPostgresEngineSuite(t *testing.T) {
 	}
 
 	runEngineSuite(t, pool, config.DriverPostgres)
+	assertPostgresSchema(t, pool)
+}
+
+func assertPostgresSchema(t *testing.T, pool *sql.DB) {
+	t.Helper()
 	assertColumns(t, pool, postgresColumns, expectedAccountColumns)
 	assertColumns(t, pool, postgresSessionColumns, expectedSessionColumns)
 	assertColumns(t, pool, postgresRoleColumns, expectedRoleColumns)
@@ -73,6 +78,15 @@ func TestPostgresEngineSuite(t *testing.T) {
 	assertColumns(t, pool, postgresImportColumns, expectedImportColumns)
 	assertColumns(t, pool, postgresImportUploadColumns, expectedImportUploadColumns)
 	assertColumns(t, pool, postgresRequestColumns, expectedRequestColumns)
+	for table, want := range map[string][]string{
+		"library_items": expectedLibraryItemColumns, "library_item_genres": expectedLibraryItemGenreColumns,
+		"library_syncs": expectedLibrarySyncColumns,
+	} {
+		assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+			return postgresTableColumns(ctx, pool, table)
+		}, want)
+	}
+	assertCatalogIndexes(t, pool, postgresTableIndexes)
 }
 
 func postgresSessionColumns(ctx context.Context, pool *sql.DB) ([]string, error) {
@@ -132,6 +146,16 @@ func postgresRequestColumns(ctx context.Context, pool *sql.DB) ([]string, error)
 func postgresTableColumns(ctx context.Context, pool *sql.DB, table string) ([]string, error) {
 	rows, err := pool.QueryContext(ctx,
 		"SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY column_name", table)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanStrings(rows)
+}
+
+func postgresTableIndexes(ctx context.Context, pool *sql.DB, table string) ([]string, error) {
+	rows, err := pool.QueryContext(ctx, `SELECT indexname FROM pg_indexes
+        WHERE schemaname=current_schema() AND tablename=$1 AND indexname NOT LIKE '%_pkey' ORDER BY indexname`, table)
 	if err != nil {
 		return nil, err
 	}

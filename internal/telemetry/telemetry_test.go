@@ -122,6 +122,10 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	m.ObserveImportJob(string(core.ImportSourcePlaybackReporting), string(core.ImportCompleted), "success")
 	m.AddImportedRecords(string(core.ImportSourcePlaybackReporting), 2)
 	m.SetRunningImports(1)
+	m.ObserveLibraryCatalogSync("completed", 0.5)
+	m.AddLibraryCatalogItems(2)
+	m.AddLibraryCatalogArchived(1)
+	m.SetLibraryCatalogRunning(1)
 	return m
 }
 
@@ -152,6 +156,9 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_playback_refresh_failures_total",
 		"bloomtest_playback_library_resolutions_total",
 		"bloomtest_import_jobs_total", "bloomtest_import_records_total", "bloomtest_imports_running",
+		"bloomtest_library_catalog_syncs_total", "bloomtest_library_catalog_sync_duration_seconds",
+		"bloomtest_library_catalog_items_upserted_total", "bloomtest_library_catalog_items_archived_total",
+		"bloomtest_library_catalog_syncs_running",
 		"bloomtest_stats_query_duration_seconds",
 	} {
 		if !names[want] {

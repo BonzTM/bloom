@@ -130,13 +130,21 @@ func (s *Server) createReportingImport(
 	if err != nil {
 		return core.ImportJob{}, invalidImportField("body", "must be one valid JSON object")
 	}
-	if request.Source != core.ImportSourcePlaybackReporting {
-		return core.ImportJob{}, invalidImportField("source", "must be playback_reporting")
-	}
 	if !core.ValidID(request.MediaServerID) {
 		return core.ImportJob{}, invalidImportField("media_server_id", "must be a valid UUID")
 	}
-	return s.imports.CreatePlaybackReporting(r.Context(), request.MediaServerID, accountID)
+	switch request.Source {
+	case core.ImportSourcePlaybackReporting:
+		return s.imports.CreatePlaybackReporting(r.Context(), request.MediaServerID, accountID)
+	case core.ImportSourceJellyfinUserData:
+		manager, ok := s.imports.(userDataImportManager)
+		if !ok {
+			return core.ImportJob{}, core.ErrInvalidArgument
+		}
+		return manager.CreateJellyfinUserData(r.Context(), request.MediaServerID, accountID)
+	default:
+		return core.ImportJob{}, invalidImportField("source", "must be playback_reporting or jellyfin_userdata")
+	}
 }
 
 func (s *Server) createBloomImport(

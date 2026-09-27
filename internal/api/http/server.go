@@ -93,6 +93,21 @@ type importManager interface {
 	Cancel(context.Context, string) (core.ImportJob, error)
 }
 
+type userDataImportManager interface {
+	CreateJellyfinUserData(context.Context, string, string) (core.ImportJob, error)
+}
+
+type catalogReader interface {
+	RequestSync(context.Context, string) (core.LibrarySync, error)
+	ListLibraries(context.Context, string, core.CatalogWindow) ([]core.CatalogLibrarySummary, error)
+	ListItems(context.Context, core.CatalogItemQuery) ([]core.CatalogItemStats, error)
+	Item(context.Context, string, string) (core.CatalogItemDetail, error)
+	History(context.Context, core.CatalogHistoryQuery) ([]core.PlaybackWatch, error)
+	Recent(context.Context, string, string, int) ([]core.CatalogItemStats, error)
+	Genres(context.Context, string, string, core.CatalogWindow) ([]core.CatalogGenreSummary, error)
+	Stale(context.Context, core.CatalogStaleQuery) ([]core.CatalogItemStats, error)
+}
+
 type metadataReader interface {
 	Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error)
 	Movie(context.Context, string) (core.MetadataTitle, error)
@@ -167,6 +182,7 @@ type Server struct {
 	accountMediaUsers      accountMediaUserManager
 	playbackReader         playbackReader
 	imports                importManager
+	catalog                catalogReader
 	statsReader            core.StatsReader
 	metadataReader         metadataReader
 	metadataDiscovery      metadataDiscoveryReader
@@ -225,6 +241,8 @@ type Deps struct {
 	PlaybackReader playbackReader
 	// Imports supplies history import lifecycle operations.
 	Imports importManager
+	// Catalog supplies library sync commands and type-agnostic reads.
+	Catalog catalogReader
 	// StatsReader supplies cached statistics dashboard reports.
 	StatsReader core.StatsReader
 	// MetadataReader supplies provider-backed search and detail reads.
@@ -370,6 +388,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		accountMediaUsers:      deps.AccountMediaUsers,
 		playbackReader:         deps.PlaybackReader,
 		imports:                deps.Imports,
+		catalog:                deps.Catalog,
 		statsReader:            deps.StatsReader,
 		metadataReader:         deps.MetadataReader,
 		metadataDiscovery:      deps.MetadataDiscovery,

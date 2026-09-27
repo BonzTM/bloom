@@ -66,6 +66,12 @@ type playbackReportingReader interface {
 	PlaybackReporting(ctx context.Context, cursor int64, limit int) (core.PlaybackReportingPage, error)
 }
 
+type libraryCatalogSyncer interface {
+	CatalogItems(context.Context, string, int, int) (core.LibraryCatalogPage, error)
+	CatalogItemIDs(context.Context, []string) ([]string, error)
+	CatalogUserData(context.Context, string, []string) ([]core.LibraryUserData, error)
+}
+
 // PlaybackLifecycle coordinates collector shutdown around server deletion.
 type PlaybackLifecycle interface {
 	StopServer(ctx context.Context, id string) error
@@ -418,6 +424,70 @@ func (s *Service) PlaybackReporting(
 		return core.PlaybackReportingPage{}, fmt.Errorf("read playback reporting history: %w", err)
 	}
 	return page, nil
+}
+
+// CatalogItems reads one bounded recursive catalog page through a registered adapter.
+func (s *Service) CatalogItems(
+	ctx context.Context, id, libraryID string, start, limit int,
+) (core.LibraryCatalogPage, error) {
+	call, err := s.adapter(ctx, id, "catalog_items")
+	if err != nil {
+		return core.LibraryCatalogPage{}, err
+	}
+	defer call.release()
+	reader, ok := call.entry.adapter.(libraryCatalogSyncer)
+	if !ok {
+		return core.LibraryCatalogPage{}, fmt.Errorf("catalog items: capability unavailable: %w", core.ErrNotFound)
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	page, err := reader.CatalogItems(callCtx, libraryID, start, limit)
+	if err != nil {
+		return core.LibraryCatalogPage{}, fmt.Errorf("read media server catalog: %w", err)
+	}
+	return page, nil
+}
+
+// CatalogItemIDs returns the requested IDs that still exist upstream.
+func (s *Service) CatalogItemIDs(ctx context.Context, id string, itemIDs []string) ([]string, error) {
+	call, err := s.adapter(ctx, id, "catalog_item_ids")
+	if err != nil {
+		return nil, err
+	}
+	defer call.release()
+	reader, ok := call.entry.adapter.(libraryCatalogSyncer)
+	if !ok {
+		return nil, fmt.Errorf("catalog item ids: capability unavailable: %w", core.ErrNotFound)
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	ids, err := reader.CatalogItemIDs(callCtx, itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("revalidate media server catalog items: %w", err)
+	}
+	return ids, nil
+}
+
+// CatalogUserData reads one bounded item batch with per-user play state.
+func (s *Service) CatalogUserData(
+	ctx context.Context, id, userID string, itemIDs []string,
+) ([]core.LibraryUserData, error) {
+	call, err := s.adapter(ctx, id, "catalog_user_data")
+	if err != nil {
+		return nil, err
+	}
+	defer call.release()
+	reader, ok := call.entry.adapter.(libraryCatalogSyncer)
+	if !ok {
+		return nil, fmt.Errorf("catalog user data: capability unavailable: %w", core.ErrNotFound)
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	items, err := reader.CatalogUserData(callCtx, userID, itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("read media server user data: %w", err)
+	}
+	return items, nil
 }
 
 // ResolveLibrary maps one item to its collection folder when the adapter supports it.

@@ -63,6 +63,11 @@ type PromMetrics struct {
 	importJobs                 *prometheus.CounterVec
 	importRecords              *prometheus.CounterVec
 	importsRunning             prometheus.Gauge
+	libraryCatalogSyncs        *prometheus.CounterVec
+	libraryCatalogSeconds      *prometheus.HistogramVec
+	libraryCatalogItems        prometheus.Counter
+	libraryCatalogArchived     prometheus.Counter
+	libraryCatalogRunning      prometheus.Gauge
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -118,6 +123,20 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		Namespace: namespace, Name: "imports_running",
 		Help: "Current import jobs running in this process.",
 	})
+	libraryCatalogSyncs := newOutcomeCounter(namespace, "library_catalog_syncs_total",
+		"Library catalog full walks by bounded outcome.")
+	libraryCatalogSeconds := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Name: "library_catalog_sync_duration_seconds",
+		Help: "Library catalog full-walk duration by bounded outcome.", Buckets: prometheus.DefBuckets,
+	}, []string{"outcome"})
+	libraryCatalogItems := newCounter(namespace, "library_catalog_items_upserted_total",
+		"Total catalog items upserted by full walks.")
+	libraryCatalogArchived := newCounter(namespace, "library_catalog_items_archived_total",
+		"Total catalog items archived after completed full walks.")
+	libraryCatalogRunning := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "library_catalog_syncs_running",
+		Help: "Current library catalog full walks running in this process.",
+	})
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -153,6 +172,9 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		notificationDeliveries:     notificationDeliveries,
 		notificationOutboxDepth:    notificationOutboxDepth,
 		importJobs:                 importJobs, importRecords: importRecords, importsRunning: importsRunning,
+		libraryCatalogSyncs: libraryCatalogSyncs, libraryCatalogSeconds: libraryCatalogSeconds,
+		libraryCatalogItems: libraryCatalogItems, libraryCatalogArchived: libraryCatalogArchived,
+		libraryCatalogRunning: libraryCatalogRunning,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -389,6 +411,11 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.importJobs,
 		m.importRecords,
 		m.importsRunning,
+		m.libraryCatalogSyncs,
+		m.libraryCatalogSeconds,
+		m.libraryCatalogItems,
+		m.libraryCatalogArchived,
+		m.libraryCatalogRunning,
 	)
 }
 
@@ -419,6 +446,34 @@ func boundedImportSource(source string) string {
 		return source
 	}
 	return "invalid"
+}
+
+// ObserveLibraryCatalogSync records one completed or failed full walk.
+func (m *PromMetrics) ObserveLibraryCatalogSync(outcome string, seconds float64) {
+	if outcome != "completed" && outcome != "failed" {
+		outcome = "invalid"
+	}
+	m.libraryCatalogSyncs.WithLabelValues(outcome).Inc()
+	m.libraryCatalogSeconds.WithLabelValues(outcome).Observe(max(seconds, 0))
+}
+
+// AddLibraryCatalogItems records catalog upserts.
+func (m *PromMetrics) AddLibraryCatalogItems(count int64) {
+	if count > 0 {
+		m.libraryCatalogItems.Add(float64(count))
+	}
+}
+
+// AddLibraryCatalogArchived records archive transitions after full walks.
+func (m *PromMetrics) AddLibraryCatalogArchived(count int64) {
+	if count > 0 {
+		m.libraryCatalogArchived.Add(float64(count))
+	}
+}
+
+// SetLibraryCatalogRunning publishes the per-process running sync count.
+func (m *PromMetrics) SetLibraryCatalogRunning(count int) {
+	m.libraryCatalogRunning.Set(float64(max(count, 0)))
 }
 
 // ObserveNotificationDelivery records one bounded worker outcome.

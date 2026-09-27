@@ -9,6 +9,21 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
+### Added
+
+- A type-agnostic Jellyfin library catalog now syncs on a durable leased
+  schedule or by an authenticated on-demand route. New read routes expose
+  library coverage, item metadata and history, recently added items, genre
+  totals, and stale items.
+- The `jellyfin_userdata` history-import source enumerates every Jellyfin user,
+  including users without Bloom accounts, and creates one idempotent synthetic
+  watch from each user's per-item play state when no richer watch exists.
+- Migration `00024_library_catalog` adds the catalog and sync tables, catalog
+  genre table, keyset-listing indexes, nullable watch series identity, and
+  per-user identity for user-data imports to SQLite and PostgreSQL.
+  `BLOOM_LIBRARY_SYNC_INTERVAL` controls scheduled walks and defaults to one
+  hour.
+
 ### Removed
 
 - `BLOOM_DATA_DIR` and filesystem upload staging are removed. Bloom no longer
@@ -29,6 +44,21 @@ contracts) gets an entry here.
 - Title pages open with a hero: the backdrop behind the poster, name, and
   overview, with the request form below. Discover shows the search form only
   with results; searching starts from the top bar.
+- Catalog item, descendant-history, and stale-item routes now use bounded
+  keyset cursors instead of offsets. Cursors are bound to the route, filters,
+  sort, and fixed time window, and mismatched reuse returns `422`. Date ordering
+  is explicit for unknown and never-played items, and genre totals are
+  aggregated in SQL.
+- Catalog lease recovery preserves shutdown checkpoints, replays an interrupted
+  library from its first page, and only archives after every library completes
+  under one generation. Before archival, Bloom revalidates missing identifiers
+  against Jellyfin in bounded batches, so changing page composition cannot
+  archive an item that still exists.
+- Catalog item sorts now use filtered or unfiltered indexes and maintained
+  per-item playback rollups. Collectors and importers refresh affected rollups,
+  and successful catalog completion rebuilds them.
+- Rich history imports supersede an existing Jellyfin user-data synthetic watch
+  for the same user and item regardless of commit order.
 - The app shell is reworked: a sidebar with icons and an Administration
   section that links straight to each admin page, a top bar with a global
   title search and the session controls, a drawer on small screens, and a

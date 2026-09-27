@@ -30,6 +30,7 @@ type playbackWatchResponse struct {
 	ItemID          string                 `json:"item_id"`
 	ItemName        string                 `json:"item_name"`
 	ItemType        string                 `json:"item_type"`
+	SeriesID        string                 `json:"series_id"`
 	SeriesName      string                 `json:"series_name"`
 	LibraryID       string                 `json:"library_id"`
 	LibraryName     string                 `json:"library_name"`
@@ -243,7 +244,8 @@ func playbackWatchDTO(watch core.PlaybackWatch, now time.Time) playbackWatchResp
 		MediaUserID: watch.MediaUserID, Username: watch.Username,
 		DeviceID: watch.DeviceID, DeviceName: watch.DeviceName, Client: watch.Client,
 		ItemID: watch.ItemID, ItemName: watch.ItemName, ItemType: watch.ItemType,
-		SeriesName: watch.SeriesName, LibraryID: watch.LibraryID, LibraryName: watch.LibraryName,
+		SeriesID: watch.SeriesID, SeriesName: watch.SeriesName,
+		LibraryID: watch.LibraryID, LibraryName: watch.LibraryName,
 		SeasonNumber: watch.SeasonNumber, EpisodeNumber: watch.EpisodeNumber,
 		PositionMS: int64(watch.LastPosition / time.Millisecond), Paused: watch.State == core.WatchPaused,
 		RuntimeMS:  durationMilliseconds(watch.Runtime),

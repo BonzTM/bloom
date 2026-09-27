@@ -76,6 +76,8 @@ type Config struct {
 	Invites InviteConfig
 	// Imports configures the resumable history-import worker.
 	Imports ImportConfig
+	// Catalog configures the type-agnostic media library full walk.
+	Catalog CatalogConfig
 	// SecretKey is the operator-supplied master secret (ADR 0006 item 6). It is
 	// required and never logged: the Secret type redacts itself in every
 	// formatting path.
@@ -163,6 +165,11 @@ type InviteConfig struct {
 // ImportConfig bounds the history-import worker polling interval.
 type ImportConfig struct {
 	WorkerInterval time.Duration
+}
+
+// CatalogConfig bounds the interval between complete library walks.
+type CatalogConfig struct {
+	SyncInterval time.Duration
 }
 
 // AuthConfig configures local login protection and server-side sessions.
@@ -328,6 +335,9 @@ const (
 	defaultImportWorkerInterval        = 10 * time.Second
 	minImportWorkerInterval            = time.Second
 	maxImportWorkerInterval            = time.Hour
+	defaultLibrarySyncInterval         = time.Hour
+	minLibrarySyncInterval             = 5 * time.Minute
+	maxLibrarySyncInterval             = 24 * time.Hour
 )
 
 // Load reads configuration from flags and the environment, applies defaults,
@@ -383,6 +393,7 @@ type rawFlags struct {
 	notifications                                                   notificationRawFlags
 	invites                                                         inviteRawFlags
 	imports                                                         importRawFlags
+	catalog                                                         catalogRawFlags
 }
 
 type authRawFlags struct {
@@ -427,6 +438,8 @@ type inviteRawFlags struct {
 
 type importRawFlags struct{ workerInterval *time.Duration }
 
+type catalogRawFlags struct{ syncInterval *time.Duration }
+
 // bindFlags declares every flag with its env-seeded default.
 func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 	return rawFlags{
@@ -466,12 +479,18 @@ func bindFlags(fs *flag.FlagSet, env *envReader) rawFlags {
 		notifications:    bindNotificationFlags(fs, env),
 		invites:          bindInviteFlags(fs, env),
 		imports:          bindImportFlags(fs, env),
+		catalog:          bindCatalogFlags(fs, env),
 
 		// Deliberately flag-only (no env seed): -migrate is how a one-shot
 		// migration Job invokes the binary, not a setting that varies by env.
 		migrateMode:   fs.Bool("migrate", false, "apply the embedded goose migrations against the configured database and exit"),
 		shutdownGrace: fs.Duration("shutdown-grace", env.duration("BLOOM_SHUTDOWN_GRACE", defaultShutdownGrace), "graceful shutdown budget"),
 	}
+}
+
+func bindCatalogFlags(fs *flag.FlagSet, env *envReader) catalogRawFlags {
+	return catalogRawFlags{syncInterval: fs.Duration("library-sync-interval", env.duration(
+		"BLOOM_LIBRARY_SYNC_INTERVAL", defaultLibrarySyncInterval), "library catalog full-sync interval")}
 }
 
 func bindImportFlags(fs *flag.FlagSet, env *envReader) importRawFlags {
@@ -596,6 +615,7 @@ func (r rawFlags) build() (Config, error) {
 			ReconcileInterval: *r.invites.reconcileInterval, StoreTimeout: *r.invites.storeTimeout,
 		},
 		Imports:       ImportConfig{WorkerInterval: *r.imports.workerInterval},
+		Catalog:       CatalogConfig{SyncInterval: *r.catalog.syncInterval},
 		SecretKey:     NewSecret([]byte(r.secretKey)),
 		Migrate:       *r.migrateMode,
 		ShutdownGrace: *r.shutdownGrace,
@@ -752,6 +772,11 @@ func (c Config) Validate() error {
 		(c.Imports.WorkerInterval < minImportWorkerInterval || c.Imports.WorkerInterval > maxImportWorkerInterval) {
 		return fmt.Errorf("config: BLOOM_IMPORT_WORKER_INTERVAL must be between %s and %s",
 			minImportWorkerInterval, maxImportWorkerInterval)
+	}
+	if c.Catalog.SyncInterval != 0 &&
+		(c.Catalog.SyncInterval < minLibrarySyncInterval || c.Catalog.SyncInterval > maxLibrarySyncInterval) {
+		return fmt.Errorf("config: BLOOM_LIBRARY_SYNC_INTERVAL must be between %s and %s",
+			minLibrarySyncInterval, maxLibrarySyncInterval)
 	}
 	if err := c.Bootstrap.validate(); err != nil {
 		return err
