@@ -1,10 +1,12 @@
 package db_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"reflect"
 	"sync"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/importer"
+	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
 type importFixture struct {
@@ -46,6 +49,253 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("Bloom export snapshot is preserved", func(t *testing.T) {
 		testBloomExportSnapshot(t, pool, driver, newImportFixture(t, pool, driver))
 	})
+	t.Run("database upload chunks and terminal cleanup", func(t *testing.T) {
+		testDatabaseUploadLifecycle(t, newImportFixture(t, pool, driver))
+	})
+	t.Run("database ZIP upload round trip", func(t *testing.T) {
+		testDatabaseZIPUploadRoundTrip(t, pool, driver, newImportFixture(t, pool, driver))
+	})
+	t.Run("cancel removes database upload", func(t *testing.T) {
+		testCancelledUploadCleanup(t, newImportFixture(t, pool, driver))
+	})
+	t.Run("failure removes database upload", func(t *testing.T) {
+		testFailedUploadCleanup(t, newImportFixture(t, pool, driver))
+	})
+	t.Run("orphan upload cleanup is bounded", func(t *testing.T) {
+		testOrphanUploadCleanup(t, newImportFixture(t, pool, driver))
+	})
+}
+
+type importFixtureServer struct{}
+
+func (importFixtureServer) Get(context.Context, string) (core.MediaServerConnection, error) {
+	return core.MediaServerConnection{}, nil
+}
+
+type importFixtureClock struct{ now time.Time }
+
+func (c importFixtureClock) Now() time.Time { return c.now }
+
+type importFixtureReporting struct{}
+
+func (importFixtureReporting) PlaybackReporting(
+	context.Context, string, int64, int,
+) (core.PlaybackReportingPage, error) {
+	return core.PlaybackReportingPage{}, nil
+}
+
+func testDatabaseUploadLifecycle(t *testing.T, fixture importFixture) {
+	t.Helper()
+	payload := make([]byte, 3*core.ImportUploadChunkBytes+17)
+	for index := range payload {
+		payload[index] = byte(index % 251)
+	}
+	service := newDatabaseImportService(t, fixture, fixture.now)
+	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	info, err := fixture.store.ImportUploadInfo(t.Context(), uploadID)
+	if err != nil || info.Size != int64(len(payload)) || info.ChunkCount != 4 {
+		t.Fatalf("ImportUploadInfo = %+v, %v", info, err)
+	}
+	chunk, err := fixture.store.ReadImportUploadChunk(t.Context(), uploadID, 2)
+	if err != nil || !bytes.Equal(chunk, payload[2*core.ImportUploadChunkBytes:3*core.ImportUploadChunkBytes]) {
+		t.Fatalf("ReadImportUploadChunk = %d bytes, %v", len(chunk), err)
+	}
+	job, err := service.CreateBloomExport(t.Context(), fixture.serverID, fixture.ownerID, uploadID)
+	if err != nil {
+		t.Fatalf("CreateBloomExport: %v", err)
+	}
+	claimed := claimImport(t, fixture.store, fixture.now, "upload-cleanup")
+	if claimed.ID != job.ID {
+		t.Fatalf("claimed job = %s, want %s", claimed.ID, job.ID)
+	}
+	if err := fixture.store.FinishImport(t.Context(), job.ID, claimed.LeaseToken,
+		core.ImportCompleted, "", fixture.now.Add(time.Minute)); err != nil {
+		t.Fatalf("FinishImport: %v", err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), uploadID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("terminal upload remains: %v", err)
+	}
+}
+
+func testDatabaseZIPUploadRoundTrip(
+	t *testing.T, pool *sql.DB, driver config.Driver, fixture importFixture,
+) {
+	t.Helper()
+	payload := databaseImportZIP(t, fixture)
+	service, staging := newDatabaseImportDependencies(t, fixture, fixture.now)
+	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	job, err := service.CreateBloomExport(t.Context(), fixture.serverID, fixture.ownerID, uploadID)
+	if err != nil {
+		t.Fatalf("CreateBloomExport: %v", err)
+	}
+	jobs, err := fixture.store.ListImports(t.Context(), core.ImportListQuery{
+		MediaServerID: fixture.serverID, PageSize: 501,
+	})
+	if err != nil || len(jobs) != 1 || jobs[0].ID != job.ID {
+		t.Fatalf("export-sized ListImports = %+v, %v", jobs, err)
+	}
+	runDatabaseImportWorker(t, fixture, staging)
+	completed, err := fixture.store.GetImport(t.Context(), job.ID)
+	if err != nil || completed.State != core.ImportCompleted || completed.Imported != 1 {
+		t.Fatalf("completed import = %+v, %v", completed, err)
+	}
+	watches, err := newPlaybackTestStore(t, pool, driver).ListWatches(t.Context(), core.PlaybackQuery{
+		Mode: core.PlaybackQueryHistory, MediaServerID: fixture.serverID, PageSize: 10,
+	})
+	if err != nil || len(watches) != 1 || watches[0].ItemID != "zip-round-trip" {
+		t.Fatalf("round-trip watches = %+v, %v", watches, err)
+	}
+}
+
+func databaseImportZIP(t *testing.T, fixture importFixture) []byte {
+	t.Helper()
+	watch := playbackStoreWatch(t, fixture.serverID, fixture.now)
+	watch.MediaServerName = "Round-trip source"
+	watch.ItemID, watch.State = "zip-round-trip", core.WatchStopped
+	ended := fixture.now.Add(time.Minute)
+	watch.EndedAt, watch.ActiveTime = &ended, time.Minute
+	var payload bytes.Buffer
+	archive := zip.NewWriter(&payload)
+	entry, err := archive.CreateHeader(&zip.FileHeader{Name: "watches.jsonl", Method: zip.Store})
+	if err != nil {
+		t.Fatalf("create watches.jsonl: %v", err)
+	}
+	if err := importer.EncodeWatchJSONL(entry, watch); err != nil {
+		t.Fatalf("EncodeWatchJSONL: %v", err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close import ZIP: %v", err)
+	}
+	return payload.Bytes()
+}
+
+func runDatabaseImportWorker(t *testing.T, fixture importFixture, staging *importer.Staging) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	var logs bytes.Buffer
+	worker, err := importer.NewWorker(importer.WorkerConfig{
+		Interval: time.Second, LeaseDuration: 30 * time.Second, ResumeWindow: 5 * time.Minute,
+	}, importer.WorkerDependencies{
+		Store: fixture.store, Reporting: importFixtureReporting{}, Clock: importFixtureClock{fixture.now},
+		Metrics: telemetry.NopMetrics{}, Logger: slog.New(slog.NewTextHandler(&logs, nil)), Staging: staging,
+		Wait: func(context.Context, time.Duration) error { cancel(); return context.Canceled },
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if logs.Len() > 0 {
+		t.Log(logs.String())
+	}
+}
+
+func testCancelledUploadCleanup(t *testing.T, fixture importFixture) {
+	t.Helper()
+	service := newDatabaseImportService(t, fixture, fixture.now)
+	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader([]byte("upload")))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	job, err := service.CreateBloomExport(t.Context(), fixture.serverID, fixture.ownerID, uploadID)
+	if err != nil {
+		t.Fatalf("CreateBloomExport: %v", err)
+	}
+	if _, err := service.Cancel(t.Context(), job.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), uploadID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("cancelled upload remains: %v", err)
+	}
+}
+
+func testFailedUploadCleanup(t *testing.T, fixture importFixture) {
+	t.Helper()
+	service := newDatabaseImportService(t, fixture, fixture.now)
+	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader([]byte("invalid")))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	job, err := service.CreateBloomExport(t.Context(), fixture.serverID, fixture.ownerID, uploadID)
+	if err != nil {
+		t.Fatalf("CreateBloomExport: %v", err)
+	}
+	claimed := claimImport(t, fixture.store, fixture.now, "failed-upload-cleanup")
+	if err := fixture.store.FinishImport(
+		t.Context(), job.ID, claimed.LeaseToken, core.ImportFailed, "invalid", fixture.now,
+	); err != nil {
+		t.Fatalf("FinishImport: %v", err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), uploadID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("failed upload remains: %v", err)
+	}
+}
+
+func testOrphanUploadCleanup(t *testing.T, fixture importFixture) {
+	t.Helper()
+	oldService := newDatabaseImportService(t, fixture, fixture.now.Add(-11*time.Minute))
+	oldID, err := oldService.StageBloomExport(t.Context(), bytes.NewReader([]byte("old")))
+	if err != nil {
+		t.Fatalf("stage old orphan: %v", err)
+	}
+	linkedID, err := oldService.StageBloomExport(t.Context(), bytes.NewReader([]byte("linked")))
+	if err != nil {
+		t.Fatalf("stage linked upload: %v", err)
+	}
+	if _, linkErr := oldService.CreateBloomExport(
+		t.Context(), fixture.serverID, fixture.ownerID, linkedID,
+	); linkErr != nil {
+		t.Fatalf("link old upload: %v", linkErr)
+	}
+	recentService := newDatabaseImportService(t, fixture, fixture.now)
+	recentID, err := recentService.StageBloomExport(t.Context(), bytes.NewReader([]byte("recent")))
+	if err != nil {
+		t.Fatalf("stage recent orphan: %v", err)
+	}
+	deleted, err := fixture.store.DeleteOrphanImportUploads(t.Context(), fixture.now.Add(-10*time.Minute), 1)
+	if err != nil || deleted != 1 {
+		t.Fatalf("DeleteOrphanImportUploads = %d, %v", deleted, err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), oldID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("old orphan remains: %v", err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), recentID); err != nil {
+		t.Fatalf("recent orphan removed: %v", err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), linkedID); err != nil {
+		t.Fatalf("linked upload removed: %v", err)
+	}
+}
+
+func newDatabaseImportService(t *testing.T, fixture importFixture, now time.Time) *importer.Service {
+	t.Helper()
+	service, _ := newDatabaseImportDependencies(t, fixture, now)
+	return service
+}
+
+func newDatabaseImportDependencies(
+	t *testing.T, fixture importFixture, now time.Time,
+) (*importer.Service, *importer.Staging) {
+	t.Helper()
+	staging, err := importer.NewStaging(fixture.store, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("NewStaging: %v", err)
+	}
+	service, err := importer.NewService(
+		fixture.store, importFixtureServer{}, importFixtureClock{now: now}, staging,
+		slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	return service, staging
 }
 
 func newImportFixture(t *testing.T, pool *sql.DB, driver config.Driver) importFixture {

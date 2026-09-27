@@ -56,10 +56,13 @@ type Querier interface {
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
 	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
 	DeleteDownloadManager(ctx context.Context, id string) (int64, error)
+	DeleteImportUpload(ctx context.Context, id string) error
+	DeleteImportUploadForJob(ctx context.Context, importID sql.NullString) error
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
 	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
+	DeleteOrphanImportUpload(ctx context.Context, id string) (int64, error)
 	DeleteOverlappingImportedWatches(ctx context.Context, arg DeleteOverlappingImportedWatchesParams) error
 	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
 	DeleteRequestProfileTags(ctx context.Context, profileID string) error
@@ -84,6 +87,8 @@ type Querier interface {
 	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
 	GetDownloadManagerByName(ctx context.Context, nameKey string) (GetDownloadManagerByNameRow, error)
 	GetImport(ctx context.Context, id string) (Import, error)
+	GetImportUploadChunk(ctx context.Context, arg GetImportUploadChunkParams) ([]byte, error)
+	GetImportUploadInfo(ctx context.Context, id string) (GetImportUploadInfoRow, error)
 	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
 	GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
@@ -98,17 +103,18 @@ type Querier interface {
 	GetRoleRequestQuota(ctx context.Context, roleID string) (RoleRequestQuota, error)
 	GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error)
 	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
+	InsertImportUploadChunk(ctx context.Context, arg InsertImportUploadChunkParams) error
 	InsertImportedWatch(ctx context.Context, arg InsertImportedWatchParams) (int64, error)
 	InsertInviteProvisioningFailureIfAbsent(ctx context.Context, arg InsertInviteProvisioningFailureIfAbsentParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
 	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
 	InviteProvisioningFailureDepth(ctx context.Context) (int64, error)
 	InviteProvisioningFailureExists(ctx context.Context, id string) (bool, error)
+	LinkImportUpload(ctx context.Context, arg LinkImportUploadParams) (int64, error)
 	ListAccountMediaUsers(ctx context.Context, arg ListAccountMediaUsersParams) ([]ListAccountMediaUsersRow, error)
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
-	ListActiveBloomImportCursors(ctx context.Context) ([]string, error)
 	ListDownloadManagers(ctx context.Context, arg ListDownloadManagersParams) ([]ListDownloadManagersRow, error)
 	ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error)
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
@@ -119,6 +125,7 @@ type Querier interface {
 	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]NotificationOutbox, error)
 	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
+	ListOrphanImportUploadIDs(ctx context.Context, arg ListOrphanImportUploadIDsParams) ([]string, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
 	ListRecentPlaybackWatches(ctx context.Context, arg ListRecentPlaybackWatchesParams) ([]ListRecentPlaybackWatchesRow, error)
 	ListRequestProfileTags(ctx context.Context, profileID string) ([]string, error)

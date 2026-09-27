@@ -53,7 +53,8 @@ func (s *postgresImportStore) ListImports(ctx context.Context, query core.Import
 	}
 	before, id := importListCursor(query)
 	rows, err := s.q.ListImports(ctx, postgres.ListImportsParams{
-		BeforeCreatedAt: before, BeforeID: id, PageSize: int32(query.PageSize), //nolint:gosec // bounded above.
+		MediaServerID: query.MediaServerID, BeforeCreatedAt: before,
+		BeforeID: id, PageSize: int32(query.PageSize), //nolint:gosec // bounded above.
 	})
 	if err != nil {
 		return nil, importStoreError("list imports", err)
@@ -69,36 +70,48 @@ func (s *postgresImportStore) ListImports(ctx context.Context, query core.Import
 	return jobs, nil
 }
 
-func (s *postgresImportStore) ListActiveBloomImportCursors(ctx context.Context) ([]string, error) {
-	cursors, err := s.q.ListActiveBloomImportCursors(ctx)
-	if err != nil {
-		return nil, importStoreError("list active Bloom import cursors", err)
-	}
-	if len(cursors) > core.MaxActiveImportUploads {
-		return nil, importStoreError("list active Bloom import cursors", errors.New("active upload count exceeds safety bound"))
-	}
-	return cursors, nil
-}
-
-func (s *postgresImportStore) CancelImport(ctx context.Context, id string, now time.Time) (core.ImportJob, error) {
+func (s *postgresImportStore) CancelImport(
+	ctx context.Context, id string, now time.Time,
+) (job core.ImportJob, result error) {
 	if !core.ValidID(id) || now.IsZero() {
 		return core.ImportJob{}, core.ErrInvalidArgument
 	}
-	rows, err := s.q.CancelImport(ctx, postgres.CancelImportParams{ID: id, Now: nullableTime(&now)})
+	tx, err := s.pool.BeginTx(ctx, nil)
 	if err != nil {
-		return core.ImportJob{}, importStoreError("cancel import", err)
+		return core.ImportJob{}, importStoreError("begin import cancellation", err)
 	}
-	if rows == 0 {
-		_, getErr := s.GetImport(ctx, id)
-		if errors.Is(getErr, core.ErrNotFound) {
-			return core.ImportJob{}, core.ErrNotFound
-		}
-		if getErr != nil {
-			return core.ImportJob{}, getErr
-		}
-		return core.ImportJob{}, core.ErrInvalidTransition
+	defer rollbackImport(tx, &result)
+	q := s.q.WithTx(tx)
+	rows, err := q.CancelImport(ctx, postgres.CancelImportParams{ID: id, Now: nullableTime(&now)})
+	if err != nil || rows == 0 {
+		return core.ImportJob{}, importStoreError("cancel import", postgresCancelError(ctx, q, id, rows, err))
 	}
-	return s.GetImport(ctx, id)
+	if cleanupErr := postgresDeleteJobUpload(ctx, q, id); cleanupErr != nil {
+		return core.ImportJob{}, importStoreError("cancel import", cleanupErr)
+	}
+	row, err := q.GetImport(ctx, id)
+	if err != nil {
+		return core.ImportJob{}, importStoreError("read cancelled import", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return core.ImportJob{}, importStoreError("commit import cancellation", err)
+	}
+	return postgresImport(row)
+}
+
+func postgresCancelError(ctx context.Context, q *postgres.Queries, id string, rows int64, queryErr error) error {
+	if queryErr != nil {
+		return queryErr
+	}
+	if rows == 1 {
+		return nil
+	}
+	if _, err := q.GetImport(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return core.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return core.ErrInvalidTransition
 }
 
 func (s *postgresImportStore) ClaimImport(ctx context.Context, lease core.ImportLease, now time.Time) (job core.ImportJob, result error) {
@@ -273,20 +286,28 @@ func postgresImportedWatchParams(
 	}, nil
 }
 
-func (s *postgresImportStore) FinishImport(ctx context.Context, id, token string, state core.ImportState, lastError string, now time.Time) error {
+func (s *postgresImportStore) FinishImport(
+	ctx context.Context, id, token string, state core.ImportState, lastError string, now time.Time,
+) (result error) {
 	if !core.ValidID(id) || token == "" || !state.Terminal() || len(lastError) > core.MaxImportErrorBytes || now.IsZero() {
 		return core.ErrInvalidArgument
 	}
-	rows, err := s.q.FinishImport(ctx, postgres.FinishImportParams{
+	tx, err := s.pool.BeginTx(ctx, nil)
+	if err != nil {
+		return importStoreError("begin import finish", err)
+	}
+	defer rollbackImport(tx, &result)
+	q := s.q.WithTx(tx)
+	rows, err := q.FinishImport(ctx, postgres.FinishImportParams{
 		ID: id, Token: token, State: string(state), LastError: lastError, Now: nullableTime(&now),
 	})
-	if err != nil {
+	if finishErr := importRowsError("finish import", rows, err, core.ErrImportLeaseLost); finishErr != nil {
+		return finishErr
+	}
+	if err := postgresDeleteJobUpload(ctx, q, id); err != nil {
 		return importStoreError("finish import", err)
 	}
-	if rows != 1 {
-		return core.ErrImportLeaseLost
-	}
-	return nil
+	return importStoreError("commit import finish", tx.Commit())
 }
 
 func postgresCreateImportParams(job core.ImportJob) postgres.CreateImportParams {

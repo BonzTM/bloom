@@ -11,6 +11,8 @@ contracts) gets an entry here.
 
 ### Removed
 
+- `BLOOM_DATA_DIR` and filesystem upload staging are removed. Bloom no longer
+  needs a data directory for imports.
 - The image workflow no longer opens deployment pull requests or needs a
   deployment token; it publishes and promotes images only.
 
@@ -35,11 +37,12 @@ contracts) gets an entry here.
   ranked poster tiles; the statistics page adds most-popular rows ranked by
   how many different people watched; most active people and libraries are
   cards instead of bar charts.
-- Bloom JSONL uploads now stream once into a private, bounded staging area.
-  Terminal jobs and periodic worker sweeps remove staged files best-effort.
-  An unavailable staging directory no longer prevents startup or Playback
-  Reporting imports; Bloom export uploads report an actionable validation error
-  and retry the directory lazily after the mount is fixed.
+- Watch exports are now one streamed ZIP download containing a manifest, every
+  watch, import-job provenance, and a trailing count summary. Bloom export
+  imports accept that ZIP by content while retaining JSONL compatibility.
+- Import uploads now stream into fixed-size database chunks. Terminal job
+  transitions delete linked chunks in the same transaction, and worker scans
+  delete bounded batches of expired orphan uploads.
 - Bloom export imports now retain the complete exported watch snapshot except
   segments and position samples. Collected watches win import deduplication in
   either commit order, including runtime, and every malformed Playback Reporting
@@ -128,14 +131,14 @@ contracts) gets an entry here.
   caller-specific request state, plus day-cached movie and series genre lists.
 - The shared `MetadataTitle` and `MetadataSeries` API responses now require a
   `backdrop_path` field.
-- Resumable Playback Reporting and Bloom JSONL history imports, cursor-paged
-  JSONL watch export, audited administrator import routes, worker metrics,
-  `BLOOM_IMPORT_WORKER_INTERVAL`, `BLOOM_DATA_DIR`, and SQLite/PostgreSQL migration
-  `00022_history_imports`.
+- Resumable Playback Reporting and Bloom history imports, streamed ZIP watch
+  export, audited administrator import routes, worker metrics,
+  `BLOOM_IMPORT_WORKER_INTERVAL`, and SQLite/PostgreSQL migrations
+  `00022_history_imports` and `00023_import_uploads`.
 - An Imports page under Administration: start a Playback Reporting import
   for a server or upload another Bloom's export file, watch each job's
   counters update while it runs, cancel a waiting or running job, and
-  download watches as JSON Lines.
+  download watches as one ZIP archive.
 - Registration pages say which way a media-server or download-manager probe
   failed: the address could not be reached, the API key was rejected, the API
   was not found at that address, or the answer did not look like the expected

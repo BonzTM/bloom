@@ -92,6 +92,14 @@ type Import struct {
 	UpdatedAt      time.Time
 }
 
+type ImportUpload struct {
+	ID         string
+	ImportID   sql.NullString
+	ChunkIndex int64
+	Bytes      []byte
+	CreatedAt  time.Time
+}
+
 type Invite struct {
 	ID                 string
 	MediaServerID      string

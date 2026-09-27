@@ -1517,25 +1517,23 @@ paths:
     get:
       tags: [imports]
       operationId: exportWatches
-      summary: Stream one bounded page of watches as Bloom JSON Lines.
-      description: Records are ordered by `(started_at, id)` newest first. Continue with the `X-Next-Cursor` response trailer until it is empty. A response that ends without the terminating chunk and trailer is truncated and must be retried.
+      summary: Stream all matching watches and import provenance as one ZIP archive.
+      description: The archive contains `manifest.json`, newest-first `watches.jsonl`, newest-first `imports.jsonl`, and trailing `summary.json`. The response is streamed directly from bounded database pages and must be retried if the connection ends before a complete ZIP central directory is received.
       security: [{ sessionCookie: [] }]
       parameters:
-        - { name: cursor, in: query, schema: { type: string, maxLength: 256 } }
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 10000, default: 1000 } }
         - { name: media_server_id, in: query, schema: { type: string, format: uuid } }
       responses:
         "200":
-          description: JSONL watch records. The `X-Next-Cursor` trailer identifies the next page.
+          description: A complete Bloom export ZIP archive.
           headers:
             Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
             X-Request-ID: { $ref: "#/components/headers/XRequestID" }
-            X-Next-Cursor:
-              description: Cursor for the next page, sent as a response trailer and empty on the final page.
-              schema: { type: string, maxLength: 256 }
+            Content-Disposition:
+              description: Attachment filename in the form `bloom-export-YYYY-MM-DD.zip`, using the UTC export date.
+              schema: { type: string }
           content:
-            application/x-ndjson:
-              schema: { type: string, description: One `WatchExportRecord` JSON object per line. }
+            application/zip:
+              schema: { type: string, format: binary, description: A streamed ZIP with data descriptors and no temporary file. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -1545,7 +1543,7 @@ paths:
     post:
       tags: [imports]
       operationId: createImport
-      summary: Create a Playback Reporting or Bloom JSONL import job.
+      summary: Create a Playback Reporting, Bloom JSONL, or Bloom ZIP import job.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -1556,7 +1554,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateBloomExportImportRequest" }
             encoding:
               file:
-                contentType: application/x-ndjson
+                contentType: application/x-ndjson, application/zip, application/octet-stream
       responses:
         "201": { description: Import job created., content: { application/json: { schema: { $ref: "#/components/schemas/ImportJob" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -3276,7 +3274,7 @@ components:
       properties:
         media_server_id: { type: string, format: uuid }
         source: { type: string, const: bloom_export }
-        file: { type: string, format: binary, x-max-bytes: 268435456, description: "An application/x-ndjson Bloom watch export, at most 256 MiB." }
+        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom watch export as JSONL or ZIP, detected by content and limited to 256 MiB." }
     ImportJob:
       type: object
       required: [id, media_server_id, source, state, read, imported, skipped, duplicate, last_error, requested_by, created_at, updated_at]
@@ -3387,6 +3385,22 @@ components:
       allOf:
         - $ref: "#/components/schemas/PlaybackHistoryWatch"
       description: The JSON object written on each export line; imported records also carry `import_source` and `import_record_id`.
+    WatchExportManifest:
+      type: object
+      required: [format_version, bloom_version, exported_at]
+      additionalProperties: false
+      properties:
+        format_version: { type: integer, const: 1 }
+        bloom_version: { type: string, minLength: 1 }
+        exported_at: { type: string, format: date-time }
+        media_server_id: { type: string, format: uuid }
+    WatchExportSummary:
+      type: object
+      required: [watch_records, import_records]
+      additionalProperties: false
+      properties:
+        watch_records: { type: integer, format: int64, minimum: 0 }
+        import_records: { type: integer, format: int64, minimum: 0 }
     PlaybackNowResponse:
       type: object
       required: [items, next_cursor]

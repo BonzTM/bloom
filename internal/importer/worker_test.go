@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,9 +18,8 @@ type workerStore struct {
 	result    core.ImportBatchResult
 	finished  core.ImportState
 	errorText string
-	active    []string
-	listErr   error
 	commitErr error
+	uploads   *memoryUploadStore
 }
 
 func (*workerStore) CreateImport(context.Context, core.ImportJob) error { return nil }
@@ -30,8 +27,38 @@ func (*workerStore) ListImports(context.Context, core.ImportListQuery) ([]core.I
 	return nil, nil
 }
 
-func (s *workerStore) ListActiveBloomImportCursors(context.Context) ([]string, error) {
-	return s.active, s.listErr
+func (s *workerStore) CreateUploadedImport(_ context.Context, job core.ImportJob, _ string) error {
+	s.job = job
+	return nil
+}
+
+func (s *workerStore) uploadStore() *memoryUploadStore {
+	if s.uploads == nil {
+		s.uploads = newMemoryUploadStore()
+	}
+	return s.uploads
+}
+
+func (s *workerStore) WriteImportUploadChunks(ctx context.Context, chunks []core.ImportUploadChunk) error {
+	return s.uploadStore().WriteImportUploadChunks(ctx, chunks)
+}
+
+func (s *workerStore) ImportUploadInfo(ctx context.Context, id string) (core.ImportUploadInfo, error) {
+	return s.uploadStore().ImportUploadInfo(ctx, id)
+}
+
+func (s *workerStore) ReadImportUploadChunk(ctx context.Context, id string, index int64) ([]byte, error) {
+	return s.uploadStore().ReadImportUploadChunk(ctx, id, index)
+}
+
+func (s *workerStore) DeleteImportUpload(ctx context.Context, id string) error {
+	return s.uploadStore().DeleteImportUpload(ctx, id)
+}
+
+func (s *workerStore) DeleteOrphanImportUploads(
+	ctx context.Context, before time.Time, limit int,
+) (int64, error) {
+	return s.uploadStore().DeleteOrphanImportUploads(ctx, before, limit)
 }
 
 func (s *workerStore) GetImport(context.Context, string) (core.ImportJob, error) { return s.job, nil }
@@ -61,8 +88,14 @@ func (s *workerStore) CommitImportBatch(_ context.Context, batch core.ImportBatc
 	return s.result, nil
 }
 
-func (s *workerStore) FinishImport(_ context.Context, _, _ string, state core.ImportState, message string, _ time.Time) error {
+func (s *workerStore) FinishImport(ctx context.Context, _, _ string, state core.ImportState, message string, _ time.Time) error {
 	s.finished, s.errorText = state, message
+	if s.job.Source == core.ImportSourceBloomExport {
+		cursor, err := decodeFileCursor(s.job.Cursor)
+		if err == nil {
+			return s.DeleteImportUpload(ctx, cursor.ID)
+		}
+	}
 	return nil
 }
 
@@ -110,7 +143,7 @@ func TestWorkerCompletionRemovesBloomUpload(t *testing.T) {
 	job.Source = core.ImportSourceBloomExport
 	store := workerStore{job: job}
 	worker := newTestWorker(t, &store, reportingStub{})
-	id, err := worker.deps.Staging.stage(strings.NewReader("upload"))
+	id, err := worker.deps.Staging.stage(t.Context(), strings.NewReader("upload"), time.Now())
 	if err != nil {
 		t.Fatalf("stage upload: %v", err)
 	}
@@ -118,20 +151,11 @@ func TestWorkerCompletionRemovesBloomUpload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode cursor: %v", err)
 	}
+	store.job = job
 	if err := worker.complete(t.Context(), job); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	assertStagingPresence(t, worker.deps.Staging, id, false)
-}
-
-func TestWorkerCompletionIgnoresCleanupFailure(t *testing.T) {
-	job := pendingWorkerJob(t)
-	job.Source, job.Cursor = core.ImportSourceBloomExport, "invalid"
-	store := workerStore{job: job}
-	worker := newTestWorker(t, &store, reportingStub{})
-	if err := worker.complete(t.Context(), job); err != nil || store.finished != core.ImportCompleted {
-		t.Fatalf("complete = %v, state %q", err, store.finished)
-	}
 }
 
 func TestWorkerLogsAndBacksOffOnStoreFailure(t *testing.T) {
@@ -157,12 +181,14 @@ func TestWorkerLogsAndBacksOffOnStoreFailure(t *testing.T) {
 	}
 }
 
-func TestBloomJobRecoversAfterStagingBecomesAvailable(t *testing.T) {
+func TestBloomJobReadsDatabaseStagingAndCompletes(t *testing.T) {
 	job := pendingWorkerJob(t)
 	job.Source = core.ImportSourceBloomExport
 	store := workerStore{job: job}
 	worker := newTestWorker(t, &store, reportingStub{})
-	id, err := worker.deps.Staging.stage(strings.NewReader(validJSONLFixture() + "\n"))
+	id, err := worker.deps.Staging.stage(
+		t.Context(), strings.NewReader(validJSONLFixture()+"\n"), time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("stage upload: %v", err)
 	}
@@ -170,67 +196,31 @@ func TestBloomJobRecoversAfterStagingBecomesAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode cursor: %v", err)
 	}
-	mounted := worker.deps.Staging.root + ".mounted"
-	if err := os.Rename(worker.deps.Staging.root, mounted); err != nil {
-		t.Fatalf("move staging root: %v", err)
-	}
-	if err := worker.deps.Staging.markUnavailable(errors.New("mount unavailable")); !errors.Is(err, errStagingUnavailable) {
-		t.Fatalf("mark unavailable: %v", err)
-	}
-	if err := worker.runOnce(t.Context()); !errors.Is(err, errStagingUnavailable) || store.finished != "" {
-		t.Fatalf("unavailable run = %v, finished %q", err, store.finished)
-	}
-	if err := os.Rename(mounted, worker.deps.Staging.root); err != nil {
-		t.Fatalf("restore staging root: %v", err)
-	}
 	if err := worker.runOnce(t.Context()); err != nil || store.finished != core.ImportCompleted || store.result.Imported != 1 {
-		t.Fatalf("recovered run = %v, state %q, counters %+v", err, store.finished, store.result)
+		t.Fatalf("database upload run = %v, state %q, counters %+v", err, store.finished, store.result)
 	}
 }
 
-func TestWorkerSweepKeepsOnlyActiveUploads(t *testing.T) {
+func TestWorkerSweepDeletesExpiredOrphanUpload(t *testing.T) {
 	store := workerStore{job: pendingWorkerJob(t)}
 	worker := newTestWorker(t, &store, reportingStub{})
-	activeID, err := worker.deps.Staging.stage(strings.NewReader("active"))
-	if err != nil {
-		t.Fatalf("stage active: %v", err)
-	}
-	orphanID, err := worker.deps.Staging.stage(strings.NewReader("orphan"))
+	orphanID, err := worker.deps.Staging.stage(
+		t.Context(), strings.NewReader("orphan"), time.Date(2026, 9, 25, 11, 40, 0, 0, time.UTC),
+	)
 	if err != nil {
 		t.Fatalf("stage orphan: %v", err)
 	}
-	worker.deps.Staging.release(activeID)
-	worker.deps.Staging.release(orphanID)
-	ageStagingEntry(t, worker.deps.Staging, stagingName(orphanID))
-	cursor, err := encodeFileCursor(fileCursor{ID: activeID})
-	if err != nil {
-		t.Fatalf("encode cursor: %v", err)
-	}
-	store.active = []string{cursor}
-	partialID := "44444444-4444-4444-8444-444444444444"
-	partialPath := filepath.Join(worker.deps.Staging.root, partialID+partialSuffix)
-	if err := os.WriteFile(partialPath, []byte("partial"), 0o600); err != nil {
-		t.Fatalf("write partial staging file: %v", err)
-	}
-	ageStagingEntry(t, worker.deps.Staging, partialID+partialSuffix)
 	if err := worker.sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	assertStagingPresence(t, worker.deps.Staging, activeID, true)
 	assertStagingPresence(t, worker.deps.Staging, orphanID, false)
-	if _, err := os.Stat(partialPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("partial staging file survived sweep: %v", err)
-	}
 }
 
 func assertStagingPresence(t *testing.T, staging *Staging, id string, want bool) {
 	t.Helper()
-	file, err := staging.open(id)
+	_, err := staging.open(t.Context(), id)
 	if (err == nil) != want {
 		t.Fatalf("staging %s exists = %t, %v; want %t", id, err == nil, err, want)
-	}
-	if file != nil {
-		_ = file.Close()
 	}
 }
 
@@ -248,7 +238,7 @@ func pendingWorkerJob(t *testing.T) core.ImportJob {
 
 func newTestWorker(t *testing.T, store core.ImportStore, reporting PlaybackReportingService) *Worker {
 	t.Helper()
-	staging, err := NewStaging(t.TempDir(), 10*time.Minute)
+	staging, err := NewStaging(store, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("NewStaging: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-const maxImportPageSize = 101
+const maxImportPageSize = 501
 
 // NewImportStore returns the import persistence seam for the configured engine.
 func NewImportStore(pool *sql.DB, driver config.Driver) (core.ImportStore, error) {
@@ -30,8 +30,24 @@ func validateImportList(query core.ImportListQuery) error {
 	if query.PageSize < 1 || query.PageSize > maxImportPageSize {
 		return core.ErrInvalidArgument
 	}
+	if query.MediaServerID != "" && !core.ValidID(query.MediaServerID) {
+		return core.ErrInvalidArgument
+	}
 	if query.Before != nil && (query.Before.CreatedAt.IsZero() || !core.ValidID(query.Before.ID)) {
 		return core.ErrInvalidArgument
+	}
+	return nil
+}
+
+func validateUploadChunks(chunks []core.ImportUploadChunk) error {
+	if len(chunks) < 1 || len(chunks) > core.MaxImportUploadWriteChunks {
+		return core.ErrInvalidArgument
+	}
+	for _, chunk := range chunks {
+		if !core.ValidID(chunk.ID) || chunk.Index < 0 || len(chunk.Bytes) > core.ImportUploadChunkBytes ||
+			chunk.CreatedAt.IsZero() {
+			return core.ErrInvalidArgument
+		}
 	}
 	return nil
 }

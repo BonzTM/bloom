@@ -1,10 +1,12 @@
 package http
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
+	"github.com/BonzTM/bloom/internal/importer"
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
@@ -41,8 +44,6 @@ func (f *fakeImportManager) CreatePlaybackReporting(_ context.Context, _, reques
 	return f.job, f.err
 }
 
-func (f *fakeImportManager) CheckBloomExportUpload() error { return f.uploadErr }
-
 func (f *fakeImportManager) StageBloomExport(_ context.Context, upload io.Reader) (string, error) {
 	if f.uploadErr != nil {
 		return "", f.uploadErr
@@ -64,7 +65,7 @@ func (f *fakeImportManager) CreateBloomExport(_ context.Context, _, requested, s
 	return f.job, f.err
 }
 
-func (f *fakeImportManager) DiscardBloomExport(stagingID string) error {
+func (f *fakeImportManager) DiscardBloomExport(_ context.Context, stagingID string) error {
 	f.discarded = stagingID
 	return nil
 }
@@ -111,51 +112,19 @@ func TestCreateBloomExportAcceptsBoundedNDJSONPart(t *testing.T) {
 	}
 }
 
-func TestCreateBloomExportUnavailableDoesNotReadBody(t *testing.T) {
+func TestCreateBloomExportAcceptsZipPartWithoutUsingFilename(t *testing.T) {
 	server, manager, _ := importHandlerServer(t)
-	manager.uploadErr = &core.InvalidArgumentError{
-		Field: "source", Code: "unavailable",
-		Message: "This Bloom cannot store uploads; set BLOOM_DATA_DIR to a writable directory.",
-	}
-	body := &countingReadCloser{Reader: strings.NewReader("must not be read")}
+	payload := string([]byte{'P', 'K', 0x03, 0x04, 'z', 'i', 'p'})
+	body, contentType := bloomMultipartWithType(t, payload, "application/zip", "export.data")
 	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
-	request.Body = body
-	request.Header.Set("Content-Type", "multipart/form-data; boundary=unused")
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
 	recorder := httptest.NewRecorder()
 	server.handleCreateImport(recorder, request)
-	if body.reads != 0 {
-		t.Fatalf("multipart body reads = %d, want 0", body.reads)
-	}
-	if recorder.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("unavailable upload = %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var response struct {
-		Code   string `json:"code"`
-		Fields []struct {
-			Field, Code, Message string
-		} `json:"fields"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode unavailable response: %v", err)
-	}
-	if response.Code != codeValidationFailed || len(response.Fields) != 1 ||
-		response.Fields[0].Field != "source" || response.Fields[0].Code != "unavailable" ||
-		response.Fields[0].Message != manager.uploadErr.Error() {
-		t.Fatalf("unavailable response = %+v", response)
+	if recorder.Code != http.StatusCreated || manager.upload != payload {
+		t.Fatalf("ZIP multipart import = %d upload %q: %s", recorder.Code, manager.upload, recorder.Body.String())
 	}
 }
-
-type countingReadCloser struct {
-	io.Reader
-	reads int
-}
-
-func (r *countingReadCloser) Read(buffer []byte) (int, error) {
-	r.reads++
-	return r.Reader.Read(buffer)
-}
-
-func (*countingReadCloser) Close() error { return nil }
 
 func TestCreateBloomExportRejectsDuplicateAndUnknownParts(t *testing.T) {
 	for _, partName := range []string{"source", "unexpected"} {
@@ -268,23 +237,35 @@ func TestCreateImportUnknownServerMatchesDocumented404(t *testing.T) {
 	assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
 }
 
-func TestWatchExportJSONLMatchesDocumentedRecord(t *testing.T) {
-	server, _, audit := importHandlerServer(t)
+func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
+	server, manager, audit := importHandlerServer(t)
+	manager.jobs = []core.ImportJob{manager.job}
 	ended := time.Date(2026, 9, 25, 12, 1, 0, 0, time.UTC)
 	server.playbackReader = &fakePlaybackReader{watches: []core.PlaybackWatch{exportHTTPWatch(ended)}}
-	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches?limit=1", "", core.PermissionAdminSettings)
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
 	recorder := httptest.NewRecorder()
 	server.handleExportWatches(recorder, request)
-	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "application/x-ndjson" {
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "application/zip" ||
+		!strings.HasPrefix(recorder.Header().Get("Content-Disposition"), `attachment; filename="bloom-export-`) {
 		t.Fatalf("export = %d %q", recorder.Code, recorder.Header().Get("Content-Type"))
 	}
-	var value any
-	if err := json.Unmarshal(bytes.TrimSpace(recorder.Body.Bytes()), &value); err != nil {
-		t.Fatalf("decode export: %v", err)
+	entries := readExportZip(t, recorder.Body.Bytes())
+	if strings.Join(entries.names, ",") != "manifest.json,watches.jsonl,imports.jsonl,summary.json" {
+		t.Fatalf("zip entries = %v", entries.names)
 	}
-	if err := validateOpenAPIValue(loadOpenAPI(t), "#/components/schemas/WatchExportRecord", value); err != nil {
-		t.Fatalf("export record contract: %v; body %s", err, recorder.Body.Bytes())
+	if entries.methods["watches.jsonl"] != zip.Store || entries.flags["watches.jsonl"]&0x8 == 0 {
+		t.Fatalf("watches.jsonl method=%d flags=%#x, want stored data descriptor",
+			entries.methods["watches.jsonl"], entries.flags["watches.jsonl"])
 	}
+	document := loadOpenAPI(t)
+	assertJSONContract(t, document, "#/components/schemas/WatchExportManifest", entries.data["manifest.json"])
+	watchLine := bytes.TrimSpace(entries.data["watches.jsonl"])
+	assertJSONContract(t, document, "#/components/schemas/WatchExportRecord", watchLine)
+	if record, err := importer.DecodeWatchJSONL(watchLine); err != nil || record.RecordID == "" {
+		t.Fatalf("import exported watch = %+v, %v", record, err)
+	}
+	assertJSONContract(t, document, "#/components/schemas/ImportJob", bytes.TrimSpace(entries.data["imports.jsonl"]))
+	assertJSONContract(t, document, "#/components/schemas/WatchExportSummary", entries.data["summary.json"])
 	event := audit.last(t)
 	if event.Actor != testRequestAccountID || event.Action != "watch.export" || event.Resource != "watches" ||
 		event.Result != telemetry.AuditSuccess || event.RequestID != "request-1" || event.Source == "" {
@@ -295,7 +276,7 @@ func TestWatchExportJSONLMatchesDocumentedRecord(t *testing.T) {
 func TestWatchExportValidationFailureIsAuditedWithoutQueryData(t *testing.T) {
 	server, _, audit := importHandlerServer(t)
 	request := requestWithAccount(t, http.MethodGet,
-		"/api/v1/exports/watches?limit=10001&cursor=sensitive", "", core.PermissionAdminSettings)
+		"/api/v1/exports/watches?limit=1&cursor=sensitive", "", core.PermissionAdminSettings)
 	recorder := httptest.NewRecorder()
 	server.handleExportWatches(recorder, request)
 	if recorder.Code != http.StatusUnprocessableEntity {
@@ -306,6 +287,17 @@ func TestWatchExportValidationFailureIsAuditedWithoutQueryData(t *testing.T) {
 		event.Result != telemetry.AuditFailure || event.Reason != "invalid" || event.RequestID != "request-1" ||
 		event.Source == "" || strings.Contains(event.Resource, "sensitive") {
 		t.Fatalf("export failure audit = %+v", event)
+	}
+}
+
+func TestWatchExportOpenAPIOnlyDocumentsMediaServerFilter(t *testing.T) {
+	operation := loadOpenAPI(t).validator.Paths.Find("/api/v1/exports/watches").Get
+	if len(operation.Parameters) != 1 || operation.Parameters[0].Value.Name != "media_server_id" {
+		t.Fatalf("export parameters = %+v, want only media_server_id", operation.Parameters)
+	}
+	response := operation.Responses.Value("200").Value
+	if response.Content.Get("application/zip") == nil || response.Headers["X-Next-Cursor"] != nil {
+		t.Fatalf("export response does not match ZIP contract: %+v", response)
 	}
 }
 
@@ -325,6 +317,24 @@ func TestWatchExportFirstQueryFailureReturnsDocumented500(t *testing.T) {
 	}
 }
 
+func TestWatchExportFirstImportQueryFailureReturnsDocumented500(t *testing.T) {
+	server, manager, audit := importHandlerServer(t)
+	server.playbackReader = &fakePlaybackReader{}
+	manager.err = errors.New("database unavailable")
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
+	recorder := httptest.NewRecorder()
+	server.handleExportWatches(recorder, request)
+	if recorder.Code != http.StatusInternalServerError ||
+		!strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("first import query failure = %d %q: %s",
+			recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
+	if event := audit.last(t); event.Result != telemetry.AuditFailure || event.Reason != "failed" {
+		t.Fatalf("failure audit = %+v", event)
+	}
+}
+
 func TestWatchExportMidstreamFailureAbortsTransfer(t *testing.T) {
 	server, _, audit := importHandlerServer(t)
 	watches := make([]core.PlaybackWatch, exportBatchSize+1)
@@ -335,14 +345,14 @@ func TestWatchExportMidstreamFailureAbortsTransfer(t *testing.T) {
 	server.playbackReader = &fakePlaybackReader{
 		watches: watches, errorsByCall: []error{nil, errors.New("database unavailable")},
 	}
-	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches?limit=501", "", core.PermissionAdminSettings)
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
 	recorder := httptest.NewRecorder()
 	handler := recoverMiddleware(server.logger)(http.HandlerFunc(server.handleExportWatches))
 	recovered := capturePanic(func() { handler.ServeHTTP(recorder, request) })
 	abortErr, ok := recovered.(error)
 	if !ok || !errors.Is(abortErr, http.ErrAbortHandler) || recorder.Code != http.StatusOK ||
 		recorder.Header().Get("X-Next-Cursor") != "" {
-		t.Fatalf("midstream failure = panic %v status %d trailer %q", recovered, recorder.Code, recorder.Header().Get("X-Next-Cursor"))
+		t.Fatalf("midstream failure = panic %v status %d", recovered, recorder.Code)
 	}
 	if event := audit.last(t); event.Result != telemetry.AuditFailure || event.Reason != "failed" {
 		t.Fatalf("failure audit = %+v", event)
@@ -563,11 +573,56 @@ func TestWatchExportExtendsDeadlineForSlowWriter(t *testing.T) {
 		ResponseRecorder: httptest.NewRecorder(), writeDeadline: time.Now().Add(time.Millisecond),
 		writeDelay: 10 * time.Millisecond,
 	}
-	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches?limit=1", "", core.PermissionAdminSettings)
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
 	handler := loggingMiddleware(server.logger, telemetry.NopMetrics{})(http.HandlerFunc(server.handleExportWatches))
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || recorder.Body.Len() == 0 || time.Until(recorder.writeDeadline) < time.Second {
 		t.Fatalf("slow export = %d deadline %s bytes %d", recorder.Code, time.Until(recorder.writeDeadline), recorder.Body.Len())
+	}
+}
+
+type exportZipEntries struct {
+	names   []string
+	data    map[string][]byte
+	methods map[string]uint16
+	flags   map[string]uint16
+}
+
+func readExportZip(t *testing.T, payload []byte) exportZipEntries {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatalf("open export zip: %v", err)
+	}
+	entries := exportZipEntries{
+		data: make(map[string][]byte), methods: make(map[string]uint16), flags: make(map[string]uint16),
+	}
+	for _, file := range archive.File {
+		reader, err := file.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", file.Name, err)
+		}
+		data, readErr := io.ReadAll(reader)
+		closeErr := reader.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("read %s: %v", file.Name, errors.Join(readErr, closeErr))
+		}
+		entries.names = append(entries.names, file.Name)
+		entries.data[file.Name] = data
+		entries.methods[file.Name] = file.Method
+		entries.flags[file.Name] = file.Flags
+	}
+	return entries
+}
+
+func assertJSONContract(t *testing.T, document openAPIDocument, schema string, data []byte) {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		t.Fatalf("decode %s: %v", schema, err)
+	}
+	if err := validateOpenAPIValue(document, schema, value); err != nil {
+		t.Fatalf("%s contract: %v; body %s", schema, err, data)
 	}
 }
 
@@ -605,6 +660,22 @@ func bloomMultipart(t *testing.T, payload string) ([]byte, string) {
 
 func bloomMultipartWithExtra(t *testing.T, payload, extraName string) ([]byte, string) {
 	t.Helper()
+	body, contentType := bloomMultipartWithType(t, payload, "application/x-ndjson", "watches.jsonl")
+	if extraName == "" {
+		return body, contentType
+	}
+	return bloomMultipartWithExtraAndType(t, payload, extraName, "application/x-ndjson", "watches.jsonl")
+}
+
+func bloomMultipartWithType(t *testing.T, payload, mediaType, filename string) ([]byte, string) {
+	t.Helper()
+	return bloomMultipartWithExtraAndType(t, payload, "", mediaType, filename)
+}
+
+func bloomMultipartWithExtraAndType(
+	t *testing.T, payload, extraName, mediaType, filename string,
+) ([]byte, string) {
+	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("media_server_id", importTestServerID); err != nil {
@@ -614,8 +685,8 @@ func bloomMultipartWithExtra(t *testing.T, payload, extraName string) ([]byte, s
 		t.Fatalf("write source: %v", err)
 	}
 	header := make(textproto.MIMEHeader)
-	header["Content-Disposition"] = []string{`form-data; name="file"; filename="watches.jsonl"`}
-	header["Content-Type"] = []string{"application/x-ndjson"}
+	header["Content-Disposition"] = []string{fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename)}
+	header["Content-Type"] = []string{mediaType}
 	part, err := writer.CreatePart(header)
 	if err != nil {
 		t.Fatalf("create file part: %v", err)

@@ -286,11 +286,10 @@ func importDependencies(
 	if err != nil {
 		return nil, nil, fmt.Errorf("build import store: %w", err)
 	}
-	staging, err := importapp.NewStaging(cfg.DataDirectory, cfg.HTTP.ImportTransferTimeout)
+	staging, err := importapp.NewStaging(store, cfg.HTTP.ImportTransferTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build import staging: %w", err)
 	}
-	warnBloomExportUnavailable(logger, staging)
 	service, err := importapp.NewService(store, servers, clock, staging, logger, metrics)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build import service: %w", err)
@@ -305,13 +304,6 @@ func importDependencies(
 		return nil, nil, fmt.Errorf("build import worker: %w", err)
 	}
 	return service, worker, nil
-}
-
-func warnBloomExportUnavailable(logger *slog.Logger, staging *importapp.Staging) {
-	if cause := staging.UnavailableCause(); cause != nil {
-		logger.Warn("Bloom export uploads are disabled: " + cause.Error() +
-			"; set BLOOM_DATA_DIR to a writable directory")
-	}
 }
 
 func statsDependencies(

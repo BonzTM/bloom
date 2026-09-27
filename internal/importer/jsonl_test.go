@@ -1,9 +1,11 @@
 package importer
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -78,6 +80,115 @@ func TestReadJSONLLinesCountsBlankLinesWithoutEndingBatch(t *testing.T) {
 	if err != nil || len(records) != 2 || skipped != 1 || offset != int64(len(input)) {
 		t.Fatalf("readJSONLLines = %d records, offset %d, skipped %d, %v", len(records), offset, skipped, err)
 	}
+}
+
+func TestBloomUploadDetectsZipByContent(t *testing.T) {
+	staging := newJSONLTestStaging(t)
+	payload := zipFixture(t, map[string]string{
+		"manifest.json": `{}`,
+		"watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json":  `{"watch_records":1,"import_records":0}`,
+	})
+	id, err := staging.stage(t.Context(), bytes.NewReader(payload), time.Now())
+	if err != nil {
+		t.Fatalf("stage zip: %v", err)
+	}
+	cursor, err := encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	records, _, _, err := (jsonlReader{staging: staging}).ReadImportBatch(t.Context(), core.ImportJob{Cursor: cursor})
+	if err != nil || len(records) != 1 || records[0].RecordID == "" {
+		t.Fatalf("ReadImportBatch = %+v, %v", records, err)
+	}
+}
+
+func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
+	tests := map[string][]byte{
+		"missing watches": zipFixture(t, map[string]string{"manifest.json": `{}`}),
+		"nested archive": zipFixture(t, map[string]string{
+			"watches.jsonl": validJSONLFixture() + "\n",
+			"nested.bin":    string(zipFixture(t, map[string]string{"inside": "data"})),
+		}),
+		"empty nested archive": zipFixture(t, map[string]string{
+			"watches.jsonl": validJSONLFixture() + "\n",
+			"nested.bin":    string(zipFixture(t, map[string]string{})),
+		}),
+		"too many entries": tooManyZipEntries(t),
+		"oversized entry":  oversizedZipEntry(t),
+	}
+	for name, payload := range tests {
+		t.Run(name, func(t *testing.T) {
+			staging := newJSONLTestStaging(t)
+			id, err := staging.stage(t.Context(), bytes.NewReader(payload), time.Now())
+			if err != nil {
+				t.Fatalf("stage zip: %v", err)
+			}
+			cursor, err := encodeFileCursor(fileCursor{ID: id})
+			if err != nil {
+				t.Fatalf("encode cursor: %v", err)
+			}
+			if _, _, _, err := (jsonlReader{staging: staging}).ReadImportBatch(
+				t.Context(), core.ImportJob{Cursor: cursor},
+			); err == nil {
+				t.Fatal("ReadImportBatch accepted unsafe zip")
+			}
+		})
+	}
+}
+
+func tooManyZipEntries(t *testing.T) []byte {
+	t.Helper()
+	entries := make(map[string]string, maxImportArchiveEntries+1)
+	entries["watches.jsonl"] = validJSONLFixture() + "\n"
+	for index := range maxImportArchiveEntries {
+		entries[fmt.Sprintf("entry-%d", index)] = "value"
+	}
+	return zipFixture(t, entries)
+}
+
+func oversizedZipEntry(t *testing.T) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	writer := zip.NewWriter(&output)
+	header := &zip.FileHeader{Name: "watches.jsonl", Method: zip.Store}
+	header.UncompressedSize64 = core.MaxImportUploadBytes + 1
+	header.CompressedSize64 = header.UncompressedSize64
+	if _, err := writer.CreateRaw(header); err != nil {
+		t.Fatalf("create oversized raw entry: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close oversized archive: %v", err)
+	}
+	return output.Bytes()
+}
+
+func newJSONLTestStaging(t *testing.T) *Staging {
+	t.Helper()
+	staging, err := NewStaging(newMemoryUploadStore(), 10*time.Minute)
+	if err != nil {
+		t.Fatalf("NewStaging: %v", err)
+	}
+	return staging
+}
+
+func zipFixture(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	writer := zip.NewWriter(&output)
+	for name, value := range entries {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry: %v", err)
+		}
+		if _, err := entry.Write([]byte(value)); err != nil {
+			t.Fatalf("write zip entry: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return output.Bytes()
 }
 
 func validJSONLFixture() string {

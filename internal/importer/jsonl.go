@@ -2,6 +2,7 @@
 package importer
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -18,6 +19,19 @@ import (
 )
 
 const maxJSONLLineBytes = 64 << 10
+
+const (
+	maxImportArchiveEntries = 16
+	maxImportMetadataBytes  = 1 << 20
+)
+
+var zipSignature = []byte{'P', 'K', 0x03, 0x04}
+
+var nestedZipSignatures = [3][4]byte{
+	{'P', 'K', 0x03, 0x04},
+	{'P', 'K', 0x05, 0x06},
+	{'P', 'K', 0x07, 0x08},
+}
 
 type bloomExportRecord struct {
 	ID              string            `json:"id"`
@@ -141,20 +155,138 @@ func (s jsonlReader) ReadImportBatch(ctx context.Context, job core.ImportJob) ([
 	if err != nil {
 		return nil, "", 0, err
 	}
-	file, err := s.staging.open(cursor.ID)
+	upload, err := s.staging.open(ctx, cursor.ID)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("open import upload: %w", err)
 	}
-	defer file.Close()
-	if _, seekErr := file.Seek(cursor.Offset, io.SeekStart); seekErr != nil {
-		return nil, "", 0, fmt.Errorf("seek import upload: %w", seekErr)
-	}
-	records, offset, skipped, err := readJSONLLines(ctx, file, cursor.Offset)
+	reader, err := openWatchUpload(upload, cursor.Offset)
 	if err != nil {
 		return nil, "", 0, err
 	}
+	records, offset, skipped, readErr := readJSONLLines(ctx, reader, cursor.Offset)
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil {
+		return nil, "", 0, errors.Join(readErr, closeErr)
+	}
 	next, err := encodeFileCursor(fileCursor{ID: cursor.ID, Offset: offset})
 	return records, next, skipped, err
+}
+
+func openWatchUpload(upload *UploadReader, offset int64) (io.ReadCloser, error) {
+	header := make([]byte, len(zipSignature))
+	_, err := upload.ReadAt(header, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("detect import upload: %w", err)
+	}
+	if !bytes.Equal(header, zipSignature) {
+		if offset > upload.Size() {
+			return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
+		}
+		return io.NopCloser(io.NewSectionReader(upload, offset, upload.Size()-offset)), nil
+	}
+	archive, err := zip.NewReader(upload, upload.Size())
+	if err != nil {
+		return nil, fmt.Errorf("open import archive: %w", err)
+	}
+	watches, err := validateImportArchive(archive)
+	if err != nil {
+		return nil, err
+	}
+	watchesSize := int64(watches.UncompressedSize64) //nolint:gosec // Archive validation caps this below MaxInt64.
+	if offset > watchesSize {
+		return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
+	}
+	if watches.Method == zip.Store {
+		dataOffset, offsetErr := watches.DataOffset()
+		if offsetErr != nil {
+			return nil, fmt.Errorf("locate watches.jsonl: %w", offsetErr)
+		}
+		length := watchesSize - offset
+		return io.NopCloser(io.NewSectionReader(upload, dataOffset+offset, length)), nil
+	}
+	reader, err := watches.Open()
+	if err != nil {
+		return nil, fmt.Errorf("open watches.jsonl: %w", err)
+	}
+	if err := discardUploadPrefix(reader, offset); err != nil {
+		return nil, errors.Join(err, reader.Close())
+	}
+	return reader, nil
+}
+
+func validateImportArchive(archive *zip.Reader) (*zip.File, error) {
+	if len(archive.File) == 0 || len(archive.File) > maxImportArchiveEntries {
+		return nil, errors.New("import archive has an invalid entry count")
+	}
+	var watches *zip.File
+	for _, entry := range archive.File {
+		if err := validateImportArchiveEntry(entry); err != nil {
+			return nil, err
+		}
+		if entry.Name == "watches.jsonl" {
+			if watches != nil {
+				return nil, errors.New("import archive repeats watches.jsonl")
+			}
+			watches = entry
+		}
+	}
+	if watches == nil {
+		return nil, errors.New("import archive does not contain watches.jsonl")
+	}
+	return watches, nil
+}
+
+func validateImportArchiveEntry(entry *zip.File) error {
+	if entry.UncompressedSize64 > importArchiveEntryLimit(entry.Name) {
+		return errors.New("import archive entry exceeds size limit")
+	}
+	reader, err := entry.Open()
+	if err != nil {
+		return fmt.Errorf("inspect import archive entry: %w", err)
+	}
+	header := make([]byte, len(zipSignature))
+	_, readErr := io.ReadFull(reader, header)
+	closeErr := reader.Close()
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("inspect import archive entry: %w", errors.Join(readErr, closeErr))
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close import archive entry: %w", closeErr)
+	}
+	if hasNestedZipSignature(header) {
+		return errors.New("nested import archives are not allowed")
+	}
+	return nil
+}
+
+func hasNestedZipSignature(header []byte) bool {
+	if len(header) != len(zipSignature) {
+		return false
+	}
+	for _, signature := range nestedZipSignatures {
+		if bytes.Equal(header, signature[:]) {
+			return true
+		}
+	}
+	return false
+}
+
+func importArchiveEntryLimit(name string) uint64 {
+	if name == "watches.jsonl" || name == "imports.jsonl" {
+		return core.MaxImportUploadBytes
+	}
+	return maxImportMetadataBytes
+}
+
+func discardUploadPrefix(reader io.Reader, offset int64) error {
+	if offset == 0 {
+		return nil
+	}
+	written, err := io.CopyN(io.Discard, reader, offset)
+	if err != nil || written != offset {
+		return fmt.Errorf("seek import upload: %w", errors.Join(err, core.ErrInvalidArgument))
+	}
+	return nil
 }
 
 func readJSONLLines(

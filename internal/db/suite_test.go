@@ -1510,7 +1510,7 @@ ORDER BY tc.table_name, kcu.column_name`
 		t.Fatalf("list foreign keys: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
-	got := make([]string, 0, 11)
+	got := make([]string, 0, len(expectedForeignKeys()))
 	for rows.Next() {
 		var table, column, target, targetColumn, action string
 		if err := rows.Scan(&table, &column, &target, &targetColumn, &action); err != nil {
@@ -1518,13 +1518,21 @@ ORDER BY tc.table_name, kcu.column_name`
 		}
 		got = append(got, strings.Join([]string{table, column, target, targetColumn, action}, ":"))
 	}
-	want := []string{
+	want := expectedForeignKeys()
+	if err := rows.Err(); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("foreign keys = %v, %v; want %v (accounts and sessions define none)", got, err, want)
+	}
+}
+
+func expectedForeignKeys() []string {
+	return []string{
 		"account_identities:account_id:accounts:id:CASCADE",
 		"account_media_users:account_id:accounts:id:CASCADE",
 		"account_media_users:media_server_id:media_servers:id:CASCADE",
 		"account_request_quotas:account_id:accounts:id:CASCADE",
 		"account_roles:account_id:accounts:id:CASCADE",
 		"account_roles:role_id:roles:id:CASCADE",
+		"import_uploads:import_id:imports:id:CASCADE",
 		"imports:media_server_id:media_servers:id:CASCADE",
 		"imports:requested_by:accounts:id:RESTRICT",
 		"invite_libraries:invite_id:invites:id:CASCADE",
@@ -1548,9 +1556,6 @@ ORDER BY tc.table_name, kcu.column_name`
 		"watch_positions:watch_id:watches:id:CASCADE",
 		"watch_segments:watch_id:watches:id:CASCADE",
 		"watches:media_server_id:media_servers:id:CASCADE",
-	}
-	if err := rows.Err(); err != nil || !slices.Equal(got, want) {
-		t.Fatalf("foreign keys = %v, %v; want %v (accounts and sessions define none)", got, err, want)
 	}
 }
 
@@ -1604,7 +1609,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 22)
+	assertMigrationVersion(t, pool, 23)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -1725,7 +1730,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 22)
+	assertMigrationVersion(t, pool, 23)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

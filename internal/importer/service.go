@@ -53,13 +53,10 @@ func (s *Service) CreatePlaybackReporting(
 	return s.create(ctx, mediaServerID, requestedBy, core.ImportSourcePlaybackReporting, "0")
 }
 
-// StageBloomExport streams one bounded upload into the private staging root.
+// StageBloomExport streams one bounded upload into database chunks.
 func (s *Service) StageBloomExport(ctx context.Context, upload io.Reader) (string, error) {
 	if upload == nil {
 		return "", core.ErrInvalidArgument
-	}
-	if err := s.CheckBloomExportUpload(); err != nil {
-		return "", err
 	}
 	select {
 	case s.staging.slots <- struct{}{}:
@@ -67,19 +64,10 @@ func (s *Service) StageBloomExport(ctx context.Context, upload io.Reader) (strin
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	id, err := s.staging.stage(upload)
-	if errors.Is(err, errStagingUnavailable) {
-		return "", uploadUnavailableError()
-	}
-	return id, err
+	return s.staging.stage(ctx, upload, s.clock.Now())
 }
 
-// CheckBloomExportUpload prepares the staging root without consuming an upload.
-func (s *Service) CheckBloomExportUpload() error {
-	return s.staging.ensureAvailable()
-}
-
-// CreateBloomExport creates a JSONL-backed job for a staged upload.
+// CreateBloomExport creates a job for a staged Bloom export upload.
 func (s *Service) CreateBloomExport(
 	ctx context.Context, mediaServerID, requestedBy, stagingID string,
 ) (job core.ImportJob, result error) {
@@ -87,7 +75,6 @@ func (s *Service) CreateBloomExport(
 		if result != nil {
 			s.removeUnclaimedUpload(ctx, stagingID)
 		}
-		s.staging.release(stagingID)
 	}()
 	if err := s.validateTarget(ctx, mediaServerID, requestedBy); err != nil {
 		return job, err
@@ -99,23 +86,42 @@ func (s *Service) CreateBloomExport(
 	if err != nil {
 		return job, err
 	}
-	return s.create(ctx, mediaServerID, requestedBy, core.ImportSourceBloomExport, cursor)
+	job, err = s.newJob(mediaServerID, requestedBy, core.ImportSourceBloomExport, cursor)
+	if err != nil {
+		return core.ImportJob{}, err
+	}
+	if err := s.store.CreateUploadedImport(ctx, job, stagingID); err != nil {
+		return core.ImportJob{}, err
+	}
+	return job, nil
 }
 
 // DiscardBloomExport removes an unclaimed staged upload.
-func (s *Service) DiscardBloomExport(stagingID string) error {
-	defer s.staging.release(stagingID)
-	return s.staging.remove(stagingID)
+func (s *Service) DiscardBloomExport(ctx context.Context, stagingID string) error {
+	return s.staging.remove(ctx, stagingID)
 }
 
 func (s *Service) removeUnclaimedUpload(ctx context.Context, stagingID string) {
-	if err := s.staging.remove(stagingID); err != nil {
-		s.logger.WarnContext(ctx, "remove unclaimed import staging file", "error", err)
+	if err := s.staging.remove(ctx, stagingID); err != nil {
+		s.logger.WarnContext(ctx, "remove unclaimed import upload", "error", err)
 	}
 }
 
 func (s *Service) create(
 	ctx context.Context, mediaServerID, requestedBy string, source core.ImportSource, cursor string,
+) (core.ImportJob, error) {
+	job, err := s.newJob(mediaServerID, requestedBy, source, cursor)
+	if err != nil {
+		return core.ImportJob{}, err
+	}
+	if err := s.store.CreateImport(ctx, job); err != nil {
+		return core.ImportJob{}, err
+	}
+	return job, nil
+}
+
+func (s *Service) newJob(
+	mediaServerID, requestedBy string, source core.ImportSource, cursor string,
 ) (core.ImportJob, error) {
 	if !source.Valid() {
 		return core.ImportJob{}, core.ErrInvalidArgument
@@ -128,9 +134,6 @@ func (s *Service) create(
 	job := core.ImportJob{
 		ID: id, MediaServerID: mediaServerID, RequestedBy: requestedBy,
 		Source: source, State: core.ImportPending, Cursor: cursor, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := s.store.CreateImport(ctx, job); err != nil {
-		return core.ImportJob{}, err
 	}
 	return job, nil
 }
@@ -153,24 +156,14 @@ func (s *Service) Get(ctx context.Context, id string) (core.ImportJob, error) {
 	return s.store.GetImport(ctx, id)
 }
 
-// Cancel transitions an active job and then removes its uploaded source file.
+// Cancel transitions an active job and atomically removes its uploaded chunks.
 func (s *Service) Cancel(ctx context.Context, id string) (core.ImportJob, error) {
 	job, err := s.store.CancelImport(ctx, id, core.NormalizeTime(s.clock.Now()))
 	if err != nil {
 		return core.ImportJob{}, err
 	}
 	s.metrics.ObserveImportJob(string(job.Source), string(core.ImportCancelled), "cancelled")
-	s.cleanupUpload(ctx, job)
 	return job, nil
-}
-
-func (s *Service) cleanupUpload(ctx context.Context, job core.ImportJob) {
-	if job.Source != core.ImportSourceBloomExport {
-		return
-	}
-	if err := cleanupJobUpload(s.staging, job); err != nil {
-		s.logger.WarnContext(ctx, "remove import staging file", "error", err, "import_id", job.ID)
-	}
 }
 
 type nopMetrics struct{}
@@ -178,11 +171,3 @@ type nopMetrics struct{}
 func (nopMetrics) ObserveImportJob(string, string, string) {}
 func (nopMetrics) AddImportedRecords(string, int64)        {}
 func (nopMetrics) SetRunningImports(int)                   {}
-
-func cleanupJobUpload(staging *Staging, job core.ImportJob) error {
-	cursor, err := decodeFileCursor(job.Cursor)
-	if err != nil {
-		return err
-	}
-	return staging.remove(cursor.ID)
-}

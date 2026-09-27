@@ -16,10 +16,14 @@ const (
 	MaxImportRecordIDBytes = 256
 	// MaxImportErrorBytes bounds operator-visible terminal failure text.
 	MaxImportErrorBytes = 512
-	// MaxImportUploadBytes bounds one Bloom JSONL upload.
+	// MaxImportUploadBytes bounds one Bloom export upload.
 	MaxImportUploadBytes = 256 << 20
-	// MaxActiveImportUploads bounds one staging sweep reference set.
-	MaxActiveImportUploads = 10000
+	// ImportUploadChunkBytes is the fixed database chunk size.
+	ImportUploadChunkBytes = 1 << 20
+	// MaxImportUploadWriteChunks bounds one upload transaction.
+	MaxImportUploadWriteChunks = 8
+	// MaxOrphanImportUploads bounds one worker cleanup transaction.
+	MaxOrphanImportUploads = 100
 )
 
 // ImportSource identifies a supported historical-watch source.
@@ -111,8 +115,24 @@ type ImportCursor struct {
 
 // ImportListQuery describes one bounded job page.
 type ImportListQuery struct {
-	Before   *ImportCursor
-	PageSize int
+	Before        *ImportCursor
+	MediaServerID string
+	PageSize      int
+}
+
+// ImportUploadChunk is one bounded piece of a database-staged upload.
+type ImportUploadChunk struct {
+	ID        string
+	Index     int64
+	Bytes     []byte
+	CreatedAt time.Time
+}
+
+// ImportUploadInfo describes one complete database-staged upload.
+type ImportUploadInfo struct {
+	ID         string
+	Size       int64
+	ChunkCount int64
 }
 
 // ImportLease grants one worker temporary ownership of a job.
@@ -190,6 +210,7 @@ type ImportBatchResult struct {
 // ImportStore is the durable job, lease, and atomic batch seam.
 type ImportStore interface {
 	CreateImport(context.Context, ImportJob) error
+	CreateUploadedImport(context.Context, ImportJob, string) error
 	ListImports(context.Context, ImportListQuery) ([]ImportJob, error)
 	GetImport(context.Context, string) (ImportJob, error)
 	CancelImport(context.Context, string, time.Time) (ImportJob, error)
@@ -197,7 +218,11 @@ type ImportStore interface {
 	RenewImportLease(context.Context, string, ImportLease, time.Time) error
 	CommitImportBatch(context.Context, ImportBatch) (ImportBatchResult, error)
 	FinishImport(context.Context, string, string, ImportState, string, time.Time) error
-	ListActiveBloomImportCursors(context.Context) ([]string, error)
+	WriteImportUploadChunks(context.Context, []ImportUploadChunk) error
+	ImportUploadInfo(context.Context, string) (ImportUploadInfo, error)
+	ReadImportUploadChunk(context.Context, string, int64) ([]byte, error)
+	DeleteImportUpload(context.Context, string) error
+	DeleteOrphanImportUploads(context.Context, time.Time, int) (int64, error)
 }
 
 var (
