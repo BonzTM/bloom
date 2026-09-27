@@ -78,7 +78,7 @@ func validateItemImagePath(serverID, itemID string, fields []httputil.FieldError
 	if !core.ValidID(serverID) {
 		fields = append(fields, httputil.FieldError{Field: "id", Code: "invalid", Message: "must be a valid UUID"})
 	}
-	if !core.ValidAccountMediaUserID(itemID) {
+	if !core.ValidMediaItemID(itemID) {
 		fields = append(fields, httputil.FieldError{Field: "item_id", Code: "invalid", Message: "must be a valid media item id"})
 	}
 	return fields

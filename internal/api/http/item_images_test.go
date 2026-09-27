@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -11,7 +12,11 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-const itemImagePath = "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/items/item-1/image"
+const (
+	itemImageID      = "0123456789abcdef0123456789abcdef"
+	itemImagePath    = "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/items/" + itemImageID + "/image"
+	itemImagePattern = `^(?:[0-9A-Fa-f]{32}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$`
+)
 
 func TestItemImageEndpoint(t *testing.T) {
 	h := newAuthHarness(t, nil)
@@ -34,7 +39,7 @@ func TestItemImageEndpoint(t *testing.T) {
 	if request.Header().Get("Cache-Control") != itemImageCacheControl {
 		t.Fatalf("Cache-Control = %q", request.Header().Get("Cache-Control"))
 	}
-	if h.mediaServers.lastItemID != "item-1" || h.mediaServers.lastImageType != core.ItemImagePrimary ||
+	if h.mediaServers.lastItemID != itemImageID || h.mediaServers.lastImageType != core.ItemImagePrimary ||
 		h.mediaServers.lastMaxWidth != 640 || h.mediaServers.lastIfNoneMatch != `"old-etag"` || !h.mediaServers.deadlineSeen {
 		t.Fatalf("image call = %+v", h.mediaServers)
 	}
@@ -74,7 +79,7 @@ func TestItemImageAcceptsEachReadPermission(t *testing.T) {
 
 func TestItemImageRejectsInvalidInput(t *testing.T) {
 	tests := []string{
-		"/api/v1/media-servers/not-a-uuid/items/item-1/image?type=Primary",
+		"/api/v1/media-servers/not-a-uuid/items/" + itemImageID + "/image?type=Primary",
 		"/api/v1/media-servers/33333333-3333-4333-8333-333333333333/items/%01/image?type=Primary",
 		itemImagePath,
 		itemImagePath + "?type=Poster",
@@ -92,6 +97,27 @@ func TestItemImageRejectsInvalidInput(t *testing.T) {
 			request := h.request(t, http.MethodGet, target, "", cookie)
 			if request.Code != http.StatusUnprocessableEntity || h.mediaServers.imageCalls != 0 {
 				t.Fatalf("response = %d %s, calls = %d", request.Code, request.Body.String(), h.mediaServers.imageCalls)
+			}
+		})
+	}
+}
+
+func TestItemImageRejectsInvalidItemID(t *testing.T) {
+	invalid := []string{".", "..", "a/b", "a%2Fb", `a\b`, "%2e%2e", "", strings.Repeat("a", 33)}
+	for _, itemID := range invalid {
+		t.Run(itemID, func(t *testing.T) {
+			h := newAuthHarness(t, nil)
+			req := httptest.NewRequest(http.MethodGet, "https://bloom.test/image?type=Primary", nil)
+			req.SetPathValue("id", "33333333-3333-4333-8333-333333333333")
+			req.SetPathValue("item_id", itemID)
+			response := httptest.NewRecorder()
+			h.server.handleItemImage(response, req)
+			envelope := decodeEnvelope(t, response)
+			if response.Code != http.StatusUnprocessableEntity || h.mediaServers.imageCalls != 0 {
+				t.Fatalf("response = %d %s, calls = %d", response.Code, response.Body.String(), h.mediaServers.imageCalls)
+			}
+			if len(envelope.Fields) != 1 || envelope.Fields[0].Field != "item_id" {
+				t.Fatalf("fields = %+v, want item_id", envelope.Fields)
 			}
 		})
 	}
@@ -119,6 +145,16 @@ func TestItemImageMapsFailures(t *testing.T) {
 				t.Fatalf("reason = %q, want %q", reason, test.reason)
 			}
 		})
+	}
+}
+
+func TestItemImageMapsMissingCapabilityToNotFound(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.mediaServers.err = core.ErrNotFound
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	response := h.request(t, http.MethodGet, itemImagePath+"?type=Primary", "", cookie)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("response = %d %s, want 404", response.Code, response.Body.String())
 	}
 }
 
@@ -178,6 +214,10 @@ func assertItemImageParameters(t *testing.T, parameters openapi3.Parameters) {
 			if schema.Min == nil || *schema.Min != core.MinItemImageWidth || schema.Max == nil ||
 				*schema.Max != core.MaxItemImageWidth || schema.Default != float64(defaultItemImageWidth) {
 				t.Errorf("max_width schema = %+v", schema)
+			}
+		case "item_id":
+			if !parameter.Required || schema.Format != "" || schema.Pattern != itemImagePattern {
+				t.Errorf("item_id schema = %+v", schema)
 			}
 		}
 	}

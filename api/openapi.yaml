@@ -1649,7 +1649,9 @@ components:
       name: item_id
       in: path
       required: true
-      schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+      schema:
+        type: string
+        pattern: '^(?:[0-9A-Fa-f]{32}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$'
     MediaItemImageType:
       name: type
       in: query

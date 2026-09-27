@@ -37,6 +37,32 @@ const (
 	MaxItemImageWidth = 1280
 )
 
+// ValidMediaItemID reports whether value is a Jellyfin GUID with or without hyphens.
+func ValidMediaItemID(value string) bool {
+	if len(value) != 32 && len(value) != 36 {
+		return false
+	}
+	if len(value) == 36 && (value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-') {
+		return false
+	}
+	for index := range 36 {
+		if index >= len(value) {
+			break
+		}
+		if len(value) == 36 && (index == 8 || index == 13 || index == 18 || index == 23) {
+			continue
+		}
+		if !isHexDigit(value[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHexDigit(value byte) bool {
+	return value >= '0' && value <= '9' || value >= 'a' && value <= 'f' || value >= 'A' && value <= 'F'
+}
+
 // ItemImageType is one upstream media artwork variant exposed by Bloom.
 type ItemImageType string
 

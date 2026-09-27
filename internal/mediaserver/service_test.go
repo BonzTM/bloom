@@ -16,6 +16,8 @@ import (
 	"github.com/BonzTM/bloom/internal/testutil"
 )
 
+const testMediaItemID = "0123456789abcdef0123456789abcdef"
+
 type memoryStore struct {
 	mu          sync.Mutex
 	records     []core.MediaServerRecord
@@ -136,6 +138,20 @@ type userListingAdapter struct {
 	users     []core.MediaUser
 	usersErr  error
 	userCalls atomic.Int32
+}
+
+type adapterWithoutItemImage struct{ delegate *fakeAdapter }
+
+func (a *adapterWithoutItemImage) Probe(ctx context.Context) (core.ServerInfo, error) {
+	return a.delegate.Probe(ctx)
+}
+
+func (a *adapterWithoutItemImage) ListLibraries(ctx context.Context) ([]core.Library, error) {
+	return a.delegate.ListLibraries(ctx)
+}
+
+func (a *adapterWithoutItemImage) Capabilities() core.Capabilities {
+	return a.delegate.Capabilities()
 }
 
 func (a *userListingAdapter) ListUsers(ctx context.Context) ([]core.MediaUser, error) {
@@ -553,13 +569,23 @@ func TestServiceItemImageMapsMissingAndUsesDependencyDeadline(t *testing.T) {
 	store, service := newTestService(t, fakeFactory{adapter: adapter})
 	seedEncryptedRecord(t, store, service)
 	id := store.records[0].ID
-	image, err := service.ItemImage(context.Background(), id, "item-1", core.ItemImagePrimary, 400, "")
+	image, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
 	if err != nil || string(image.Body) != "image" || !adapter.deadlineSeen.Load() {
 		t.Fatalf("ItemImage = %+v, %v; deadline = %t", image, err, adapter.deadlineSeen.Load())
 	}
 	adapter.imageErr = &core.MediaServerError{Kind: core.MediaServerNotFound, Operation: "item_image"}
 	if _, err := service.ItemImage(context.Background(), id, "missing", core.ItemImagePrimary, 400, ""); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("missing image error = %v", err)
+	}
+}
+
+func TestServiceItemImageMapsMissingAdapterCapabilityToNotFound(t *testing.T) {
+	adapter := &adapterWithoutItemImage{delegate: &fakeAdapter{}}
+	store, service := newTestService(t, fixedAdapterFactory{adapter: adapter})
+	seedEncryptedRecord(t, store, service)
+	_, err := service.ItemImage(context.Background(), store.records[0].ID, testMediaItemID, core.ItemImagePrimary, 400, "")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ItemImage error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -573,14 +599,14 @@ func TestServiceItemImageUsesPerServerBulkhead(t *testing.T) {
 	errs := make(chan error, maxConcurrentCallsPerServer)
 	for range maxConcurrentCallsPerServer {
 		go func() {
-			_, err := service.ItemImage(context.Background(), id, "item-1", core.ItemImagePrimary, 400, "")
+			_, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
 			errs <- err
 		}()
 	}
 	for range maxConcurrentCallsPerServer {
 		<-started
 	}
-	_, err := service.ItemImage(context.Background(), id, "item-1", core.ItemImagePrimary, 400, "")
+	_, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
 	var mediaErr *core.MediaServerError
 	if !errors.As(err, &mediaErr) || mediaErr.Kind != core.MediaServerSaturated {
 		t.Fatalf("fifth ItemImage error = %#v, want saturation", err)

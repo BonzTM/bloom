@@ -82,6 +82,25 @@ func TestResultCacheClonesWatchStreamDetails(t *testing.T) {
 	}
 }
 
+func TestResultCacheClonesWatchRuntime(t *testing.T) {
+	t.Parallel()
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	cache := newResultCache(clock, 1, time.Minute)
+	key := cacheKey{kind: "user"}
+	runtime := 45 * time.Minute
+	cache.put(key, core.StatsResult{Watches: []core.PlaybackWatch{{Runtime: &runtime}}})
+	runtime = time.Hour
+	first, ok := cache.get(key)
+	if !ok || first.Watches[0].Runtime == nil || *first.Watches[0].Runtime != 45*time.Minute {
+		t.Fatalf("cached runtime = %+v, found = %t", first.Watches[0].Runtime, ok)
+	}
+	*first.Watches[0].Runtime = 90 * time.Minute
+	second, _ := cache.get(key)
+	if second.Watches[0].Runtime == nil || *second.Watches[0].Runtime != 45*time.Minute {
+		t.Fatalf("cached runtime was aliased: %+v", second.Watches[0].Runtime)
+	}
+}
+
 func TestResultCacheKeyIncludesExactWindowBounds(t *testing.T) {
 	t.Parallel()
 	first, err := core.NewStatsWindow(30, "", "UTC", time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))

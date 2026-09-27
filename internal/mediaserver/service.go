@@ -43,7 +43,7 @@ func (s *Service) ItemImage(
 	defer call.release()
 	reader, ok := call.entry.adapter.(core.MediaItemImageReader)
 	if !ok {
-		return core.ItemImage{}, fmt.Errorf("read media server item image: %w", core.ErrInvalidArgument)
+		return core.ItemImage{}, fmt.Errorf("read media server item image: capability unavailable: %w", core.ErrNotFound)
 	}
 	callCtx, cancel := dependencyContext(ctx)
 	defer cancel()

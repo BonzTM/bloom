@@ -1,10 +1,38 @@
 package core_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/BonzTM/bloom/internal/core"
 )
+
+func TestValidMediaItemID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value string
+		valid bool
+	}{
+		{value: "0123456789abcdef0123456789abcdef", valid: true},
+		{value: "0123456789ABCDEF0123456789ABCDEF", valid: true},
+		{value: "01234567-89ab-cdef-0123-456789abcdef", valid: true},
+		{value: "01234567-89AB-CDEF-0123-456789ABCDEF", valid: true},
+		{value: "."},
+		{value: ".."},
+		{value: "a/b"},
+		{value: "a%2Fb"},
+		{value: `a\b`},
+		{value: "%2e%2e"},
+		{value: ""},
+		{value: strings.Repeat("a", 33)},
+		{value: "01234567-89ab-cdef-0123-456789abcdeg"},
+	}
+	for _, testCase := range tests {
+		if got := core.ValidMediaItemID(testCase.value); got != testCase.valid {
+			t.Errorf("ValidMediaItemID(%q) = %t, want %t", testCase.value, got, testCase.valid)
+		}
+	}
+}
 
 func FuzzValidateMediaServerURL(f *testing.F) {
 	for _, seed := range []struct {

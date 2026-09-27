@@ -6,7 +6,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -19,11 +18,11 @@ const maxImageResponseBytes = 4 << 20
 func (c *Client) ItemImage(
 	ctx context.Context, itemID string, imageType core.ItemImageType, maxWidth int, ifNoneMatch string,
 ) (core.ItemImage, error) {
-	if !core.ValidAccountMediaUserID(itemID) || !imageType.Valid() ||
+	if !core.ValidMediaItemID(itemID) || !imageType.Valid() ||
 		maxWidth < core.MinItemImageWidth || maxWidth > core.MaxItemImageWidth {
 		return core.ItemImage{}, core.ErrInvalidArgument
 	}
-	path := "/Items/" + url.PathEscape(itemID) + "/Images/" + string(imageType) +
+	path := "/Items/" + itemID + "/Images/" + string(imageType) +
 		"?maxWidth=" + strconv.Itoa(maxWidth) + "&quality=90"
 	image, started, err := c.getImageWithRetry(ctx, path, ifNoneMatch)
 	if err == nil {
