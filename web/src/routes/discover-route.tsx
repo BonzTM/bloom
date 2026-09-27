@@ -16,15 +16,17 @@ import { describeSearchError } from "../features/requests/components/request-err
 import { kindLabel } from "../features/requests/components/request-format.js";
 import { TitleGrid } from "../features/requests/components/title-grid.js";
 import {
+  useDiscover,
   useRequests,
   useSearchTitles,
 } from "../features/requests/hooks/requests-queries.js";
+import { DiscoverRow } from "../features/requests/components/discover-row.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
 
 export default function DiscoverRoute(): ReactNode {
-  usePageTitle(pageTitle("Requests"));
+  usePageTitle(pageTitle("Discover"));
   const session = useSession();
   const accountId = session.data?.account.id;
   const granted = session.data?.permissions ?? [];
@@ -59,17 +61,32 @@ function DiscoverPage({
   const kind = readKind(params.get("kind"));
   const results = useSearchTitles(accountId, canSearch ? query : "", kind);
   const mine = useRequests(accountId, { requesterId: accountId }, canReadOwn);
-  const denial = accessDenial(results.error) ?? accessDenial(mine.error);
+  // Rows load only while no search is showing; the discover endpoints are
+  // open to anyone who may create or read their own requests.
+  const browsing = query === "" && (canSearch || canReadOwn);
+  const trending = useDiscover(accountId, "trending", browsing);
+  const popularMovies = useDiscover(accountId, "movies/popular", browsing);
+  const popularSeries = useDiscover(accountId, "series/popular", browsing);
+  const upcomingMovies = useDiscover(accountId, "movies/upcoming", browsing);
+  const airingSeries = useDiscover(accountId, "series/upcoming", browsing);
+  const denial =
+    accessDenial(results.error) ??
+    accessDenial(mine.error) ??
+    accessDenial(trending.error);
   useSessionRecheck(
     denial !== undefined,
-    Math.max(results.errorUpdatedAt, mine.errorUpdatedAt),
+    Math.max(
+      results.errorUpdatedAt,
+      mine.errorUpdatedAt,
+      trending.errorUpdatedAt,
+    ),
   );
   if (denial === "forbidden") {
     return <AccessDeniedRoute />;
   }
   return (
     <>
-      <h1>Requests</h1>
+      <h1>Discover</h1>
       <p className="page-intro">
         Find a movie or series and ask for it. Requests wait for approval unless
         your account approves its own, and become available once the download
@@ -87,6 +104,15 @@ function DiscoverPage({
           />
           <SearchResults query={query} results={results} />
         </section>
+      ) : null}
+      {browsing ? (
+        <>
+          <DiscoverRow title="Trending this week" query={trending} />
+          <DiscoverRow title="Popular movies" query={popularMovies} />
+          <DiscoverRow title="Popular series" query={popularSeries} />
+          <DiscoverRow title="Upcoming movies" query={upcomingMovies} />
+          <DiscoverRow title="Series on the air" query={airingSeries} />
+        </>
       ) : null}
       {canReadOwn ? (
         <section aria-labelledby="my-requests-heading" className="card">

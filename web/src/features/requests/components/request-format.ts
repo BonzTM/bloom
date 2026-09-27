@@ -1,3 +1,4 @@
+import type { MetadataRequestState } from "../api/metadata-schemas.js";
 import type {
   MediaKind,
   MediaRequest,
@@ -33,6 +34,18 @@ export function statusLabel(status: RequestStatus): string {
 
 export function statusBadgeClass(status: RequestStatus): string {
   return `badge ${STATUS_BADGES[status]}`;
+}
+
+// A discover title's badge: the caller's own request, worded as Seerr does,
+// or nothing when there is none.
+export function requestStateBadge(
+  state: MetadataRequestState,
+): Readonly<{ label: string; className: string }> | undefined {
+  if (state === "none") {
+    return undefined;
+  }
+  const label = state === "pending" ? "Requested" : STATUS_LABELS[state];
+  return { label, className: `badge ${STATUS_BADGES[state]}` };
 }
 
 export function kindLabel(kind: MediaKind): string {

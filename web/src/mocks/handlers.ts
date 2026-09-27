@@ -1340,6 +1340,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     year: 1995,
     overview: "A group of professional bank robbers start to feel the heat.",
     poster_path: "/heat.jpg",
+    backdrop_path: "",
   },
   {
     kind: "movie",
@@ -1350,6 +1351,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     overview:
       "Paul Atreides travels to the most dangerous planet in the universe.",
     poster_path: "",
+    backdrop_path: "",
   },
   {
     kind: "movie",
@@ -1359,6 +1361,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     year: 1999,
     overview: "An insomniac office worker forms an underground fight club.",
     poster_path: "/fight.jpg",
+    backdrop_path: "",
   },
   {
     kind: "series",
@@ -1368,6 +1371,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     year: 2021,
     overview: "Strangers land in a small town and nothing is the same again.",
     poster_path: "/arrival.jpg",
+    backdrop_path: "",
   },
 ];
 
@@ -2622,7 +2626,111 @@ function mockImageLabel(
   return (name === "" ? itemId : name).slice(0, 12);
 }
 
+// ---- discover rows (requests.create or requests.read.own)
+
+const DISCOVER_PAGE_SIZE = 20;
+
+function discoverDenial() {
+  return permissionDenial("requests.create") === undefined ||
+    permissionDenial("requests.read.own") === undefined
+    ? undefined
+    : (permissionDenial("requests.create") ?? undefined);
+}
+
+function requestStateFor(kind: string, providerId: string): string {
+  const own = requests.find(
+    (request) =>
+      request.kind === kind &&
+      request.provider_id === providerId &&
+      request.requester_account_id === mockAccount.id,
+  );
+  return own?.status ?? "none";
+}
+
+function discoverPage(url: URL, kind: "movie" | "series" | undefined) {
+  const cursor = url.searchParams.get("cursor");
+  if (cursor !== null && !/^([1-9]|1[0-9]|20)$/.test(cursor)) {
+    return envelope(422, "validation_failed", "invalid cursor");
+  }
+  const page = cursor === null ? 1 : Number(cursor);
+  // The catalogue plus a title this account has requested, so a row can
+  // show a request state.
+  const pool = [
+    ...mockCatalogue,
+    {
+      kind: "movie" as const,
+      provider: "tmdb" as const,
+      provider_id: "1124",
+      title: "The Prestige",
+      year: 2006,
+      overview: "Two rival stage magicians engage in a bitter battle.",
+      poster_path: "",
+      backdrop_path: "",
+    },
+  ].filter((title) => kind === undefined || title.kind === kind);
+  // Repeat the small catalogue so rows have enough tiles to scroll and page.
+  const items = Array.from({ length: DISCOVER_PAGE_SIZE }, (_, index) => {
+    const source =
+      pool[(index + (page - 1) * DISCOVER_PAGE_SIZE) % pool.length];
+    if (source === undefined) {
+      return undefined;
+    }
+    const providerId =
+      page === 1 && index < pool.length
+        ? source.provider_id
+        : `${source.provider_id}${String(page)}${String(index)}`;
+    return {
+      ...source,
+      provider_id: providerId,
+      request_state: requestStateFor(source.kind, providerId),
+    };
+  }).filter((item) => item !== undefined);
+  return HttpResponse.json({
+    items,
+    next_cursor: page >= 3 ? "" : String(page + 1),
+  });
+}
+
+const discoverHandlers = [
+  http.get(
+    "*/api/v1/metadata/discover/trending",
+    jsonApi(
+      ({ request }) =>
+        discoverDenial() ?? discoverPage(new URL(request.url), undefined),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/discover/movies/popular",
+    jsonApi(
+      ({ request }) =>
+        discoverDenial() ?? discoverPage(new URL(request.url), "movie"),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/discover/series/popular",
+    jsonApi(
+      ({ request }) =>
+        discoverDenial() ?? discoverPage(new URL(request.url), "series"),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/discover/movies/upcoming",
+    jsonApi(
+      ({ request }) =>
+        discoverDenial() ?? discoverPage(new URL(request.url), "movie"),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/discover/series/upcoming",
+    jsonApi(
+      ({ request }) =>
+        discoverDenial() ?? discoverPage(new URL(request.url), "series"),
+    ),
+  ),
+];
+
 export const handlers = [
+  ...discoverHandlers,
   ...notificationHandlers,
   ...statsHandlers,
   ...requestHandlers,

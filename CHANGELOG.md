@@ -95,6 +95,10 @@ contracts) gets an entry here.
 
 ### Added
 
+- The requests page becomes Discover: rows of posters for what is trending
+  this week, popular movies and series, upcoming movies, and series on the
+  air, each tile carrying your own request state and loading more on demand,
+  above the search and your requests.
 - Cursor-paged TMDB discovery routes for weekly trending titles, popular
   movies and series, upcoming movies, and on-the-air series, with each title's
   caller-specific request state, plus day-cached movie and series genre lists.
