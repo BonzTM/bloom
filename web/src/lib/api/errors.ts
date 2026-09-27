@@ -9,6 +9,7 @@ export const probeFailureReasonSchema = z.enum([
   "unauthorized",
   "not_found",
   "malformed",
+  "unavailable",
 ]);
 
 export type ProbeFailureReason = z.output<typeof probeFailureReasonSchema>;

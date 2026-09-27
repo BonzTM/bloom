@@ -20,18 +20,22 @@ it("shows the stream on the playing-now card and links to the series", async () 
     await screen.findByRole("heading", { name: "Watch", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Watch | Bloom");
-  const samples = await screen.findByRole("table", {
-    name: "Samples, newest first",
-  });
+  const timeline = await screen.findByRole("list", { name: "Watch timeline" });
+  const events = within(timeline).getAllByRole("listitem");
+  expect(events[0]).toHaveTextContent("Started at 5:00");
+  expect(events[0]).toHaveTextContent("Direct play");
+  expect(events[1]).toHaveTextContent("Switched to transcode at 12:34");
+  expect(events[1]).toHaveTextContent("720p · h264/aac · 4.0 Mbit/s");
+  expect(events[1]).toHaveTextContent(
+    "because ContainerNotSupported, AudioCodecNotSupported",
+  );
+  expect(events.at(-1)).toHaveTextContent("Last seen at 12:34");
+  await user.click(screen.getByText(/^All samples \(2\)$/));
+  const samples = screen.getByRole("table", { name: "Samples, newest first" });
   const rows = within(samples).getAllByRole("row").slice(1);
   expect(rows).toHaveLength(2);
   expect(rows[0]).toHaveTextContent("Transcode");
-  expect(rows[0]).toHaveTextContent("720p · h264/aac · 4.0 Mbit/s");
-  expect(rows[0]).toHaveTextContent(
-    "ContainerNotSupported, AudioCodecNotSupported",
-  );
   expect(rows[1]).toHaveTextContent("Direct play");
-  expect(rows[1]).toHaveTextContent("05:00");
   expect(
     screen.getByRole("link", { name: "Back to playback" }),
   ).toHaveAttribute("href", "/admin/playback");

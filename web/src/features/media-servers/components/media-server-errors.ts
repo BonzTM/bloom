@@ -30,6 +30,7 @@ const probeMessagesByReason: Readonly<Record<ProbeFailureReason, string>> = {
     "The address answered, but Jellyfin's API was not found there. Check that the address is the server itself, including any base path. Nothing was saved.",
   malformed:
     "The address answered, but not like a Jellyfin server. Check that it points at Jellyfin itself rather than a login page or a redirect. Nothing was saved.",
+  unavailable: "The server is not answering right now. Try again in a moment.",
 };
 
 const removeMessagesByStatus: Readonly<Record<number, string>> = {

@@ -15,6 +15,7 @@ import {
   streamSummary,
   transcodeReasonsLabel,
 } from "../features/playback/components/watch-format.js";
+import { watchTimeline } from "../features/playback/components/watch-timeline.js";
 import { useWatchPositions } from "../features/playback/hooks/playback-queries.js";
 import { accessDenial, ApiError } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
@@ -58,8 +59,9 @@ function WatchPage({
       </p>
       <h1>Watch</h1>
       <p className="page-intro">
-        Every recorded moment of <code>{id}</code>, newest first. A new row is
-        kept whenever the position, pause state, play method, or stream changed.
+        What happened during this watch: when it started, paused, resumed,
+        seeked, or changed how it was delivered. The raw samples Bloom polled
+        are below for anyone who needs them.
       </p>
       {positions.status === "pending" ? (
         <AsyncStatus>Loading the watch…</AsyncStatus>
@@ -85,9 +87,45 @@ function WatchPage({
           </>
         )
       ) : (
-        <SeriesTable items={positions.data.items} />
+        <>
+          <Timeline items={positions.data.items} />
+          <details className="samples-details">
+            <summary>
+              All samples ({String(positions.data.items.length)})
+            </summary>
+            <SeriesTable items={positions.data.items} />
+          </details>
+        </>
       )}
     </>
+  );
+}
+
+// The readable version of the sample series: one row per moment that
+// changed something, oldest first.
+function Timeline({
+  items,
+}: Readonly<{ items: readonly PlaybackPosition[] }>): ReactNode {
+  const events = watchTimeline(items);
+  if (events.length === 0) {
+    return <p>No samples have been recorded for this watch.</p>;
+  }
+  return (
+    <ol className="timeline" aria-label="Watch timeline">
+      {events.map((event, index) => (
+        <li key={`${event.at}-${String(index)}`} className="timeline-event">
+          <time dateTime={event.at} className="timeline-time">
+            {event.at.slice(11, 19)}
+          </time>
+          <span className="timeline-what">
+            <strong>{event.what}</strong> at {event.position}
+          </span>
+          {event.detail === "" ? null : (
+            <span className="timeline-detail">{event.detail}</span>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }
 

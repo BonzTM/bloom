@@ -790,6 +790,52 @@ button:disabled {
   padding: 0;
 }
 
+/* ---------- watch timeline ---------- */
+
+.timeline {
+  border-left: 2px solid var(--border-strong);
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0 0 var(--space-4) var(--space-2);
+  padding: var(--space-1) 0 var(--space-1) var(--space-4);
+}
+
+.timeline-event {
+  display: grid;
+  gap: var(--space-1) var(--space-3);
+  grid-template-columns: 5rem 1fr;
+  position: relative;
+}
+
+.timeline-event::before {
+  background: var(--accent);
+  border-radius: 50%;
+  content: "";
+  height: 0.6rem;
+  left: calc(-1 * var(--space-4) - 0.375rem);
+  position: absolute;
+  top: 0.35rem;
+  width: 0.6rem;
+}
+
+.timeline-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-detail {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  grid-column: 2;
+}
+
+.samples-details summary {
+  color: var(--link);
+  cursor: pointer;
+  margin-bottom: var(--space-3);
+}
+
 /* ---------- tiles and cards ---------- */
 
 .section-intro {
