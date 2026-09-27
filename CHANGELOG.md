@@ -80,6 +80,10 @@ contracts) gets an entry here.
 
 ### Added
 
+- Registration pages say which way a media-server or download-manager probe
+  failed: the address could not be reached, the API key was rejected, the API
+  was not found at that address, or the answer did not look like the expected
+  server.
 - Stream details on playback watches and bounded position samples, including
   containers, codecs, bitrate, dimensions, framerate, audio channels,
   direct-stream flags, and transcode reasons. Mid-play method and stream

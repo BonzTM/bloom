@@ -144,7 +144,7 @@ it("explains an instance that cannot be reached", async () => {
 
   const alert = await screen.findByRole("alert");
   expect(alert).toHaveTextContent(
-    "The instance could not be reached or refused the API key.",
+    "Bloom could not reach the instance at that address.",
   );
   expect(alert).toHaveFocus();
   expect(screen.getByLabelText("Name")).toHaveValue("far");

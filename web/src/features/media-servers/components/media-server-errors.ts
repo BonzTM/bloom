@@ -1,4 +1,8 @@
-import { ApiError, CSRF_REJECTED } from "../../../lib/api/errors.js";
+import {
+  ApiError,
+  CSRF_REJECTED,
+  type ProbeFailureReason,
+} from "../../../lib/api/errors.js";
 
 const GENERIC_REGISTER_FAILURE =
   "The server could not be registered. Please try again.";
@@ -14,7 +18,18 @@ const registerMessagesByStatus: Readonly<Record<number, string>> = {
   403: "You no longer have permission to manage media servers.",
   409: "Another media server already uses that name.",
   422: "Check the name, address, and API key. HTTPS is required unless plaintext HTTP is allowed, and that override applies to http:// addresses only.",
-  502: "The server did not answer as a Jellyfin server, or it rejected the API key. Nothing was saved.",
+  502: "The server could not be checked. Nothing was saved.",
+};
+
+// What went wrong when Bloom probed the server, when the API says which.
+const probeMessagesByReason: Readonly<Record<ProbeFailureReason, string>> = {
+  unreachable:
+    "Bloom could not reach the server at that address. Check the address and port, and that the network between Bloom and the server allows it. Nothing was saved.",
+  unauthorized: "The server rejected the API key. Nothing was saved.",
+  not_found:
+    "The address answered, but Jellyfin's API was not found there. Check that the address is the server itself, including any base path. Nothing was saved.",
+  malformed:
+    "The address answered, but not like a Jellyfin server. Check that it points at Jellyfin itself rather than a login page or a redirect. Nothing was saved.",
 };
 
 const removeMessagesByStatus: Readonly<Record<number, string>> = {
@@ -49,6 +64,9 @@ function describe(
   }
   if (error.status === 403 && error.code === CSRF_REJECTED) {
     return CROSS_SITE;
+  }
+  if (error.status === 502 && error.reason !== undefined) {
+    return probeMessagesByReason[error.reason];
   }
   if (error.status !== undefined && error.status in messagesByStatus) {
     return messagesByStatus[error.status];
