@@ -61,9 +61,6 @@ export const IMPORT_IN_PROGRESS = "import_in_progress";
 
 export const MAX_IMPORT_UPLOAD_BYTES = 256 * 1024 * 1024;
 
-// The largest page the export endpoint serves in one request.
-export const MAX_EXPORT_LIMIT = 10_000;
-
 export type StartImportInput =
   | Readonly<{ source: "playback_reporting"; mediaServerId: string }>
   | Readonly<{ source: "bloom_export"; mediaServerId: string; file: File }>;
