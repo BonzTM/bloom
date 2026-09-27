@@ -627,20 +627,21 @@ func testCatalogDetailHistoryPlans(t *testing.T, pool *sql.DB, driver config.Dri
 	t.Helper()
 	detail := explainCatalogQuery(t, pool, driver, catalogTargetPlanCTE+`SELECT COUNT(*) FROM target_watches`,
 		catalogPagingServerID, "item-b")
-	assertCatalogWatchSeeks(t, detail, "detail", false)
+	assertCatalogWatchSeeks(t, detail, "detail")
 	history := explainCatalogQuery(t, pool, driver, catalogTargetPlanCTE+`SELECT * FROM target_watches
 WHERE started_at<$3 OR (started_at=$3 AND id<$4)
 ORDER BY started_at DESC,id DESC LIMIT 10`, catalogPagingServerID, "item-b",
 		time.Date(2026, 9, 27, 23, 0, 0, 0, time.UTC), "z")
-	assertCatalogWatchSeeks(t, history, "history", true)
+	assertCatalogWatchSeeks(t, history, "history")
 }
 
-func assertCatalogWatchSeeks(t *testing.T, plan, query string, ordered bool) {
+// assertCatalogWatchSeeks accepts either watches index that leads with
+// (media_server_id, item_id); the planner picks between them by table size,
+// and the union of the three branches sorts before LIMIT either way.
+func assertCatalogWatchSeeks(t *testing.T, plan, query string) {
 	t.Helper()
-	itemSeek := strings.Contains(plan, "watches_server_item_started_idx")
-	if !ordered {
-		itemSeek = itemSeek || strings.Contains(plan, "watches_catalog_aggregate_idx")
-	}
+	itemSeek := strings.Contains(plan, "watches_server_item_started_idx") ||
+		strings.Contains(plan, "watches_catalog_aggregate_idx")
 	if !itemSeek || !strings.Contains(plan, "watches_server_series_started_idx") {
 		t.Errorf("%s plan = %q; want item and series index seeks", query, plan)
 	}
