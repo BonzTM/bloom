@@ -2,9 +2,11 @@
 package mediaserver
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
@@ -257,6 +259,34 @@ func (s *Service) Libraries(ctx context.Context, id string) ([]core.Library, err
 		return nil, fmt.Errorf("list media server libraries: %w", err)
 	}
 	return libraries, nil
+}
+
+// Users lists linkable media-server users in binary name and identifier order.
+func (s *Service) Users(ctx context.Context, id string) ([]core.MediaUser, error) {
+	call, err := s.adapter(ctx, id, "list_users")
+	if err != nil {
+		return nil, err
+	}
+	defer call.release()
+	lister, ok := call.entry.adapter.(core.MediaUserLister)
+	if !ok {
+		return nil, fmt.Errorf("list media server users: capability unavailable: %w", core.ErrNotFound)
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	users, err := lister.ListUsers(callCtx)
+	if err != nil {
+		return nil, fmt.Errorf("list media server users: %w", err)
+	}
+	slices.SortFunc(users, compareMediaUsers)
+	return users, nil
+}
+
+func compareMediaUsers(left, right core.MediaUser) int {
+	if byName := cmp.Compare(left.Name, right.Name); byName != 0 {
+		return byName
+	}
+	return cmp.Compare(left.ID, right.ID)
 }
 
 // AcquireUserProvisioner resolves and reserves one per-server adapter slot.

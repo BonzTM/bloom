@@ -249,6 +249,7 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},

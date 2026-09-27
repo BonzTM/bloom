@@ -244,6 +244,49 @@ func TestClientFindUserByNameAndID(t *testing.T) {
 	}
 }
 
+func TestClientListUsersReturnsOnlyValidatedIdentity(t *testing.T) {
+	const firstUserID = "44444444-4444-4444-8444-444444444444"
+	const secondUserID = "55555555-5555-4555-8555-555555555555"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/Users" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `[{"Id":"`+firstUserID+`","Name":"zoe","Password":"secret","Policy":{"IsAdministrator":true}},`+
+			`{"Id":"`+secondUserID+`","Name":"Alice"}]`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	users, err := client.ListUsers(context.Background())
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	want := []core.MediaUser{{ID: firstUserID, Name: "zoe"}, {ID: secondUserID, Name: "Alice"}}
+	if !slices.Equal(users, want) {
+		t.Fatalf("ListUsers = %+v, want %+v", users, want)
+	}
+}
+
+func TestClientListUsersRejectsMalformedIdentity(t *testing.T) {
+	tests := map[string]string{
+		"missing id":   `[{"Name":"alice"}]`,
+		"missing name": `[{"Id":"44444444-4444-4444-8444-444444444444"}]`,
+		"long name":    `[{"Id":"44444444-4444-4444-8444-444444444444","Name":"` + strings.Repeat("a", core.MaxMediaUsernameBytes+1) + `"}]`,
+		"control name": `[{"Id":"44444444-4444-4444-8444-444444444444","Name":"alice\u0000"}]`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, body)
+			}))
+			defer server.Close()
+			client := newTestClient(t, server, nil)
+			_, err := client.ListUsers(context.Background())
+			assertMediaError(t, err, core.MediaServerMalformed)
+		})
+	}
+}
+
 func TestClientFindUserByNameRejectsAmbiguousExactMatches(t *testing.T) {
 	const firstUserID = "44444444-4444-4444-8444-444444444444"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -624,6 +667,30 @@ func TestClientRejectsTooManyLibraries(t *testing.T) {
 	defer server.Close()
 	client := newTestClient(t, server, nil)
 	_, err := client.ListLibraries(context.Background())
+	assertMediaError(t, err, core.MediaServerMalformed)
+}
+
+func TestClientRejectsTooManyUsers(t *testing.T) {
+	user := `{"Id":"44444444-4444-4444-8444-444444444444","Name":"alice"}`
+	body := "[" + strings.Repeat(user+",", core.MaxMediaServerUsers) + user + "]"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, body)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	_, err := client.ListUsers(context.Background())
+	assertMediaError(t, err, core.MediaServerMalformed)
+}
+
+func TestClientRejectsInvalidUTF8UserResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := w.Write([]byte("[{\"Id\":\"44444444-4444-4444-8444-444444444444\",\"Name\":\"\xff\"}]")); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, nil)
+	_, err := client.ListUsers(context.Background())
 	assertMediaError(t, err, core.MediaServerMalformed)
 }
 

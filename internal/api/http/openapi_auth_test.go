@@ -32,6 +32,7 @@ const (
 	mediaServerSchema       = "#/components/schemas/MediaServer"
 	probeMediaServerSchema  = "#/components/schemas/ProbeMediaServerResponse"
 	librariesSchema         = "#/components/schemas/LibrariesResponse"
+	mediaUsersSchema        = "#/components/schemas/MediaUsersResponse"
 	providersSchema         = "#/components/schemas/AuthProvidersResponse"
 	playbackNowSchema       = "#/components/schemas/PlaybackNowResponse"
 	playbackHistorySchema   = "#/components/schemas/PlaybackHistoryResponse"
@@ -504,7 +505,7 @@ func assertResponseSchema(
 		}
 	case currentSchema, permissionsSchema, rolesSchema, errorSchema,
 		createMediaServerSchema, mediaServersSchema, mediaServerSchema,
-		probeMediaServerSchema, librariesSchema, providersSchema,
+		probeMediaServerSchema, librariesSchema, mediaUsersSchema, providersSchema,
 		playbackNowSchema, playbackHistorySchema, playbackPositionsSchema, statsOverviewSchema,
 		statsDailySchema, statsPatternsSchema, statsTitlesSchema,
 		statsUsersSchema, statsLibrariesSchema, statsUserSchema:

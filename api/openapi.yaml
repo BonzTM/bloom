@@ -705,6 +705,26 @@ paths:
         "502": { $ref: "#/components/responses/MediaServerFailure" }
         "503": { $ref: "#/components/responses/MediaServerBusy" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/users:
+    get:
+      tags: [media-servers]
+      operationId: listMediaServerUsers
+      summary: List media-server users available for account linking.
+      parameters:
+        - $ref: "#/components/parameters/MediaServerID"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MediaServerUsersListed"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/MediaServerUsersNotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/MediaServerFailure" }
+        "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
   /api/v1/download-managers:
     post:
       tags: [download-managers]
@@ -1849,7 +1869,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ProbeMediaServerResponse" }
     MediaServerLibrariesListed:
-      description: At most 256 media-server libraries. This bounded unpaginated exception lasts until the users slice adds server-side pagination.
+      description: At most 256 media-server libraries in a bounded configuration selector.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -1858,6 +1878,18 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/LibrariesResponse" }
+    MediaServerUsersListed:
+      description: At most 1000 media-server user identities ordered by name and identifier using binary comparisons.
+      headers: *AuthenticatedHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/MediaUsersResponse" }
+    MediaServerUsersNotFound:
+      description: The registered media server does not exist, or its adapter does not support user listing. The `code` is `not_found` in both cases because this API has no `not_supported` error code.
+      headers: *AuthenticatedHeaders
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
     PlaybackNowListed:
       description: A stable cursor page of open watches ordered by start time and identifier, newest first.
       headers:
@@ -2878,7 +2910,23 @@ components:
           type: array
           maxItems: 256
           items: { $ref: "#/components/schemas/Library" }
-          description: Bounded unpaginated exception; server-side pagination arrives with the users slice.
+          description: Bounded unpaginated configuration selector.
+    MediaUser:
+      type: object
+      required: [id, name]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 1, x-max-bytes: 128 }
+        name: { type: string, minLength: 1, x-max-bytes: 64 }
+    MediaUsersResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/MediaUser" }
     PlayMethod:
       type: string
       enum: [direct_play, direct_stream, transcode, unknown]

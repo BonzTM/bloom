@@ -31,11 +31,13 @@ type fakeMediaServerService struct {
 	connection   core.MediaServerConnection
 	info         core.ServerInfo
 	libraries    []core.Library
+	users        []core.MediaUser
 	err          error
 	registered   int
 	getCalls     int
 	probeCalls   int
 	libraryCalls int
+	userCalls    int
 	deleted      int
 	deadlineSeen bool
 	lastAPIKey   string
@@ -52,6 +54,7 @@ func newFakeMediaServerService() *fakeMediaServerService {
 	return &fakeMediaServerService{
 		servers: []core.MediaServer{server}, connection: core.MediaServerConnection{Server: server, Info: info, Capabilities: capabilities},
 		info: info, libraries: []core.Library{{ID: "lib-1", Name: "Movies", Type: "movies"}},
+		users: []core.MediaUser{{ID: "user-1", Name: "Alice"}, {ID: "user-2", Name: "zoe"}},
 	}
 }
 
@@ -108,6 +111,14 @@ func (f *fakeMediaServerService) Libraries(ctx context.Context, _ string) ([]cor
 	return slices.Clone(f.libraries), f.err
 }
 
+func (f *fakeMediaServerService) Users(ctx context.Context, _ string) ([]core.MediaUser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.userCalls++
+	_, f.deadlineSeen = ctx.Deadline()
+	return slices.Clone(f.users), f.err
+}
+
 func (f *fakeMediaServerService) Delete(ctx context.Context, _ string) (core.MediaServer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -138,6 +149,7 @@ func TestMediaServerEndpoints(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", want: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", want: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/libraries", want: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/users", want: http.StatusOK},
 		{method: http.MethodDelete, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", want: http.StatusNoContent},
 	} {
 		recorder := h.request(t, testCase.method, testCase.path, "", cookie)
@@ -284,6 +296,7 @@ func TestMediaServerPathIDsValidateBeforeService(t *testing.T) {
 		{method: http.MethodDelete, path: "/api/v1/media-servers/not-a-uuid"},
 		{method: http.MethodPost, path: "/api/v1/media-servers/not-a-uuid/probe"},
 		{method: http.MethodGet, path: "/api/v1/media-servers/not-a-uuid/libraries"},
+		{method: http.MethodGet, path: "/api/v1/media-servers/not-a-uuid/users"},
 	} {
 		recorder := h.request(t, testCase.method, testCase.path, "", cookie)
 		if recorder.Code != http.StatusUnprocessableEntity {
@@ -291,8 +304,22 @@ func TestMediaServerPathIDsValidateBeforeService(t *testing.T) {
 		}
 	}
 	if h.mediaServers.getCalls != 0 || h.mediaServers.deleted != 0 ||
-		h.mediaServers.probeCalls != 0 || h.mediaServers.libraryCalls != 0 {
+		h.mediaServers.probeCalls != 0 || h.mediaServers.libraryCalls != 0 || h.mediaServers.userCalls != 0 {
 		t.Fatalf("invalid ids reached service: %+v", h.mediaServers)
+	}
+}
+
+func TestMediaServerUsersResponseContainsIdentityOnly(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	recorder := h.request(t, http.MethodGet,
+		"/api/v1/media-servers/33333333-3333-4333-8333-333333333333/users", "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	const want = `{"items":[{"id":"user-1","name":"Alice"},{"id":"user-2","name":"zoe"}]}` + "\n"
+	if recorder.Body.String() != want {
+		t.Fatalf("body = %s, want %s", recorder.Body.String(), want)
 	}
 }
 
@@ -570,6 +597,7 @@ func TestMediaServerOpenAPIContractWithValidFixtures(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333", schema: "#/components/schemas/MediaServer", status: 200},
 		{method: http.MethodPost, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/probe", schema: "#/components/schemas/ProbeMediaServerResponse", status: 200},
 		{method: http.MethodGet, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/libraries", schema: "#/components/schemas/LibrariesResponse", status: 200},
+		{method: http.MethodGet, path: "/api/v1/media-servers/33333333-3333-4333-8333-333333333333/users", schema: "#/components/schemas/MediaUsersResponse", status: 200},
 	}
 	for _, testCase := range tests {
 		contentType := ""
@@ -654,6 +682,10 @@ func mediaOperationContracts() []mediaOperationContract {
 		},
 		{
 			method: "get", path: "/api/v1/media-servers/{id}/libraries", schema: librariesSchema, success: 200,
+			statuses: []int{200, 401, 403, 404, 422, 500, 502, 503, 405},
+		},
+		{
+			method: "get", path: "/api/v1/media-servers/{id}/users", schema: mediaUsersSchema, success: 200,
 			statuses: []int{200, 401, 403, 404, 422, 500, 502, 503, 405},
 		},
 	}

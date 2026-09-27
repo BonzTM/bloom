@@ -81,6 +81,15 @@ type librariesResponse struct {
 	Items []libraryResponse `json:"items"`
 }
 
+type mediaUserResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type mediaUsersResponse struct {
+	Items []mediaUserResponse `json:"items"`
+}
+
 func (s *Server) handleCreateMediaServer(w http.ResponseWriter, r *http.Request) {
 	request, ok := s.decodeMediaServerRegistration(w, r)
 	if !ok {
@@ -222,6 +231,23 @@ func (s *Server) handleMediaServerLibraries(w http.ResponseWriter, r *http.Reque
 		items = append(items, libraryResponse{ID: library.ID, Name: library.Name, Type: library.Type})
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, librariesResponse{Items: items})
+}
+
+func (s *Server) handleMediaServerUsers(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.mediaServerID(w, r)
+	if !ok {
+		return
+	}
+	users, err := s.mediaServerReader.Users(r.Context(), id)
+	if err != nil {
+		s.writeMediaServerError(w, r, err)
+		return
+	}
+	items := make([]mediaUserResponse, 0, len(users))
+	for _, user := range users {
+		items = append(items, mediaUserResponse{ID: user.ID, Name: user.Name})
+	}
+	writeJSON(w, r, s.logger, http.StatusOK, mediaUsersResponse{Items: items})
 }
 
 func (s *Server) handleDeleteMediaServer(w http.ResponseWriter, r *http.Request) {
