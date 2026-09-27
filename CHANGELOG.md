@@ -9,6 +9,13 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-09-27
+
+The first tagged release: everything below shipped between the first commit
+and this tag.
+
 ### Removed
 
 - The image workflow no longer opens deployment pull requests or needs a
