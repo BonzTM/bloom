@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -120,7 +119,7 @@ func playbackReportingRow(row []any, rowID int64) (core.ImportedWatch, error) {
 		return core.ImportedWatch{}, errSkippedPlaybackRow
 	}
 	duration, err := reportingInt(row[9])
-	if err != nil || duration < 0 || duration > math.MaxInt32 {
+	if err != nil || duration < 0 || duration > core.MaxImportPlaybackSeconds {
 		return core.ImportedWatch{}, errSkippedPlaybackRow
 	}
 	values := make([]string, 0, 7)

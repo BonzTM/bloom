@@ -46,8 +46,6 @@ var (
 	ErrMetadataNotConfigured = errors.New("metadata provider not configured")
 	// ErrMetadataUnauthorized reports a credential rejected by the provider.
 	ErrMetadataUnauthorized = errors.New("metadata provider credential rejected")
-	// ErrMetadataUnreachable reports a provider connection failure before a response.
-	ErrMetadataUnreachable = errors.New("metadata provider unreachable")
 	// ErrMetadataUnavailable reports a transient provider failure.
 	ErrMetadataUnavailable = errors.New("metadata provider unavailable")
 	// ErrMetadataMalformed reports an invalid provider response.

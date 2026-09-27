@@ -1689,7 +1689,7 @@ paths:
     post:
       tags: [imports]
       operationId: createImport
-      summary: Create a Playback Reporting, Jellyfin user-data, Bloom JSONL, or Bloom ZIP import job.
+      summary: Create a Playback Reporting, Jellyfin user-data, Jellystat JSONL, Bloom JSONL, or Bloom ZIP import job.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -1697,7 +1697,10 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CreatePlaybackReportingImportRequest" }
           multipart/form-data:
-            schema: { $ref: "#/components/schemas/CreateBloomExportImportRequest" }
+            schema:
+              oneOf:
+                - { $ref: "#/components/schemas/CreateBloomExportImportRequest" }
+                - { $ref: "#/components/schemas/CreateJellystatImportRequest" }
             encoding:
               file:
                 contentType: application/x-ndjson, application/zip, application/octet-stream
@@ -2482,7 +2485,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     MetadataProviderFailure:
-      description: Opaque upstream metadata-provider failure with an unreachable, unauthorized, or malformed reason. Retryable failures may include Retry-After.
+      description: Opaque upstream metadata-provider failure. Retryable failures may include Retry-After.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -2493,7 +2496,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     MetadataNotConfigured:
-      description: TMDB is not configured (`metadata_not_configured`, no reason) or is temporarily unavailable (`metadata_provider_failure`, reason `unavailable`).
+      description: TMDB is not configured or is temporarily unavailable. The error code distinguishes the cause.
       headers: *AuthenticatedHeaders
       content: *AuthenticatedErrorContent
     DownloadManagerFailure:
@@ -3533,7 +3536,7 @@ components:
       enum: [poll, websocket, webhook, import]
     ImportSource:
       type: string
-      enum: [playback_reporting, bloom_export, jellyfin_userdata]
+      enum: [playback_reporting, jellystat, bloom_export, jellyfin_userdata]
     ImportState:
       type: string
       enum: [pending, running, completed, failed, cancelled]
@@ -3552,6 +3555,14 @@ components:
         media_server_id: { type: string, format: uuid }
         source: { type: string, const: bloom_export }
         file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom watch export as JSONL or ZIP, detected by content and limited to 256 MiB." }
+    CreateJellystatImportRequest:
+      type: object
+      required: [media_server_id, source, file]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        source: { type: string, const: jellystat }
+        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Jellystat JSONL backup whose first line is a table marker, limited to 256 MiB." }
     ImportJob:
       type: object
       required: [id, media_server_id, source, state, read, imported, skipped, duplicate, last_error, requested_by, created_at, updated_at]
@@ -4072,16 +4083,13 @@ components:
         reason:
           type: string
           description: |
-            Present only for `media_server_failure`, `download_manager_failure`,
-            and `metadata_provider_failure`. For metadata failures, `unreachable`
-            covers connection failures, timeouts, and DNS failures before any
-            response; `unavailable` covers an upstream 429 or 5xx after retries.
-            For other upstream failures, `unreachable` also covers refused
-            destinations and retryable upstream statuses.
+            Present only for `media_server_failure` and `download_manager_failure`.
+            `unreachable` covers connection failures, timeouts, DNS failures,
+            refused destinations, and retryable upstream statuses;
             `unauthorized` covers an upstream 401 or 403; `not_found` covers an
             upstream 404; `malformed` covers anything else, including unexpected
             statuses, redirects, and responses that do not fit the upstream's contract.
-          enum: [unreachable, unauthorized, not_found, malformed, unavailable]
+          enum: [unreachable, unauthorized, not_found, malformed]
         fields:
           type: array
           description: Per-field validation failures. Present only when `code` is `validation_failed`.

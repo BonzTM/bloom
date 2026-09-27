@@ -235,6 +235,28 @@ func (q *Queries) FindCollectedImportDuplicate(ctx context.Context, arg FindColl
 	return exists, err
 }
 
+const findCrossSourceImportDuplicate = `-- name: FindCrossSourceImportDuplicate :one
+SELECT EXISTS (
+    SELECT 1 FROM watches
+    WHERE media_server_id = ?1
+      AND import_source = ?2
+      AND import_record_id = ?3
+)
+`
+
+type FindCrossSourceImportDuplicateParams struct {
+	MediaServerID  string
+	ImportSource   sql.NullString
+	ImportRecordID sql.NullString
+}
+
+func (q *Queries) FindCrossSourceImportDuplicate(ctx context.Context, arg FindCrossSourceImportDuplicateParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, findCrossSourceImportDuplicate, arg.MediaServerID, arg.ImportSource, arg.ImportRecordID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const finishImport = `-- name: FinishImport :execrows
 UPDATE imports
 SET state = ?1, last_error = ?2,

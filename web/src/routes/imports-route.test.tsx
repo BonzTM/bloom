@@ -202,10 +202,9 @@ it("cancels a running job", async () => {
   expect(IMPORT_RUNNING_ID).toBeTruthy();
 });
 
-it("offers the export as one download", async () => {
+it("offers the export as a download", async () => {
   await openImports();
-  expect(screen.getByRole("link", { name: "Download export" })).toHaveAttribute(
-    "href",
-    "/api/v1/exports/watches",
-  );
+  expect(
+    screen.getByRole("link", { name: "Download watches" }),
+  ).toHaveAttribute("href", "/api/v1/exports/watches?limit=10000");
 });

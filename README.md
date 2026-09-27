@@ -266,15 +266,43 @@ counters. A stopped process resumes after the last committed batch.
 The `playback_reporting` source reads Jellyfin's Playback Reporting plugin by
 ascending database `rowid`. The plugin must be installed on the selected
 server. Create this job with JSON containing `media_server_id` and
-`source: "playback_reporting"`. The `jellyfin_userdata` source enumerates every
-user reported by Jellyfin in media-user ID order, including users without a
-Bloom account, then walks the synced catalog for each user. It checkpoints the
-user and item cursors and creates at most one synthetic watch per user and item,
-at `LastPlayedDate`, when `PlayCount` is positive. The synthetic watch records
-the Jellyfin user ID and name. Its watch time is zero because Jellyfin user data
-does not retain session duration. A Playback Reporting, Jellystat-style, Bloom
-export, or collected watch for the same user and item supersedes the synthetic
-watch regardless of commit order. The `bloom_export` source accepts a multipart
+`source: "playback_reporting"`.
+
+The `jellyfin_userdata` source enumerates every user reported by Jellyfin in
+media-user ID order, including users without a Bloom account, then walks the
+synced catalog for each user. It checkpoints the user and item cursors and
+creates at most one synthetic watch per user and item, at `LastPlayedDate`,
+when `PlayCount` is positive. The synthetic watch records the Jellyfin user ID
+and name. Its watch time is zero because Jellyfin user data does not retain
+session duration. A Playback Reporting, Jellystat-style, Bloom export, or
+collected watch for the same user and item supersedes the synthetic watch
+regardless of commit order.
+
+The `jellystat` source accepts a Jellystat backup through the same multipart
+route. In Jellystat, open **Settings → Backup**, create or select a backup, and
+download the `.jsonl` file. Upload it with `media_server_id`,
+`source: jellystat`, and the `file` part. Bloom verifies that the first line is
+a Jellystat table marker before creating the job. It streams the
+database-staged upload twice: a first pass builds only the user, item, and
+episode lookups needed by playback rows, and a second pass imports activity.
+The combined lookups are limited to 250,000 entries and 64 MiB of stored lookup
+text. No lookup data is written to disk. A backup is limited to 1,000,000 JSONL
+rows, and each JSON payload is limited to 64 KiB. Malformed and non-activity
+lines increment the skipped counter.
+
+Jellystat imports carry over user and item identity, movie or episode names,
+series and season metadata when available, runtime, active seconds, play
+method, client, device, and the activity finalisation time. They do not carry
+Jellystat aggregate counters, library assignment, IP addresses, raw play-state
+JSON, media-stream JSON, transcoding JSON, segments, or position samples.
+Jellystat stores `ActivityDateInserted` when a record is finalised or last
+merged, not when playback starts. Bloom therefore approximates `started_at` as
+that timestamp minus `PlaybackDuration`; pauses and merge gaps cannot be
+reconstructed. Rows that Jellystat imported from Playback Reporting are kept
+and cross-deduplicated against a later direct Playback Reporting import.
+Unknown users and items are retained with their source IDs as display names.
+
+The `bloom_export` source accepts a multipart
 `file` part containing either a Bloom `.zip` export or the previous JSONL shape,
 plus `media_server_id` and `source: bloom_export` fields. Bloom detects ZIP by
 content rather than filename. Uploads are limited to 256 MiB, and only one
@@ -507,8 +535,6 @@ adds the signed-in account's latest request state to every title. Movie and
 series genre lists are available from `GET /api/v1/metadata/genres?kind=...`
 and are cached for one day; discover pages use the existing metadata cache
 TTL.
-If a metadata error reports the `unreachable` reason, the Bloom server cannot
-reach `api.themoviedb.org`; a firewall or network policy is the usual cause.
 Accounts with `requests.create` can open movie or series details and submit a
 movie or selected series seasons to `POST /api/v1/requests`.
 Accounts with `requests.approve` are exempt from quotas and their own requests
@@ -775,6 +801,11 @@ admits the `jellyfin_userdata` import source and changes that source's
 imported-watch identity to include the media user. Its down migration removes
 catalog data and the new provenance while preserving other watch rows.
 
+Migration `00025_jellystat_import_source` widens import provenance on both
+engines for Jellystat backups. Rolling it down removes Jellystat import jobs,
+their staged uploads, and watches imported from Jellystat before restoring the
+previous source constraints, so preserve a database backup before rollback.
+
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account
 rolling request quotas on both engines. Apply it before enabling metadata and
@@ -827,13 +858,8 @@ Layout follows the handbook default (`cmd/` + `internal/`):
 ### Error handling
 
 Every JSON API failure uses the `ErrorResponse` envelope with a stable `code`,
-a safe `message`, and a `request_id` for log correlation. Failures may include
-`reason`, which is omitted when empty. Classified media-server,
-download-manager, and metadata-provider failures populate it.
-Metadata uses `unreachable` for connection, DNS, or timeout failures before a
-response; `unauthorized` for TMDB 401; `malformed` for an unusable response;
-and `unavailable` for TMDB 429 or 5xx responses after bounded retries.
-Media-server and download-manager failures use `unreachable` for
+a safe `message`, and a `request_id` for log correlation. Media-server and
+download-manager probe failures also include `reason`: `unreachable` for
 connection, timeout, DNS, refused-destination, and retryable-status failures;
 `unauthorized` for upstream 401 or 403 responses; `not_found` for an upstream
 404; and `malformed` for unexpected statuses, redirects, or responses that do

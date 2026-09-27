@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -49,6 +50,12 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("Bloom export snapshot is preserved", func(t *testing.T) {
 		testBloomExportSnapshot(t, pool, driver, newImportFixture(t, pool, driver))
 	})
+	t.Run("Jellystat backup imports and reruns idempotently", func(t *testing.T) {
+		testDatabaseJellystatImport(t, pool, driver, newImportFixture(t, pool, driver))
+	})
+	t.Run("Playback Reporting deduplicates Jellystat plugin rows", func(t *testing.T) {
+		testPlaybackReportingJellystatCrossDedup(t, newImportFixture(t, pool, driver))
+	})
 	t.Run("database upload chunks and terminal cleanup", func(t *testing.T) {
 		testDatabaseUploadLifecycle(t, newImportFixture(t, pool, driver))
 	})
@@ -76,6 +83,76 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("import supersession maintains catalog rollups", func(t *testing.T) {
 		testImportCatalogRollup(t, pool, driver, newImportFixture(t, pool, driver))
 	})
+}
+
+func testDatabaseJellystatImport(
+	t *testing.T, pool *sql.DB, driver config.Driver, fixture importFixture,
+) {
+	t.Helper()
+	payload, err := os.ReadFile("../importer/testdata/jellystat-backup.jsonl")
+	if err != nil {
+		t.Fatalf("read Jellystat fixture: %v", err)
+	}
+	service, staging := newDatabaseImportDependencies(t, fixture, fixture.now)
+	first := createDatabaseJellystatJob(t, service, fixture, payload)
+	runDatabaseImportWorker(t, fixture, staging)
+	assertJellystatJobCounters(t, fixture.store, first.ID, 4, 17, 0)
+	second := createDatabaseJellystatJob(t, service, fixture, payload)
+	runDatabaseImportWorker(t, fixture, staging)
+	assertJellystatJobCounters(t, fixture.store, second.ID, 0, 17, 4)
+	watches, err := newPlaybackTestStore(t, pool, driver).ListWatches(t.Context(), core.PlaybackQuery{
+		Mode: core.PlaybackQueryHistory, MediaServerID: fixture.serverID, PageSize: 10,
+	})
+	if err != nil || len(watches) != 4 {
+		t.Fatalf("Jellystat watches = %d, %v", len(watches), err)
+	}
+}
+
+func createDatabaseJellystatJob(
+	t *testing.T, service *importer.Service, fixture importFixture, payload []byte,
+) core.ImportJob {
+	t.Helper()
+	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("stage Jellystat fixture: %v", err)
+	}
+	job, err := service.CreateJellystat(t.Context(), fixture.serverID, fixture.ownerID, uploadID)
+	if err != nil {
+		t.Fatalf("CreateJellystat: %v", err)
+	}
+	return job
+}
+
+func assertJellystatJobCounters(
+	t *testing.T, store core.ImportStore, id string, imported, skipped, duplicate int64,
+) {
+	t.Helper()
+	job, err := store.GetImport(t.Context(), id)
+	if err != nil || job.State != core.ImportCompleted || job.Read != 21 ||
+		job.Imported != imported || job.Skipped != skipped || job.Duplicate != duplicate {
+		t.Fatalf("Jellystat job = %+v, %v", job, err)
+	}
+}
+
+func testPlaybackReportingJellystatCrossDedup(t *testing.T, fixture importFixture) {
+	t.Helper()
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	record := importedRecord("plugin:77", "cross-source", fixture.now)
+	result := commitSingleImport(t, fixture, jellystat, record)
+	if result.Imported != 1 {
+		t.Fatalf("Jellystat plugin insert = %+v", result)
+	}
+	if err := fixture.store.FinishImport(
+		t.Context(), jellystat.ID, jellystat.LeaseToken, core.ImportCompleted, "", fixture.now,
+	); err != nil {
+		t.Fatalf("finish Jellystat import: %v", err)
+	}
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	record.RecordID = "77"
+	result = commitSingleImport(t, fixture, reporting, record)
+	if result.Imported != 0 || result.Duplicate != 1 {
+		t.Fatalf("Playback Reporting cross-source counters = %+v", result)
+	}
 }
 
 type importFixtureServer struct{}

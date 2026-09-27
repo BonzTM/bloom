@@ -18,13 +18,15 @@ import (
 )
 
 type workerStore struct {
-	job       core.ImportJob
-	result    core.ImportBatchResult
-	finished  core.ImportState
-	errorText string
-	commitErr error
-	uploads   *memoryUploadStore
-	infoHook  func(context.Context, string) (core.ImportUploadInfo, error)
+	job           core.ImportJob
+	result        core.ImportBatchResult
+	finished      core.ImportState
+	errorText     string
+	commitErr     error
+	uploads       *memoryUploadStore
+	infoHook      func(context.Context, string) (core.ImportUploadInfo, error)
+	readChunkHook func(int64)
+	renewed       int
 }
 
 func (*workerStore) CreateImport(context.Context, core.ImportJob) error { return nil }
@@ -57,6 +59,9 @@ func (s *workerStore) ImportUploadInfo(ctx context.Context, id string) (core.Imp
 }
 
 func (s *workerStore) ReadImportUploadChunk(ctx context.Context, id string, index int64) ([]byte, error) {
+	if s.readChunkHook != nil {
+		s.readChunkHook(index)
+	}
 	return s.uploadStore().ReadImportUploadChunk(ctx, id, index)
 }
 
@@ -82,7 +87,15 @@ func (s *workerStore) ClaimImport(_ context.Context, lease core.ImportLease, now
 	return s.job, nil
 }
 
-func (*workerStore) RenewImportLease(context.Context, string, core.ImportLease, time.Time) error {
+func (s *workerStore) RenewImportLease(
+	_ context.Context, id string, lease core.ImportLease, now time.Time,
+) error {
+	if id != s.job.ID || lease.Token != s.job.LeaseToken ||
+		s.job.LeaseExpiresAt != nil && !s.job.LeaseExpiresAt.After(now) {
+		return core.ErrImportLeaseLost
+	}
+	s.renewed++
+	s.job.LeaseToken, s.job.LeaseExpiresAt = lease.Token, &lease.ExpiresAt
 	return nil
 }
 
@@ -99,7 +112,7 @@ func (s *workerStore) CommitImportBatch(_ context.Context, batch core.ImportBatc
 
 func (s *workerStore) FinishImport(ctx context.Context, _, _ string, state core.ImportState, message string, _ time.Time) error {
 	s.finished, s.errorText = state, message
-	if s.job.Source == core.ImportSourceBloomExport {
+	if s.job.Source == core.ImportSourceBloomExport || s.job.Source == core.ImportSourceJellystat {
 		cursor, err := decodeFileCursor(s.job.Cursor)
 		if err == nil {
 			uploads := s.uploadStore()

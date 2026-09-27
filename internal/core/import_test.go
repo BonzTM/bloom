@@ -35,6 +35,12 @@ func TestImportJobValidationAndSafeErrors(t *testing.T) {
 	}
 }
 
+func TestJellystatImportSourceIsValid(t *testing.T) {
+	if !ImportSourceJellystat.Valid() {
+		t.Fatal("Jellystat import source was rejected")
+	}
+}
+
 func TestImportedWatchRejectsControlsAndOversizedIdentifiers(t *testing.T) {
 	record := ImportedWatch{
 		RecordID: "source-1", MediaUserID: "user-1", Username: "alice",

@@ -121,6 +121,9 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("library catalog migration preserves version 23 data", func(t *testing.T) {
 		testLibraryCatalogMigrationUpgrade(t, pool, driver)
 	})
+	t.Run("Jellystat source migration preserves rows and foreign keys", func(t *testing.T) {
+		testJellystatSourceMigration(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(context.Background(), pool, driver); err != nil {
@@ -229,6 +232,85 @@ func assertCatalogWidenedConstraints(t *testing.T, pool *sql.DB, accountID, serv
          active_seconds,last_position_ms,source,created_at,updated_at,import_source,import_record_id)
         VALUES ($1,$2,'user-2','User','','','','','item-2','Synthetic','Movie','','unknown','stopped',
                 $3,$3,$3,1,1,'import',$3,$3,'jellyfin_userdata','item-2')`, mustID(t), serverID, now)
+}
+
+func testJellystatSourceMigration(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare Jellystat source migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 24); err != nil {
+		t.Fatalf("roll back Jellystat source migration: %v", err)
+	}
+	accountID, serverID, importID, watchID, uploadID := mustID(t), mustID(t), mustID(t), mustID(t), mustID(t)
+	now := migrationCreatedAt(driver)
+	seedJellystatMigrationRows(t, pool, accountID, serverID, importID, watchID, uploadID, now)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("apply Jellystat source migration: %v", err)
+	}
+	assertJellystatMigrationRowsPreserved(t, pool, importID, watchID, uploadID)
+	execTestSQL(t, pool, "DELETE FROM media_servers WHERE id = $1", serverID)
+	assertMigrationRowsCascaded(t, pool, importID, watchID, uploadID)
+	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean Jellystat migration fixture: %v", err)
+	}
+}
+
+func seedJellystatMigrationRows(
+	t *testing.T, pool *sql.DB, accountID, serverID, importID, watchID, uploadID string, now any,
+) {
+	t.Helper()
+	execTestSQL(t, pool,
+		"INSERT INTO accounts (id, username, username_key, created_at) VALUES ($1, $2, $2, $3)",
+		accountID, "jellystat-migration-"+accountID, now)
+	execTestSQL(t, pool, `INSERT INTO media_servers
+        (id, kind, name, name_key, base_url, credential_ciphertext, allow_insecure, created_at, updated_at)
+        VALUES ($1, 'jellyfin', $2, $2, 'https://jellystat-migration.example.test', $3, FALSE, $4, $4)`,
+		serverID, "Jellystat "+serverID, []byte("ciphertext"), now)
+	execTestSQL(t, pool, `INSERT INTO imports
+        (id, media_server_id, source, state, cursor, requested_by, created_at, updated_at)
+		VALUES ($1, $2, 'jellyfin_userdata', 'pending', '', $3, $4, $4)`, importID, serverID, accountID, now)
+	execTestSQL(t, pool, `INSERT INTO import_uploads (id, import_id, chunk_index, bytes, created_at)
+        VALUES ($1, $2, 0, $3, $4)`, uploadID, importID, []byte("chunk"), now)
+	execTestSQL(t, pool, `INSERT INTO watches
+        (id, media_server_id, media_user_id, username, device_id, device_name, client,
+		 server_session_id, item_id, item_name, item_type, series_id, series_name, play_method,
+         state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms,
+         source, created_at, updated_at, import_source, import_record_id)
+		VALUES ($1, $2, 'user', 'User', '', 'TV', 'Web', '', 'item', 'Title', 'Movie', 'series-1', '',
+		        'direct_play', 'stopped', $3, $3, $3, 1, 1, 'import', $3, $3, 'jellyfin_userdata', 'item')`,
+		watchID, serverID, now)
+}
+
+func assertJellystatMigrationRowsPreserved(t *testing.T, pool *sql.DB, ids ...string) {
+	t.Helper()
+	for index, table := range []string{"imports", "watches", "import_uploads"} {
+		var count int
+		if err := pool.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table+" WHERE id = $1", ids[index]).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("preserved %s rows = %d, %v", table, count, err)
+		}
+	}
+	var source, seriesID, importSource string
+	if err := pool.QueryRowContext(t.Context(), "SELECT source FROM imports WHERE id = $1", ids[0]).Scan(&source); err != nil ||
+		source != "jellyfin_userdata" {
+		t.Fatalf("preserved import source = %q, %v", source, err)
+	}
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT series_id, import_source FROM watches WHERE id = $1", ids[1],
+	).Scan(&seriesID, &importSource); err != nil || seriesID != "series-1" || importSource != "jellyfin_userdata" {
+		t.Fatalf("preserved watch series/source = %q/%q, %v", seriesID, importSource, err)
+	}
+}
+
+func assertMigrationRowsCascaded(t *testing.T, pool *sql.DB, ids ...string) {
+	t.Helper()
+	for index, table := range []string{"imports", "watches", "import_uploads"} {
+		var count int
+		if err := pool.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table+" WHERE id = $1", ids[index]).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("cascaded %s rows = %d, %v", table, count, err)
+		}
+	}
 }
 
 func testHistoryImportMigrationBackfill(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -1710,7 +1792,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 24)
+	assertMigrationVersion(t, pool, 25)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -1831,7 +1913,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 24)
+	assertMigrationVersion(t, pool, 25)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

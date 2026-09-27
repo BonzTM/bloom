@@ -216,6 +216,14 @@ func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch cor
 			}
 			continue
 		}
+		crossDuplicate, err := sqliteCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if crossDuplicate {
+			duplicate++
+			continue
+		}
 		id, err := core.NewID()
 		if err != nil {
 			return 0, 0, importStoreError("create imported watch id", err)
@@ -271,6 +279,21 @@ func sqliteImportDuplicate(
 		StartAfter:  formatSQLiteTime(record.StartedAt.Add(-batch.ResumeWindow)),
 		StartBefore: formatSQLiteTime(record.StartedAt.Add(batch.ResumeWindow)),
 	})
+}
+
+func sqliteCrossSourceDuplicate(
+	ctx context.Context, q *sqlite.Queries, batch core.ImportBatch, recordID string,
+) (bool, error) {
+	source, alternateID, ok := crossSourceImportRecord(batch.Source, recordID)
+	if !ok {
+		return false, nil
+	}
+	duplicate, err := q.FindCrossSourceImportDuplicate(ctx, sqlite.FindCrossSourceImportDuplicateParams{
+		MediaServerID:  batch.MediaServerID,
+		ImportSource:   sql.NullString{String: string(source), Valid: true},
+		ImportRecordID: sql.NullString{String: alternateID, Valid: true},
+	})
+	return duplicate, importStoreError("find cross-source import duplicate", err)
 }
 
 func sqliteImportedWatchParams(

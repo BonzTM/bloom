@@ -129,13 +129,12 @@ export function StartImportForm({
             id={`${formId}-file`}
             type="file"
             name="file"
-            accept=".zip,.jsonl,application/zip,application/x-ndjson"
+            accept=".jsonl,.ndjson,application/x-ndjson"
             aria-describedby={`${fieldErrorId(formId, "file")} ${formId}-file-hint`}
             aria-invalid={errors.file !== undefined}
           />
           <p id={`${formId}-file-hint`} className="field-hint">
-            The zip another Bloom exported (or an older JSON Lines export), at
-            most 256 MiB.
+            JSON Lines from another Bloom's export, at most 256 MiB.
           </p>
           <FieldError formId={formId} field="file" message={errors.file} />
         </div>

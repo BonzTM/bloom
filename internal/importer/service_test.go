@@ -39,7 +39,7 @@ func (s *serviceStore) CreateUploadedImport(
 
 func (s *serviceStore) CancelImport(ctx context.Context, _ string, now time.Time) (core.ImportJob, error) {
 	s.job.State, s.job.FinishedAt, s.job.UpdatedAt = core.ImportCancelled, &now, now
-	if s.job.Source == core.ImportSourceBloomExport {
+	if s.job.Source == core.ImportSourceBloomExport || s.job.Source == core.ImportSourceJellystat {
 		cursor, err := decodeFileCursor(s.job.Cursor)
 		if err != nil {
 			return core.ImportJob{}, err
@@ -75,6 +75,32 @@ func TestBloomUploadIsRemovedAfterCancellation(t *testing.T) {
 	}
 	if _, err := staging.open(t.Context(), stagingID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("cancelled upload still exists: %v", err)
+	}
+}
+
+func TestCreateJellystatValidatesFirstLineAndRemovesRejectedUpload(t *testing.T) {
+	store := newServiceStore()
+	service, staging := newService(t, store)
+	invalidID, err := service.StageBloomExport(t.Context(), strings.NewReader(`{"id":"watch"}`+"\n"))
+	if err != nil {
+		t.Fatalf("stage invalid upload: %v", err)
+	}
+	_, err = service.CreateJellystat(t.Context(), importServiceServerID, importServiceAccountID, invalidID)
+	if !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("CreateJellystat(invalid) = %v, want invalid argument", err)
+	}
+	if _, openErr := staging.open(t.Context(), invalidID); !errors.Is(openErr, core.ErrNotFound) {
+		t.Fatalf("rejected Jellystat upload remains: %v", openErr)
+	}
+	validID, err := service.StageBloomExport(
+		t.Context(), strings.NewReader(`{"type":"table","table":"jf_libraries"}`+"\n"),
+	)
+	if err != nil {
+		t.Fatalf("stage valid upload: %v", err)
+	}
+	job, err := service.CreateJellystat(t.Context(), importServiceServerID, importServiceAccountID, validID)
+	if err != nil || job.Source != core.ImportSourceJellystat {
+		t.Fatalf("CreateJellystat(valid) = %+v, %v", job, err)
 	}
 }
 

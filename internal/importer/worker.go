@@ -67,7 +67,8 @@ func NewWorker(config WorkerConfig, deps WorkerDependencies) (*Worker, error) {
 		config: config, deps: deps,
 		sources: sourceFactory{
 			reporting: deps.Reporting, userData: deps.UserData, staging: deps.Staging,
-			storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
+			store: deps.Store, clock: deps.Clock,
+			leaseDuration: config.LeaseDuration, storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
 		},
 	}, nil
 }

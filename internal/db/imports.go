@@ -14,6 +14,22 @@ import (
 
 const maxImportPageSize = 501
 
+func crossSourceImportRecord(
+	source core.ImportSource, recordID string,
+) (core.ImportSource, string, bool) {
+	switch source {
+	case core.ImportSourcePlaybackReporting:
+		return core.ImportSourceJellystat, "plugin:" + recordID, true
+	case core.ImportSourceJellystat:
+		if value, ok := strings.CutPrefix(recordID, "plugin:"); ok && value != "" {
+			return core.ImportSourcePlaybackReporting, value, true
+		}
+	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
+		return "", "", false
+	}
+	return "", "", false
+}
+
 // NewImportStore returns the import persistence seam for the configured engine.
 func NewImportStore(pool *sql.DB, driver config.Driver) (core.ImportStore, error) {
 	switch driver {

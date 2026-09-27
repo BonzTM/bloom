@@ -240,6 +240,14 @@ func insertPostgresImportRecords(ctx context.Context, q *postgres.Queries, batch
 			}
 			continue
 		}
+		crossDuplicate, err := postgresCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if crossDuplicate {
+			duplicate++
+			continue
+		}
 		id, err := core.NewID()
 		if err != nil {
 			return 0, 0, importStoreError("create imported watch id", err)
@@ -294,6 +302,21 @@ func postgresImportDuplicate(
 		MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
 		StartAfter: record.StartedAt.Add(-batch.ResumeWindow), StartBefore: record.StartedAt.Add(batch.ResumeWindow),
 	})
+}
+
+func postgresCrossSourceDuplicate(
+	ctx context.Context, q *postgres.Queries, batch core.ImportBatch, recordID string,
+) (bool, error) {
+	source, alternateID, ok := crossSourceImportRecord(batch.Source, recordID)
+	if !ok {
+		return false, nil
+	}
+	duplicate, err := q.FindCrossSourceImportDuplicate(ctx, postgres.FindCrossSourceImportDuplicateParams{
+		MediaServerID:  batch.MediaServerID,
+		ImportSource:   sql.NullString{String: string(source), Valid: true},
+		ImportRecordID: sql.NullString{String: alternateID, Valid: true},
+	})
+	return duplicate, importStoreError("find cross-source import duplicate", err)
 }
 
 func postgresImportedWatchParams(

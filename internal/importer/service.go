@@ -106,6 +106,38 @@ func (s *Service) CreateBloomExport(
 	return job, nil
 }
 
+// CreateJellystat validates a staged Jellystat backup and creates its job.
+func (s *Service) CreateJellystat(
+	ctx context.Context, mediaServerID, requestedBy, stagingID string,
+) (job core.ImportJob, result error) {
+	defer func() {
+		if result != nil {
+			s.removeUnclaimedUpload(ctx, stagingID)
+		}
+	}()
+	if err := s.validateTarget(ctx, mediaServerID, requestedBy); err != nil {
+		return job, err
+	}
+	if !core.ValidID(stagingID) {
+		return job, core.ErrInvalidArgument
+	}
+	if err := validateJellystatUpload(ctx, s.staging, stagingID, 0); err != nil {
+		return job, err
+	}
+	cursor, err := encodeFileCursor(fileCursor{ID: stagingID})
+	if err != nil {
+		return job, err
+	}
+	job, err = s.newJob(mediaServerID, requestedBy, core.ImportSourceJellystat, cursor)
+	if err != nil {
+		return core.ImportJob{}, err
+	}
+	if err := s.store.CreateUploadedImport(ctx, job, stagingID); err != nil {
+		return core.ImportJob{}, err
+	}
+	return job, nil
+}
+
 // DiscardBloomExport removes an unclaimed staged upload.
 func (s *Service) DiscardBloomExport(ctx context.Context, stagingID string) error {
 	return s.staging.remove(ctx, stagingID)

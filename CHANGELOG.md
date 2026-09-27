@@ -39,8 +39,6 @@ contracts) gets an entry here.
 - Discover and search say why TMDB could not be used when the API reports a
   reason (unreachable, rejected token, unusable answer, not answering) and
   say so when Bloom itself took too long to answer.
-- The Imports page offers the export as one zip download and accepts that
-  zip, or an older JSON Lines export, for a Bloom export import.
 - Title pages open with a hero: the backdrop behind the poster, name, and
   overview, with the request form below. Discover shows the search form only
   with results; searching starts from the top bar.
@@ -163,6 +161,11 @@ contracts) gets an entry here.
   last played, genre charts, and what nobody has played in 90 days, and an
   item page with artwork, facts, play summary, and who watched it. A
   "Sync now" button asks for a fresh walk of a server's libraries.
+- Jellystat `.jsonl` backup imports through the existing resumable import job
+  pipeline, including bounded two-pass lookup resolution, movie and episode
+  mapping, unknown-item retention, idempotent reruns, and Playback Reporting
+  cross-source deduplication. SQLite and PostgreSQL migration
+  `00025_jellystat_import_source` adds the new provenance value.
 - The requests page becomes Discover: rows of posters for what is trending
   this week, popular movies and series, upcoming movies, and series on the
   air, each tile carrying your own request state and loading more on demand,
@@ -429,9 +432,6 @@ contracts) gets an entry here.
 
 ### Fixed
 
-- TMDB operations now have a six-second total deadline across retries. Metadata
-  failures include an actionable `reason`, and repeated provider warnings are
-  limited to once per minute for each reason.
 - Playback startup now remains available when the initial media-server listing
   fails, reports the failure once, and retries during the bounded refresh loop.
 - SQLite database startup now supplies the foreign-key pragma when the

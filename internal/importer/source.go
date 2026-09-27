@@ -46,11 +46,14 @@ func (s playbackReportingSource) ReadImportBatch(
 }
 
 type sourceFactory struct {
-	reporting    PlaybackReportingService
-	userData     UserDataService
-	staging      *Staging
-	storeTimeout time.Duration
-	openWatch    watchOpener
+	reporting     PlaybackReportingService
+	userData      UserDataService
+	staging       *Staging
+	store         core.ImportStore
+	clock         core.Clock
+	leaseDuration time.Duration
+	storeTimeout  time.Duration
+	openWatch     watchOpener
 }
 
 type jobSource interface {
@@ -68,6 +71,11 @@ func (f sourceFactory) reader(source core.ImportSource) (jobSource, error) {
 		}, nil
 	case core.ImportSourceJellyfinUserData:
 		return userDataSource{service: f.userData}, nil
+	case core.ImportSourceJellystat:
+		return &jellystatReader{
+			staging: f.staging, store: f.store, clock: f.clock,
+			leaseDuration: f.leaseDuration, storeTimeout: f.storeTimeout,
+		}, nil
 	default:
 		return nil, core.ErrInvalidArgument
 	}

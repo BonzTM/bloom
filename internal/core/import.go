@@ -18,6 +18,9 @@ const (
 	MaxImportErrorBytes = 512
 	// MaxImportUploadBytes bounds one Bloom export upload.
 	MaxImportUploadBytes = 256 << 20
+	// MaxImportPlaybackSeconds bounds one imported watch to the signed 32-bit
+	// duration range supported by Playback Reporting and Jellystat imports.
+	MaxImportPlaybackSeconds = int64(1<<31 - 1)
 	// ImportUploadChunkBytes is the fixed database chunk size.
 	ImportUploadChunkBytes = 1 << 20
 	// MaxImportUploadWriteChunks bounds one upload transaction.
@@ -36,11 +39,14 @@ const (
 	ImportSourceBloomExport ImportSource = "bloom_export"
 	// ImportSourceJellyfinUserData reads coarse per-user item play state.
 	ImportSourceJellyfinUserData ImportSource = "jellyfin_userdata"
+	// ImportSourceJellystat reads a database-staged Jellystat JSONL backup.
+	ImportSourceJellystat ImportSource = "jellystat"
 )
 
 // Valid reports whether the source is implemented by this slice.
 func (s ImportSource) Valid() bool {
-	return s == ImportSourcePlaybackReporting || s == ImportSourceBloomExport || s == ImportSourceJellyfinUserData
+	return s == ImportSourcePlaybackReporting || s == ImportSourceBloomExport ||
+		s == ImportSourceJellyfinUserData || s == ImportSourceJellystat
 }
 
 // ImportState is the durable lifecycle state of one import job.

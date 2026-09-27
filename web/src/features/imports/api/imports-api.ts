@@ -4,6 +4,7 @@ import {
   importJobSchema,
   importsCursorSchema,
   importsPageSchema,
+  MAX_EXPORT_LIMIT,
   mediaServerIdSchema,
   type ImportJob,
   type ImportsPage,
@@ -46,14 +47,10 @@ export class ImportsApi {
     const form = new FormData();
     form.set("media_server_id", mediaServerId);
     form.set("source", input.source);
-    // A Bloom export is a zip; an older export is JSON Lines. The server
-    // detects the shape by content, so the file goes with the type the
-    // browser gave it, re-wrapped so the form owns a File of its own realm.
     form.set(
       "file",
       new File([input.file], input.file.name, {
-        type:
-          input.file.type === "" ? "application/octet-stream" : input.file.type,
+        type: "application/x-ndjson",
       }),
     );
     return this.#client.requestJson(BASE_PATH, importJobSchema, {
@@ -69,15 +66,13 @@ export class ImportsApi {
   }
 }
 
-// The export is one zip the browser downloads with the session cookie:
-// everything Bloom has, streamed straight from the database.
+// The export is a plain download the browser fetches with the session
+// cookie; one request returns at most MAX_EXPORT_LIMIT watches.
 export function exportWatchesPath(mediaServerId: string | undefined): string {
-  if (mediaServerId === undefined) {
-    return `/${EXPORT_PATH}`;
+  const query = new URLSearchParams({ limit: String(MAX_EXPORT_LIMIT) });
+  if (mediaServerId !== undefined) {
+    query.set("media_server_id", mediaServerIdSchema.parse(mediaServerId));
   }
-  const query = new URLSearchParams({
-    media_server_id: mediaServerIdSchema.parse(mediaServerId),
-  });
   return `/${EXPORT_PATH}?${query.toString()}`;
 }
 
