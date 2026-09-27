@@ -3053,9 +3053,11 @@ function catalogSummary(serverId: string) {
   });
 }
 
-function catalogPage(url: URL, items: readonly CatalogItem[]) {
+// Cursors are the offset of the next page, as the other mocks do.
+function catalogPage(url: URL, items: readonly unknown[]) {
   const limit = Number(url.searchParams.get("limit") ?? "50");
-  const offset = Number(url.searchParams.get("offset") ?? "0");
+  const cursor = url.searchParams.get("cursor");
+  const offset = cursor === null ? 0 : Number(cursor.replace("offset:", ""));
   if (
     !Number.isInteger(limit) ||
     limit < 1 ||
@@ -3065,10 +3067,11 @@ function catalogPage(url: URL, items: readonly CatalogItem[]) {
   ) {
     return envelope(422, "validation_failed", "invalid page");
   }
+  const next = offset + limit;
   return HttpResponse.json({
-    items: items.slice(offset, offset + limit),
+    items: items.slice(offset, next),
     limit,
-    offset,
+    next_cursor: next < items.length ? `offset:${String(next)}` : "",
   });
 }
 
@@ -3153,7 +3156,7 @@ const catalogHandlers = [
             )
             .slice(0, 20),
           limit: 20,
-          offset: 0,
+          next_cursor: "",
         }),
     ),
   ),
@@ -3234,19 +3237,12 @@ const catalogHandlers = [
       if (denied !== undefined) {
         return denied;
       }
-      const url = new URL(request.url);
-      const limit = Number(url.searchParams.get("limit") ?? "50");
-      const offset = Number(url.searchParams.get("offset") ?? "0");
       const watches = mockPlaybackHistory.filter(
         (watch) =>
           watch.item_id === params.itemId ||
           (watch.series_name === "The Arrival" && params.itemId === "s-1"),
       );
-      return HttpResponse.json({
-        items: watches.slice(offset, offset + limit),
-        limit,
-        offset,
-      });
+      return catalogPage(new URL(request.url), watches);
     }),
   ),
   http.post(

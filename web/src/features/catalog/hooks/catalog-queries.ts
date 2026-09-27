@@ -87,11 +87,14 @@ export function useCatalogSummary(
   });
 }
 
-// Pages are addressed by offset; the next page starts where the last ended
-// and a short page means there is no more.
-function nextOffset(page: CatalogItemsPage | CatalogHistoryPage) {
-  return page.items.length < page.limit ? undefined : page.offset + page.limit;
+// Pages carry an opaque cursor for the next one; empty means the end.
+function nextCursor(
+  page: CatalogItemsPage | CatalogHistoryPage,
+): string | undefined {
+  return page.next_cursor === "" ? undefined : page.next_cursor;
 }
+
+const firstPage: string | undefined = undefined;
 
 export function useCatalogItems(
   accountId: string,
@@ -104,8 +107,8 @@ export function useCatalogItems(
     queryKey: catalogKeys.items(accountId, serverId, libraryId, params),
     queryFn: ({ pageParam, signal }) =>
       api.items(serverId, libraryId, params, pageParam, signal),
-    initialPageParam: 0,
-    getNextPageParam: nextOffset,
+    initialPageParam: firstPage,
+    getNextPageParam: nextCursor,
     staleTime: STALE_MS,
     meta: { sessionScoped: true },
   });
@@ -135,8 +138,8 @@ export function useItemHistory(
     queryKey: catalogKeys.history(accountId, serverId, itemId),
     queryFn: ({ pageParam, signal }) =>
       api.history(serverId, itemId, pageParam, signal),
-    initialPageParam: 0,
-    getNextPageParam: nextOffset,
+    initialPageParam: firstPage,
+    getNextPageParam: nextCursor,
     staleTime: STALE_MS,
     meta: { sessionScoped: true },
   });
@@ -182,8 +185,8 @@ export function useStaleItems(
     queryKey: catalogKeys.stale(accountId, serverId, libraryId, days),
     queryFn: ({ pageParam, signal }) =>
       api.stale(serverId, libraryId, days, pageParam, signal),
-    initialPageParam: 0,
-    getNextPageParam: nextOffset,
+    initialPageParam: firstPage,
+    getNextPageParam: nextCursor,
     staleTime: STALE_MS,
     meta: { sessionScoped: true },
   });

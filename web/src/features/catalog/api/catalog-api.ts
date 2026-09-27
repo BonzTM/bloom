@@ -1,6 +1,7 @@
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
   CATALOG_PAGE,
+  catalogCursorSchema,
   catalogDaysSchema,
   catalogGenresResponseSchema,
   catalogHistoryResponseSchema,
@@ -67,15 +68,17 @@ export class CatalogApi {
     serverId: string,
     libraryId: string,
     params: CatalogItemsParams,
-    offset: number,
+    cursor: string | undefined,
     signal: AbortSignal,
   ): Promise<CatalogItemsPage> {
     const query = new URLSearchParams({
       limit: String(CATALOG_PAGE),
-      offset: String(offset),
       sort: catalogSortSchema.parse(params.sort),
       order: catalogOrderSchema.parse(params.order),
     });
+    if (cursor !== undefined) {
+      query.set("cursor", catalogCursorSchema.parse(cursor));
+    }
     if (params.days !== undefined) {
       query.set("days", String(catalogDaysSchema.parse(params.days)));
     }
@@ -107,13 +110,13 @@ export class CatalogApi {
   history(
     serverId: string,
     itemId: string,
-    offset: number,
+    cursor: string | undefined,
     signal: AbortSignal,
   ): Promise<CatalogHistoryPage> {
-    const query = new URLSearchParams({
-      limit: String(CATALOG_PAGE),
-      offset: String(offset),
-    });
+    const query = new URLSearchParams({ limit: String(CATALOG_PAGE) });
+    if (cursor !== undefined) {
+      query.set("cursor", catalogCursorSchema.parse(cursor));
+    }
     return this.#client.requestJson(
       `${itemPath(serverId, itemId)}/history?${query.toString()}`,
       catalogHistoryResponseSchema,
@@ -154,14 +157,16 @@ export class CatalogApi {
     serverId: string,
     libraryId: string,
     days: number,
-    offset: number,
+    cursor: string | undefined,
     signal: AbortSignal,
   ): Promise<CatalogItemsPage> {
     const query = new URLSearchParams({
       days: String(catalogDaysSchema.parse(days)),
       limit: String(CATALOG_PAGE),
-      offset: String(offset),
     });
+    if (cursor !== undefined) {
+      query.set("cursor", catalogCursorSchema.parse(cursor));
+    }
     return this.#client.requestJson(
       `${libraryPath(serverId, libraryId)}/stale?${query.toString()}`,
       catalogItemsResponseSchema,

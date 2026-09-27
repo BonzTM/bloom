@@ -71,10 +71,17 @@ export const catalogItemSchema = z.object({
 
 export type CatalogItem = z.output<typeof catalogItemSchema>;
 
+export const MAX_CATALOG_CURSOR_LENGTH = 400;
+
+export const catalogCursorSchema = z
+  .string()
+  .min(1)
+  .max(MAX_CATALOG_CURSOR_LENGTH);
+
 export const catalogItemsResponseSchema = z.object({
   items: z.array(catalogItemSchema).max(100),
   limit: z.number().int().min(1).max(100),
-  offset: z.number().int().min(0).max(1_000_000),
+  next_cursor: z.string().max(MAX_CATALOG_CURSOR_LENGTH),
 });
 
 export type CatalogItemsPage = z.output<typeof catalogItemsResponseSchema>;
@@ -94,7 +101,7 @@ export type CatalogItemDetail = z.output<typeof catalogItemDetailSchema>;
 export const catalogHistoryResponseSchema = z.object({
   items: z.array(watchSchema).max(100),
   limit: z.number().int().min(1).max(100),
-  offset: z.number().int().min(0).max(1_000_000),
+  next_cursor: z.string().max(MAX_CATALOG_CURSOR_LENGTH),
 });
 
 export type CatalogHistoryPage = z.output<typeof catalogHistoryResponseSchema>;
