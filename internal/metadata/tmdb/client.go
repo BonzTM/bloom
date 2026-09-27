@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -42,12 +43,15 @@ func (nopMetrics) ObserveMetadataRetry(string, string, string)            {}
 
 // Dependencies configures the TMDB client and its test seams.
 type Dependencies struct {
-	HTTPClient   *http.Client
-	BaseURL      string
-	Metrics      Metrics
-	Clock        core.Clock
-	Wait         func(context.Context, time.Duration) error
-	RandomInt64N func(int64) int64
+	HTTPClient       *http.Client
+	BaseTransport    http.RoundTripper
+	BaseURL          string
+	Metrics          Metrics
+	Clock            core.Clock
+	Wait             func(context.Context, time.Duration) error
+	RandomInt64N     func(int64) int64
+	AttemptTimeout   time.Duration
+	OperationTimeout time.Duration
 }
 
 // Client implements the metadata provider seam with TMDB's v3 API and v4 Read Access Token.
@@ -64,6 +68,13 @@ func New(token string, deps Dependencies) (*Client, error) {
 	if core.ValidateMetadataCredential(core.MetadataProviderTMDB, token) != nil || deps.Clock == nil {
 		return nil, fmt.Errorf("tmdb client: %w", core.ErrInvalidArgument)
 	}
+	if deps.HTTPClient != nil && deps.BaseTransport != nil {
+		return nil, fmt.Errorf("tmdb client transport: %w", core.ErrInvalidArgument)
+	}
+	timeouts, err := resolveTimeouts(deps.AttemptTimeout, deps.OperationTimeout)
+	if err != nil {
+		return nil, err
+	}
 	baseURL := deps.BaseURL
 	if baseURL == "" {
 		baseURL = defaultBaseURL
@@ -78,18 +89,43 @@ func New(token string, deps Dependencies) (*Client, error) {
 	}
 	httpClient := deps.HTTPClient
 	if httpClient == nil {
-		httpClient = newHTTPClient(token, base, metrics, deps.Clock, deps.Wait, deps.RandomInt64N)
+		httpClient = newHTTPClient(
+			token, base, metrics, deps.Clock, deps.Wait, deps.RandomInt64N, deps.BaseTransport, timeouts,
+		)
 	} else {
 		httpClient = withBearerToken(httpClient, token, base)
 	}
-	generated, err := tmdbapi.NewClientWithResponses(baseURL, tmdbapi.WithHTTPClient(httpClient))
+	generated, err := tmdbapi.NewClientWithResponses(
+		baseURL, tmdbapi.WithHTTPClient(&responseTrackingDoer{next: httpClient}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("construct generated TMDB client: %w", err)
 	}
 	return &Client{
 		api: generated, http: httpClient, metrics: metrics, clock: deps.Clock,
-		operationTimeout: metadataOperationTimeout,
+		operationTimeout: timeouts.operation,
 	}, nil
+}
+
+type timeouts struct {
+	attempt   time.Duration
+	operation time.Duration
+}
+
+func resolveTimeouts(attempt, operation time.Duration) (timeouts, error) {
+	if attempt < 0 || operation < 0 {
+		return timeouts{}, fmt.Errorf("tmdb client timeouts: %w", core.ErrInvalidArgument)
+	}
+	if attempt == 0 {
+		attempt = attemptTimeout
+	}
+	if operation == 0 {
+		operation = metadataOperationTimeout
+	}
+	if attempt > operation {
+		return timeouts{}, fmt.Errorf("tmdb client timeouts: %w", core.ErrInvalidArgument)
+	}
+	return timeouts{attempt: attempt, operation: operation}, nil
 }
 
 func newHTTPClient(
@@ -99,12 +135,16 @@ func newHTTPClient(
 	clock core.Clock,
 	wait func(context.Context, time.Duration) error,
 	randomInt64N func(int64) int64,
+	baseTransport http.RoundTripper,
+	timeouts timeouts,
 ) *http.Client {
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		ForceAttemptHTTP2: true, MaxIdleConns: 20, MaxIdleConnsPerHost: 10,
-		IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 3 * time.Second,
-		ResponseHeaderTimeout: 4 * time.Second, ExpectContinueTimeout: time.Second,
+	if baseTransport == nil {
+		baseTransport = &http.Transport{
+			Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2: true, MaxIdleConns: 20, MaxIdleConnsPerHost: 10,
+			IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 3 * time.Second,
+			ResponseHeaderTimeout: 4 * time.Second, ExpectContinueTimeout: time.Second,
+		}
 	}
 	if wait == nil {
 		wait = waitContext
@@ -113,11 +153,63 @@ func newHTTPClient(
 		randomInt64N = rand.Int64N
 	}
 	limiter := newTokenBucket(clock, ratePerSecond, rateBurst)
-	retrying := &retryTransport{next: transport, metrics: metrics, clock: clock, wait: wait, randomInt64N: randomInt64N, limiter: limiter}
+	retrying := &retryTransport{
+		next: baseTransport, metrics: metrics, clock: clock, wait: wait, randomInt64N: randomInt64N,
+		limiter: limiter, attemptTimeout: timeouts.attempt,
+	}
 	authenticated := &bearerTransport{next: retrying, token: token, baseURL: baseURL}
-	client := &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: metadataOperationTimeout}
+	client := &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: timeouts.operation}
 	client.CheckRedirect = redirectPolicy(baseURL, nil)
 	return client
+}
+
+type responseTrackingDoer struct {
+	next tmdbapi.HttpRequestDoer
+}
+
+func (d *responseTrackingDoer) Do(request *http.Request) (*http.Response, error) {
+	response, err := d.next.Do(request)
+	if response == nil {
+		return nil, err
+	}
+	if err != nil {
+		return response, newResponseReceivedError(response.StatusCode, err)
+	}
+	if response.Body == nil {
+		response.Body = http.NoBody
+	}
+	response.Body = &responseTrackingBody{ReadCloser: response.Body, status: response.StatusCode}
+	return response, nil
+}
+
+type responseTrackingBody struct {
+	io.ReadCloser
+	status int
+}
+
+func (b *responseTrackingBody) Read(buffer []byte) (int, error) {
+	count, err := b.ReadCloser.Read(buffer)
+	if err == nil || errors.Is(err, io.EOF) {
+		return count, err
+	}
+	return count, newResponseReceivedError(b.status, err)
+}
+
+type responseReceivedError struct {
+	status int
+	err    error
+}
+
+func newResponseReceivedError(status int, err error) error {
+	return &responseReceivedError{status: status, err: err}
+}
+
+func (e *responseReceivedError) Error() string {
+	return fmt.Sprintf("TMDB response status %d: %v", e.status, e.err)
+}
+
+func (e *responseReceivedError) Unwrap() error {
+	return e.err
 }
 
 type bearerTransport struct {
@@ -329,6 +421,13 @@ func classifyError(operation string, status int, err error) error {
 }
 
 func classifyCallError(operation string, err error) error {
+	if responseErr, ok := errors.AsType[*responseReceivedError](err); ok {
+		classification := core.ErrMetadataMalformed
+		if retryableStatus(responseErr.status) {
+			classification = core.ErrMetadataUnavailable
+		}
+		return classifyError(operation, responseErr.status, errors.Join(classification, err))
+	}
 	if retryableError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return classifyError(operation, 0, errors.Join(core.ErrMetadataUnreachable, err))
 	}

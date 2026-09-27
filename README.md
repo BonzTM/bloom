@@ -778,8 +778,9 @@ Layout follows the handbook default (`cmd/` + `internal/`):
 ### Error handling
 
 Every JSON API failure uses the `ErrorResponse` envelope with a stable `code`,
-a safe `message`, and a `request_id` for log correlation. Media-server,
-download-manager, and metadata-provider failures also include `reason`.
+a safe `message`, and a `request_id` for log correlation. Failures may include
+`reason`, which is omitted when empty. Classified media-server,
+download-manager, and metadata-provider failures populate it.
 Metadata uses `unreachable` for connection, DNS, or timeout failures before a
 response; `unauthorized` for TMDB 401; `malformed` for an unusable response;
 and `unavailable` for TMDB 429 or 5xx responses after bounded retries.

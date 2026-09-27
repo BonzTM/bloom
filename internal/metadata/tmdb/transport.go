@@ -13,12 +13,13 @@ import (
 )
 
 type retryTransport struct {
-	next         http.RoundTripper
-	metrics      Metrics
-	clock        core.Clock
-	wait         func(context.Context, time.Duration) error
-	randomInt64N func(int64) int64
-	limiter      *tokenBucket
+	next           http.RoundTripper
+	metrics        Metrics
+	clock          core.Clock
+	wait           func(context.Context, time.Duration) error
+	randomInt64N   func(int64) int64
+	limiter        *tokenBucket
+	attemptTimeout time.Duration
 }
 
 func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -35,7 +36,7 @@ func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error
 			return response, err
 		}
 		delay := t.retryDelay(response, attempt)
-		if !retryFits(request.Context(), delay) {
+		if !retryFits(request.Context(), delay, t.attemptTimeout) {
 			if response != nil {
 				response.Body = http.MaxBytesReader(nil, response.Body, maxResponseBytes)
 			}
@@ -51,7 +52,7 @@ func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error
 }
 
 func (t *retryTransport) roundTripAttempt(request *http.Request) (*http.Response, error) {
-	ctx, cancel := context.WithTimeout(request.Context(), attemptTimeout)
+	ctx, cancel := context.WithTimeout(request.Context(), t.attemptTimeout)
 	response, err := t.next.RoundTrip(request.Clone(ctx))
 	if err != nil {
 		cancel()
@@ -79,12 +80,12 @@ func (b *cancelBody) Close() error {
 	return err
 }
 
-func retryFits(ctx context.Context, delay time.Duration) bool {
+func retryFits(ctx context.Context, delay, timeout time.Duration) bool {
 	if ctx.Err() != nil {
 		return false
 	}
 	deadline, ok := ctx.Deadline()
-	return !ok || time.Until(deadline) >= delay+attemptTimeout
+	return !ok || time.Until(deadline) >= delay+timeout
 }
 
 func shouldRetry(response *http.Response, err error, attempt int) bool {

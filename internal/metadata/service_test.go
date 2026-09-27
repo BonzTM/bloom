@@ -77,63 +77,84 @@ type serviceTestProvider struct {
 	discoverCalls   atomic.Int32
 	genreCalls      atomic.Int32
 	searchErr       error
+	searchEntered   chan<- struct{}
+	searchRelease   <-chan struct{}
 	discoverEntered chan<- struct{}
 	genreEntered    chan<- struct{}
 	release         <-chan struct{}
 }
 
 func (p *serviceTestProvider) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
+	blockServiceTestProvider(p.searchEntered, p.searchRelease)
 	return []core.MetadataTitle{}, p.searchErr
 }
 
-func TestProviderFailureWarningsAreLimitedPerReason(t *testing.T) {
-	provider := &serviceTestProvider{}
-	store := &serviceTestStore{record: core.MetadataProviderRecord{
-		Kind: core.MetadataProviderTMDB, CredentialCiphertext: []byte(serviceTestReadAccessToken), KeyID: "test-key",
-	}}
-	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
-	var logs bytes.Buffer
-	service, err := NewService(
-		store, store, &serviceTestStates{}, serviceTestCipher{}, &serviceTestFactory{provider: provider},
-		clock, slog.New(slog.NewTextHandler(&logs, nil)),
-	)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+func TestProviderFailureWarningsAreLimitedPerReasonUnderConcurrency(t *testing.T) {
 	for _, failure := range []error{
 		core.ErrMetadataUnreachable, core.ErrMetadataUnauthorized, core.ErrMetadataMalformed, core.ErrMetadataUnavailable,
 	} {
-		provider.searchErr = failure
-		for range 2 {
-			_, searchErr := service.Search(t.Context(), core.MetadataSearch{Query: "movie"})
-			if !errors.Is(searchErr, failure) {
-				t.Fatalf("Search error = %v, want %v", searchErr, failure)
+		reason, _ := metadataFailureReason(failure)
+		t.Run(reason, func(t *testing.T) {
+			provider := &serviceTestProvider{searchErr: failure}
+			store := &serviceTestStore{record: core.MetadataProviderRecord{
+				Kind: core.MetadataProviderTMDB, CredentialCiphertext: []byte(serviceTestReadAccessToken), KeyID: "test-key",
+			}}
+			clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+			var logs bytes.Buffer
+			service, err := NewService(
+				store, store, &serviceTestStates{}, serviceTestCipher{}, &serviceTestFactory{provider: provider},
+				clock, slog.New(slog.NewTextHandler(&logs, nil)),
+			)
+			if err != nil {
+				t.Fatalf("NewService: %v", err)
 			}
-		}
+			runConcurrentSearchFailures(t, service, provider, failure)
+			assertProviderWarningCount(t, logs.String(), reason, 1)
+			clock.Advance(providerWarningInterval)
+			runConcurrentSearchFailures(t, service, provider, failure)
+			assertProviderWarningCount(t, logs.String(), reason, 2)
+		})
 	}
-	assertMetadataWarningCounts(t, logs.String(), 1)
-	clock.Advance(time.Minute)
-	for _, failure := range []error{
-		core.ErrMetadataUnreachable, core.ErrMetadataUnauthorized, core.ErrMetadataMalformed, core.ErrMetadataUnavailable,
-	} {
-		provider.searchErr = failure
-		_, searchErr := service.Search(t.Context(), core.MetadataSearch{Query: "movie"})
-		if !errors.Is(searchErr, failure) {
-			t.Fatalf("Search error = %v, want %v", searchErr, failure)
-		}
-	}
-	assertMetadataWarningCounts(t, logs.String(), 2)
 }
 
-func assertMetadataWarningCounts(t *testing.T, logs string, want int) {
+func runConcurrentSearchFailures(
+	t *testing.T, service *Service, provider *serviceTestProvider, failure error,
+) {
 	t.Helper()
-	if got := strings.Count(logs, "level=WARN"); got != want*4 {
-		t.Fatalf("warning records = %d, want %d: %s", got, want*4, logs)
+	const workers = 32
+	entered := make(chan struct{}, workers)
+	release := make(chan struct{})
+	provider.searchEntered, provider.searchRelease = entered, release
+	errorsByWorker := make(chan error, workers)
+	ctx := t.Context()
+	var group sync.WaitGroup
+	group.Add(workers)
+	for range workers {
+		go func() {
+			defer group.Done()
+			_, err := service.Search(ctx, core.MetadataSearch{Query: "movie"})
+			errorsByWorker <- err
+		}()
 	}
-	for _, reason := range []string{"unreachable", "unauthorized", "malformed", "unavailable"} {
-		if got := strings.Count(logs, "reason="+reason); got != want {
-			t.Errorf("reason %s warnings = %d, want %d: %s", reason, got, want, logs)
+	for range workers {
+		<-entered
+	}
+	close(release)
+	group.Wait()
+	for range workers {
+		if err := <-errorsByWorker; !errors.Is(err, failure) {
+			t.Errorf("Search error = %v, want %v", err, failure)
 		}
+	}
+}
+
+func assertProviderWarningCount(t *testing.T, logs, reason string, want int) {
+	t.Helper()
+	if got := strings.Count(logs, "level=WARN"); got != want {
+		t.Fatalf("warning records = %d, want %d: %s", got, want, logs)
+	}
+	if got := strings.Count(logs, "reason="+reason); got != want {
+		t.Errorf("reason %s warnings = %d, want %d: %s", reason, got, want, logs)
 	}
 }
 
