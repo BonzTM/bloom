@@ -126,8 +126,8 @@ func (s *Server) handleSetMetadataKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request, err := httputil.DecodeJSON[metadataKeyRequest](w, r, s.maxBodyBytes)
-	if err != nil || request.APIKey == "" {
-		s.writeValidation(w, r, []httputil.FieldError{{Field: "api_key", Code: "invalid", Message: "must be valid non-empty text"}})
+	if err != nil || core.ValidateMetadataCredential(core.MetadataProviderTMDB, request.APIKey) != nil {
+		s.writeValidation(w, r, []httputil.FieldError{metadataReadAccessTokenError()})
 		return
 	}
 	if err := s.metadataManager.SetKey(r.Context(), core.MetadataProviderTMDB, request.APIKey); err != nil {
@@ -137,6 +137,13 @@ func (s *Server) handleSetMetadataKey(w http.ResponseWriter, r *http.Request) {
 	}
 	s.emitMetadataAudit(r, "metadata_provider.key.set", telemetry.AuditSuccess)
 	writeJSON(w, r, s.logger, http.StatusOK, metadataKeyPresenceResponse{Configured: true})
+}
+
+func metadataReadAccessTokenError() httputil.FieldError {
+	return httputil.FieldError{
+		Field: "api_key", Code: "read_access_token_required",
+		Message: "TMDB needs the API Read Access Token, not the v3 API key",
+	}
 }
 
 func (s *Server) handleDeleteMetadataKey(w http.ResponseWriter, r *http.Request) {

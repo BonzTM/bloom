@@ -65,7 +65,7 @@ func TestRequestSliceOpenAPIDocumentsRequiredFailures(t *testing.T) {
 		"/api/v1/metadata/search":                {"get": {"401", "403", "422", "502", "503"}},
 		"/api/v1/metadata/movies/{id}":           {"get": {"401", "403", "404", "422", "502", "503"}},
 		"/api/v1/metadata/series/{id}":           {"get": {"401", "403", "404", "422", "502", "503"}},
-		"/api/v1/metadata/providers/tmdb/key":    {"get": {"401", "403"}, "put": {"401", "403", "415", "422"}, "delete": {"401", "403", "404"}},
+		"/api/v1/metadata/providers/tmdb/key":    {"get": {"401", "403"}, "put": {"401", "403", "415", "422", "502", "503"}, "delete": {"401", "403", "404"}},
 		"/api/v1/request-profiles":               {"get": {"401", "403"}, "post": {"401", "403", "409", "415", "422"}},
 		"/api/v1/request-profiles/{id}":          {"put": {"401", "403", "404", "409", "415", "422"}, "delete": {"401", "403", "404", "409"}},
 		"/api/v1/requests":                       {"get": {"401", "403", "422"}, "post": {"401", "403", "404", "409", "415", "422", "502", "503"}},
@@ -190,5 +190,26 @@ func TestMediaRequestContractRequiresBoundedRequesterUsername(t *testing.T) {
 	}
 	if got := fmt.Sprint(property.Extensions["x-max-bytes"]); got != "256" {
 		t.Fatalf("requester_username x-max-bytes = %s, want 256", got)
+	}
+}
+
+func TestMetadataKeyContractRequiresReadAccessToken(t *testing.T) {
+	document := loadOpenAPI(t)
+	schemaRef := "#/components/schemas/MetadataKeyRequest"
+	property := document.validator.Components.Schemas["MetadataKeyRequest"].Value.Properties["api_key"].Value
+	if property == nil {
+		t.Fatal("MetadataKeyRequest api_key property is missing")
+	}
+	if property.MinLength != 100 || property.MaxLength == nil || *property.MaxLength != 4096 {
+		t.Fatalf("api_key length = %d..%v, want 100..4096", property.MinLength, property.MaxLength)
+	}
+	if !strings.Contains(property.Description, "API Read Access Token") || property.Pattern == "" {
+		t.Fatalf("api_key description/pattern = %q / %q", property.Description, property.Pattern)
+	}
+	if err := validateOpenAPIValue(document, schemaRef, map[string]any{"api_key": testMetadataReadAccessToken}); err != nil {
+		t.Fatalf("contract rejected Read Access Token: %v", err)
+	}
+	if err := validateOpenAPIValue(document, schemaRef, map[string]any{"api_key": "0123456789abcdef0123456789abcdef"}); err == nil {
+		t.Fatal("contract accepted v3 API key")
 	}
 }

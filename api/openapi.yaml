@@ -1150,7 +1150,7 @@ paths:
       operationId: getTMDBKeyPresence
       security: [{ sessionCookie: [] }]
       responses:
-        "200": { description: Credential presence only., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataKeyPresence" } } } }
+        "200": { description: Valid Read Access Token presence only., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataKeyPresence" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -1166,6 +1166,8 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
     delete:
@@ -2489,7 +2491,15 @@ components:
       required: [api_key]
       additionalProperties: false
       properties:
-        api_key: { type: string, format: password, minLength: 1, maxLength: 4096, x-max-bytes: 4096, writeOnly: true }
+        api_key:
+          type: string
+          format: password
+          minLength: 100
+          maxLength: 4096
+          pattern: "^eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+          x-max-bytes: 4096
+          writeOnly: true
+          description: TMDB v4 API Read Access Token from Settings, API, "API Read Access Token". The field remains `api_key` for client compatibility.
     MetadataKeyPresence:
       type: object
       required: [configured]

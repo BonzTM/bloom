@@ -136,6 +136,13 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// AuthenticationValidateKey Validate Key
+	//
+	// Test your API Key to see if it's valid.
+	//
+	// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
+	AuthenticationValidateKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// MovieDetails Details
 	//
 	// Get the top level details of a movie by ID.
@@ -170,6 +177,23 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /3/tv/{series_id} (the `TvSeriesDetails` operationId).
 	TvSeriesDetails(ctx context.Context, seriesId int32, params *TvSeriesDetailsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// AuthenticationValidateKey Validate Key
+//
+// Test your API Key to see if it's valid.
+//
+// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
+func (c *Client) AuthenticationValidateKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAuthenticationValidateKeyRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // MovieDetails Details
@@ -255,6 +279,33 @@ func (c *Client) TvSeriesDetails(ctx context.Context, seriesId int32, params *Tv
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewAuthenticationValidateKeyRequest constructs an http.Request for the AuthenticationValidateKey method
+func NewAuthenticationValidateKeyRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/authentication")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewMovieDetailsRequest constructs an http.Request for the MovieDetails method
@@ -765,6 +816,15 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// AuthenticationValidateKeyWithResponse Validate Key
+	//
+	// Test your API Key to see if it's valid.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
+	AuthenticationValidateKeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AuthenticationValidateKeyResponse, error)
+
 	// MovieDetailsWithResponse Details
 	//
 	// Get the top level details of a movie by ID.
@@ -809,6 +869,70 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /3/tv/{series_id} (the `TvSeriesDetails` operationId).
 	TvSeriesDetailsWithResponse(ctx context.Context, seriesId int32, params *TvSeriesDetailsParams, reqEditors ...RequestEditorFn) (*TvSeriesDetailsResponse, error)
+}
+
+type AuthenticationValidateKeyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		StatusCode    *int    `json:"status_code,omitempty"`
+		StatusMessage *string `json:"status_message,omitempty"`
+		Success       *bool   `json:"success,omitempty"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *struct {
+		StatusCode    *int    `json:"status_code,omitempty"`
+		StatusMessage *string `json:"status_message,omitempty"`
+		Success       *bool   `json:"success,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r AuthenticationValidateKeyResponse) GetJSON200() *struct {
+	StatusCode    *int    `json:"status_code,omitempty"`
+	StatusMessage *string `json:"status_message,omitempty"`
+	Success       *bool   `json:"success,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r AuthenticationValidateKeyResponse) GetJSON401() *struct {
+	StatusCode    *int    `json:"status_code,omitempty"`
+	StatusMessage *string `json:"status_message,omitempty"`
+	Success       *bool   `json:"success,omitempty"`
+} {
+	return r.JSON401
+}
+
+// GetBody returns the raw response body bytes
+func (r AuthenticationValidateKeyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r AuthenticationValidateKeyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AuthenticationValidateKeyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r AuthenticationValidateKeyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type MovieDetailsResponse struct {
@@ -1398,6 +1522,21 @@ func (r TvSeriesDetailsResponse) ContentType() string {
 	return ""
 }
 
+// AuthenticationValidateKeyWithResponse Validate Key
+//
+// Test your API Key to see if it's valid.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
+func (c *ClientWithResponses) AuthenticationValidateKeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AuthenticationValidateKeyResponse, error) {
+	rsp, err := c.AuthenticationValidateKey(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAuthenticationValidateKeyResponse(rsp)
+}
+
 // MovieDetailsWithResponse Details
 //
 // Get the top level details of a movie by ID.
@@ -1471,6 +1610,47 @@ func (c *ClientWithResponses) TvSeriesDetailsWithResponse(ctx context.Context, s
 		return nil, err
 	}
 	return ParseTvSeriesDetailsResponse(rsp)
+}
+
+// ParseAuthenticationValidateKeyResponse parses an HTTP response from a AuthenticationValidateKeyWithResponse call
+func ParseAuthenticationValidateKeyResponse(rsp *http.Response) (*AuthenticationValidateKeyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AuthenticationValidateKeyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			StatusCode    *int    `json:"status_code,omitempty"`
+			StatusMessage *string `json:"status_message,omitempty"`
+			Success       *bool   `json:"success,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest struct {
+			StatusCode    *int    `json:"status_code,omitempty"`
+			StatusMessage *string `json:"status_message,omitempty"`
+			Success       *bool   `json:"success,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseMovieDetailsResponse parses an HTTP response from a MovieDetailsWithResponse call

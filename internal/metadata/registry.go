@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BonzTM/bloom/internal/core"
@@ -21,4 +22,17 @@ func (r *Registry) New(kind core.MetadataProviderKind, credential string) (core.
 		return nil, fmt.Errorf("metadata provider kind %q: %w", kind, core.ErrInvalidArgument)
 	}
 	return tmdb.New(credential, r.deps)
+}
+
+// Probe verifies a provider credential without retaining its client.
+func (r *Registry) Probe(ctx context.Context, kind core.MetadataProviderKind, credential string) error {
+	if kind != core.MetadataProviderTMDB {
+		return fmt.Errorf("metadata provider kind %q: %w", kind, core.ErrInvalidArgument)
+	}
+	client, err := tmdb.New(credential, r.deps)
+	if err != nil {
+		return err
+	}
+	defer client.CloseIdleConnections()
+	return client.Probe(ctx)
 }

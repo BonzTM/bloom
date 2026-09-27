@@ -19,10 +19,15 @@ import (
 	"github.com/BonzTM/bloom/internal/testutil"
 )
 
+const testReadAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJ0bWRiIiwic3ViIjoiYmxvb20tdGVzdCIsImlhdCI6MTcwMDAwMDAwMH0.c2lnbmF0dXJlLXNpZ25hdHVyZS1zaWduYXR1cmUtc2lnbmF0dXJl"
+
 func TestClientSearchMovieAndSeries(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("api_key") != "secret" {
-			t.Errorf("api_key = %q", r.URL.Query().Get("api_key"))
+		if r.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if strings.Contains(r.URL.RawQuery, testReadAccessToken) || r.URL.Query().Has("api_key") {
+			t.Errorf("credential leaked in query %q", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -49,6 +54,37 @@ func TestClientSearchMovieAndSeries(t *testing.T) {
 	series, err := client.Series(t.Context(), "12", false)
 	if err != nil || len(series.Seasons) != 1 || series.Seasons[0].Number != 1 {
 		t.Fatalf("Series = %+v, %v", series, err)
+	}
+}
+
+func TestClientProbeClassifiesUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/3/authentication" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		writeTestResponse(t, w, `{}`)
+	}))
+	defer server.Close()
+	if err := newTestClient(t, server.URL, nil).Probe(t.Context()); !errors.Is(err, core.ErrMetadataUnauthorized) {
+		t.Fatalf("Probe error = %v, want %v", err, core.ErrMetadataUnauthorized)
+	}
+}
+
+func TestClientProbeAcceptsValidatedToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Has("api_key") || strings.Contains(r.URL.RawQuery, testReadAccessToken) {
+			t.Errorf("credential leaked in query %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		writeTestResponse(t, w, `{"success":true,"status_code":1}`)
+	}))
+	defer server.Close()
+	if err := newTestClient(t, server.URL, nil).Probe(t.Context()); err != nil {
+		t.Fatalf("Probe: %v", err)
 	}
 }
 
@@ -87,24 +123,29 @@ func TestClientClassifiesProviderFailures(t *testing.T) {
 }
 
 func TestClientRejectsCrossOriginRedirectWithoutLeakingKey(t *testing.T) {
-	const apiKey = "redirect-secret"
 	var destinationCalls atomic.Int32
-	destination := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	destination := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		destinationCalls.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("cross-origin Authorization = %q", r.Header.Get("Authorization"))
+		}
 	}))
 	defer destination.Close()
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+			t.Errorf("source Authorization = %q", r.Header.Get("Authorization"))
+		}
 		http.Redirect(w, r, destination.URL, http.StatusFound)
 	}))
 	defer source.Close()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
-	client, err := New(apiKey, Dependencies{BaseURL: source.URL, Clock: clock})
+	client, err := New(testReadAccessToken, Dependencies{BaseURL: source.URL, Clock: clock})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(client.CloseIdleConnections)
 	_, err = client.Movie(t.Context(), "11")
-	if err == nil || strings.Contains(err.Error(), apiKey) {
+	if err == nil || strings.Contains(err.Error(), testReadAccessToken) {
 		t.Fatalf("redirect error = %v", err)
 	}
 	if destinationCalls.Load() != 0 {
@@ -112,12 +153,13 @@ func TestClientRejectsCrossOriginRedirectWithoutLeakingKey(t *testing.T) {
 	}
 }
 
-func TestAPIKeyTransportSkipsCrossOriginRequest(t *testing.T) {
+func TestBearerTransportDropsAuthorizationFromCrossOriginRequest(t *testing.T) {
 	wantErr := errors.New("transport stopped")
 	capture := &captureTransport{err: wantErr}
 	base := httptest.NewRequest(http.MethodGet, "https://api.example.test/3/movie/11", nil).URL
 	request := httptest.NewRequest(http.MethodGet, "https://redirect.example.test/target", nil)
-	transport := &apiKeyTransport{next: capture, apiKey: "transport-secret", baseURL: base}
+	request.Header.Set("Authorization", "Bearer "+testReadAccessToken)
+	transport := &bearerTransport{next: capture, token: testReadAccessToken, baseURL: base}
 	_, err := transport.RoundTrip(request)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("RoundTrip error = %v", err)
@@ -125,8 +167,11 @@ func TestAPIKeyTransportSkipsCrossOriginRequest(t *testing.T) {
 	if capture.request == nil {
 		t.Fatal("cross-origin request did not reach transport")
 	}
-	if capture.request.URL.Query().Has("api_key") {
-		t.Fatalf("cross-origin request query = %q", capture.request.URL.RawQuery)
+	if capture.request.Header.Get("Authorization") != "" {
+		t.Fatalf("cross-origin Authorization = %q", capture.request.Header.Get("Authorization"))
+	}
+	if strings.Contains(capture.request.URL.RawQuery, testReadAccessToken) {
+		t.Fatalf("cross-origin request query leaked credential: %q", capture.request.URL.RawQuery)
 	}
 }
 
@@ -189,7 +234,7 @@ func TestClientRetries429UsingRetryAfter(t *testing.T) {
 func newTestClient(t *testing.T, baseURL string, wait func(context.Context, time.Duration) error) *Client {
 	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
-	client, err := New("secret", Dependencies{BaseURL: baseURL, Clock: clock, Wait: wait, RandomInt64N: func(int64) int64 { return 0 }})
+	client, err := New(testReadAccessToken, Dependencies{BaseURL: baseURL, Clock: clock, Wait: wait, RandomInt64N: func(int64) int64 { return 0 }})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -221,8 +266,11 @@ func TestClientSpansNeverContainAPIKey(t *testing.T) {
 		}
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("api_key") != "secret" {
-			t.Errorf("upstream API key = %q", r.URL.Query().Get("api_key"))
+		if r.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+			t.Errorf("upstream Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if strings.Contains(r.URL.RawQuery, testReadAccessToken) || r.URL.Query().Has("api_key") {
+			t.Errorf("credential leaked in query %q", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		writeTestResponse(t, w, `{"id":11,"title":"Film"}`)
@@ -231,7 +279,7 @@ func TestClientSpansNeverContainAPIKey(t *testing.T) {
 	if _, err := newTestClient(t, server.URL, nil).Movie(t.Context(), "11"); err != nil {
 		t.Fatalf("Movie: %v", err)
 	}
-	if rendered := fmt.Sprintf("%+v", exporter.GetSpans()); strings.Contains(rendered, "secret") {
-		t.Fatalf("exported span data contains TMDB key: %s", rendered)
+	if rendered := fmt.Sprintf("%+v", exporter.GetSpans()); strings.Contains(rendered, testReadAccessToken) {
+		t.Fatalf("exported span data contains TMDB token: %s", rendered)
 	}
 }

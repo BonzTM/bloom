@@ -471,7 +471,7 @@ func requestDependencies(
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("build metadata credential cipher: %w", err)
 	}
-	metadataService, err := buildMetadataService(pool, cfg, metrics, clock, cipher)
+	metadataService, err := buildMetadataService(pool, cfg, metrics, clock, cipher, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -556,14 +556,15 @@ type requestStores struct {
 }
 
 func buildMetadataService(
-	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock, cipher *secrets.Cipher,
+	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock,
+	cipher *secrets.Cipher, logger *slog.Logger,
 ) (*metadata.Service, error) {
 	reader, writer, err := db.NewMetadataProviderStores(pool, cfg.Database.Driver)
 	if err != nil {
 		return nil, fmt.Errorf("build metadata provider stores: %w", err)
 	}
 	registry := metadata.NewRegistry(tmdb.Dependencies{Metrics: metrics, Clock: clock})
-	service, err := metadata.NewService(reader, writer, cipher, registry, clock)
+	service, err := metadata.NewService(reader, writer, cipher, registry, clock, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build metadata service: %w", err)
 	}
