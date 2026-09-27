@@ -59,6 +59,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runPlaybackEngineTests(t, pool, driver)
 	runStatsEngineTests(t, pool, driver)
 	runDownloadManagerEngineTests(t, pool, driver)
+	runMetadataProviderEngineTests(t, pool, driver)
 	runRequestEngineTests(t, pool, driver, store)
 	runNotificationEngineTests(t, pool, driver, store)
 }

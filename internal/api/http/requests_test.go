@@ -289,7 +289,7 @@ func malformedTMDBClient(t *testing.T) *tmdb.Client {
 	}))
 	t.Cleanup(upstream.Close)
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
-	client, err := tmdb.New("test-key", tmdb.Dependencies{BaseURL: upstream.URL, Clock: clock})
+	client, err := tmdb.New(testMetadataReadAccessToken, tmdb.Dependencies{BaseURL: upstream.URL, Clock: clock})
 	if err != nil {
 		t.Fatalf("new TMDB client: %v", err)
 	}

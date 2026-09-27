@@ -363,11 +363,14 @@ code cannot be guessed by enumeration.
 ### Requests
 
 Bloom starts without a metadata credential. An account with `admin.settings`
-stores the TMDB API key with `PUT /api/v1/metadata/providers/tmdb/key`. Bloom
-encrypts the key under `BLOOM_SECRET_KEY`, never returns it, and exposes only
-its presence through `GET` on the same route. Removing the key disables new
-metadata searches and returns `metadata_not_configured` until another key is
-stored.
+stores TMDB's v4 API Read Access Token with
+`PUT /api/v1/metadata/providers/tmdb/key`. TMDB shows this value under
+**Settings**, **API**, **API Read Access Token**. Bloom verifies the token,
+encrypts it under `BLOOM_SECRET_KEY`, never returns it, and exposes only its
+valid presence through `GET` on the same route. A previously stored v3 API key
+is treated as not configured and must be replaced with the API Read Access
+Token. Removing the token disables new metadata searches and returns
+`metadata_not_configured` until another token is stored.
 
 Register each Radarr or Sonarr instance with `POST /api/v1/download-managers`.
 Bloom verifies the API key before storing it encrypted. Use `GET` on that
@@ -484,9 +487,9 @@ The Playback page shows each watch's stream (resolution, codecs, bitrate)
 and links to its sample series with the transcode reasons.
 
 The web UI covers the same flow. Administrators register Radarr and Sonarr
-instances under Download managers, store the TMDB key and build profiles from
-an instance's options under Request settings, and decide pending requests,
-retry failed ones, and read queue progress under Requests in the
+instances under Download managers, store the TMDB API Read Access Token, build
+profiles from an instance's options under Request settings, decide pending
+requests, retry failed ones, and read queue progress under Requests in the
 administration area. Anyone who may request media searches, browses
 posters, picks seasons, and follows their own requests under Requests in the
 main navigation. Posters load from `image.tmdb.org`, the only third-party

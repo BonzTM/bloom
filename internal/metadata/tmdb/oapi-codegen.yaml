@@ -5,6 +5,7 @@ generate:
   client: true
 output-options:
   include-operation-ids:
+    - authentication-validate-key
     - search-multi
     - search-movie
     - search-tv

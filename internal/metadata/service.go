@@ -6,11 +6,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"strings"
+	"log/slog"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/secrets"
@@ -21,7 +19,6 @@ const (
 	providerBaseURL   = "https://api.themoviedb.org"
 	cacheCapacity     = 512
 	cacheTTL          = 15 * time.Minute
-	maxAPIKeyBytes    = 4096
 )
 
 type credentialCipher interface {
@@ -32,6 +29,7 @@ type credentialCipher interface {
 
 type providerFactory interface {
 	New(kind core.MetadataProviderKind, credential string) (core.MetadataProvider, error)
+	Probe(ctx context.Context, kind core.MetadataProviderKind, credential string) error
 }
 
 type idleCloser interface{ CloseIdleConnections() }
@@ -43,27 +41,35 @@ type Service struct {
 	cipher      credentialCipher
 	factory     providerFactory
 	clock       core.Clock
+	logger      *slog.Logger
 	cache       *detailCache
 	mu          sync.Mutex
+	warnInvalid sync.Once
 	provider    core.MetadataProvider
 	fingerprint [sha256.Size]byte
 }
 
 // NewService creates a metadata service with explicit storage and clock dependencies.
-func NewService(reader core.MetadataProviderReader, writer core.MetadataProviderWriter, cipher credentialCipher, factory providerFactory, clock core.Clock) (*Service, error) {
-	if reader == nil || writer == nil || cipher == nil || factory == nil || clock == nil {
+func NewService(
+	reader core.MetadataProviderReader, writer core.MetadataProviderWriter, cipher credentialCipher,
+	factory providerFactory, clock core.Clock, logger *slog.Logger,
+) (*Service, error) {
+	if reader == nil || writer == nil || cipher == nil || factory == nil || clock == nil || logger == nil {
 		return nil, errors.New("metadata service: all dependencies are required")
 	}
 	return &Service{
-		reader: reader, writer: writer, cipher: cipher, factory: factory, clock: clock,
+		reader: reader, writer: writer, cipher: cipher, factory: factory, clock: clock, logger: logger,
 		cache: newDetailCache(clock, cacheCapacity, cacheTTL),
 	}, nil
 }
 
 // SetKey encrypts and stores a provider credential without retaining plaintext.
-func (s *Service) SetKey(ctx context.Context, kind core.MetadataProviderKind, apiKey string) error {
-	if !kind.Valid() || !validAPIKey(apiKey) {
+func (s *Service) SetKey(ctx context.Context, kind core.MetadataProviderKind, credential string) error {
+	if !kind.Valid() || core.ValidateMetadataCredential(kind, credential) != nil {
 		return core.ErrInvalidArgument
+	}
+	if err := s.factory.Probe(ctx, kind, credential); err != nil {
+		return fmt.Errorf("probe metadata provider credential: %w", err)
 	}
 	now := core.NormalizeTime(s.clock.Now())
 	existing, err := s.reader.GetMetadataProvider(ctx, kind)
@@ -74,7 +80,7 @@ func (s *Service) SetKey(ctx context.Context, kind core.MetadataProviderKind, ap
 		return fmt.Errorf("read metadata provider before update: %w", err)
 	}
 	context := credentialContext(kind)
-	ciphertext, err := s.cipher.Encrypt([]byte(apiKey), context)
+	ciphertext, err := s.cipher.Encrypt([]byte(credential), context)
 	if err != nil {
 		return fmt.Errorf("encrypt metadata provider credential: %w", err)
 	}
@@ -94,12 +100,20 @@ func (s *Service) HasKey(ctx context.Context, kind core.MetadataProviderKind) (b
 	if !kind.Valid() {
 		return false, core.ErrInvalidArgument
 	}
-	_, err := s.reader.GetMetadataProvider(ctx, kind)
+	record, err := s.reader.GetMetadataProvider(ctx, kind)
 	if errors.Is(err, core.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("read metadata provider: %w", err)
+	}
+	credential, err := s.decryptCredential(ctx, record, kind)
+	defer clear(credential)
+	if errors.Is(err, core.ErrMetadataNotConfigured) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -179,11 +193,11 @@ func (s *Service) loadProvider(ctx context.Context, kind core.MetadataProviderKi
 	if s.provider != nil && s.fingerprint == fingerprint {
 		return s.provider, nil
 	}
-	plaintext, err := s.cipher.Decrypt(record.CredentialCiphertext, credentialContext(kind))
-	if err != nil {
-		return nil, fmt.Errorf("decrypt metadata provider credential: %w", err)
-	}
+	plaintext, err := s.decryptCredential(ctx, record, kind)
 	defer clear(plaintext)
+	if err != nil {
+		return nil, err
+	}
 	provider, err := s.factory.New(kind, string(plaintext))
 	if err != nil {
 		return nil, fmt.Errorf("construct metadata provider: %w", err)
@@ -191,6 +205,23 @@ func (s *Service) loadProvider(ctx context.Context, kind core.MetadataProviderKi
 	closeProvider(s.provider)
 	s.provider, s.fingerprint = provider, fingerprint
 	return provider, nil
+}
+
+func (s *Service) decryptCredential(
+	ctx context.Context, record core.MetadataProviderRecord, kind core.MetadataProviderKind,
+) ([]byte, error) {
+	plaintext, err := s.cipher.Decrypt(record.CredentialCiphertext, credentialContext(kind))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt metadata provider credential: %w", err)
+	}
+	if core.ValidateMetadataCredential(kind, string(plaintext)) != nil {
+		clear(plaintext)
+		s.warnInvalid.Do(func() {
+			s.logger.WarnContext(ctx, "stored TMDB credential is not an API Read Access Token", "provider", kind)
+		})
+		return nil, core.ErrMetadataNotConfigured
+	}
+	return plaintext, nil
 }
 
 func (s *Service) resetProvider() {
@@ -214,13 +245,6 @@ func closeProvider(provider core.MetadataProvider) {
 func credentialContext(kind core.MetadataProviderKind) secrets.Context {
 	return secrets.Context{Purpose: credentialPurpose, RecordID: string(kind), Kind: string(kind), BaseURL: providerBaseURL}
 }
-
-func validAPIKey(value string) bool {
-	return value != "" && len(value) <= maxAPIKeyBytes && utf8.ValidString(value) &&
-		stringsIndexControl(value) < 0
-}
-
-func stringsIndexControl(value string) int { return strings.IndexFunc(value, unicode.IsControl) }
 
 func filterSpecials(series core.MetadataSeries, include bool) core.MetadataSeries {
 	if include {

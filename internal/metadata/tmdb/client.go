@@ -49,7 +49,7 @@ type Dependencies struct {
 	RandomInt64N func(int64) int64
 }
 
-// Client implements the metadata provider seam with TMDB v3.
+// Client implements the metadata provider seam with TMDB's v3 API and v4 Read Access Token.
 type Client struct {
 	api     *tmdbapi.ClientWithResponses
 	http    *http.Client
@@ -58,8 +58,8 @@ type Client struct {
 }
 
 // New constructs a TMDB client with bounded network behavior.
-func New(apiKey string, deps Dependencies) (*Client, error) {
-	if apiKey == "" || deps.Clock == nil {
+func New(token string, deps Dependencies) (*Client, error) {
+	if core.ValidateMetadataCredential(core.MetadataProviderTMDB, token) != nil || deps.Clock == nil {
 		return nil, fmt.Errorf("tmdb client: %w", core.ErrInvalidArgument)
 	}
 	baseURL := deps.BaseURL
@@ -76,9 +76,9 @@ func New(apiKey string, deps Dependencies) (*Client, error) {
 	}
 	httpClient := deps.HTTPClient
 	if httpClient == nil {
-		httpClient = newHTTPClient(apiKey, base, metrics, deps.Clock, deps.Wait, deps.RandomInt64N)
+		httpClient = newHTTPClient(token, base, metrics, deps.Clock, deps.Wait, deps.RandomInt64N)
 	} else {
-		httpClient = withAPIKey(httpClient, apiKey, base)
+		httpClient = withBearerToken(httpClient, token, base)
 	}
 	generated, err := tmdbapi.NewClientWithResponses(baseURL, tmdbapi.WithHTTPClient(httpClient))
 	if err != nil {
@@ -88,7 +88,7 @@ func New(apiKey string, deps Dependencies) (*Client, error) {
 }
 
 func newHTTPClient(
-	apiKey string,
+	token string,
 	baseURL *url.URL,
 	metrics Metrics,
 	clock core.Clock,
@@ -109,40 +109,61 @@ func newHTTPClient(
 	}
 	limiter := newTokenBucket(clock, ratePerSecond, rateBurst)
 	retrying := &retryTransport{next: transport, metrics: metrics, clock: clock, wait: wait, randomInt64N: randomInt64N, limiter: limiter}
-	authenticated := &apiKeyTransport{next: retrying, apiKey: apiKey, baseURL: baseURL}
+	authenticated := &bearerTransport{next: retrying, token: token, baseURL: baseURL}
 	client := &http.Client{Transport: otelhttp.NewTransport(authenticated), Timeout: requestTimeout}
 	client.CheckRedirect = redirectPolicy(baseURL, nil)
 	return client
 }
 
-type apiKeyTransport struct {
+type bearerTransport struct {
 	next    http.RoundTripper
-	apiKey  string
+	token   string
 	baseURL *url.URL
 }
 
-func (t *apiKeyTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if !sameOrigin(request.URL, t.baseURL) {
-		return t.next.RoundTrip(request)
-	}
+func (t *bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	clone := request.Clone(request.Context())
-	urlCopy := *request.URL
-	clone.URL = &urlCopy
-	query := clone.URL.Query()
-	query.Set("api_key", t.apiKey)
-	clone.URL.RawQuery = query.Encode()
+	if !sameOrigin(request.URL, t.baseURL) {
+		clone.Header.Del("Authorization")
+		return t.next.RoundTrip(clone)
+	}
+	clone.Header.Set("Authorization", "Bearer "+t.token)
 	return t.next.RoundTrip(clone)
 }
 
-func withAPIKey(client *http.Client, apiKey string, baseURL *url.URL) *http.Client {
+func withBearerToken(client *http.Client, token string, baseURL *url.URL) *http.Client {
 	clone := *client
 	transport := clone.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	clone.Transport = &apiKeyTransport{next: transport, apiKey: apiKey, baseURL: baseURL}
+	clone.Transport = &bearerTransport{next: transport, token: token, baseURL: baseURL}
 	clone.CheckRedirect = redirectPolicy(baseURL, client.CheckRedirect)
 	return &clone
+}
+
+// Probe verifies the configured Read Access Token with TMDB.
+func (c *Client) Probe(ctx context.Context) error {
+	started := c.clock.Now()
+	response, err := c.api.AuthenticationValidateKeyWithResponse(ctx)
+	status := 0
+	if response != nil {
+		status = response.StatusCode()
+	}
+	c.observe("probe", started, status, err)
+	if err != nil {
+		return classifyCallError("probe", err)
+	}
+	if err := validateStatus("probe", response.StatusCode()); err != nil {
+		return err
+	}
+	if response.JSON200 == nil || response.JSON200.Success == nil {
+		return classifyError("probe", response.StatusCode(), core.ErrMetadataMalformed)
+	}
+	if !*response.JSON200.Success {
+		return classifyError("probe", response.StatusCode(), core.ErrMetadataUnauthorized)
+	}
+	return nil
 }
 
 func redirectPolicy(baseURL *url.URL, previous func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {

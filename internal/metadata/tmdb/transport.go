@@ -72,6 +72,8 @@ func drainAndClose(response *http.Response) {
 
 func operationFromPath(path string) string {
 	switch {
+	case path == "/3/authentication":
+		return "probe"
 	case path == "/3/search/multi":
 		return "search"
 	case len(path) > len("/3/movie/") && path[:len("/3/movie/")] == "/3/movie/":

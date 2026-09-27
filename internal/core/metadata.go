@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strconv"
@@ -26,6 +27,10 @@ const (
 	MaxMetadataOverviewBytes = 10_000
 	// MaxMetadataPosterPathBytes bounds a provider image path.
 	MaxMetadataPosterPathBytes = 500
+	// MinMetadataCredentialBytes is the shortest accepted TMDB Read Access Token.
+	MinMetadataCredentialBytes = 100
+	// MaxMetadataCredentialBytes bounds a stored TMDB Read Access Token.
+	MaxMetadataCredentialBytes = 4096
 )
 
 var (
@@ -130,6 +135,32 @@ func ValidateProviderID(value string) error {
 		return ErrInvalidArgument
 	}
 	return nil
+}
+
+// ValidateMetadataCredential validates the credential shape required by a provider.
+func ValidateMetadataCredential(kind MetadataProviderKind, value string) error {
+	if kind != MetadataProviderTMDB || len(value) < MinMetadataCredentialBytes || len(value) > MaxMetadataCredentialBytes {
+		return ErrInvalidArgument
+	}
+	if strings.IndexFunc(value, func(char rune) bool { return unicode.IsSpace(char) || unicode.IsControl(char) }) >= 0 {
+		return ErrInvalidArgument
+	}
+	segments := strings.Split(value, ".")
+	if len(segments) != 3 || !strings.HasPrefix(segments[0], "eyJ") {
+		return ErrInvalidArgument
+	}
+	if !validBase64URLSegment(segments[0]) || !validBase64URLSegment(segments[1]) || !validBase64URLSegment(segments[2]) {
+		return ErrInvalidArgument
+	}
+	return nil
+}
+
+func validBase64URLSegment(value string) bool {
+	if value == "" || strings.Contains(value, "=") {
+		return false
+	}
+	_, err := base64.RawURLEncoding.Strict().DecodeString(value)
+	return err == nil
 }
 
 // ValidateMetadataTitle validates a normalized provider title.
