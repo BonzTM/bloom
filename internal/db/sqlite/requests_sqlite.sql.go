@@ -89,23 +89,25 @@ func (q *Queries) LockRequestTitle(ctx context.Context, lockKey interface{}) err
 }
 
 const metadataRequestStates = `-- name: MetadataRequestStates :many
-WITH ranked AS (
-    SELECT kind, provider, provider_id, status,
-           ROW_NUMBER() OVER (
-               PARTITION BY kind, provider, provider_id
-               ORDER BY created_at DESC, id DESC
-           ) AS position
-    FROM requests
-    WHERE requester_account_id = ?1
-      AND provider = 'tmdb'
-      AND kind || ':' || provider_id IN (
-          SELECT value FROM json_each(CAST(?2 AS TEXT))
-      )
+WITH title_keys AS (
+    SELECT
+        substr(value, 1, instr(value, ':') - 1) AS kind,
+        substr(value, instr(value, ':') + 1) AS provider_id
+    FROM json_each(CAST(?2 AS TEXT))
 )
-SELECT kind, provider, provider_id, status
-FROM ranked
-WHERE position = 1
-ORDER BY kind, provider_id
+SELECT request.kind, request.provider, request.provider_id, request.status
+FROM title_keys
+JOIN requests AS request ON request.id = (
+    SELECT latest.id
+    FROM requests AS latest
+    WHERE latest.requester_account_id = ?1
+      AND latest.provider = 'tmdb'
+      AND latest.kind = title_keys.kind
+      AND latest.provider_id = title_keys.provider_id
+    ORDER BY latest.created_at DESC, latest.id DESC
+    LIMIT 1
+)
+ORDER BY request.kind, request.provider_id
 `
 
 type MetadataRequestStatesParams struct {

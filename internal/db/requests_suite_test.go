@@ -34,7 +34,7 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 		testRequestProfileRoundTrip(t, profileReader, profileWriter, profile)
 	})
 	t.Run("metadata request states", func(t *testing.T) {
-		testMetadataRequestStates(t, requestReader, requestWriter, account.ID, profile.ID, now)
+		testMetadataRequestStates(t, accounts, profileWriter, requestReader, requestWriter, account.ID, profile.ID, now)
 	})
 	t.Run("movie transition and active uniqueness", func(t *testing.T) {
 		testRequestTransitionAndUniqueness(t, requestReader, requestWriter, profileWriter, account.ID, profile.ID, now)
@@ -63,42 +63,88 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 }
 
 func testMetadataRequestStates(
-	t *testing.T, reader core.RequestReader, writer core.RequestWriter, accountID, profileID string, now time.Time,
+	t *testing.T, accounts core.AccountStore, profiles core.RequestProfileWriter,
+	reader core.RequestReader, writer core.RequestWriter, accountID, profileID string, now time.Time,
 ) {
 	t.Helper()
 	stateReader, ok := reader.(core.MetadataRequestStateReader)
 	if !ok {
 		t.Fatal("request store does not implement MetadataRequestStateReader")
 	}
-	declined := requestFixture(t, accountID, profileID, "901", now)
-	if err := writer.CreateRequest(t.Context(), declined, now, true); err != nil {
-		t.Fatalf("create declined request: %v", err)
-	}
-	if _, err := writer.TransitionRequest(t.Context(), declined.ID, core.RequestPending, core.RequestDeclined, accountID, "", now); err != nil {
-		t.Fatalf("decline request: %v", err)
-	}
-	latest := requestFixture(t, accountID, profileID, "901", now.Add(time.Second))
-	if err := writer.CreateRequest(t.Context(), latest, now.Add(time.Second), true); err != nil {
-		t.Fatalf("create latest request: %v", err)
-	}
+	createMetadataRequestHistory(t, writer, accountID, profileID, "901", now)
 	series := seriesRequestFixture(t, accountID, profileID, "902", []int{1}, now)
 	if err := writer.CreateRequest(t.Context(), series, now, true); err != nil {
 		t.Fatalf("create series request: %v", err)
+	}
+	otherAccount := requestTestAccount(t, accounts, now, "request-state-other")
+	otherProfile := metadataStateProfile(t, profiles, now)
+	other := requestFixture(t, otherAccount.ID, otherProfile.ID, "901", now.Add(3*time.Second))
+	if err := writer.CreateRequest(t.Context(), other, other.CreatedAt, true); err != nil {
+		t.Fatalf("create other caller request: %v", err)
+	}
+	if _, err := writer.TransitionRequest(t.Context(), other.ID, core.RequestPending, core.RequestDeclined, otherAccount.ID, "", other.CreatedAt); err != nil {
+		t.Fatalf("decline other caller request: %v", err)
 	}
 	titles := []core.MetadataTitle{
 		{Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "901", Title: "Film"},
 		{Kind: core.MediaKindSeries, Provider: core.MetadataProviderTMDB, ProviderID: "902", Title: "Show"},
 		{Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "903", Title: "Missing"},
 	}
-	states, err := stateReader.MetadataRequestStates(t.Context(), accountID, titles)
+	assertMetadataRequestStates(t, stateReader, accountID, titles, core.RequestPending)
+	assertMetadataRequestStates(t, stateReader, otherAccount.ID, titles[:1], core.RequestDeclined)
+}
+
+func createMetadataRequestHistory(
+	t *testing.T, writer core.RequestWriter, accountID, profileID, providerID string, now time.Time,
+) {
+	t.Helper()
+	for offset := range 3 {
+		createdAt := now.Add(time.Duration(offset) * time.Second)
+		request := requestFixture(t, accountID, profileID, providerID, createdAt)
+		if err := writer.CreateRequest(t.Context(), request, createdAt, true); err != nil {
+			t.Fatalf("create request history item %d: %v", offset, err)
+		}
+		if offset == 2 {
+			continue
+		}
+		if _, err := writer.TransitionRequest(t.Context(), request.ID, core.RequestPending, core.RequestDeclined, accountID, "", createdAt); err != nil {
+			t.Fatalf("decline request history item %d: %v", offset, err)
+		}
+	}
+}
+
+func metadataStateProfile(t *testing.T, writer core.RequestProfileWriter, now time.Time) core.RequestProfile {
+	t.Helper()
+	profile := core.RequestProfile{
+		ID: mustID(t), Name: "Request state " + mustID(t), Kinds: []core.MediaKind{core.MediaKindMovie},
+		DownloadManagerKind: "placeholder", DownloadManagerInstance: "future", QualityProfile: "Any",
+		RootFolder: "/media", Tags: []string{"request-state"}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := writer.CreateRequestProfile(t.Context(), profile); err != nil {
+		t.Fatalf("create request-state profile: %v", err)
+	}
+	return profile
+}
+
+func assertMetadataRequestStates(
+	t *testing.T, reader core.MetadataRequestStateReader, accountID string,
+	titles []core.MetadataTitle, wantMovie core.RequestStatus,
+) {
+	t.Helper()
+	states, err := reader.MetadataRequestStates(t.Context(), accountID, titles)
 	if err != nil {
 		t.Fatalf("MetadataRequestStates: %v", err)
 	}
-	if states[core.MetadataKey(titles[0])] != core.RequestPending || states[core.MetadataKey(titles[1])] != core.RequestPending {
-		t.Fatalf("metadata request states = %v", states)
+	if states[core.MetadataKey(titles[0])] != wantMovie {
+		t.Fatalf("movie request state = %q, want %q in %v", states[core.MetadataKey(titles[0])], wantMovie, states)
 	}
-	if _, exists := states[core.MetadataKey(titles[2])]; exists {
-		t.Fatalf("missing title unexpectedly has state: %v", states)
+	if len(titles) > 1 && states[core.MetadataKey(titles[1])] != core.RequestPending {
+		t.Fatalf("series request state = %q, want %q in %v", states[core.MetadataKey(titles[1])], core.RequestPending, states)
+	}
+	if len(titles) > 2 {
+		if _, exists := states[core.MetadataKey(titles[2])]; exists {
+			t.Fatalf("missing title unexpectedly has state: %v", states)
+		}
 	}
 }
 

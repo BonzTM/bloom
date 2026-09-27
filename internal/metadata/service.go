@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/secrets"
 )
@@ -46,6 +48,7 @@ type Service struct {
 	clock       core.Clock
 	logger      *slog.Logger
 	cache       *detailCache
+	loads       singleflight.Group
 	mu          sync.Mutex
 	warnInvalid sync.Once
 	provider    core.MetadataProvider
@@ -204,19 +207,21 @@ func (s *Service) discoverPage(ctx context.Context, input core.MetadataDiscover)
 	key := cacheKey{
 		provider: core.MetadataProviderTMDB, resource: "discover", id: string(input.List) + ":" + strconv.Itoa(input.Page),
 	}
-	if cached, ok := s.cache.get(key); ok {
-		return cached.page, nil
-	}
-	provider, err := s.discoveryProvider(ctx)
+	value, err := s.cachedLoad(key, cacheTTL, func() (cacheValue, error) {
+		provider, providerErr := s.discoveryProvider(ctx)
+		if providerErr != nil {
+			return cacheValue{}, providerErr
+		}
+		page, discoverErr := provider.Discover(ctx, input)
+		if discoverErr != nil {
+			return cacheValue{}, fmt.Errorf("discover metadata: %w", discoverErr)
+		}
+		return cacheValue{page: page}, nil
+	})
 	if err != nil {
 		return core.MetadataPage{}, err
 	}
-	page, err := provider.Discover(ctx, input)
-	if err != nil {
-		return core.MetadataPage{}, fmt.Errorf("discover metadata: %w", err)
-	}
-	s.cache.put(key, cacheValue{page: page})
-	return page, nil
+	return value.page, nil
 }
 
 func discoverPageWithStates(
@@ -239,19 +244,52 @@ func (s *Service) Genres(ctx context.Context, kind core.MediaKind) ([]core.Metad
 		return nil, core.ErrInvalidArgument
 	}
 	key := cacheKey{provider: core.MetadataProviderTMDB, resource: "genres", kind: kind}
-	if cached, ok := s.cache.get(key); ok {
-		return cached.genres, nil
-	}
-	provider, err := s.discoveryProvider(ctx)
+	value, err := s.cachedLoad(key, genreCacheTTL, func() (cacheValue, error) {
+		provider, providerErr := s.discoveryProvider(ctx)
+		if providerErr != nil {
+			return cacheValue{}, providerErr
+		}
+		genres, genreErr := provider.Genres(ctx, kind)
+		if genreErr != nil {
+			return cacheValue{}, fmt.Errorf("load metadata genres: %w", genreErr)
+		}
+		return cacheValue{genres: genres}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	genres, err := provider.Genres(ctx, kind)
-	if err != nil {
-		return nil, fmt.Errorf("load metadata genres: %w", err)
+	return value.genres, nil
+}
+
+func (s *Service) cachedLoad(
+	key cacheKey, ttl time.Duration, load func() (cacheValue, error),
+) (cacheValue, error) {
+	if cached, ok := s.cache.get(key); ok {
+		return cached, nil
 	}
-	s.cache.putFor(key, cacheValue{genres: genres}, genreCacheTTL)
-	return append([]core.MetadataGenre(nil), genres...), nil
+	loaded, err, _ := s.loads.Do(key.flightKey(), func() (any, error) {
+		if cached, ok := s.cache.get(key); ok {
+			return cached, nil
+		}
+		value, loadErr := load()
+		if loadErr != nil {
+			return cacheValue{}, loadErr
+		}
+		s.cache.putFor(key, value, ttl)
+		return value, nil
+	})
+	if err != nil {
+		return cacheValue{}, err
+	}
+	value, ok := loaded.(cacheValue)
+	if !ok {
+		return cacheValue{}, errors.New("metadata cache load returned an invalid value")
+	}
+	return cloneCacheValue(value), nil
+}
+
+func (k cacheKey) flightKey() string {
+	return string(k.provider) + "\x00" + k.resource + "\x00" + string(k.kind) + "\x00" + k.id
 }
 
 func (s *Service) discoveryProvider(ctx context.Context) (core.MetadataDiscoveryProvider, error) {
