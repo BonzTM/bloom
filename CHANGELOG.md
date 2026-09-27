@@ -25,6 +25,8 @@ contracts) gets an entry here.
 - TMDB metadata authentication now accepts only the v4 API Read Access Token,
   sends it as a Bearer credential instead of a URL query parameter, and treats
   previously stored v3 API keys as not configured until they are replaced.
+- The request settings page asks for TMDB's API Read Access Token and refuses
+  a v3 API key before sending it.
 - Invite code preview and acceptance now perform the same bounded database
   lookup and library-read sequence for malformed, non-canonical, unknown,
   expired, exhausted, and revoked codes, and verify the selected digest with a
