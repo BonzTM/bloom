@@ -16,6 +16,12 @@ contracts) gets an entry here.
 
 ### Changed
 
+- A watch's details page reads as a timeline (started, paused, resumed,
+  seeked, delivery changes, last seen) instead of every polled sample; the
+  raw samples sit behind a disclosure.
+- Discover and search say why TMDB could not be used when the API reports a
+  reason (unreachable, rejected token, unusable answer, not answering) and
+  say so when Bloom itself took too long to answer.
 - Title pages open with a hero: the backdrop behind the poster, name, and
   overview, with the request form below. Discover shows the search form only
   with results; searching starts from the top bar.

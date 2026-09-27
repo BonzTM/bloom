@@ -58,9 +58,26 @@ const createMessages: Messages = {
 const QUOTA_EXCEEDED = "request_quota_exceeded";
 const METADATA_NOT_CONFIGURED = "metadata_not_configured";
 
+const providerReasonMessages: Readonly<Record<string, string>> = {
+  unreachable:
+    "Bloom could not reach TMDB. The server may not be allowed to reach api.themoviedb.org.",
+  unauthorized: "TMDB rejected Bloom's API Read Access Token.",
+  malformed: "TMDB answered with something Bloom could not use.",
+  unavailable: "TMDB is not answering right now. Try again in a moment.",
+};
+
 export function describeSearchError(error: unknown): string | undefined {
   if (error instanceof ApiError && error.code === METADATA_NOT_CONFIGURED) {
     return "Searching needs a TMDB key, which no administrator has set yet.";
+  }
+  if (error instanceof ApiError && error.reason !== undefined) {
+    const byReason = providerReasonMessages[error.reason];
+    if (byReason !== undefined) {
+      return byReason;
+    }
+  }
+  if (error instanceof ApiError && error.kind === "aborted") {
+    return "Bloom took too long to answer. If this keeps happening, the server may not be able to reach TMDB.";
   }
   return describe(error, searchMessages, "The search could not be completed.");
 }
@@ -93,6 +110,8 @@ const managerProbeMessages: Readonly<Record<ProbeFailureReason, string>> = {
     "The address answered, but the instance's API was not found there. Check that the address is the instance itself, including any base path.",
   malformed:
     "The address answered, but not like a Radarr or Sonarr instance. Check that it points at the instance itself rather than a login page or a redirect.",
+  unavailable:
+    "The instance is not answering right now. Try again in a moment.",
 };
 
 export function describeManagerError(error: unknown): string | undefined {
