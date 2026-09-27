@@ -97,43 +97,89 @@ it("lists profiles with their kinds, manager, folder, and tags", async () => {
 it("stores a TMDB key without keeping it anywhere on the client", async () => {
   const user = userEvent.setup();
   const { queryClient } = await openSettings();
-  expect(await screen.findByText("No key stored")).toBeVisible();
-  const form = screen.getByRole("form", { name: "Store the TMDB key" });
-  await user.type(within(form).getByLabelText("API key"), "tmdb-secret-123");
+  expect(await screen.findByText("No token stored")).toBeVisible();
+  const form = screen.getByRole("form", { name: "Store the TMDB token" });
+  await user.type(
+    within(form).getByLabelText("API Read Access Token"),
+    "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0In0.c2lnbmF0dXJlLXRlc3QtMTIz",
+  );
 
-  await user.click(within(form).getByRole("button", { name: "Store key" }));
+  await user.click(within(form).getByRole("button", { name: "Store token" }));
 
-  expect(await screen.findByText("Key stored")).toBeVisible();
-  expect(screen.getByText("The TMDB key was saved.")).toBeVisible();
-  expect(screen.getByLabelText("New API key")).toHaveValue("");
-  expect(cachedText(queryClient)).not.toContain("tmdb-secret-123");
-  expect(document.body.textContent).not.toContain("tmdb-secret-123");
+  expect(await screen.findByText("Token stored")).toBeVisible();
+  expect(screen.getByText("The TMDB token was saved.")).toBeVisible();
+  expect(screen.getByLabelText("New API Read Access Token")).toHaveValue("");
+  expect(cachedText(queryClient)).not.toContain(
+    "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0In0.c2lnbmF0dXJlLXRlc3QtMTIz",
+  );
+  expect(document.body.textContent).not.toContain(
+    "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0In0.c2lnbmF0dXJlLXRlc3QtMTIz",
+  );
 });
 
-it("explains a key the server refuses and keeps it in the field", async () => {
+it("refuses a v3 API key before sending anything", async () => {
+  const user = userEvent.setup();
+  let puts = 0;
+  server.use(
+    http.put(
+      "*/api/v1/metadata/providers/tmdb/key",
+      jsonApi(() => {
+        puts += 1;
+        return envelope(500, "internal", "boom");
+      }),
+    ),
+  );
+  await openSettings();
+  const form = await screen.findByRole("form", {
+    name: "Store the TMDB token",
+  });
+  await user.type(
+    within(form).getByLabelText("API Read Access Token"),
+    "0123456789abcdef0123456789abcdef",
+  );
+
+  await user.click(within(form).getByRole("button", { name: "Store token" }));
+
+  expect(within(form).getByLabelText("API Read Access Token")).toBeInvalid();
+  expect(
+    within(form).getByLabelText("API Read Access Token"),
+  ).toHaveAccessibleDescription(/That is a v3 API key/);
+  expect(puts).toBe(0);
+});
+
+it("explains a token the server refuses and keeps it in the field", async () => {
   const user = userEvent.setup();
   await openSettings();
-  const form = await screen.findByRole("form", { name: "Store the TMDB key" });
-  await user.type(within(form).getByLabelText("API key"), INVALID_TMDB_KEY);
+  const form = await screen.findByRole("form", {
+    name: "Store the TMDB token",
+  });
+  await user.type(
+    within(form).getByLabelText("API Read Access Token"),
+    INVALID_TMDB_KEY,
+  );
 
-  await user.click(within(form).getByRole("button", { name: "Store key" }));
+  await user.click(within(form).getByRole("button", { name: "Store token" }));
 
   const alert = await within(form).findByRole("alert");
-  expect(alert).toHaveTextContent("Enter a TMDB API key without control");
+  expect(alert).toHaveTextContent("TMDB needs the API Read Access Token");
   expect(alert).toHaveFocus();
-  expect(within(form).getByLabelText("API key")).toHaveValue(INVALID_TMDB_KEY);
+  expect(within(form).getByLabelText("API Read Access Token")).toHaveValue(
+    INVALID_TMDB_KEY,
+  );
 });
 
 it("removes a stored key after an in-row confirmation", async () => {
   const user = userEvent.setup();
   setMockTmdbKeyConfigured(true);
   await openSettings();
-  expect(await screen.findByText("Key stored")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Remove the TMDB key" }));
+  expect(await screen.findByText("Token stored")).toBeVisible();
   await user.click(
-    screen.getByRole("button", { name: "Confirm removing the TMDB key" }),
+    screen.getByRole("button", { name: "Remove the TMDB token" }),
   );
-  expect(await screen.findByText("No key stored")).toBeVisible();
+  await user.click(
+    screen.getByRole("button", { name: "Confirm removing the TMDB token" }),
+  );
+  expect(await screen.findByText("No token stored")).toBeVisible();
 });
 
 it("creates a profile from a registered instance's options", async () => {

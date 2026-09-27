@@ -32,8 +32,8 @@ const decisionMessages: Messages = {
 const keyMessages: Messages = {
   401: SIGN_IN_AGAIN,
   403: "You no longer have permission to change settings.",
-  404: "No TMDB key is stored.",
-  422: "Enter a TMDB API key without control characters.",
+  404: "No TMDB token is stored.",
+  422: "TMDB needs the API Read Access Token, not the v3 API key, without control characters.",
 };
 
 const searchMessages: Messages = {
@@ -119,7 +119,7 @@ export function describeDecisionError(error: unknown): string | undefined {
 }
 
 export function describeKeyError(error: unknown): string | undefined {
-  return describe(error, keyMessages, "The TMDB key could not be changed.");
+  return describe(error, keyMessages, "The TMDB token could not be changed.");
 }
 
 // One sentence a person can act on. Bloom keeps upstream details to itself,
