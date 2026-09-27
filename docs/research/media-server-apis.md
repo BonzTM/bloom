@@ -238,6 +238,11 @@ Working pattern (Jellyseerr): enumerate each library with
 `/Items?SortBy=SortName&SortOrder=Ascending&IncludeItemTypes=Series,Movie,Others&Recursive=true&StartIndex=0&ParentId=${id}&collapseBoxSetItems=false` and `fields: 'ProviderIds,MediaSources,Width,Height,IsHD,DateCreated'`, then index `ProviderIds.Tmdb / Imdb / Tvdb` locally.
 Source: <https://github.com/Fallenbagel/jellyseerr/blob/develop/server/api/jellyfin.ts>
 
+Bloom coverage: ADR 0010 slice three and migration `00024_library_catalog`
+address the library-coverage gap with a bounded, resumable `/Items` walk that
+retains every Jellyfin item type and archives missing rows only after a complete
+successful walk.
+
 `BaseItemDto.ProviderIds` is declared as `object` ("Gets or sets the provider ids.") — a string→string map. Key names (`Tmdb`, `Imdb`, `Tvdb`) come from the Jellyseerr type definition; they are not enumerated in the OpenAPI.
 
 Title search: `/Items?searchTerm=` ("Optional. Filter based on a search term.") and `GET /Search/Hints`. The controller comment says "Use search providers when searchTerm is provided." Search is a fallback, not a deterministic key match.

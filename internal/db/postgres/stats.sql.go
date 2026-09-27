@@ -893,7 +893,7 @@ func (q *Queries) StatsTotals(ctx context.Context, arg StatsTotalsParams) (Stats
 }
 
 const statsUserRecentWatches = `-- name: StatsUserRecentWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at >= $1
@@ -956,6 +956,7 @@ type StatsUserRecentWatchesRow struct {
 	ImportSource              sql.NullString
 	ImportRecordID            sql.NullString
 	ImportProvenanceGuard     sql.NullInt32
+	SeriesID                  sql.NullString
 	MediaServerName           string
 }
 
@@ -1016,6 +1017,7 @@ func (q *Queries) StatsUserRecentWatches(ctx context.Context, arg StatsUserRecen
 			&i.ImportSource,
 			&i.ImportRecordID,
 			&i.ImportProvenanceGuard,
+			&i.SeriesID,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err

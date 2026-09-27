@@ -53,6 +53,16 @@ func (s *Service) CreatePlaybackReporting(
 	return s.create(ctx, mediaServerID, requestedBy, core.ImportSourcePlaybackReporting, "0")
 }
 
+// CreateJellyfinUserData creates a coarse catalog-backed play-state job.
+func (s *Service) CreateJellyfinUserData(
+	ctx context.Context, mediaServerID, requestedBy string,
+) (core.ImportJob, error) {
+	if err := s.validateTarget(ctx, mediaServerID, requestedBy); err != nil {
+		return core.ImportJob{}, err
+	}
+	return s.create(ctx, mediaServerID, requestedBy, core.ImportSourceJellyfinUserData, "{}")
+}
+
 // StageBloomExport streams one bounded upload into database chunks.
 func (s *Service) StageBloomExport(ctx context.Context, upload io.Reader) (string, error) {
 	if upload == nil {

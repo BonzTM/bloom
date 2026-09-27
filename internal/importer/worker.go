@@ -31,6 +31,7 @@ type WorkerConfig struct {
 type WorkerDependencies struct {
 	Store     core.ImportStore
 	Reporting PlaybackReportingService
+	UserData  UserDataService
 	Clock     core.Clock
 	Metrics   Metrics
 	Logger    *slog.Logger
@@ -65,7 +66,7 @@ func NewWorker(config WorkerConfig, deps WorkerDependencies) (*Worker, error) {
 	return &Worker{
 		config: config, deps: deps,
 		sources: sourceFactory{
-			reporting: deps.Reporting, staging: deps.Staging,
+			reporting: deps.Reporting, userData: deps.UserData, staging: deps.Staging,
 			storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
 		},
 	}, nil
@@ -147,7 +148,7 @@ func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error)
 		w.deps.Metrics.AddImportedRecords(string(job.Source), result.Imported-job.Imported)
 		job.Cursor, job.Read, job.Imported = cursor, result.Read, result.Imported
 		job.Skipped, job.Duplicate = result.Skipped, result.Duplicate
-		if len(records)+int(skipped) < core.ImportBatchSize {
+		if job.Source != core.ImportSourceJellyfinUserData && len(records)+int(skipped) < core.ImportBatchSize {
 			return w.complete(ctx, job)
 		}
 	}

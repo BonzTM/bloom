@@ -44,6 +44,8 @@ tags:
     description: Administrative invite management and public redemption.
   - name: playback
     description: Administrator playback activity and history.
+  - name: catalog
+    description: Type-agnostic media library catalog synchronization and reads.
   - name: stats
     description: Administrator statistics dashboards computed from recorded watches.
   - name: metadata
@@ -747,6 +749,150 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/MediaServerFailure" }
         "503": { $ref: "#/components/responses/MediaServerBusy" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/catalog/sync:
+    post:
+      tags: [catalog]
+      operationId: syncLibraryCatalog
+      summary: Schedule an immediate full catalog walk.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/MediaServerID" }]
+      responses:
+        "202": { description: Sync accepted., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogSyncResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedPost" }
+  /api/v1/media-servers/{id}/libraries/catalog:
+    get:
+      tags: [catalog]
+      operationId: listCatalogLibraries
+      summary: Return active catalog counts and optional-window play totals by library and item type.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogDays" }
+      responses:
+        "200": { description: Catalog library summaries., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogLibrariesResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/libraries/{library_id}/items:
+    get:
+      tags: [catalog]
+      operationId: listCatalogItems
+      summary: Return one bounded, sortable catalog item page.
+      description: Activity sorts use indexed all-time item rollups. The optional days window limits returned play totals without changing item order.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogLibraryID" }
+        - { $ref: "#/components/parameters/CatalogLimit" }
+        - { $ref: "#/components/parameters/CatalogCursor" }
+        - { $ref: "#/components/parameters/CatalogDays" }
+        - { name: item_type, in: query, schema: { type: string, minLength: 1, x-max-bytes: 500 } }
+        - { name: archived, in: query, schema: { type: boolean, default: false } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, date_added, premiere_date, plays, watch_time, last_played], default: name } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+      responses:
+        "200": { description: Catalog item page., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemsResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/items/{item_id}:
+    get:
+      tags: [catalog]
+      operationId: getCatalogItem
+      summary: Return one catalog item with descendant and play summaries.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogItemID" }
+      responses:
+        "200": { description: Catalog item detail., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemDetailResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/items/{item_id}/history:
+    get:
+      tags: [catalog]
+      operationId: listCatalogItemHistory
+      summary: Return watches for an item or descendants of a series or season.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogItemID" }
+        - { $ref: "#/components/parameters/CatalogLimit" }
+        - { $ref: "#/components/parameters/CatalogCursor" }
+      responses:
+        "200": { description: Catalog item history., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogHistoryResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/libraries/{library_id}/recent:
+    get:
+      tags: [catalog]
+      operationId: listRecentCatalogItems
+      summary: Return recently added active catalog items.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogLibraryID" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200": { description: Recently added items., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemsResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/libraries/{library_id}/genres:
+    get:
+      tags: [catalog]
+      operationId: listCatalogGenres
+      summary: Return active item and optional-window play totals by genre.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogLibraryID" }
+        - { $ref: "#/components/parameters/CatalogDays" }
+      responses:
+        "200": { description: Genre summaries., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogGenresResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/libraries/{library_id}/stale:
+    get:
+      tags: [catalog]
+      operationId: listStaleCatalogItems
+      summary: Return items never played or not played within the requested number of days.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/MediaServerID" }
+        - { $ref: "#/components/parameters/CatalogLibraryID" }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 3650, default: 90 } }
+        - { $ref: "#/components/parameters/CatalogLimit" }
+        - { $ref: "#/components/parameters/CatalogCursor" }
+      responses:
+        "200": { description: Stale catalog item page., content: { application/json: { schema: { $ref: "#/components/schemas/CatalogItemsResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
   /api/v1/download-managers:
     post:
@@ -1543,7 +1689,7 @@ paths:
     post:
       tags: [imports]
       operationId: createImport
-      summary: Create a Playback Reporting, Bloom JSONL, or Bloom ZIP import job.
+      summary: Create a Playback Reporting, Jellyfin user-data, Bloom JSONL, or Bloom ZIP import job.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -1788,6 +1934,31 @@ paths:
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
 components:
   parameters:
+    CatalogLibraryID:
+      name: library_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+    CatalogItemID:
+      name: item_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+    CatalogLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    CatalogCursor:
+      name: cursor
+      in: query
+      description: Opaque cursor returned as `next_cursor` by the previous page. It is bound to the route identity, filters, sort, and the first page's fixed time window; mismatched reuse returns 422.
+      schema: { type: string, minLength: 1, maxLength: 2048 }
+    CatalogDays:
+      name: days
+      in: query
+      required: false
+      description: Rolling 24-hour window for returned play totals. Item-list activity sorting remains all-time.
+      schema: { type: integer, minimum: 1, maximum: 3650 }
     StatsDays:
       name: days
       in: query
@@ -3248,6 +3419,112 @@ components:
           type: array
           maxItems: 1000
           items: { $ref: "#/components/schemas/MediaUser" }
+    CatalogSyncResponse:
+      type: object
+      required: [media_server_id, state]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        state: { type: string, const: pending }
+    CatalogTypeSummary:
+      type: object
+      required: [item_type, items, plays, watch_seconds]
+      additionalProperties: false
+      properties:
+        item_type: { type: string, minLength: 1, x-max-bytes: 500 }
+        items: { type: integer, format: int64, minimum: 0 }
+        plays: { type: integer, format: int64, minimum: 0 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+    CatalogLibrarySummary:
+      type: object
+      required: [library_id, types]
+      additionalProperties: false
+      properties:
+        library_id: { type: string, minLength: 1, x-max-bytes: 128 }
+        types: { type: array, maxItems: 10000, items: { $ref: "#/components/schemas/CatalogTypeSummary" } }
+    CatalogLibrariesResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/CatalogLibrarySummary" } }
+    CatalogItem:
+      type: object
+      required: [media_server_id, item_id, library_id, parent_id, item_type, name, series_id, series_name, season_id, genres, primary_image_tag, archived, first_seen_at, last_seen_at, updated_at, plays, watch_seconds, unique_users]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        item_id: { type: string, minLength: 1, x-max-bytes: 128 }
+        library_id: { type: string, minLength: 1, x-max-bytes: 128 }
+        parent_id: { type: string, x-max-bytes: 128 }
+        item_type: { type: string, minLength: 1, x-max-bytes: 500 }
+        name: { type: string, minLength: 1, x-max-bytes: 500 }
+        series_id: { type: string, x-max-bytes: 128 }
+        series_name: { type: string, x-max-bytes: 500 }
+        season_id: { type: string, x-max-bytes: 128 }
+        season_number: { type: integer, format: int32 }
+        index_number: { type: integer, format: int32 }
+        runtime_ms: { type: integer, format: int64, minimum: 0 }
+        premiere_date: { type: string, format: date-time }
+        date_created: { type: string, format: date-time }
+        production_year: { type: integer, format: int32, minimum: 0, maximum: 9999 }
+        community_rating: { type: number, format: double, minimum: 0, maximum: 100 }
+        genres: { type: array, maxItems: 64, items: { type: string, minLength: 1, x-max-bytes: 500 } }
+        primary_image_tag: { type: string, x-max-bytes: 256 }
+        archived: { type: boolean }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        plays: { type: integer, format: int64, minimum: 0 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+        unique_users: { type: integer, format: int64, minimum: 0 }
+        first_played_at: { type: string, format: date-time }
+        last_played_at: { type: string, format: date-time }
+    CatalogItemsResponse:
+      type: object
+      required: [items, limit, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/CatalogItem" } }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        next_cursor: { type: string, maxLength: 2048 }
+    CatalogChildSummary:
+      type: object
+      required: [item_type, items]
+      additionalProperties: false
+      properties:
+        item_type: { type: string, minLength: 1, x-max-bytes: 500 }
+        items: { type: integer, format: int64, minimum: 0 }
+    CatalogItemDetailResponse:
+      type: object
+      required: [item, children]
+      additionalProperties: false
+      properties:
+        item: { $ref: "#/components/schemas/CatalogItem" }
+        children: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/CatalogChildSummary" } }
+    CatalogHistoryResponse:
+      type: object
+      required: [items, limit, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/PlaybackWatch" } }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        next_cursor: { type: string, maxLength: 2048 }
+    CatalogGenreSummary:
+      type: object
+      required: [genre, items, plays, watch_seconds]
+      additionalProperties: false
+      properties:
+        genre: { type: string, minLength: 1, x-max-bytes: 500 }
+        items: { type: integer, format: int64, minimum: 0 }
+        plays: { type: integer, format: int64, minimum: 0 }
+        watch_seconds: { type: integer, format: int64, minimum: 0 }
+    CatalogGenresResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/CatalogGenreSummary" } }
     PlayMethod:
       type: string
       enum: [direct_play, direct_stream, transcode, unknown]
@@ -3256,7 +3533,7 @@ components:
       enum: [poll, websocket, webhook, import]
     ImportSource:
       type: string
-      enum: [playback_reporting, bloom_export]
+      enum: [playback_reporting, bloom_export, jellyfin_userdata]
     ImportState:
       type: string
       enum: [pending, running, completed, failed, cancelled]
@@ -3266,7 +3543,7 @@ components:
       additionalProperties: false
       properties:
         media_server_id: { type: string, format: uuid }
-        source: { type: string, const: playback_reporting }
+        source: { type: string, enum: [playback_reporting, jellyfin_userdata] }
     CreateBloomExportImportRequest:
       type: object
       required: [media_server_id, source, file]
@@ -3333,6 +3610,7 @@ components:
         - item_id
         - item_name
         - item_type
+        - series_id
         - series_name
         - library_id
         - library_name
@@ -3358,6 +3636,7 @@ components:
         item_id: { type: string, minLength: 1 }
         item_name: { type: string }
         item_type: { type: string }
+        series_id: { type: string, x-max-bytes: 128 }
         series_name: { type: string }
         library_id: { type: string, maxLength: 128 }
         library_name: { type: string, maxLength: 500 }

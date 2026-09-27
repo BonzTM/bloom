@@ -499,7 +499,7 @@ func mapSession(value jellyfinapi.SessionInfoDto) (core.PlaybackSession, error) 
 		Username: stringValue(value.UserName), DeviceID: *value.DeviceId,
 		DeviceName: stringValue(value.DeviceName), Client: stringValue(value.Client),
 		ItemID: item.Id.String(), ItemName: *item.Name, ItemType: string(*item.Type),
-		SeriesName: stringValue(item.SeriesName), SeasonNumber: cloneInt32(item.ParentIndexNumber),
+		SeriesID: uuidString(item.SeriesId), SeriesName: stringValue(item.SeriesName), SeasonNumber: cloneInt32(item.ParentIndexNumber),
 		EpisodeNumber: cloneInt32(item.IndexNumber), Position: position, Runtime: runtime,
 		Paused: boolValue(value.PlayState.IsPaused), PlayMethod: mapPlayMethod(value.PlayState.PlayMethod),
 		Stream:         stream,

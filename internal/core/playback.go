@@ -122,6 +122,7 @@ type PlaybackSession struct {
 	ItemID          string
 	ItemName        string
 	ItemType        string
+	SeriesID        string
 	SeriesName      string
 	SeasonNumber    *int32
 	EpisodeNumber   *int32
@@ -185,6 +186,7 @@ type PlaybackWatch struct {
 	ItemID          string
 	ItemName        string
 	ItemType        string
+	SeriesID        string
 	SeriesName      string
 	LibraryID       string
 	LibraryName     string
@@ -661,7 +663,7 @@ func applySession(watch *PlaybackWatch, session PlaybackSession) {
 	watch.ServerSessionID = session.ServerSessionID
 	watch.ItemName = session.ItemName
 	watch.ItemType = session.ItemType
-	watch.SeriesName = session.SeriesName
+	watch.SeriesID, watch.SeriesName = session.SeriesID, session.SeriesName
 	watch.SeasonNumber = cloneInt32(session.SeasonNumber)
 	watch.EpisodeNumber = cloneInt32(session.EpisodeNumber)
 	watch.PlayMethod = session.PlayMethod
@@ -837,6 +839,9 @@ func ValidatePlaybackWatch(watch PlaybackWatch) error {
 		return ErrInvalidArgument
 	}
 	if watch.Runtime != nil && *watch.Runtime < 0 {
+		return ErrInvalidArgument
+	}
+	if watch.SeriesID != "" && !ValidCatalogID(watch.SeriesID) {
 		return ErrInvalidArgument
 	}
 	provenance := watch.ImportSource.Valid() && watch.ImportRecordID != "" &&

@@ -74,7 +74,6 @@ type DownloadManager struct {
 type Import struct {
 	ID             string
 	MediaServerID  string
-	Source         string
 	State          string
 	Cursor         string
 	ReadCount      int64
@@ -89,6 +88,7 @@ type Import struct {
 	StartedAt      sql.NullString
 	FinishedAt     sql.NullString
 	UpdatedAt      string
+	Source         string
 }
 
 type ImportUpload struct {
@@ -144,6 +144,56 @@ type InviteRedemption struct {
 	MediaUserID   string
 	Username      string
 	RedeemedAt    string
+}
+
+type LibraryItem struct {
+	MediaServerID   string
+	ItemID          string
+	LibraryID       string
+	ParentID        string
+	ItemType        string
+	Name            string
+	SeriesID        string
+	SeriesName      string
+	SeasonID        string
+	SeasonNumber    sql.NullInt64
+	IndexNumber     sql.NullInt64
+	RuntimeMs       sql.NullInt64
+	PremiereDate    sql.NullString
+	ProductionYear  sql.NullInt64
+	CommunityRating sql.NullFloat64
+	Genres          string
+	PrimaryImageTag string
+	DateCreated     sql.NullString
+	Archived        int64
+	Plays           int64
+	WatchSeconds    int64
+	UniqueUsers     int64
+	FirstPlayedAt   sql.NullString
+	LastPlayedAt    sql.NullString
+	FirstSeenAt     string
+	LastSeenAt      string
+	UpdatedAt       string
+}
+
+type LibraryItemGenre struct {
+	MediaServerID string
+	ItemID        string
+	Genre         string
+}
+
+type LibrarySync struct {
+	MediaServerID  string
+	State          string
+	Cursor         string
+	SeenCount      int64
+	UpsertedCount  int64
+	ArchivedCount  int64
+	LastError      string
+	LeaseToken     string
+	LeaseExpiresAt sql.NullString
+	StartedAt      sql.NullString
+	FinishedAt     sql.NullString
 }
 
 type MediaServer struct {
@@ -340,8 +390,9 @@ type Watch struct {
 	StreamIsAudioDirect       sql.NullInt64
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
-	ImportSource              sql.NullString
 	ImportRecordID            sql.NullString
+	SeriesID                  sql.NullString
+	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
 }
 

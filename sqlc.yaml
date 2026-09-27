@@ -29,6 +29,7 @@ sql:
       - internal/db/queries/playback.sql
       - internal/db/queries/imports.sql
       - internal/db/queries/imports_sqlite.sql
+      - internal/db/queries/catalog.sql
       - internal/db/queries/stats.sql
       - internal/db/queries/requests.sql
       - internal/db/queries/requests_sqlite.sql
@@ -60,6 +61,7 @@ sql:
       - internal/db/queries/playback.sql
       - internal/db/queries/imports.sql
       - internal/db/queries/imports_postgres.sql
+      - internal/db/queries/catalog.sql
       - internal/db/queries/stats.sql
       - internal/db/queries/requests.sql
       - internal/db/queries/requests_postgres.sql

@@ -71,6 +71,11 @@ func TestGeneratedQuerierParity(t *testing.T) {
 func TestSQLiteEngineSuite(t *testing.T) {
 	pool := openSQLiteMemory(t)
 	runEngineSuite(t, pool, config.DriverSQLite)
+	assertSQLiteSchema(t, pool)
+}
+
+func assertSQLiteSchema(t *testing.T, pool *sql.DB) {
+	t.Helper()
 	assertColumns(t, pool, sqliteColumns, expectedAccountColumns)
 	assertColumns(t, pool, sqliteSessionColumns, expectedSessionColumns)
 	assertColumns(t, pool, sqliteRoleColumns, expectedRoleColumns)
@@ -89,6 +94,16 @@ func TestSQLiteEngineSuite(t *testing.T) {
 	assertColumns(t, pool, sqliteImportColumns, expectedImportColumns)
 	assertColumns(t, pool, sqliteImportUploadColumns, expectedImportUploadColumns)
 	assertColumns(t, pool, sqliteRequestColumns, expectedRequestColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return sqliteTableColumns(ctx, pool, "library_items")
+	}, expectedLibraryItemColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return sqliteTableColumns(ctx, pool, "library_item_genres")
+	}, expectedLibraryItemGenreColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return sqliteTableColumns(ctx, pool, "library_syncs")
+	}, expectedLibrarySyncColumns)
+	assertCatalogIndexes(t, pool, sqliteTableIndexes)
 }
 
 // expectedAccountColumns is the column set ADR 0004 item 2 requires both
@@ -106,13 +121,40 @@ var (
 	expectedInviteLibraryColumns             = []string{"invite_id", "library_id"}
 	expectedInviteRedemptionColumns          = []string{"id", "invite_id", "media_server_id", "media_user_id", "redeemed_at", "username"}
 	expectedInviteProvisioningFailureColumns = []string{"account_id", "attempts", "created_at", "id", "invite_id", "last_error", "lease_expires_at", "lease_token", "media_server_id", "media_user_id", "media_user_owned", "next_attempt_at", "reason", "terminal", "updated_at", "username"}
-	expectedWatchColumns                     = []string{"active_seconds", "client", "created_at", "device_id", "device_name", "ended_at", "episode_number", "id", "import_provenance_guard", "import_record_id", "import_source", "item_id", "item_name", "item_type", "last_position_ms", "last_seen_at", "library_id", "library_name", "media_server_id", "media_user_id", "play_method", "runtime_ms", "season_number", "series_name", "server_session_id", "source", "started_at", "state", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "updated_at", "username"}
+	expectedWatchColumns                     = []string{"active_seconds", "client", "created_at", "device_id", "device_name", "ended_at", "episode_number", "id", "import_provenance_guard", "import_record_id", "import_source", "item_id", "item_name", "item_type", "last_position_ms", "last_seen_at", "library_id", "library_name", "media_server_id", "media_user_id", "play_method", "runtime_ms", "season_number", "series_id", "series_name", "server_session_id", "source", "started_at", "state", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "updated_at", "username"}
 	expectedImportColumns                    = []string{"created_at", "cursor", "duplicate_count", "finished_at", "id", "imported_count", "last_error", "lease_expires_at", "lease_token", "media_server_id", "read_count", "requested_by", "skipped_count", "source", "started_at", "state", "updated_at"}
 	expectedImportUploadColumns              = []string{"bytes", "chunk_index", "created_at", "id", "import_id"}
 	expectedWatchSegmentColumns              = []string{"ended_at", "source", "started_at", "watch_id"}
 	expectedWatchPositionColumns             = []string{"is_transition", "observed_at", "paused", "play_method", "position_ms", "source", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "watch_id"}
 	expectedRequestColumns                   = []string{"created_at", "decided_at", "decided_by_account_id", "decision_reason", "dispatch_lease_expires_at", "dispatch_lease_token", "dispatch_quality_profile", "dispatch_root_folder", "dispatch_tags", "download_manager_id", "download_manager_item_id", "failure_reason", "id", "kind", "last_availability_check_at", "poster_path", "profile_id", "provider", "provider_id", "release_year", "requester_account_id", "status", "title", "updated_at"}
+	expectedLibraryItemColumns               = []string{"archived", "community_rating", "date_created", "first_played_at", "first_seen_at", "genres", "index_number", "item_id", "item_type", "last_played_at", "last_seen_at", "library_id", "media_server_id", "name", "parent_id", "plays", "premiere_date", "primary_image_tag", "production_year", "runtime_ms", "season_id", "season_number", "series_id", "series_name", "unique_users", "updated_at", "watch_seconds"}
+	expectedLibraryItemGenreColumns          = []string{"genre", "item_id", "media_server_id"}
+	expectedLibrarySyncColumns               = []string{"archived_count", "cursor", "finished_at", "last_error", "lease_expires_at", "lease_token", "media_server_id", "seen_count", "started_at", "state", "upserted_count"}
 )
+
+var expectedCatalogIndexes = map[string][]string{
+	"library_item_genres": {"library_item_genres_summary_idx"},
+	"library_syncs":       {"library_syncs_claim_idx"},
+	"watches": {
+		"watches_catalog_aggregate_idx", "watches_import_record_idx", "watches_key_idx",
+		"watches_server_item_started_idx", "watches_server_library_started_idx",
+		"watches_server_series_started_idx", "watches_server_started_idx", "watches_server_state_idx",
+		"watches_started_idx", "watches_userdata_import_record_idx",
+	},
+	"library_items": {
+		"library_items_archived_idx", "library_items_date_asc_idx", "library_items_date_desc_idx",
+		"library_items_last_played_asc_idx", "library_items_last_played_desc_idx", "library_items_name_asc_idx",
+		"library_items_name_desc_idx", "library_items_plays_asc_idx", "library_items_plays_desc_idx",
+		"library_items_premiere_asc_idx", "library_items_premiere_desc_idx",
+		"library_items_season_idx", "library_items_series_idx", "library_items_stale_idx", "library_items_type_date_asc_idx",
+		"library_items_type_date_desc_idx", "library_items_type_last_played_asc_idx",
+		"library_items_type_last_played_desc_idx", "library_items_type_name_asc_idx",
+		"library_items_type_name_desc_idx", "library_items_type_plays_asc_idx", "library_items_type_plays_desc_idx",
+		"library_items_type_premiere_asc_idx", "library_items_type_premiere_desc_idx",
+		"library_items_type_watch_asc_idx", "library_items_type_watch_desc_idx",
+		"library_items_watch_asc_idx", "library_items_watch_desc_idx",
+	},
+}
 
 func openSQLiteMemory(t *testing.T) *sql.DB {
 	t.Helper()
@@ -291,6 +333,27 @@ func sqliteTableColumns(ctx context.Context, pool *sql.DB, table string) ([]stri
 	}
 	defer func() { _ = rows.Close() }()
 	return scanStrings(rows)
+}
+
+func sqliteTableIndexes(ctx context.Context, pool *sql.DB, table string) ([]string, error) {
+	rows, err := pool.QueryContext(ctx, "SELECT name FROM pragma_index_list($1) WHERE origin='c' ORDER BY name", table)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanStrings(rows)
+}
+
+type indexLister func(context.Context, *sql.DB, string) ([]string, error)
+
+func assertCatalogIndexes(t *testing.T, pool *sql.DB, list indexLister) {
+	t.Helper()
+	for table, want := range expectedCatalogIndexes {
+		got, err := list(t.Context(), pool, table)
+		if err != nil || !slices.Equal(got, want) {
+			t.Fatalf("%s indexes = %v, %v; want %v", table, got, err, want)
+		}
+	}
 }
 
 func scanStrings(rows *sql.Rows) ([]string, error) {

@@ -116,6 +116,11 @@ func (s *sqlitePlaybackStore) saveSQLiteMutation(
 	if err := s.deleteSQLiteImportDuplicates(ctx, queries, mutation.Watch); err != nil {
 		return err
 	}
+	if err := queries.RebuildLibraryItemRollup(ctx, sqlite.RebuildLibraryItemRollupParams{
+		MediaServerID: mutation.Watch.MediaServerID, ItemID: mutation.Watch.ItemID,
+	}); err != nil {
+		return playbackStoreError("rebuild catalog item rollup", err)
+	}
 	if mutation.SegmentEnd != nil {
 		params := sqlite.CloseOpenWatchSegmentParams{
 			WatchID: mutation.Watch.ID, EndedAt: sqliteNullableTime(mutation.SegmentEnd),
@@ -141,6 +146,11 @@ func (s *sqlitePlaybackStore) deleteSQLiteImportDuplicates(
 ) error {
 	if watch.Source == core.WatchSourceImport {
 		return nil
+	}
+	if err := queries.DeleteJellyfinUserDataDuplicate(ctx, sqlite.DeleteJellyfinUserDataDuplicateParams{
+		MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID, ItemID: watch.ItemID,
+	}); err != nil {
+		return playbackStoreError("delete Jellyfin user-data duplicate", err)
 	}
 	err := queries.DeleteOverlappingImportedWatches(ctx, sqlite.DeleteOverlappingImportedWatchesParams{
 		MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID, ItemID: watch.ItemID,
@@ -339,7 +349,7 @@ func sqliteWatchParams(w core.PlaybackWatch) (sqlite.UpsertPlaybackWatchParams, 
 		ID: w.ID, MediaServerID: w.MediaServerID, MediaUserID: w.MediaUserID,
 		Username: w.Username, DeviceID: w.DeviceID, DeviceName: w.DeviceName, Client: w.Client,
 		ServerSessionID: w.ServerSessionID, ItemID: w.ItemID, ItemName: w.ItemName,
-		ItemType: w.ItemType, SeriesName: w.SeriesName,
+		ItemType: w.ItemType, SeriesID: optionalStreamString(w.SeriesID), SeriesName: w.SeriesName,
 		LibraryID: w.LibraryID, LibraryName: w.LibraryName,
 		SeasonNumber: sqliteNullableInt32(w.SeasonNumber), EpisodeNumber: sqliteNullableInt32(w.EpisodeNumber),
 		PlayMethod: string(w.PlayMethod), State: string(w.State),
@@ -388,7 +398,7 @@ func sqliteOptionalTime(value sql.NullString) (*time.Time, error) {
 
 func sqliteStoredWatch(
 	id, serverID, serverName, userID, username, deviceID, deviceName, client, sessionID string,
-	itemID, itemName, itemType, seriesName, libraryID, libraryName string,
+	itemID, itemName, itemType string, seriesID sql.NullString, seriesName, libraryID, libraryName string,
 	season, episode sql.NullInt64,
 	method, state, started, lastSeen string,
 	ended sql.NullString,
@@ -437,7 +447,7 @@ func sqliteStoredWatch(
 		id: id, mediaServerID: serverID, mediaServerName: serverName, mediaUserID: userID,
 		username: username, deviceID: deviceID, deviceName: deviceName, client: client,
 		serverSessionID: sessionID, itemID: itemID, itemName: itemName, itemType: itemType,
-		seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
+		seriesID: seriesID.String, seriesName: seriesName, libraryID: libraryID, libraryName: libraryName,
 		seasonNumber: seasonNumber, episodeNumber: episodeNumber,
 		playMethod: core.PlayMethod(method), state: core.WatchState(state),
 		stream:    details,
@@ -453,7 +463,7 @@ func sqliteOpenWatch(row sqlite.ListOpenPlaybackWatchesRow) (core.PlaybackWatch,
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -468,7 +478,7 @@ func sqliteNowWatch(row sqlite.ListNowPlayingRow) (core.PlaybackWatch, error) {
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -483,7 +493,7 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -498,7 +508,7 @@ func sqliteRecentWatch(row sqlite.FindRecentPlaybackWatchRow) (core.PlaybackWatc
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
@@ -513,7 +523,7 @@ func sqliteRecentServerWatch(row sqlite.ListRecentPlaybackWatchesRow) (core.Play
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
-		row.ItemID, row.ItemName, row.ItemType, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,

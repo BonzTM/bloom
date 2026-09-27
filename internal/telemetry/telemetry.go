@@ -184,3 +184,15 @@ func (NopMetrics) AddImportedRecords(string, int64) {}
 
 // SetRunningImports does nothing.
 func (NopMetrics) SetRunningImports(int) {}
+
+// ObserveLibraryCatalogSync does nothing.
+func (NopMetrics) ObserveLibraryCatalogSync(string, float64) {}
+
+// AddLibraryCatalogItems does nothing.
+func (NopMetrics) AddLibraryCatalogItems(int64) {}
+
+// AddLibraryCatalogArchived does nothing.
+func (NopMetrics) AddLibraryCatalogArchived(int64) {}
+
+// SetLibraryCatalogRunning does nothing.
+func (NopMetrics) SetLibraryCatalogRunning(int) {}

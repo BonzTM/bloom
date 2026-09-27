@@ -226,15 +226,18 @@ func lockPostgresImportKeys(ctx context.Context, q *postgres.Queries, batch core
 func insertPostgresImportRecords(ctx context.Context, q *postgres.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		dupe, err := q.FindCollectedImportDuplicate(ctx, postgres.FindCollectedImportDuplicateParams{
-			MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
-			StartAfter: record.StartedAt.Add(-batch.ResumeWindow), StartBefore: record.StartedAt.Add(batch.ResumeWindow),
-		})
+		if err := supersedePostgresUserData(ctx, q, batch, record); err != nil {
+			return 0, 0, importStoreError("supersede Jellyfin user-data watch", err)
+		}
+		dupe, err := postgresImportDuplicate(ctx, q, batch, record)
 		if err != nil {
 			return 0, 0, importStoreError("find collected import duplicate", err)
 		}
 		if dupe {
 			duplicate++
+			if rebuildErr := rebuildPostgresImportRollup(ctx, q, batch.MediaServerID, record.ItemID); rebuildErr != nil {
+				return 0, 0, rebuildErr
+			}
 			continue
 		}
 		id, err := core.NewID()
@@ -254,8 +257,43 @@ func insertPostgresImportRecords(ctx context.Context, q *postgres.Queries, batch
 		} else {
 			duplicate++
 		}
+		if err := rebuildPostgresImportRollup(ctx, q, batch.MediaServerID, record.ItemID); err != nil {
+			return 0, 0, err
+		}
 	}
 	return imported, duplicate, nil
+}
+
+func rebuildPostgresImportRollup(ctx context.Context, q *postgres.Queries, serverID, itemID string) error {
+	err := q.RebuildLibraryItemRollup(ctx, postgres.RebuildLibraryItemRollupParams{
+		MediaServerID: serverID, ItemID: itemID,
+	})
+	return importStoreError("rebuild catalog item rollup", err)
+}
+
+func supersedePostgresUserData(
+	ctx context.Context, q *postgres.Queries, batch core.ImportBatch, record core.ImportedWatch,
+) error {
+	if batch.Source == core.ImportSourceJellyfinUserData {
+		return nil
+	}
+	return q.DeleteJellyfinUserDataDuplicate(ctx, postgres.DeleteJellyfinUserDataDuplicateParams{
+		MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
+	})
+}
+
+func postgresImportDuplicate(
+	ctx context.Context, q *postgres.Queries, batch core.ImportBatch, record core.ImportedWatch,
+) (bool, error) {
+	if batch.Source == core.ImportSourceJellyfinUserData {
+		return q.FindAnyWatchForUserItem(ctx, postgres.FindAnyWatchForUserItemParams{
+			MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
+		})
+	}
+	return q.FindCollectedImportDuplicate(ctx, postgres.FindCollectedImportDuplicateParams{
+		MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID, ItemID: record.ItemID,
+		StartAfter: record.StartedAt.Add(-batch.ResumeWindow), StartBefore: record.StartedAt.Add(batch.ResumeWindow),
+	})
 }
 
 func postgresImportedWatchParams(
@@ -269,7 +307,7 @@ func postgresImportedWatchParams(
 		ID: id, MediaServerID: batch.MediaServerID, MediaUserID: record.MediaUserID,
 		Username: record.Username, DeviceID: record.DeviceID, DeviceName: record.DeviceName, Client: record.Client,
 		ItemID: record.ItemID, ItemName: record.ItemName, ItemType: record.ItemType,
-		SeriesName: record.SeriesName, LibraryID: record.LibraryID, LibraryName: record.LibraryName,
+		SeriesID: optionalStreamString(record.SeriesID), SeriesName: record.SeriesName, LibraryID: record.LibraryID, LibraryName: record.LibraryName,
 		SeasonNumber: nullableInt32(record.SeasonNumber), EpisodeNumber: nullableInt32(record.EpisodeNumber),
 		PlayMethod: string(record.PlayMethod), StartedAt: core.NormalizeTime(record.StartedAt),
 		EndedAt: importEndedAt(record), ActiveSeconds: int64(record.Duration / time.Second),

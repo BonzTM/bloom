@@ -11,17 +11,27 @@ import (
 
 type Querier interface {
 	AddNotificationSubscription(ctx context.Context, arg AddNotificationSubscriptionParams) error
+	ArchiveLibraryItem(ctx context.Context, arg ArchiveLibraryItemParams) (int64, error)
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
+	BackfillWatchCatalogItem(ctx context.Context, arg BackfillWatchCatalogItemParams) (int64, error)
 	BackfillWatchLibrary(ctx context.Context, arg BackfillWatchLibraryParams) (int64, error)
 	CancelImport(ctx context.Context, arg CancelImportParams) (int64, error)
+	CatalogChildSummary(ctx context.Context, arg CatalogChildSummaryParams) ([]CatalogChildSummaryRow, error)
+	CatalogItemPlaySummary(ctx context.Context, arg CatalogItemPlaySummaryParams) (CatalogItemPlaySummaryRow, error)
+	CatalogItemWindowSummary(ctx context.Context, arg CatalogItemWindowSummaryParams) (CatalogItemWindowSummaryRow, error)
+	CatalogLibraryTypeRows(ctx context.Context, arg CatalogLibraryTypeRowsParams) ([]CatalogLibraryTypeRowsRow, error)
 	CheckpointImport(ctx context.Context, arg CheckpointImportParams) (int64, error)
+	CheckpointLibrarySync(ctx context.Context, arg CheckpointLibrarySyncParams) (int64, error)
+	CheckpointLibrarySyncArchives(ctx context.Context, arg CheckpointLibrarySyncArchivesParams) (int64, error)
 	ClaimImport(ctx context.Context, arg ClaimImportParams) (int64, error)
 	ClaimInviteProvisioningFailure(ctx context.Context, arg ClaimInviteProvisioningFailureParams) (ClaimInviteProvisioningFailureRow, error)
+	ClaimLibrarySync(ctx context.Context, arg ClaimLibrarySyncParams) (int64, error)
 	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (NotificationOutbox, error)
 	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CompleteInviteProvisioningCleanup(ctx context.Context, arg CompleteInviteProvisioningCleanupParams) (int64, error)
+	CompleteLibrarySync(ctx context.Context, arg CompleteLibrarySyncParams) (int64, error)
 	CompleteNotificationOutbox(ctx context.Context, arg CompleteNotificationOutboxParams) (int64, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	CountActiveRequestSeason(ctx context.Context, arg CountActiveRequestSeasonParams) (int64, error)
@@ -55,9 +65,12 @@ type Querier interface {
 	CreateRequestSeason(ctx context.Context, arg CreateRequestSeasonParams) error
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
 	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
+	DeleteArchivedLibraryItemGenres(ctx context.Context, targetMediaServerID string) (int64, error)
 	DeleteDownloadManager(ctx context.Context, id string) (int64, error)
 	DeleteImportUpload(ctx context.Context, id string) error
 	DeleteImportUploadForJob(ctx context.Context, importID sql.NullString) error
+	DeleteJellyfinUserDataDuplicate(ctx context.Context, arg DeleteJellyfinUserDataDuplicateParams) error
+	DeleteLibraryItemGenres(ctx context.Context, arg DeleteLibraryItemGenresParams) error
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
@@ -69,10 +82,15 @@ type Querier interface {
 	DeleteRoleRequestQuota(ctx context.Context, roleID string) (int64, error)
 	DeleteTombstonedNotificationChannel(ctx context.Context, arg DeleteTombstonedNotificationChannelParams) (int64, error)
 	DismissInviteProvisioningFailure(ctx context.Context, arg DismissInviteProvisioningFailureParams) (int64, error)
+	// Type-agnostic library catalog queries shared by SQLite and PostgreSQL.
+	EnsureLibrarySyncRows(ctx context.Context) error
 	FailExpiredExhaustedNotificationOutbox(ctx context.Context, updatedAt string) (int64, error)
+	FailLibrarySync(ctx context.Context, arg FailLibrarySyncParams) (int64, error)
 	FailPendingNotificationDeliveriesForChannel(ctx context.Context, arg FailPendingNotificationDeliveriesForChannelParams) (int64, error)
 	FailRequestDispatch(ctx context.Context, arg FailRequestDispatchParams) (int64, error)
 	FenceImportBatch(ctx context.Context, arg FenceImportBatchParams) (int64, error)
+	FenceLibrarySync(ctx context.Context, arg FenceLibrarySyncParams) (string, error)
+	FindAnyWatchForUserItem(ctx context.Context, arg FindAnyWatchForUserItemParams) (bool, error)
 	FindCollectedImportDuplicate(ctx context.Context, arg FindCollectedImportDuplicateParams) (bool, error)
 	FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPlaybackWatchParams) (FindRecentPlaybackWatchRow, error)
 	FinishImport(ctx context.Context, arg FinishImportParams) (int64, error)
@@ -83,6 +101,7 @@ type Querier interface {
 	GetAccountMediaUser(ctx context.Context, arg GetAccountMediaUserParams) (GetAccountMediaUserRow, error)
 	GetAccountRequestQuota(ctx context.Context, accountID string) (AccountRequestQuota, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
+	GetCatalogItem(ctx context.Context, arg GetCatalogItemParams) (LibraryItem, error)
 	GetClaimedInviteProvisioningFailure(ctx context.Context, arg GetClaimedInviteProvisioningFailureParams) (GetClaimedInviteProvisioningFailureRow, error)
 	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
 	GetDownloadManagerByName(ctx context.Context, nameKey string) (GetDownloadManagerByNameRow, error)
@@ -91,6 +110,7 @@ type Querier interface {
 	GetImportUploadInfo(ctx context.Context, id string) (GetImportUploadInfoRow, error)
 	GetInvite(ctx context.Context, id string) (GetInviteRow, error)
 	GetInviteByCodeHash(ctx context.Context, codeHash []byte) (GetInviteByCodeHashRow, error)
+	GetLibrarySync(ctx context.Context, mediaServerID string) (LibrarySync, error)
 	GetMediaServer(ctx context.Context, id string) (GetMediaServerRow, error)
 	// Metadata, request profile, request, and quota queries shared by both engines.
 	GetMetadataProvider(ctx context.Context, kind string) (MetadataProvider, error)
@@ -107,6 +127,7 @@ type Querier interface {
 	InsertImportedWatch(ctx context.Context, arg InsertImportedWatchParams) (int64, error)
 	InsertInviteProvisioningFailureIfAbsent(ctx context.Context, arg InsertInviteProvisioningFailureIfAbsentParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
+	InsertLibraryItemGenre(ctx context.Context, arg InsertLibraryItemGenreParams) error
 	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
 	InviteProvisioningFailureDepth(ctx context.Context) (int64, error)
 	InviteProvisioningFailureExists(ctx context.Context, id string) (bool, error)
@@ -115,17 +136,47 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListCatalogGenreRows(ctx context.Context, arg ListCatalogGenreRowsParams) ([]ListCatalogGenreRowsRow, error)
+	ListCatalogImportItems(ctx context.Context, arg ListCatalogImportItemsParams) ([]ListCatalogImportItemsRow, error)
+	ListCatalogItemHistory(ctx context.Context, arg ListCatalogItemHistoryParams) ([]ListCatalogItemHistoryRow, error)
+	ListCatalogItemsDateAsc(ctx context.Context, arg ListCatalogItemsDateAscParams) ([]LibraryItem, error)
+	ListCatalogItemsDateAscFiltered(ctx context.Context, arg ListCatalogItemsDateAscFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsDateDesc(ctx context.Context, arg ListCatalogItemsDateDescParams) ([]LibraryItem, error)
+	ListCatalogItemsDateDescFiltered(ctx context.Context, arg ListCatalogItemsDateDescFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsLastPlayedAsc(ctx context.Context, arg ListCatalogItemsLastPlayedAscParams) ([]LibraryItem, error)
+	ListCatalogItemsLastPlayedAscFiltered(ctx context.Context, arg ListCatalogItemsLastPlayedAscFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsLastPlayedDesc(ctx context.Context, arg ListCatalogItemsLastPlayedDescParams) ([]LibraryItem, error)
+	ListCatalogItemsLastPlayedDescFiltered(ctx context.Context, arg ListCatalogItemsLastPlayedDescFilteredParams) ([]LibraryItem, error)
+	// Item pages use fixed filtered and unfiltered plans selected by the adapter.
+	ListCatalogItemsNameAsc(ctx context.Context, arg ListCatalogItemsNameAscParams) ([]LibraryItem, error)
+	ListCatalogItemsNameAscFiltered(ctx context.Context, arg ListCatalogItemsNameAscFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsNameDesc(ctx context.Context, arg ListCatalogItemsNameDescParams) ([]LibraryItem, error)
+	ListCatalogItemsNameDescFiltered(ctx context.Context, arg ListCatalogItemsNameDescFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsPlaysAsc(ctx context.Context, arg ListCatalogItemsPlaysAscParams) ([]LibraryItem, error)
+	ListCatalogItemsPlaysAscFiltered(ctx context.Context, arg ListCatalogItemsPlaysAscFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsPlaysDesc(ctx context.Context, arg ListCatalogItemsPlaysDescParams) ([]LibraryItem, error)
+	ListCatalogItemsPlaysDescFiltered(ctx context.Context, arg ListCatalogItemsPlaysDescFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsPremiereAsc(ctx context.Context, arg ListCatalogItemsPremiereAscParams) ([]LibraryItem, error)
+	ListCatalogItemsPremiereAscFiltered(ctx context.Context, arg ListCatalogItemsPremiereAscFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsPremiereDesc(ctx context.Context, arg ListCatalogItemsPremiereDescParams) ([]LibraryItem, error)
+	ListCatalogItemsPremiereDescFiltered(ctx context.Context, arg ListCatalogItemsPremiereDescFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsWatchAsc(ctx context.Context, arg ListCatalogItemsWatchAscParams) ([]LibraryItem, error)
+	ListCatalogItemsWatchAscFiltered(ctx context.Context, arg ListCatalogItemsWatchAscFilteredParams) ([]LibraryItem, error)
+	ListCatalogItemsWatchDesc(ctx context.Context, arg ListCatalogItemsWatchDescParams) ([]LibraryItem, error)
+	ListCatalogItemsWatchDescFiltered(ctx context.Context, arg ListCatalogItemsWatchDescFilteredParams) ([]LibraryItem, error)
 	ListDownloadManagers(ctx context.Context, arg ListDownloadManagersParams) ([]ListDownloadManagersRow, error)
 	ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error)
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
 	ListInviteProvisioningFailures(ctx context.Context, arg ListInviteProvisioningFailuresParams) ([]ListInviteProvisioningFailuresRow, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
+	ListMissingLibraryItemIDs(ctx context.Context, arg ListMissingLibraryItemIDsParams) ([]string, error)
 	ListNotificationChannels(ctx context.Context, arg ListNotificationChannelsParams) ([]ListNotificationChannelsRow, error)
 	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]NotificationOutbox, error)
 	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
+	ListRecentCatalogItems(ctx context.Context, arg ListRecentCatalogItemsParams) ([]LibraryItem, error)
 	ListRecentPlaybackWatches(ctx context.Context, arg ListRecentPlaybackWatchesParams) ([]ListRecentPlaybackWatchesRow, error)
 	ListRequestProfileTags(ctx context.Context, profileID string) ([]string, error)
 	ListRequestProfiles(ctx context.Context, arg ListRequestProfilesParams) ([]RequestProfile, error)
@@ -134,6 +185,7 @@ type Querier interface {
 	ListRequestsForAvailability(ctx context.Context, pageSize int64) ([]Request, error)
 	ListRoleRequestQuotasForAccount(ctx context.Context, accountID string) ([]RoleRequestQuota, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	ListStaleCatalogItems(ctx context.Context, arg ListStaleCatalogItemsParams) ([]LibraryItem, error)
 	ListSubscribedNotificationChannels(ctx context.Context, arg ListSubscribedNotificationChannelsParams) ([]ListSubscribedNotificationChannelsRow, error)
 	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
 	ListWatchPositions(ctx context.Context, watchID string) ([]WatchPosition, error)
@@ -152,16 +204,20 @@ type Querier interface {
 	NotificationOutboxDepth(ctx context.Context) (int64, error)
 	PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error)
 	PruneNotificationOutbox(ctx context.Context, arg PruneNotificationOutboxParams) (int64, error)
+	RebuildLibraryItemRollup(ctx context.Context, arg RebuildLibraryItemRollupParams) error
+	RebuildLibraryItemRollups(ctx context.Context, mediaServerID string) error
 	RecordNotificationChannelSuccess(ctx context.Context, arg RecordNotificationChannelSuccessParams) (int64, error)
 	RecordNotificationChannelTerminalFailure(ctx context.Context, arg RecordNotificationChannelTerminalFailureParams) (int64, error)
 	RecordRequestDispatch(ctx context.Context, arg RecordRequestDispatchParams) (int64, error)
 	RemoveRoleIDFromAccount(ctx context.Context, arg RemoveRoleIDFromAccountParams) (int64, error)
 	RenewImportLease(ctx context.Context, arg RenewImportLeaseParams) (int64, error)
+	RequestLibrarySync(ctx context.Context, mediaServerID string) (int64, error)
 	RescheduleInviteProvisioningFailure(ctx context.Context, arg RescheduleInviteProvisioningFailureParams) (int64, error)
 	RescheduleNotificationOutbox(ctx context.Context, arg RescheduleNotificationOutboxParams) (int64, error)
 	RevokeInvite(ctx context.Context, arg RevokeInviteParams) (RevokeInviteRow, error)
 	// SQLite claim rechecks eligibility in the guarded update inside one transaction.
 	SelectClaimableImport(ctx context.Context, now sql.NullString) (Import, error)
+	SelectClaimableLibrarySync(ctx context.Context, arg SelectClaimableLibrarySyncParams) (LibrarySync, error)
 	SetAccountMediaUser(ctx context.Context, arg SetAccountMediaUserParams) error
 	StampRequestAvailabilityCheck(ctx context.Context, arg StampRequestAvailabilityCheckParams) (int64, error)
 	StatsBucketRows(ctx context.Context, arg StatsBucketRowsParams) ([]StatsBucketRowsRow, error)
@@ -188,6 +244,7 @@ type Querier interface {
 	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (int64, error)
 	UpdateRequestProfile(ctx context.Context, arg UpdateRequestProfileParams) (int64, error)
 	UpsertAccountRequestQuota(ctx context.Context, arg UpsertAccountRequestQuotaParams) error
+	UpsertLibraryItem(ctx context.Context, arg UpsertLibraryItemParams) (int64, error)
 	UpsertMetadataProvider(ctx context.Context, arg UpsertMetadataProviderParams) error
 	// Playback queries are portable across SQLite and PostgreSQL.
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error

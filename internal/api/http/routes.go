@@ -53,6 +53,14 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerLibraries},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerUsers},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleItemImage},
+	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/catalog/sync", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCatalogSync},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/catalog", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogLibraries},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/items", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogItems},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogItem},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogHistory},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/recent", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogRecent},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/genres", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogGenres},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/stale", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogStale},
 	{method: http.MethodDelete, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMediaServer},
 	{method: http.MethodPost, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateDownloadManager},
 	{method: http.MethodGet, path: "/api/v1/download-managers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListDownloadManagers},
@@ -186,6 +194,12 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		}
 		if strings.HasPrefix(route.path, "/api/v1/media-servers") && (s.mediaServerReader == nil || s.mediaServerManager == nil) {
 			continue
+		}
+		if strings.Contains(route.path, "/catalog") || strings.Contains(route.path, "/libraries/{library_id}") ||
+			(strings.Contains(route.path, "/items/{item_id}") && !strings.HasSuffix(route.path, "/image")) {
+			if s.catalog == nil {
+				continue
+			}
 		}
 		if strings.HasPrefix(route.path, "/api/v1/download-managers") && (s.downloadManagerReader == nil || s.downloadManagerManager == nil) {
 			continue

@@ -59,6 +59,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runPlaybackEngineTests(t, pool, driver)
 	runImportEngineTests(t, pool, driver)
 	runStatsEngineTests(t, pool, driver)
+	runCatalogEngineTests(t, pool, driver)
 	runDownloadManagerEngineTests(t, pool, driver)
 	runMetadataProviderEngineTests(t, pool, driver)
 	runRequestEngineTests(t, pool, driver, store)
@@ -117,6 +118,9 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("history import migration backfills legacy provenance", func(t *testing.T) {
 		testHistoryImportMigrationBackfill(t, pool, driver)
 	})
+	t.Run("library catalog migration preserves version 23 data", func(t *testing.T) {
+		testLibraryCatalogMigrationUpgrade(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(context.Background(), pool, driver); err != nil {
@@ -131,6 +135,100 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("Migrate (second up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
+}
+
+func testLibraryCatalogMigrationUpgrade(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare catalog migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 23); err != nil {
+		t.Fatalf("roll back catalog migration: %v", err)
+	}
+	accountID, serverID := mustID(t), mustID(t)
+	now := migrationCreatedAt(driver)
+	seedCatalogUpgradeOwner(t, pool, accountID, serverID, now)
+	seedCatalogUpgradeWatches(t, pool, serverID, now)
+	seedCatalogUpgradeImports(t, pool, accountID, serverID, now)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("apply catalog migration: %v", err)
+	}
+	assertCatalogUpgradeRows(t, pool, serverID)
+	assertCatalogWidenedConstraints(t, pool, accountID, serverID, now)
+	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean catalog migration fixture: %v", err)
+	}
+}
+
+func seedCatalogUpgradeOwner(t *testing.T, pool *sql.DB, accountID, serverID string, now any) {
+	t.Helper()
+	execTestSQL(t, pool, "INSERT INTO accounts (id,username,username_key,created_at) VALUES ($1,$2,$2,$3)",
+		accountID, "catalog-upgrade-"+accountID, now)
+	execTestSQL(t, pool, `INSERT INTO media_servers
+        (id,kind,name,name_key,base_url,credential_ciphertext,allow_insecure,created_at,updated_at)
+        VALUES ($1,'jellyfin',$2,$2,'https://catalog-upgrade.example.test',$3,FALSE,$4,$4)`,
+		serverID, "Catalog "+serverID, []byte("ciphertext"), now)
+}
+
+func seedCatalogUpgradeWatches(t *testing.T, pool *sql.DB, serverID string, now any) {
+	t.Helper()
+	const columns = `(id,media_server_id,media_user_id,username,device_id,device_name,client,
+        server_session_id,item_id,item_name,item_type,series_name,play_method,state,started_at,
+        last_seen_at,ended_at,active_seconds,last_position_ms,source,created_at,updated_at,
+        import_source,import_record_id)`
+	values := `VALUES ($1,$2,'user','User','','TV','Web',$3,$4,$5,'Movie','','direct_play','stopped',
+        $6,$6,$6,42,1000,$7,$6,$6,$8,$9)`
+	execTestSQL(t, pool, "INSERT INTO watches "+columns+" "+values,
+		mustID(t), serverID, "collected-session", "collected-item", "Collected", now, "poll", nil, nil)
+	execTestSQL(t, pool, "INSERT INTO watches "+columns+" "+values,
+		mustID(t), serverID, "", "imported-item", "Imported", now, "import", "playback_reporting", "record-1")
+}
+
+func seedCatalogUpgradeImports(t *testing.T, pool *sql.DB, accountID, serverID string, now any) {
+	t.Helper()
+	query := `INSERT INTO imports
+        (id,media_server_id,source,state,cursor,read_count,imported_count,skipped_count,
+         duplicate_count,last_error,lease_token,lease_expires_at,requested_by,created_at,started_at,finished_at,updated_at)
+        VALUES ($1,$2,$3,$4,$5,7,5,1,1,'',$6,$7,$8,$9,$10,$11,$9)`
+	execTestSQL(t, pool, query, mustID(t), serverID, "playback_reporting", "running", "cursor-7",
+		"lease", now, accountID, now, now, nil)
+	execTestSQL(t, pool, query, mustID(t), serverID, "bloom_export", "completed", "cursor-9",
+		"", nil, accountID, now, now, now)
+}
+
+func assertCatalogUpgradeRows(t *testing.T, pool *sql.DB, serverID string) {
+	t.Helper()
+	var watches, imports int
+	if err := pool.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM watches WHERE media_server_id=$1 AND
+        ((item_name='Collected' AND source='poll' AND active_seconds=42 AND import_source IS NULL) OR
+         (item_name='Imported' AND source='import' AND active_seconds=42 AND
+          import_source='playback_reporting' AND import_record_id='record-1'))`, serverID,
+	).Scan(&watches); err != nil || watches != 2 {
+		t.Fatalf("preserved watches = %d, %v", watches, err)
+	}
+	if err := pool.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM imports WHERE media_server_id=$1 AND read_count=7 AND imported_count=5 AND
+        skipped_count=1 AND duplicate_count=1 AND
+        ((source='playback_reporting' AND state='running' AND cursor='cursor-7' AND lease_token='lease') OR
+         (source='bloom_export' AND state='completed' AND cursor='cursor-9' AND lease_token=''))`, serverID,
+	).Scan(&imports); err != nil || imports != 2 {
+		t.Fatalf("preserved imports = %d, %v", imports, err)
+	}
+}
+
+func assertCatalogWidenedConstraints(t *testing.T, pool *sql.DB, accountID, serverID string, now any) {
+	t.Helper()
+	execTestSQL(t, pool, `INSERT INTO imports
+        (id,media_server_id,source,state,requested_by,created_at,updated_at)
+        VALUES ($1,$2,'jellyfin_userdata','completed',$3,$4,$4)`, mustID(t), serverID, accountID, now)
+	execTestSQL(t, pool, `INSERT INTO watches
+        (id,media_server_id,media_user_id,username,device_id,device_name,client,server_session_id,
+         item_id,item_name,item_type,series_name,play_method,state,started_at,last_seen_at,ended_at,
+         active_seconds,last_position_ms,source,created_at,updated_at,import_source,import_record_id)
+        VALUES ($1,$2,'user-2','User','','','','','item-2','Synthetic','Movie','','unknown','stopped',
+                $3,$3,$3,1,1,'import',$3,$3,'jellyfin_userdata','item-2')`, mustID(t), serverID, now)
 }
 
 func testHistoryImportMigrationBackfill(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -1543,6 +1641,9 @@ func expectedForeignKeys() []string {
 		"invite_redemptions:media_server_id:media_servers:id:RESTRICT",
 		"invites:created_by_account_id:accounts:id:RESTRICT",
 		"invites:media_server_id:media_servers:id:RESTRICT",
+		"library_item_genres:media_server_id:media_servers:id:CASCADE",
+		"library_items:media_server_id:media_servers:id:CASCADE",
+		"library_syncs:media_server_id:media_servers:id:CASCADE",
 		"notification_channel_subscriptions:channel_id:notification_channels:id:CASCADE",
 		"notification_outbox:channel_id:notification_channels:id:CASCADE",
 		"notification_outbox:event_id:notification_events:id:CASCADE",
@@ -1609,7 +1710,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 23)
+	assertMigrationVersion(t, pool, 24)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -1730,7 +1831,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 23)
+	assertMigrationVersion(t, pool, 24)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

@@ -181,6 +181,28 @@ func (q *Queries) DeleteOrphanImportUploadChunks(ctx context.Context, arg Delete
 	return result.RowsAffected()
 }
 
+const findAnyWatchForUserItem = `-- name: FindAnyWatchForUserItem :one
+SELECT EXISTS (
+    SELECT 1 FROM watches
+    WHERE media_server_id = $1
+      AND media_user_id = $2
+      AND item_id = $3
+)
+`
+
+type FindAnyWatchForUserItemParams struct {
+	MediaServerID string
+	MediaUserID   string
+	ItemID        string
+}
+
+func (q *Queries) FindAnyWatchForUserItem(ctx context.Context, arg FindAnyWatchForUserItemParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, findAnyWatchForUserItem, arg.MediaServerID, arg.MediaUserID, arg.ItemID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const findCollectedImportDuplicate = `-- name: FindCollectedImportDuplicate :one
 SELECT EXISTS (
     SELECT 1 FROM watches
@@ -336,7 +358,7 @@ func (q *Queries) InsertImportUploadChunk(ctx context.Context, arg InsertImportU
 const insertImportedWatch = `-- name: InsertImportedWatch :execrows
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,
-    server_session_id, item_id, item_name, item_type, series_name, library_id,
+    server_session_id, item_id, item_name, item_type, series_id, series_name, library_id,
     library_name, season_number, episode_number, play_method,
     stream_container, stream_video_codec, stream_audio_codec, stream_bitrate,
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
@@ -346,18 +368,17 @@ INSERT INTO watches (
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7, '', $8, $9,
-    $10, $11, $12, $13,
-    $14, $15, $16,
-    $17, $18, $19,
-    $20, $21, $22,
-    $23, $24,
-    $25, $26,
-    $27, 'stopped', $28, $29,
-    $29, $30, $31, $32, 'import',
-    $33, $33, $34, $35
+    $10, $11, $12, $13, $14,
+    $15, $16, $17,
+    $18, $19, $20,
+    $21, $22, $23,
+    $24, $25,
+    $26, $27,
+    $28, 'stopped', $29, $30,
+    $30, $31, $32, $33, 'import',
+    $34, $34, $35, $36
 )
-ON CONFLICT (media_server_id, import_source, import_record_id)
-WHERE import_record_id IS NOT NULL DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type InsertImportedWatchParams struct {
@@ -371,6 +392,7 @@ type InsertImportedWatchParams struct {
 	ItemID                    string
 	ItemName                  string
 	ItemType                  string
+	SeriesID                  sql.NullString
 	SeriesName                string
 	LibraryID                 string
 	LibraryName               string
@@ -410,6 +432,7 @@ func (q *Queries) InsertImportedWatch(ctx context.Context, arg InsertImportedWat
 		arg.ItemID,
 		arg.ItemName,
 		arg.ItemType,
+		arg.SeriesID,
 		arg.SeriesName,
 		arg.LibraryID,
 		arg.LibraryName,

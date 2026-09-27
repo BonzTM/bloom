@@ -67,6 +67,15 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("large orphan cleanup commits chunk batches", func(t *testing.T) {
 		testLargeOrphanUploadCleanup(t, newImportFixture(t, pool, driver))
 	})
+	t.Run("Jellyfin user data is per-user and yields to every watch source", func(t *testing.T) {
+		testJellyfinUserDataDeduplication(t, pool, driver, newImportFixture(t, pool, driver))
+	})
+	t.Run("richer imports supersede Jellyfin user data in either order", func(t *testing.T) {
+		testRicherImportPrecedence(t, pool, newImportFixture(t, pool, driver))
+	})
+	t.Run("import supersession maintains catalog rollups", func(t *testing.T) {
+		testImportCatalogRollup(t, pool, driver, newImportFixture(t, pool, driver))
+	})
 }
 
 type importFixtureServer struct{}
@@ -266,9 +275,10 @@ func testOrphanUploadCleanup(t *testing.T, fixture importFixture) {
 	if err != nil {
 		t.Fatalf("stage linked upload: %v", err)
 	}
-	if _, linkErr := oldService.CreateBloomExport(
+	linkedJob, linkErr := oldService.CreateBloomExport(
 		t.Context(), fixture.serverID, fixture.ownerID, linkedID,
-	); linkErr != nil {
+	)
+	if linkErr != nil {
 		t.Fatalf("link old upload: %v", linkErr)
 	}
 	if discardErr := fixture.store.DeleteImportUpload(t.Context(), linkedID); discardErr != nil {
@@ -298,6 +308,9 @@ func testOrphanUploadCleanup(t *testing.T, fixture importFixture) {
 	}
 	if info, err := fixture.store.ImportUploadInfo(t.Context(), mixedID); err != nil || info.ChunkCount != 2 {
 		t.Fatalf("recently extended upload = %+v, %v", info, err)
+	}
+	if _, err := fixture.store.CancelImport(t.Context(), linkedJob.ID, fixture.now); err != nil {
+		t.Fatalf("cancel linked upload import: %v", err)
 	}
 }
 
@@ -621,7 +634,7 @@ func testBloomExportSnapshot(
 		ID: mustID(t), MediaServerID: fixture.serverID, MediaServerName: "Import source",
 		MediaUserID: "snapshot-user", Username: "Snapshot",
 		DeviceID: "device-id", DeviceName: "TV", Client: "Web", ItemID: "snapshot-item",
-		ItemName: "Episode", ItemType: "Episode", SeriesName: "Series",
+		ItemName: "Episode", ItemType: "Episode", SeriesID: "series-id", SeriesName: "Series",
 		LibraryID: "library", LibraryName: "Shows", SeasonNumber: &season, EpisodeNumber: &episode,
 		PlayMethod: core.PlayMethodDirectStream, State: core.WatchStopped,
 		Source: core.WatchSourcePoll, StartedAt: fixture.now, EndedAt: &ended,
@@ -649,6 +662,162 @@ func testBloomExportSnapshot(
 		t.Fatalf("ListWatches = %+v, %v", watches, err)
 	}
 	assertBloomSnapshot(t, watches[0], exported)
+}
+
+func testJellyfinUserDataDeduplication(
+	t *testing.T, pool *sql.DB, driver config.Driver, fixture importFixture,
+) {
+	t.Helper()
+	prior := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	existing := importedRecord("prior-record", "existing-item", fixture.now)
+	existing.MediaUserID = "existing-user"
+	commitSingleImport(t, fixture, prior, existing)
+	if err := fixture.store.FinishImport(t.Context(), prior.ID, prior.LeaseToken,
+		core.ImportCompleted, "", fixture.now.Add(time.Second)); err != nil {
+		t.Fatalf("FinishImport(prior): %v", err)
+	}
+
+	job := createClaimedImport(t, fixture, core.ImportSourceJellyfinUserData, "{}")
+	records := []core.ImportedWatch{
+		userDataRecord("existing-user", "existing-item", fixture.now.Add(24*time.Hour)),
+		userDataRecord("user-a", "shared-item", fixture.now.Add(24*time.Hour)),
+		userDataRecord("user-b", "shared-item", fixture.now.Add(24*time.Hour)),
+	}
+	result, err := fixture.store.CommitImportBatch(t.Context(), userDataBatch(fixture, job, records))
+	if err != nil || result.Imported != 2 || result.Duplicate != 1 {
+		t.Fatalf("first user-data batch = %+v, %v", result, err)
+	}
+	result, err = fixture.store.CommitImportBatch(t.Context(), userDataBatch(fixture, job, records))
+	if err != nil || result.Imported != 2 || result.Duplicate != 4 {
+		t.Fatalf("replayed user-data batch = %+v, %v", result, err)
+	}
+
+	store := newPlaybackTestStore(t, pool, driver)
+	collected := playbackStoreWatch(t, fixture.serverID, fixture.now.Add(48*time.Hour))
+	collected.MediaUserID, collected.ItemID = "user-a", "shared-item"
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: collected}}); err != nil {
+		t.Fatalf("SaveWatches(collected winner): %v", err)
+	}
+	assertUserDataWatchCounts(t, pool, fixture.serverID)
+}
+
+func userDataRecord(userID, itemID string, started time.Time) core.ImportedWatch {
+	record := importedRecord(itemID, itemID, started)
+	record.MediaUserID = userID
+	return record
+}
+
+func userDataBatch(
+	fixture importFixture, job core.ImportJob, records []core.ImportedWatch,
+) core.ImportBatch {
+	return core.ImportBatch{
+		JobID: job.ID, LeaseToken: job.LeaseToken, Cursor: "{}", Source: job.Source,
+		MediaServerID: fixture.serverID, Records: records, ResumeWindow: 5 * time.Minute,
+		Now: fixture.now.Add(time.Minute), LeaseExpiresAt: fixture.now.Add(2 * time.Minute),
+	}
+}
+
+func assertUserDataWatchCounts(t *testing.T, pool *sql.DB, serverID string) {
+	t.Helper()
+	var collected, imported int
+	err := pool.QueryRowContext(t.Context(), `SELECT
+        SUM(CASE WHEN source <> 'import' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN import_source = 'jellyfin_userdata' THEN 1 ELSE 0 END)
+        FROM watches WHERE media_server_id = $1 AND item_id = 'shared-item'`, serverID).
+		Scan(&collected, &imported)
+	if err != nil || collected != 1 || imported != 1 {
+		t.Fatalf("user-data watch counts = collected %d imported %d, %v; want 1/1", collected, imported, err)
+	}
+}
+
+func testRicherImportPrecedence(t *testing.T, pool *sql.DB, fixture importFixture) {
+	t.Helper()
+	userFirst := createClaimedImport(t, fixture, core.ImportSourceJellyfinUserData, "{}")
+	record := userDataRecord("unlinked-user", "user-first-item", fixture.now)
+	if result := commitSingleImport(t, fixture, userFirst, record); result.Imported != 1 || result.Duplicate != 0 {
+		t.Fatalf("user-data first result = %+v", result)
+	}
+	finishImportFixture(t, fixture, userFirst)
+	richSecond := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	rich := importedRecord("rich-record", record.ItemID, fixture.now)
+	rich.MediaUserID = record.MediaUserID
+	if result := commitSingleImport(t, fixture, richSecond, rich); result.Imported != 1 || result.Duplicate != 0 {
+		t.Fatalf("rich second result = %+v", result)
+	}
+	assertSingleImportSource(t, pool, fixture.serverID, record.MediaUserID, record.ItemID, "playback_reporting")
+
+	finishImportFixture(t, fixture, richSecond)
+	richFirst := createClaimedImport(t, fixture, core.ImportSourceBloomExport, `{"id":"precedence","offset":0}`)
+	other := importedRecord("export-record", "rich-first-item", fixture.now)
+	other.MediaUserID = "another-unlinked-user"
+	if result := commitSingleImport(t, fixture, richFirst, other); result.Imported != 1 {
+		t.Fatalf("rich first result = %+v", result)
+	}
+	finishImportFixture(t, fixture, richFirst)
+	userSecond := createClaimedImport(t, fixture, core.ImportSourceJellyfinUserData, "{}")
+	if result := commitSingleImport(t, fixture, userSecond,
+		userDataRecord(other.MediaUserID, other.ItemID, fixture.now)); result.Imported != 0 || result.Duplicate != 1 {
+		t.Fatalf("user-data second result = %+v", result)
+	}
+	assertSingleImportSource(t, pool, fixture.serverID, other.MediaUserID, other.ItemID, "bloom_export")
+}
+
+func testImportCatalogRollup(
+	t *testing.T, pool *sql.DB, driver config.Driver, fixture importFixture,
+) {
+	t.Helper()
+	const itemID = "rollup-item"
+	seedImportCatalogItem(t, pool, driver, fixture, itemID)
+	userJob := createClaimedImport(t, fixture, core.ImportSourceJellyfinUserData, "{}")
+	record := userDataRecord("rollup-user", itemID, fixture.now)
+	commitSingleImport(t, fixture, userJob, record)
+	assertLibraryItemRollup(t, pool, driver, fixture.serverID, itemID, 1, 90, 1, fixture.now, fixture.now)
+	finishImportFixture(t, fixture, userJob)
+
+	richJob := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	rich := importedRecord("rollup-rich", itemID, fixture.now)
+	rich.MediaUserID = record.MediaUserID
+	rich.Duration = 2 * time.Minute
+	commitSingleImport(t, fixture, richJob, rich)
+	assertLibraryItemRollup(t, pool, driver, fixture.serverID, itemID, 1, 120, 1, fixture.now, fixture.now)
+}
+
+func seedImportCatalogItem(
+	t *testing.T, pool *sql.DB, driver config.Driver, fixture importFixture, itemID string,
+) {
+	t.Helper()
+	store, err := db.NewLibraryCatalogStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	sync := claimCatalogSync(t, store, fixture.serverID, fixture.now)
+	item := catalogSuiteItem(fixture.serverID, itemID, "Rollup item", fixture.now)
+	sync, err = store.CommitLibrarySyncPage(t.Context(), sync, []core.LibraryItem{item}, "", fixture.now)
+	if err != nil {
+		t.Fatalf("CommitLibrarySyncPage: %v", err)
+	}
+	if _, err = store.FinishLibrarySync(t.Context(), sync, fixture.now); err != nil {
+		t.Fatalf("FinishLibrarySync: %v", err)
+	}
+}
+
+func finishImportFixture(t *testing.T, fixture importFixture, job core.ImportJob) {
+	t.Helper()
+	if err := fixture.store.FinishImport(t.Context(), job.ID, job.LeaseToken,
+		core.ImportCompleted, "", fixture.now.Add(time.Second)); err != nil {
+		t.Fatalf("FinishImport: %v", err)
+	}
+}
+
+func assertSingleImportSource(t *testing.T, pool *sql.DB, serverID, userID, itemID, source string) {
+	t.Helper()
+	var count int
+	var got string
+	err := pool.QueryRowContext(t.Context(), `SELECT COUNT(*), MIN(import_source) FROM watches
+        WHERE media_server_id = $1 AND media_user_id = $2 AND item_id = $3`, serverID, userID, itemID).Scan(&count, &got)
+	if err != nil || count != 1 || got != source {
+		t.Fatalf("watch precedence = %d/%q, %v; want 1/%q", count, got, err, source)
+	}
 }
 
 func createClaimedImport(
@@ -724,7 +893,7 @@ func assertBloomSnapshot(t *testing.T, watch, exported core.PlaybackWatch) {
 		watch.Username != exported.Username || watch.DeviceID != exported.DeviceID ||
 		watch.DeviceName != exported.DeviceName || watch.Client != exported.Client ||
 		watch.ItemID != exported.ItemID || watch.ItemName != exported.ItemName || watch.ItemType != exported.ItemType ||
-		watch.SeriesName != exported.SeriesName || watch.PlayMethod != exported.PlayMethod ||
+		watch.SeriesID != exported.SeriesID || watch.SeriesName != exported.SeriesName || watch.PlayMethod != exported.PlayMethod ||
 		watch.LibraryID != exported.LibraryID || watch.LibraryName != exported.LibraryName ||
 		watch.SeasonNumber == nil || *watch.SeasonNumber != *exported.SeasonNumber ||
 		watch.EpisodeNumber == nil || *watch.EpisodeNumber != *exported.EpisodeNumber ||

@@ -34,11 +34,13 @@ const (
 	ImportSourcePlaybackReporting ImportSource = "playback_reporting"
 	// ImportSourceBloomExport reads Bloom's JSONL watch export.
 	ImportSourceBloomExport ImportSource = "bloom_export"
+	// ImportSourceJellyfinUserData reads coarse per-user item play state.
+	ImportSourceJellyfinUserData ImportSource = "jellyfin_userdata"
 )
 
 // Valid reports whether the source is implemented by this slice.
 func (s ImportSource) Valid() bool {
-	return s == ImportSourcePlaybackReporting || s == ImportSourceBloomExport
+	return s == ImportSourcePlaybackReporting || s == ImportSourceBloomExport || s == ImportSourceJellyfinUserData
 }
 
 // ImportState is the durable lifecycle state of one import job.
@@ -146,7 +148,7 @@ type ImportedWatch struct {
 	RecordID, MediaUserID, Username string
 	DeviceID, DeviceName, Client    string
 	ItemID, ItemName, ItemType      string
-	SeriesName                      string
+	SeriesID, SeriesName            string
 	LibraryID, LibraryName          string
 	SeasonNumber, EpisodeNumber     *int32
 	PlayMethod                      PlayMethod
@@ -164,13 +166,13 @@ func (w ImportedWatch) Valid() bool {
 		!validImportText(w.DeviceID, 256) || !validImportValue(w.Username) ||
 		!validImportValue(w.DeviceName) || !validImportValue(w.Client) ||
 		!validImportValue(w.ItemName) || !validImportValue(w.ItemType) ||
-		!validImportValue(w.SeriesName) || !w.PlayMethod.Valid() ||
+		!validCatalogOptionalID(w.SeriesID) || !validImportValue(w.SeriesName) || !w.PlayMethod.Valid() ||
 		w.StartedAt.IsZero() || w.Duration < 0 || w.LastPosition < 0 ||
 		(w.Runtime != nil && *w.Runtime < 0) {
 		return false
 	}
-	if (w.LibraryID == "") != (w.LibraryName == "") ||
-		(w.LibraryID != "" && !(Library{ID: w.LibraryID, Name: w.LibraryName}).Valid()) {
+	if (w.LibraryID == "" && w.LibraryName != "") ||
+		(w.LibraryID != "" && (!ValidLibraryID(w.LibraryID) || !validImportValue(w.LibraryName))) {
 		return false
 	}
 	if w.EndedAt != nil && w.EndedAt.Before(w.StartedAt) {

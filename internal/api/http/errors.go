@@ -81,6 +81,8 @@ func errorClass(err error) (status int, code string) {
 		return http.StatusConflict, codeProfileInUse
 	case errors.Is(err, core.ErrImportInProgress):
 		return http.StatusConflict, codeImportInProgress
+	case errors.Is(err, core.ErrLibrarySyncInProgress):
+		return http.StatusConflict, "library_sync_in_progress"
 	case errors.Is(err, core.ErrInvalidTransition):
 		return http.StatusConflict, codeInvalidTransition
 	case isMediaServerErrorKind(err, core.MediaServerSaturated):
