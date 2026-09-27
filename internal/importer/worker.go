@@ -126,6 +126,9 @@ func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error)
 	for {
 		records, cursor, skipped, readErr := reader.ReadImportBatch(ctx, job)
 		if readErr != nil {
+			if errors.Is(readErr, core.ErrImportStore) {
+				return fmt.Errorf("read import batch: %w", readErr)
+			}
 			return w.fail(ctx, job, readErr)
 		}
 		if len(records) == 0 && skipped == 0 {

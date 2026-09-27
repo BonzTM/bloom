@@ -234,6 +234,8 @@ var (
 	ErrImportPluginMissing = errors.New("playback reporting plugin is not installed")
 	// ErrImportStore classifies persistence failures that workers should retry.
 	ErrImportStore = errors.New("import store failure")
+	// ErrImportRecordCountMismatch reports a truncated or inconsistent Bloom export.
+	ErrImportRecordCountMismatch = errors.New("bloom export record count mismatch")
 )
 
 // SafeImportError returns bounded operator text without source bodies or secrets.
@@ -243,6 +245,8 @@ func SafeImportError(err error) string {
 		return "Playback Reporting plugin is not installed"
 	case errors.Is(err, ErrInvalidArgument):
 		return "source data is invalid"
+	case errors.Is(err, ErrImportRecordCountMismatch):
+		return "Bloom export watch record count does not match summary"
 	default:
 		return "import failed; see server logs"
 	}

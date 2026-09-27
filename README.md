@@ -289,10 +289,12 @@ there are no `cursor` or `limit` parameters. The archive contains
 `manifest.json`, every watch in newest-first `(started_at, id)` order as
 `watches.jsonl`, import-job provenance as `imports.jsonl`, and record counts and
 entry byte sizes in the trailing `summary.json`. Import that ZIP on another
-Bloom instance to move watch history between SQLite and PostgreSQL. The previous JSONL shape remains
-accepted for compatibility. Re-import is idempotent because the original watch
-ID is the source record ID. A transfer that does not form a complete ZIP archive
-is truncated and must be retried.
+Bloom instance to move watch history between SQLite and PostgreSQL. Bloom ZIP
+imports require both `manifest.json` and `summary.json`. The importer verifies
+that the number of watch records read matches the count in `summary.json`. The
+previous JSONL shape remains accepted for compatibility. Re-import is idempotent
+because the original watch ID is the source record ID. A transfer that does not
+form a complete ZIP archive is truncated and must be retried.
 
 Bloom's collected watch wins when an imported and collected watch have the same
 media server, media user, and item and start within

@@ -362,6 +362,9 @@ func TestWatchExportMidstreamFailureAbortsTransfer(t *testing.T) {
 		recorder.Header().Get("X-Next-Cursor") != "" {
 		t.Fatalf("midstream failure = panic %v status %d", recovered, recorder.Code)
 	}
+	if _, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len())); err == nil {
+		t.Fatal("midstream failure produced a readable ZIP archive")
+	}
 	if event := audit.last(t); event.Result != telemetry.AuditFailure || event.Reason != "failed" {
 		t.Fatalf("failure audit = %+v", event)
 	}

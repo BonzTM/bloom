@@ -165,15 +165,29 @@ func databaseImportZIP(t *testing.T, fixture importFixture) []byte {
 	watch.EndedAt, watch.ActiveTime = &ended, time.Minute
 	var payload bytes.Buffer
 	archive := zip.NewWriter(&payload)
+	manifest, err := archive.Create("manifest.json")
+	if err != nil {
+		t.Fatalf("create manifest.json: %v", err)
+	}
+	if _, writeErr := manifest.Write([]byte(`{}`)); writeErr != nil {
+		t.Fatalf("write manifest.json: %v", writeErr)
+	}
 	entry, err := archive.CreateHeader(&zip.FileHeader{Name: "watches.jsonl", Method: zip.Store})
 	if err != nil {
 		t.Fatalf("create watches.jsonl: %v", err)
 	}
-	if err := importer.EncodeWatchJSONL(entry, watch); err != nil {
-		t.Fatalf("EncodeWatchJSONL: %v", err)
+	if encodeErr := importer.EncodeWatchJSONL(entry, watch); encodeErr != nil {
+		t.Fatalf("EncodeWatchJSONL: %v", encodeErr)
 	}
-	if err := archive.Close(); err != nil {
-		t.Fatalf("close import ZIP: %v", err)
+	summary, err := archive.Create("summary.json")
+	if err != nil {
+		t.Fatalf("create summary.json: %v", err)
+	}
+	if _, writeErr := summary.Write([]byte(`{"watch_records":1}`)); writeErr != nil {
+		t.Fatalf("write summary.json: %v", writeErr)
+	}
+	if closeErr := archive.Close(); closeErr != nil {
+		t.Fatalf("close import ZIP: %v", closeErr)
 	}
 	return payload.Bytes()
 }

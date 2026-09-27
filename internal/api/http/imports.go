@@ -473,9 +473,8 @@ func (s *Server) loadWatchExportStart(r *http.Request, query core.PlaybackQuery)
 
 func (s *Server) streamWatchExportZip(
 	w io.Writer, r *http.Request, query core.PlaybackQuery, start watchExportStart, exportedAt time.Time,
-) (result error) {
+) error {
 	archive := zip.NewWriter(w)
-	defer func() { result = errors.Join(result, archive.Close()) }()
 	manifest := watchExportManifest{
 		FormatVersion: 1, BloomVersion: buildinfo.Version, ExportedAt: exportedAt,
 		MediaServerID: query.MediaServerID,
@@ -491,10 +490,16 @@ func (s *Server) streamWatchExportZip(
 	if err != nil {
 		return err
 	}
-	return writeZipJSON(archive, "summary.json", watchExportSummary{
+	if err := writeZipJSON(archive, "summary.json", watchExportSummary{
 		WatchRecords: watchCount, ImportRecords: importCount,
 		WatchesBytes: watchBytes, ImportsBytes: importBytes,
-	}, exportedAt)
+	}, exportedAt); err != nil {
+		return err
+	}
+	if err := archive.Close(); err != nil {
+		return fmt.Errorf("close watch export archive: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) writeWatchExportEntry(

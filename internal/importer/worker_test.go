@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -261,12 +262,26 @@ func compressedWatchArchive(t *testing.T, records int) []byte {
 	t.Helper()
 	var output bytes.Buffer
 	archive := zip.NewWriter(&output)
+	manifest, err := archive.Create("manifest.json")
+	if err != nil {
+		t.Fatalf("create manifest.json: %v", err)
+	}
+	if _, writeErr := io.WriteString(manifest, `{}`); writeErr != nil {
+		t.Fatalf("write manifest.json: %v", writeErr)
+	}
 	entry, err := archive.Create("watches.jsonl")
 	if err != nil {
 		t.Fatalf("create compressed watches.jsonl: %v", err)
 	}
-	if _, err := io.WriteString(entry, strings.Repeat(validJSONLFixture()+"\n", records)); err != nil {
-		t.Fatalf("write compressed watches.jsonl: %v", err)
+	if _, writeErr := io.WriteString(entry, strings.Repeat(validJSONLFixture()+"\n", records)); writeErr != nil {
+		t.Fatalf("write compressed watches.jsonl: %v", writeErr)
+	}
+	summary, err := archive.Create("summary.json")
+	if err != nil {
+		t.Fatalf("create summary.json: %v", err)
+	}
+	if _, err := fmt.Fprintf(summary, `{"watch_records":%d}`, records); err != nil {
+		t.Fatalf("write summary.json: %v", err)
 	}
 	if err := archive.Close(); err != nil {
 		t.Fatalf("close compressed archive: %v", err)
@@ -291,14 +306,53 @@ func TestWorkerTimesOutStalledUploadInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode cursor: %v", err)
 	}
+	store.uploadStore().linkUpload(id)
 	store.infoHook = func(ctx context.Context, _ string) (core.ImportUploadInfo, error) {
 		<-ctx.Done()
-		return core.ImportUploadInfo{}, ctx.Err()
+		return core.ImportUploadInfo{}, errors.Join(core.ErrImportStore, ctx.Err())
 	}
 	started := time.Now()
 	err = worker.runOnce(t.Context())
-	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+	if !errors.Is(err, core.ErrImportStore) || !errors.Is(err, context.DeadlineExceeded) ||
+		time.Since(started) > time.Second {
 		t.Fatalf("runOnce = %v after %s", err, time.Since(started))
+	}
+	if store.finished != "" || store.job.State != core.ImportRunning {
+		t.Fatalf("timed-out read finished job as %q from state %q", store.finished, store.job.State)
+	}
+	store.infoHook = nil
+	assertStagingPresence(t, worker.deps.Staging, id, true)
+	store.uploads.mu.Lock()
+	linked := store.uploads.linked[id]
+	store.uploads.mu.Unlock()
+	if !linked {
+		t.Fatal("timed-out read unlinked its staged upload")
+	}
+}
+
+func TestWorkerFailsBloomImportWhenSummaryCountDoesNotMatch(t *testing.T) {
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceBloomExport
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	payload := zipFixture(t, map[string]string{
+		"manifest.json": `{}`,
+		"watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json":  `{"watch_records":2}`,
+	})
+	id, err := worker.deps.Staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
+	if err != nil {
+		t.Fatalf("stage archive: %v", err)
+	}
+	store.uploadStore().linkUpload(id)
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	err = worker.runOnce(t.Context())
+	if !errors.Is(err, core.ErrImportRecordCountMismatch) || store.finished != core.ImportFailed ||
+		store.errorText != "Bloom export watch record count does not match summary" {
+		t.Fatalf("mismatched summary = %v, state %q, last_error %q", err, store.finished, store.errorText)
 	}
 }
 

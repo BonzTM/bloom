@@ -5,8 +5,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -78,7 +81,7 @@ func TestWatchJSONLRejectsSchemaDriftAndControlCharacters(t *testing.T) {
 func TestReadJSONLLinesCountsBlankLinesWithoutEndingBatch(t *testing.T) {
 	input := validJSONLFixture() + "\n\n" + validJSONLFixture() + "\n"
 	reader := bufio.NewReaderSize(strings.NewReader(input), maxJSONLLineBytes+1)
-	records, offset, skipped, err := readJSONLLines(context.Background(), reader, 0)
+	records, offset, skipped, _, err := readJSONLLines(context.Background(), reader, 0)
 	if err != nil || len(records) != 2 || skipped != 1 || offset != int64(len(input)) {
 		t.Fatalf("readJSONLLines = %d records, offset %d, skipped %d, %v", len(records), offset, skipped, err)
 	}
@@ -108,6 +111,12 @@ func TestBloomUploadDetectsZipByContent(t *testing.T) {
 func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 	tests := map[string][]byte{
 		"missing watches": zipFixture(t, map[string]string{"manifest.json": `{}`}),
+		"missing manifest": zipFixture(t, map[string]string{
+			"watches.jsonl": validJSONLFixture() + "\n", "summary.json": `{"watch_records":1}`,
+		}),
+		"missing summary": zipFixture(t, map[string]string{
+			"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
+		}),
 		"nested archive": zipFixture(t, map[string]string{
 			"watches.jsonl": validJSONLFixture() + "\n",
 			"nested.bin":    string(zipFixture(t, map[string]string{"inside": "data"})),
@@ -137,6 +146,95 @@ func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBloomUploadBoundsCentralDirectoryBeforeZipReader(t *testing.T) {
+	fixture := zipFixture(t, map[string]string{
+		"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json": `{"watch_records":1}`,
+	})
+	tests := []struct {
+		name          string
+		records       uint16
+		directorySize uint32
+	}{
+		{name: "huge declared entry count", records: 60_000},
+		{name: "oversized declared directory", directorySize: maxImportCentralDirectoryBytes + 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			payload := bytes.Clone(fixture)
+			end := bytes.LastIndex(payload, []byte{'P', 'K', 0x05, 0x06})
+			if end < 0 {
+				t.Fatal("fixture does not contain an end-of-central-directory record")
+			}
+			if test.records != 0 {
+				binary.LittleEndian.PutUint16(payload[end+8:end+10], test.records)
+				binary.LittleEndian.PutUint16(payload[end+10:end+12], test.records)
+			}
+			if test.directorySize != 0 {
+				binary.LittleEndian.PutUint32(payload[end+12:end+16], test.directorySize)
+			}
+			if err := openStagedWatch(t, payload); !errors.Is(err, errImportArchiveDirectoryBounds) {
+				t.Fatalf("openWatchUpload = %v, want directory bound", err)
+			}
+		})
+	}
+}
+
+func openStagedWatch(t *testing.T, payload []byte) error {
+	t.Helper()
+	staging := newJSONLTestStaging(t)
+	id, err := staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
+	if err != nil {
+		t.Fatalf("stage zip: %v", err)
+	}
+	upload, err := staging.open(t.Context(), id)
+	if err != nil {
+		t.Fatalf("open staged zip: %v", err)
+	}
+	_, err = openWatchUpload(upload, 0)
+	return err
+}
+
+func TestBloomUploadRejectsMalformedAndOversizedZip64Records(t *testing.T) {
+	tests := map[string][]byte{
+		"missing locator":  zip64EndFixture(t, false, 44),
+		"oversized record": zip64EndFixture(t, true, maxImportCentralDirectoryBytes+1),
+	}
+	for name, payload := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := validateZipDirectory(payloadReaderAt(payload), int64(len(payload))); err == nil {
+				t.Fatal("validateZipDirectory accepted invalid ZIP64 metadata")
+			}
+		})
+	}
+}
+
+type payloadReaderAt []byte
+
+func (p payloadReaderAt) ReadAt(buffer []byte, offset int64) (int, error) {
+	return bytes.NewReader(p).ReadAt(buffer, offset)
+}
+
+func zip64EndFixture(t *testing.T, locator bool, recordSize uint64) []byte {
+	t.Helper()
+	payload := make([]byte, zip64EndRecordBytes)
+	binary.LittleEndian.PutUint32(payload[0:4], zip64EndSignature)
+	binary.LittleEndian.PutUint64(payload[4:12], recordSize)
+	if locator {
+		locatorRecord := make([]byte, zip64LocatorBytes)
+		binary.LittleEndian.PutUint32(locatorRecord[0:4], zip64LocatorSignature)
+		binary.LittleEndian.PutUint32(locatorRecord[16:20], 1)
+		payload = append(payload, locatorRecord...)
+	}
+	end := make([]byte, zipEndRecordBytes)
+	binary.LittleEndian.PutUint32(end[0:4], zipEndSignature)
+	binary.LittleEndian.PutUint16(end[8:10], math.MaxUint16)
+	binary.LittleEndian.PutUint16(end[10:12], math.MaxUint16)
+	binary.LittleEndian.PutUint32(end[12:16], math.MaxUint32)
+	binary.LittleEndian.PutUint32(end[16:20], math.MaxUint32)
+	return append(payload, end...)
 }
 
 func tooManyZipEntries(t *testing.T) []byte {
