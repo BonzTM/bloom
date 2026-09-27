@@ -50,9 +50,11 @@ it("takes an administrator from the navigation to the roles page", async () => {
     await screen.findByRole("heading", { name: "Roles", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Roles | Bloom");
-  expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
+  expect(
+    screen.getByRole("link", { name: "Administration: Roles" }),
+  ).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("link", { name: "Admin" })).not.toHaveAttribute(
     "aria-current",
-    "page",
   );
 });
 

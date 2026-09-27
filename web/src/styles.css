@@ -24,29 +24,29 @@
   --space-6: 2rem;
   --space-8: 3rem;
 
-  --shell-sidebar: 15rem;
+  --shell-sidebar: 16rem;
   --content-max: 72rem;
 
-  --accent: #7c6cff;
-  --accent-soft: rgb(124 108 255 / 0.16);
+  --accent: #6366f1;
+  --accent-soft: rgb(99 102 241 / 0.18);
   /* Links stay bright on dark surfaces; filled buttons darken so white text
      reads on them; the focus ring is opaque so it reaches 3:1 everywhere. */
-  --link: #9a8dff;
-  --button-primary: #5a49f0;
-  --button-primary-hover: #4b3ae0;
+  --link: #a5b4fc;
+  --button-primary: #4f46e5;
+  --button-primary-hover: #4338ca;
   --accent-contrast: #ffffff;
-  --focus: #9a8dff;
+  --focus: #a5b4fc;
 
-  --bg: #0f1117;
-  --bg-elevated: #161a23;
-  --bg-sunken: #0b0d12;
-  --bg-hover: #1c212c;
-  --border: #262c3a;
-  --border-strong: #354055;
-  --text: #e8ebf3;
-  --text-muted: #9aa3b8;
+  --bg: #111827;
+  --bg-elevated: #1f2937;
+  --bg-sunken: #0b1120;
+  --bg-hover: #273449;
+  --border: #374151;
+  --border-strong: #4b5563;
+  --text: #f3f4f6;
+  --text-muted: #9ca3af;
   --text-faint: #8b93a7;
-  --control-border: #6b7590;
+  --control-border: #6b7280;
 
   --success: #37c88a;
   --success-soft: rgb(55 200 138 / 0.16);
@@ -183,21 +183,23 @@ code {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  padding: var(--space-5) var(--space-4);
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-3);
   position: sticky;
   top: 0;
-  height: 100vh;
 }
 
 .brand {
   align-items: center;
-  text-decoration: none;
   color: var(--text);
   display: flex;
-  font-size: 1.125rem;
+  font-size: 1.25rem;
   font-weight: 700;
   gap: var(--space-2);
   letter-spacing: -0.01em;
+  padding-inline: var(--space-2);
+  text-decoration: none;
 }
 
 .brand:hover {
@@ -205,28 +207,36 @@ code {
 }
 
 .brand-mark {
-  background: linear-gradient(135deg, var(--accent), #48c6ff);
+  background: linear-gradient(135deg, var(--accent), #38bdf8);
   border-radius: 0.5rem;
   display: inline-block;
-  height: 1.5rem;
-  width: 1.5rem;
+  height: 1.625rem;
+  width: 1.625rem;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .sidebar nav ul {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0.125rem;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .sidebar nav a {
-  border-radius: var(--radius-sm);
+  align-items: center;
+  border-radius: var(--radius-md);
   color: var(--text-muted);
-  display: block;
+  display: flex;
   font-weight: 500;
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  padding: 0.5625rem var(--space-3);
   text-decoration: none;
 }
 
@@ -238,9 +248,17 @@ code {
 
 .sidebar nav a[aria-current="page"] {
   background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--link);
   color: var(--text);
   font-weight: 600;
+}
+
+.sidebar nav a[aria-current="page"] .nav-icon {
+  color: var(--link);
+}
+
+.nav-icon {
+  flex: 0 0 auto;
+  opacity: 0.9;
 }
 
 .nav-section-label {
@@ -248,14 +266,78 @@ code {
   font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-  margin: var(--space-2) var(--space-3) var(--space-1);
+  margin: var(--space-3) var(--space-3) 0;
   text-transform: uppercase;
 }
 
-.sidebar-footer {
-  border-top: 1px solid var(--border);
-  margin-top: auto;
-  padding-top: var(--space-4);
+.content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The top bar is sticky, so anything scrolled into view (the focused main
+   after a route change, a hash target) must land below it, not under it. */
+html {
+  scroll-padding-top: var(--bar-height, 0px);
+}
+
+main {
+  scroll-margin-top: var(--bar-height, 0px);
+}
+
+.topbar {
+  align-items: center;
+  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.nav-toggle {
+  display: none;
+}
+
+.global-search {
+  align-items: center;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--space-2);
+  max-width: 34rem;
+  padding: 0.375rem var(--space-3);
+}
+
+.global-search:focus-within {
+  border-color: var(--control-border);
+}
+
+.global-search input {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  min-width: 0;
+  outline: none;
+  padding: 0.125rem 0;
+}
+
+.global-search input::placeholder {
+  color: var(--text-faint);
+}
+
+.topbar-session {
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .session-controls {
@@ -273,14 +355,11 @@ code {
   overflow-wrap: anywhere;
 }
 
-.content {
-  min-width: 0;
-}
-
 main {
   margin: 0 auto;
   max-width: var(--content-max);
   padding: var(--space-6) var(--space-6) var(--space-8);
+  width: 100%;
 }
 
 main:focus {
@@ -292,47 +371,49 @@ main:focus {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* The bar stays put so focusing the page after navigation, which scrolls
-     the main region into view, never scrolls the navigation away. */
+  /* The sidebar is a drawer opened from the top bar; the top bar stays put
+     so focusing the page after navigation never scrolls it away. */
   .sidebar {
-    border-bottom: 1px solid var(--border);
-    border-right: 0;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: var(--space-3);
-    height: auto;
-    max-height: 100dvh;
-    overflow-y: auto;
-    padding: var(--space-3) var(--space-4);
-    position: sticky;
+    box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.5);
+    height: 100dvh;
+    left: 0;
+    position: fixed;
     top: 0;
-    z-index: 10;
+    transform: translateX(-100%);
+    transition: transform 160ms ease;
+    width: var(--shell-sidebar);
+    z-index: 20;
   }
 
-  .sidebar nav ul {
-    flex-direction: row;
-    flex-wrap: wrap;
+  .nav-open .sidebar {
+    transform: translateX(0);
   }
 
-  .nav-section-label {
-    display: none;
+  .nav-toggle {
+    display: inline-flex;
   }
 
-  .sidebar-footer {
-    border-top: 0;
-    margin-left: auto;
-    margin-top: 0;
-    padding-top: 0;
+  .topbar {
+    padding-inline: var(--space-4);
+  }
+
+  /* Only the sign-out control fits beside the search on a phone; the
+     account name stays in the accessibility tree. */
+  .topbar-session button {
+    white-space: nowrap;
+  }
+
+  .topbar-session > span:first-child {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
   }
 
   main {
     padding: var(--space-4);
-  }
-
-  /* Focus and anchor scrolling land below the sticky bar, whose measured
-     height the shell writes into --bar-height. */
-  html {
-    scroll-padding-block-start: var(--bar-height, 6rem);
   }
 }
 
