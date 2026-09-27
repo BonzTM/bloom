@@ -64,6 +64,9 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("orphan upload cleanup is bounded", func(t *testing.T) {
 		testOrphanUploadCleanup(t, newImportFixture(t, pool, driver))
 	})
+	t.Run("large orphan cleanup commits chunk batches", func(t *testing.T) {
+		testLargeOrphanUploadCleanup(t, newImportFixture(t, pool, driver))
+	})
 }
 
 type importFixtureServer struct{}
@@ -254,11 +257,18 @@ func testOrphanUploadCleanup(t *testing.T, fixture importFixture) {
 	); linkErr != nil {
 		t.Fatalf("link old upload: %v", linkErr)
 	}
+	if discardErr := fixture.store.DeleteImportUpload(t.Context(), linkedID); discardErr != nil {
+		t.Fatalf("discard linked upload: %v", discardErr)
+	}
 	recentService := newDatabaseImportService(t, fixture, fixture.now)
 	recentID, err := recentService.StageBloomExport(t.Context(), bytes.NewReader([]byte("recent")))
 	if err != nil {
 		t.Fatalf("stage recent orphan: %v", err)
 	}
+	mixedID := mustID(t)
+	writeUploadChunks(t, fixture.store, mixedID, []time.Time{
+		fixture.now.Add(-11 * time.Minute), fixture.now,
+	})
 	deleted, err := fixture.store.DeleteOrphanImportUploads(t.Context(), fixture.now.Add(-10*time.Minute), 1)
 	if err != nil || deleted != 1 {
 		t.Fatalf("DeleteOrphanImportUploads = %d, %v", deleted, err)
@@ -271,6 +281,57 @@ func testOrphanUploadCleanup(t *testing.T, fixture importFixture) {
 	}
 	if _, err := fixture.store.ImportUploadInfo(t.Context(), linkedID); err != nil {
 		t.Fatalf("linked upload removed: %v", err)
+	}
+	if info, err := fixture.store.ImportUploadInfo(t.Context(), mixedID); err != nil || info.ChunkCount != 2 {
+		t.Fatalf("recently extended upload = %+v, %v", info, err)
+	}
+}
+
+func testLargeOrphanUploadCleanup(t *testing.T, fixture importFixture) {
+	t.Helper()
+	id := mustID(t)
+	chunkCount := core.MaxOrphanImportUploadChunks + 1
+	timestamps := make([]time.Time, chunkCount)
+	for index := range timestamps {
+		timestamps[index] = fixture.now.Add(-11 * time.Minute)
+	}
+	writeUploadChunks(t, fixture.store, id, timestamps)
+	before := fixture.now.Add(-10 * time.Minute)
+	deleted, err := fixture.store.DeleteOrphanImportUploads(
+		t.Context(), before, core.MaxOrphanImportUploadChunks,
+	)
+	if err != nil || deleted != core.MaxOrphanImportUploadChunks {
+		t.Fatalf("first orphan sweep = %d, %v", deleted, err)
+	}
+	if info, infoErr := fixture.store.ImportUploadInfo(t.Context(), id); infoErr != nil || info.ChunkCount != 1 {
+		t.Fatalf("partially deleted orphan = %+v, %v", info, infoErr)
+	}
+	deleted, err = fixture.store.DeleteOrphanImportUploads(
+		t.Context(), before, core.MaxOrphanImportUploadChunks,
+	)
+	if err != nil || deleted != 1 {
+		t.Fatalf("second orphan sweep = %d, %v", deleted, err)
+	}
+	if _, err := fixture.store.ImportUploadInfo(t.Context(), id); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("large orphan remains: %v", err)
+	}
+}
+
+func writeUploadChunks(
+	t *testing.T, store core.ImportStore, id string, timestamps []time.Time,
+) {
+	t.Helper()
+	for start := 0; start < len(timestamps); start += core.MaxImportUploadWriteChunks {
+		end := min(start+core.MaxImportUploadWriteChunks, len(timestamps))
+		chunks := make([]core.ImportUploadChunk, 0, end-start)
+		for index := start; index < end; index++ {
+			chunks = append(chunks, core.ImportUploadChunk{
+				ID: id, Index: int64(index), Bytes: []byte{byte(index)}, CreatedAt: timestamps[index],
+			})
+		}
+		if err := store.WriteImportUploadChunks(t.Context(), chunks); err != nil {
+			t.Fatalf("write upload chunks %d-%d: %v", start, end, err)
+		}
 	}
 }
 

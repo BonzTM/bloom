@@ -90,26 +90,17 @@ func (s *sqliteImportStore) DeleteImportUpload(ctx context.Context, id string) e
 func (s *sqliteImportStore) DeleteOrphanImportUploads(
 	ctx context.Context, before time.Time, limit int,
 ) (int64, error) {
-	if before.IsZero() || limit < 1 || limit > core.MaxOrphanImportUploads {
+	if before.IsZero() || limit < 1 || limit > core.MaxOrphanImportUploadChunks {
 		return 0, core.ErrInvalidArgument
 	}
 	var deleted int64
 	err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
 		q := sqlite.New(conn)
-		ids, err := q.ListOrphanImportUploadIDs(ctx, sqlite.ListOrphanImportUploadIDsParams{
+		rows, err := q.DeleteOrphanImportUploadChunks(ctx, sqlite.DeleteOrphanImportUploadChunksParams{
 			Before: formatSQLiteTime(before), PageSize: int64(limit),
 		})
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			rows, err := q.DeleteOrphanImportUpload(ctx, id)
-			if err != nil {
-				return err
-			}
-			deleted += rows
-		}
-		return nil
+		deleted = rows
+		return err
 	})
 	if err != nil {
 		return 0, importStoreError("delete orphan import uploads", err)

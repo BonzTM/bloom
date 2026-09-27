@@ -130,7 +130,8 @@ func (q *Queries) CreateImport(ctx context.Context, arg CreateImportParams) erro
 }
 
 const deleteImportUpload = `-- name: DeleteImportUpload :exec
-DELETE FROM import_uploads WHERE id = ?1
+DELETE FROM import_uploads
+WHERE id = ?1 AND import_id IS NULL
 `
 
 func (q *Queries) DeleteImportUpload(ctx context.Context, id string) error {
@@ -147,13 +148,32 @@ func (q *Queries) DeleteImportUploadForJob(ctx context.Context, importID sql.Nul
 	return err
 }
 
-const deleteOrphanImportUpload = `-- name: DeleteOrphanImportUpload :execrows
+const deleteOrphanImportUploadChunks = `-- name: DeleteOrphanImportUploadChunks :execrows
 DELETE FROM import_uploads
-WHERE id = ?1 AND import_id IS NULL
+WHERE import_id IS NULL
+  AND (id, chunk_index) IN (
+    SELECT chunks.id, chunks.chunk_index
+    FROM import_uploads AS chunks
+    JOIN (
+        SELECT candidate.id, MAX(candidate.created_at) AS newest_at
+        FROM import_uploads AS candidate
+        WHERE candidate.import_id IS NULL
+        GROUP BY candidate.id
+        HAVING MAX(candidate.created_at) < ?1
+    ) AS orphans ON orphans.id = chunks.id
+    WHERE chunks.import_id IS NULL
+    ORDER BY orphans.newest_at, chunks.id, chunks.chunk_index
+    LIMIT ?2
+  )
 `
 
-func (q *Queries) DeleteOrphanImportUpload(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteOrphanImportUpload, id)
+type DeleteOrphanImportUploadChunksParams struct {
+	Before   string
+	PageSize int64
+}
+
+func (q *Queries) DeleteOrphanImportUploadChunks(ctx context.Context, arg DeleteOrphanImportUploadChunksParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOrphanImportUploadChunks, arg.Before, arg.PageSize)
 	if err != nil {
 		return 0, err
 	}
@@ -492,42 +512,6 @@ func (q *Queries) ListImports(ctx context.Context, arg ListImportsParams) ([]Imp
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listOrphanImportUploadIDs = `-- name: ListOrphanImportUploadIDs :many
-SELECT id FROM import_uploads
-WHERE import_id IS NULL AND created_at < ?1
-GROUP BY id
-ORDER BY MIN(created_at), id
-LIMIT ?2
-`
-
-type ListOrphanImportUploadIDsParams struct {
-	Before   string
-	PageSize int64
-}
-
-func (q *Queries) ListOrphanImportUploadIDs(ctx context.Context, arg ListOrphanImportUploadIDsParams) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listOrphanImportUploadIDs, arg.Before, arg.PageSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

@@ -64,7 +64,7 @@ func (s *Service) StageBloomExport(ctx context.Context, upload io.Reader) (strin
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	return s.staging.stage(ctx, upload, s.clock.Now())
+	return s.staging.stage(ctx, upload, s.clock)
 }
 
 // CreateBloomExport creates a job for a staged Bloom export upload.

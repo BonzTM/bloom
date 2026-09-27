@@ -1,8 +1,11 @@
 package importer
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -20,6 +23,7 @@ type workerStore struct {
 	errorText string
 	commitErr error
 	uploads   *memoryUploadStore
+	infoHook  func(context.Context, string) (core.ImportUploadInfo, error)
 }
 
 func (*workerStore) CreateImport(context.Context, core.ImportJob) error { return nil }
@@ -27,8 +31,9 @@ func (*workerStore) ListImports(context.Context, core.ImportListQuery) ([]core.I
 	return nil, nil
 }
 
-func (s *workerStore) CreateUploadedImport(_ context.Context, job core.ImportJob, _ string) error {
+func (s *workerStore) CreateUploadedImport(_ context.Context, job core.ImportJob, uploadID string) error {
 	s.job = job
+	s.uploadStore().linkUpload(uploadID)
 	return nil
 }
 
@@ -44,6 +49,9 @@ func (s *workerStore) WriteImportUploadChunks(ctx context.Context, chunks []core
 }
 
 func (s *workerStore) ImportUploadInfo(ctx context.Context, id string) (core.ImportUploadInfo, error) {
+	if s.infoHook != nil {
+		return s.infoHook(ctx, id)
+	}
 	return s.uploadStore().ImportUploadInfo(ctx, id)
 }
 
@@ -93,7 +101,10 @@ func (s *workerStore) FinishImport(ctx context.Context, _, _ string, state core.
 	if s.job.Source == core.ImportSourceBloomExport {
 		cursor, err := decodeFileCursor(s.job.Cursor)
 		if err == nil {
-			return s.DeleteImportUpload(ctx, cursor.ID)
+			uploads := s.uploadStore()
+			uploads.mu.Lock()
+			uploads.deleteUpload(cursor.ID)
+			uploads.mu.Unlock()
 		}
 	}
 	return nil
@@ -143,7 +154,7 @@ func TestWorkerCompletionRemovesBloomUpload(t *testing.T) {
 	job.Source = core.ImportSourceBloomExport
 	store := workerStore{job: job}
 	worker := newTestWorker(t, &store, reportingStub{})
-	id, err := worker.deps.Staging.stage(t.Context(), strings.NewReader("upload"), time.Now())
+	id, err := worker.deps.Staging.stage(t.Context(), strings.NewReader("upload"), staticClock{time.Now()})
 	if err != nil {
 		t.Fatalf("stage upload: %v", err)
 	}
@@ -187,7 +198,7 @@ func TestBloomJobReadsDatabaseStagingAndCompletes(t *testing.T) {
 	store := workerStore{job: job}
 	worker := newTestWorker(t, &store, reportingStub{})
 	id, err := worker.deps.Staging.stage(
-		t.Context(), strings.NewReader(validJSONLFixture()+"\n"), time.Now(),
+		t.Context(), strings.NewReader(validJSONLFixture()+"\n"), staticClock{time.Now()},
 	)
 	if err != nil {
 		t.Fatalf("stage upload: %v", err)
@@ -205,7 +216,8 @@ func TestWorkerSweepDeletesExpiredOrphanUpload(t *testing.T) {
 	store := workerStore{job: pendingWorkerJob(t)}
 	worker := newTestWorker(t, &store, reportingStub{})
 	orphanID, err := worker.deps.Staging.stage(
-		t.Context(), strings.NewReader("orphan"), time.Date(2026, 9, 25, 11, 40, 0, 0, time.UTC),
+		t.Context(), strings.NewReader("orphan"),
+		staticClock{time.Date(2026, 9, 25, 11, 40, 0, 0, time.UTC)},
 	)
 	if err != nil {
 		t.Fatalf("stage orphan: %v", err)
@@ -214,6 +226,80 @@ func TestWorkerSweepDeletesExpiredOrphanUpload(t *testing.T) {
 		t.Fatalf("sweep: %v", err)
 	}
 	assertStagingPresence(t, worker.deps.Staging, orphanID, false)
+}
+
+func TestWorkerKeepsCompressedWatchEntryOpenAcrossBatches(t *testing.T) {
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceBloomExport
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	payload := compressedWatchArchive(t, core.ImportBatchSize+1)
+	id, err := worker.deps.Staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
+	if err != nil {
+		t.Fatalf("stage compressed archive: %v", err)
+	}
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	opened := 0
+	worker.sources.openWatch = func(upload *UploadReader, offset int64) (io.ReadCloser, error) {
+		return openWatchUploadWith(upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
+			opened++
+			return entry.Open()
+		})
+	}
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("run compressed import: %v", err)
+	}
+	if opened != 1 || store.result.Imported != core.ImportBatchSize+1 {
+		t.Fatalf("entry opens = %d, imported = %d", opened, store.result.Imported)
+	}
+}
+
+func compressedWatchArchive(t *testing.T, records int) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	entry, err := archive.Create("watches.jsonl")
+	if err != nil {
+		t.Fatalf("create compressed watches.jsonl: %v", err)
+	}
+	if _, err := io.WriteString(entry, strings.Repeat(validJSONLFixture()+"\n", records)); err != nil {
+		t.Fatalf("write compressed watches.jsonl: %v", err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close compressed archive: %v", err)
+	}
+	return output.Bytes()
+}
+
+func TestWorkerTimesOutStalledUploadInfo(t *testing.T) {
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceBloomExport
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	worker.config.StoreTimeout = 20 * time.Millisecond
+	worker.sources.storeTimeout = worker.config.StoreTimeout
+	id, err := worker.deps.Staging.stage(
+		t.Context(), strings.NewReader(validJSONLFixture()+"\n"), staticClock{time.Now()},
+	)
+	if err != nil {
+		t.Fatalf("stage upload: %v", err)
+	}
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	store.infoHook = func(ctx context.Context, _ string) (core.ImportUploadInfo, error) {
+		<-ctx.Done()
+		return core.ImportUploadInfo{}, ctx.Err()
+	}
+	started := time.Now()
+	err = worker.runOnce(t.Context())
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+		t.Fatalf("runOnce = %v after %s", err, time.Since(started))
+	}
 }
 
 func assertStagingPresence(t *testing.T, staging *Staging, id string, want bool) {

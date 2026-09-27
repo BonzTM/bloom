@@ -28,15 +28,16 @@ import (
 const importTestServerID = "22222222-2222-4222-8222-222222222222"
 
 type fakeImportManager struct {
-	job       core.ImportJob
-	jobs      []core.ImportJob
-	err       error
-	upload    string
-	requested string
-	stagingID string
-	discarded string
-	uploadErr error
-	stageSeen chan struct{}
+	job              core.ImportJob
+	jobs             []core.ImportJob
+	err              error
+	upload           string
+	requested        string
+	stagingID        string
+	discarded        string
+	uploadErr        error
+	stageSeen        chan struct{}
+	stageHasDeadline bool
 }
 
 func (f *fakeImportManager) CreatePlaybackReporting(_ context.Context, _, requested string) (core.ImportJob, error) {
@@ -44,10 +45,11 @@ func (f *fakeImportManager) CreatePlaybackReporting(_ context.Context, _, reques
 	return f.job, f.err
 }
 
-func (f *fakeImportManager) StageBloomExport(_ context.Context, upload io.Reader) (string, error) {
+func (f *fakeImportManager) StageBloomExport(ctx context.Context, upload io.Reader) (string, error) {
 	if f.uploadErr != nil {
 		return "", f.uploadErr
 	}
+	_, f.stageHasDeadline = ctx.Deadline()
 	f.stagingID = "44444444-4444-4444-8444-444444444444"
 	if f.stageSeen != nil {
 		close(f.stageSeen)
@@ -107,7 +109,7 @@ func TestCreateBloomExportAcceptsBoundedNDJSONPart(t *testing.T) {
 	request.Header.Set("Content-Type", contentType)
 	recorder := httptest.NewRecorder()
 	server.handleCreateImport(recorder, request)
-	if recorder.Code != http.StatusCreated || manager.upload != payload {
+	if recorder.Code != http.StatusCreated || manager.upload != payload || !manager.stageHasDeadline {
 		t.Fatalf("multipart import = %d upload %q: %s", recorder.Code, manager.upload, recorder.Body.String())
 	}
 }
@@ -266,6 +268,12 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	}
 	assertJSONContract(t, document, "#/components/schemas/ImportJob", bytes.TrimSpace(entries.data["imports.jsonl"]))
 	assertJSONContract(t, document, "#/components/schemas/WatchExportSummary", entries.data["summary.json"])
+	var summary watchExportSummary
+	if err := json.Unmarshal(entries.data["summary.json"], &summary); err != nil ||
+		summary.WatchesBytes != int64(len(entries.data["watches.jsonl"])) ||
+		summary.ImportsBytes != int64(len(entries.data["imports.jsonl"])) {
+		t.Fatalf("export summary sizes = %+v, %v", summary, err)
+	}
 	event := audit.last(t)
 	if event.Actor != testRequestAccountID || event.Action != "watch.export" || event.Resource != "watches" ||
 		event.Result != telemetry.AuditSuccess || event.RequestID != "request-1" || event.Source == "" {

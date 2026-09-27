@@ -13,15 +13,17 @@ import (
 )
 
 type memoryUploadStore struct {
-	mu      sync.Mutex
-	chunks  map[string]map[int64][]byte
-	created map[string]time.Time
+	mu     sync.Mutex
+	chunks map[string]map[int64][]byte
+	newest map[string]time.Time
+	linked map[string]bool
 }
 
 func newMemoryUploadStore() *memoryUploadStore {
 	return &memoryUploadStore{
-		chunks:  make(map[string]map[int64][]byte),
-		created: make(map[string]time.Time),
+		chunks: make(map[string]map[int64][]byte),
+		newest: make(map[string]time.Time),
+		linked: make(map[string]bool),
 	}
 }
 
@@ -31,9 +33,11 @@ func (s *memoryUploadStore) WriteImportUploadChunks(_ context.Context, chunks []
 	for _, chunk := range chunks {
 		if s.chunks[chunk.ID] == nil {
 			s.chunks[chunk.ID] = make(map[int64][]byte)
-			s.created[chunk.ID] = chunk.CreatedAt
 		}
 		s.chunks[chunk.ID][chunk.Index] = bytes.Clone(chunk.Bytes)
+		if chunk.CreatedAt.After(s.newest[chunk.ID]) {
+			s.newest[chunk.ID] = chunk.CreatedAt
+		}
 	}
 	return nil
 }
@@ -65,9 +69,23 @@ func (s *memoryUploadStore) ReadImportUploadChunk(_ context.Context, id string, 
 func (s *memoryUploadStore) DeleteImportUpload(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.chunks, id)
-	delete(s.created, id)
+	if s.linked[id] {
+		return nil
+	}
+	s.deleteUpload(id)
 	return nil
+}
+
+func (s *memoryUploadStore) deleteUpload(id string) {
+	delete(s.chunks, id)
+	delete(s.newest, id)
+	delete(s.linked, id)
+}
+
+func (s *memoryUploadStore) linkUpload(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.linked[id] = true
 }
 
 func (s *memoryUploadStore) DeleteOrphanImportUploads(
@@ -76,14 +94,22 @@ func (s *memoryUploadStore) DeleteOrphanImportUploads(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var deleted int64
-	for id, created := range s.created {
+	for id, newest := range s.newest {
 		if deleted == int64(limit) {
 			break
 		}
-		if created.Before(before) {
-			delete(s.chunks, id)
-			delete(s.created, id)
+		if s.linked[id] || !newest.Before(before) {
+			continue
+		}
+		for index := range s.chunks[id] {
+			delete(s.chunks[id], index)
 			deleted++
+			if deleted == int64(limit) {
+				break
+			}
+		}
+		if len(s.chunks[id]) == 0 {
+			s.deleteUpload(id)
 		}
 	}
 	return deleted, nil
@@ -100,7 +126,7 @@ func TestDatabaseStagingStreamsThreeMiBAcrossChunkBoundaries(t *testing.T) {
 		payload[index] = byte(index % 251)
 	}
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-	id, err := staging.stage(t.Context(), bytes.NewReader(payload), now)
+	id, err := staging.stage(t.Context(), bytes.NewReader(payload), staticClock{now})
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}
@@ -133,7 +159,9 @@ func TestDatabaseStagingEnforcesUploadCapWithoutResidue(t *testing.T) {
 		t.Fatalf("NewStaging: %v", err)
 	}
 	staging.maxBytes = 8
-	if _, err := staging.stage(t.Context(), bytes.NewReader([]byte("123456789")), time.Now()); !errors.Is(err, core.ErrInvalidArgument) {
+	if _, err := staging.stage(
+		t.Context(), bytes.NewReader([]byte("123456789")), staticClock{time.Now()},
+	); !errors.Is(err, core.ErrInvalidArgument) {
 		t.Fatalf("oversize stage = %v, want invalid argument", err)
 	}
 	if len(store.chunks) != 0 {
@@ -148,11 +176,11 @@ func TestDatabaseStagingDeletesOnlyExpiredOrphans(t *testing.T) {
 		t.Fatalf("NewStaging: %v", err)
 	}
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-	oldID, err := staging.stage(t.Context(), bytes.NewReader([]byte("old")), now.Add(-11*time.Minute))
+	oldID, err := staging.stage(t.Context(), bytes.NewReader([]byte("old")), staticClock{now.Add(-11 * time.Minute)})
 	if err != nil {
 		t.Fatalf("stage old: %v", err)
 	}
-	newID, err := staging.stage(t.Context(), bytes.NewReader([]byte("new")), now)
+	newID, err := staging.stage(t.Context(), bytes.NewReader([]byte("new")), staticClock{now})
 	if err != nil {
 		t.Fatalf("stage new: %v", err)
 	}
@@ -167,3 +195,112 @@ func TestDatabaseStagingDeletesOnlyExpiredOrphans(t *testing.T) {
 		t.Fatalf("recent orphan removed: %v", err)
 	}
 }
+
+func TestSecondStagingDoesNotSweepUploadWithRecentChunks(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	clock := &controlledClock{now: now.Add(-11 * time.Minute)}
+	recentWrite := make(chan struct{})
+	store := &observedUploadStore{memoryUploadStore: newMemoryUploadStore()}
+	store.afterWrite = func(call int) {
+		if call == 1 {
+			clock.Set(now)
+		}
+		if call == 2 {
+			close(recentWrite)
+		}
+	}
+	first := mustStaging(t, store)
+	second := mustStaging(t, store)
+	reader, writer := io.Pipe()
+	staged := make(chan stageResult, 1)
+	go func() {
+		id, err := first.stage(t.Context(), reader, clock)
+		staged <- stageResult{id: id, err: err}
+	}()
+	writeDone := writeUploadChunks(writer, 2*core.MaxImportUploadWriteChunks)
+	<-recentWrite
+	deleted, err := second.sweep(t.Context(), now)
+	if err != nil || deleted != 0 {
+		t.Fatalf("concurrent sweep = %d, %v", deleted, err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close upload writer: %v", err)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	result := <-staged
+	if result.err != nil {
+		t.Fatalf("stage upload: %v", result.err)
+	}
+	if _, err := store.ImportUploadInfo(t.Context(), result.id); err != nil {
+		t.Fatalf("active upload was swept: %v", err)
+	}
+}
+
+type controlledClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *controlledClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *controlledClock) Set(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = now
+}
+
+type observedUploadStore struct {
+	*memoryUploadStore
+	afterWrite func(int)
+	writes     int
+}
+
+func (s *observedUploadStore) WriteImportUploadChunks(
+	ctx context.Context, chunks []core.ImportUploadChunk,
+) error {
+	if err := s.memoryUploadStore.WriteImportUploadChunks(ctx, chunks); err != nil {
+		return err
+	}
+	s.writes++
+	s.afterWrite(s.writes)
+	return nil
+}
+
+type stageResult struct {
+	id  string
+	err error
+}
+
+func mustStaging(t *testing.T, store uploadStore) *Staging {
+	t.Helper()
+	staging, err := NewStaging(store, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("NewStaging: %v", err)
+	}
+	return staging
+}
+
+func writeUploadChunks(writer io.Writer, count int) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		chunk := make([]byte, core.ImportUploadChunkBytes)
+		for range count {
+			if _, err := writer.Write(chunk); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	return done
+}
+
+type staticClock struct{ now time.Time }
+
+func (c staticClock) Now() time.Time { return c.now }

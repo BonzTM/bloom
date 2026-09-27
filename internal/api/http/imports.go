@@ -2,6 +2,7 @@ package http
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -74,6 +75,8 @@ type watchExportManifest struct {
 type watchExportSummary struct {
 	WatchRecords  int64 `json:"watch_records"`
 	ImportRecords int64 `json:"import_records"`
+	WatchesBytes  int64 `json:"watches_bytes"`
+	ImportsBytes  int64 `json:"imports_bytes"`
 }
 
 type watchExportStart struct {
@@ -142,6 +145,9 @@ func (s *Server) createBloomImport(
 	if err := s.setImportDeadlines(w); err != nil {
 		return core.ImportJob{}, fmt.Errorf("extend import upload deadlines: %w", err)
 	}
+	uploadCtx, cancel := context.WithTimeout(r.Context(), s.importTransferTimeout)
+	defer cancel()
+	r = r.WithContext(uploadCtx)
 	r.Body = http.MaxBytesReader(w, r.Body, importMultipartBytes)
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -477,79 +483,93 @@ func (s *Server) streamWatchExportZip(
 	if err := writeZipJSON(archive, "manifest.json", manifest, exportedAt); err != nil {
 		return err
 	}
-	watchCount, err := s.writeWatchExportEntry(archive, r, query, start, exportedAt)
+	watchCount, watchBytes, err := s.writeWatchExportEntry(archive, r, query, start, exportedAt)
 	if err != nil {
 		return err
 	}
-	importCount, err := s.writeImportExportEntry(archive, r, query.MediaServerID, start, exportedAt)
+	importCount, importBytes, err := s.writeImportExportEntry(archive, r, query.MediaServerID, start, exportedAt)
 	if err != nil {
 		return err
 	}
 	return writeZipJSON(archive, "summary.json", watchExportSummary{
 		WatchRecords: watchCount, ImportRecords: importCount,
+		WatchesBytes: watchBytes, ImportsBytes: importBytes,
 	}, exportedAt)
 }
 
 func (s *Server) writeWatchExportEntry(
 	archive *zip.Writer, r *http.Request, query core.PlaybackQuery,
 	start watchExportStart, modified time.Time,
-) (int64, error) {
+) (int64, int64, error) {
 	entry, err := createZipEntryWithMethod(archive, "watches.jsonl", modified, zip.Store)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
+	counted := &countingWriter{writer: entry}
 	page, cursor := start.watches, start.watchCursor
 	var count int64
 	for range maxExportPages {
 		for _, watch := range page {
-			if encodeErr := importer.EncodeWatchJSONL(entry, watch); encodeErr != nil {
-				return 0, encodeErr
+			if encodeErr := importer.EncodeWatchJSONL(counted, watch); encodeErr != nil {
+				return 0, 0, encodeErr
 			}
 			count++
 		}
 		if cursor == "" {
-			return count, nil
+			return count, counted.count, nil
 		}
 		query, err = nextExportQuery(query, cursor)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		page, cursor, err = s.watchExportPage(r, query, exportBatchSize)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
-	return 0, errors.New("watch export exceeded page safety bound")
+	return 0, 0, errors.New("watch export exceeded page safety bound")
 }
 
 func (s *Server) writeImportExportEntry(
 	archive *zip.Writer, r *http.Request, mediaServerID string,
 	start watchExportStart, modified time.Time,
-) (int64, error) {
+) (int64, int64, error) {
 	entry, err := createZipEntry(archive, "imports.jsonl", modified)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
+	counted := &countingWriter{writer: entry}
 	page, cursor := start.imports, start.importCursor
 	var count int64
 	for range maxExportPages {
 		for _, job := range page {
-			if encodeErr := json.NewEncoder(entry).Encode(importDTO(job)); encodeErr != nil {
-				return 0, fmt.Errorf("encode import export record: %w", encodeErr)
+			if encodeErr := json.NewEncoder(counted).Encode(importDTO(job)); encodeErr != nil {
+				return 0, 0, fmt.Errorf("encode import export record: %w", encodeErr)
 			}
 			count++
 		}
 		if cursor == nil {
-			return count, nil
+			return count, counted.count, nil
 		}
 		page, cursor, err = s.importExportPage(r, core.ImportListQuery{
 			Before: cursor, MediaServerID: mediaServerID, PageSize: exportBatchSize + 1,
 		})
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
-	return 0, errors.New("import export exceeded page safety bound")
+	return 0, 0, errors.New("import export exceeded page safety bound")
+}
+
+type countingWriter struct {
+	writer io.Writer
+	count  int64
+}
+
+func (w *countingWriter) Write(data []byte) (int, error) {
+	written, err := w.writer.Write(data)
+	w.count += int64(written)
+	return written, err
 }
 
 func (s *Server) importExportPage(

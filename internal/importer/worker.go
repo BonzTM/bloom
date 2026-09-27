@@ -64,7 +64,10 @@ func NewWorker(config WorkerConfig, deps WorkerDependencies) (*Worker, error) {
 	}
 	return &Worker{
 		config: config, deps: deps,
-		sources: sourceFactory{reporting: deps.Reporting, staging: deps.Staging},
+		sources: sourceFactory{
+			reporting: deps.Reporting, staging: deps.Staging,
+			storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
+		},
 	}, nil
 }
 
@@ -114,11 +117,12 @@ func (w *Worker) runOnce(ctx context.Context) error {
 	return w.process(ctx, job)
 }
 
-func (w *Worker) process(ctx context.Context, job core.ImportJob) error {
+func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error) {
 	reader, err := w.sources.reader(job.Source)
 	if err != nil {
 		return w.fail(ctx, job, err)
 	}
+	defer func() { result = errors.Join(result, reader.Close()) }()
 	for {
 		records, cursor, skipped, readErr := reader.ReadImportBatch(ctx, job)
 		if readErr != nil {

@@ -96,7 +96,7 @@ func (s *postgresImportStore) DeleteImportUpload(ctx context.Context, id string)
 func (s *postgresImportStore) DeleteOrphanImportUploads(
 	ctx context.Context, before time.Time, limit int,
 ) (deleted int64, result error) {
-	if before.IsZero() || limit < 1 || limit > core.MaxOrphanImportUploads {
+	if before.IsZero() || limit < 1 || limit > core.MaxOrphanImportUploadChunks {
 		return 0, core.ErrInvalidArgument
 	}
 	tx, err := s.pool.BeginTx(ctx, nil)
@@ -105,18 +105,11 @@ func (s *postgresImportStore) DeleteOrphanImportUploads(
 	}
 	defer rollbackImport(tx, &result)
 	q := s.q.WithTx(tx)
-	ids, err := q.ListOrphanImportUploadIDs(ctx, postgres.ListOrphanImportUploadIDsParams{
+	deleted, err = q.DeleteOrphanImportUploadChunks(ctx, postgres.DeleteOrphanImportUploadChunksParams{
 		Before: core.NormalizeTime(before), PageSize: int32(limit),
 	})
 	if err != nil {
-		return 0, importStoreError("list orphan import uploads", err)
-	}
-	for _, id := range ids {
-		rows, err := q.DeleteOrphanImportUpload(ctx, id)
-		if err != nil {
-			return 0, importStoreError("delete orphan import upload", err)
-		}
-		deleted += rows
+		return 0, importStoreError("delete orphan import upload chunks", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, importStoreError("commit orphan import upload cleanup", err)

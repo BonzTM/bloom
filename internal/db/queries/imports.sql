@@ -44,19 +44,27 @@ WHERE id = sqlc.arg(id) AND chunk_index = sqlc.arg(chunk_index);
 UPDATE import_uploads SET import_id = sqlc.arg(import_id)
 WHERE id = sqlc.arg(id) AND import_id IS NULL;
 
--- name: ListOrphanImportUploadIDs :many
-SELECT id FROM import_uploads
-WHERE import_id IS NULL AND created_at < sqlc.arg(before)
-GROUP BY id
-ORDER BY MIN(created_at), id
-LIMIT sqlc.arg(page_size);
-
 -- name: DeleteImportUpload :exec
-DELETE FROM import_uploads WHERE id = sqlc.arg(id);
-
--- name: DeleteOrphanImportUpload :execrows
 DELETE FROM import_uploads
 WHERE id = sqlc.arg(id) AND import_id IS NULL;
+
+-- name: DeleteOrphanImportUploadChunks :execrows
+DELETE FROM import_uploads
+WHERE import_id IS NULL
+  AND (id, chunk_index) IN (
+    SELECT chunks.id, chunks.chunk_index
+    FROM import_uploads AS chunks
+    JOIN (
+        SELECT candidate.id, MAX(candidate.created_at) AS newest_at
+        FROM import_uploads AS candidate
+        WHERE candidate.import_id IS NULL
+        GROUP BY candidate.id
+        HAVING MAX(candidate.created_at) < sqlc.arg(before)
+    ) AS orphans ON orphans.id = chunks.id
+    WHERE chunks.import_id IS NULL
+    ORDER BY orphans.newest_at, chunks.id, chunks.chunk_index
+    LIMIT sqlc.arg(page_size)
+  );
 
 -- name: DeleteImportUploadForJob :exec
 DELETE FROM import_uploads WHERE import_id = sqlc.arg(import_id);

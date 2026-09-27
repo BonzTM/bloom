@@ -2,6 +2,7 @@ package importer
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -76,7 +77,8 @@ func TestWatchJSONLRejectsSchemaDriftAndControlCharacters(t *testing.T) {
 
 func TestReadJSONLLinesCountsBlankLinesWithoutEndingBatch(t *testing.T) {
 	input := validJSONLFixture() + "\n\n" + validJSONLFixture() + "\n"
-	records, offset, skipped, err := readJSONLLines(context.Background(), strings.NewReader(input), 0)
+	reader := bufio.NewReaderSize(strings.NewReader(input), maxJSONLLineBytes+1)
+	records, offset, skipped, err := readJSONLLines(context.Background(), reader, 0)
 	if err != nil || len(records) != 2 || skipped != 1 || offset != int64(len(input)) {
 		t.Fatalf("readJSONLLines = %d records, offset %d, skipped %d, %v", len(records), offset, skipped, err)
 	}
@@ -89,7 +91,7 @@ func TestBloomUploadDetectsZipByContent(t *testing.T) {
 		"watches.jsonl": validJSONLFixture() + "\n",
 		"summary.json":  `{"watch_records":1,"import_records":0}`,
 	})
-	id, err := staging.stage(t.Context(), bytes.NewReader(payload), time.Now())
+	id, err := staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
 	if err != nil {
 		t.Fatalf("stage zip: %v", err)
 	}
@@ -97,7 +99,7 @@ func TestBloomUploadDetectsZipByContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode cursor: %v", err)
 	}
-	records, _, _, err := (jsonlReader{staging: staging}).ReadImportBatch(t.Context(), core.ImportJob{Cursor: cursor})
+	records, _, _, err := (&jsonlReader{staging: staging}).ReadImportBatch(t.Context(), core.ImportJob{Cursor: cursor})
 	if err != nil || len(records) != 1 || records[0].RecordID == "" {
 		t.Fatalf("ReadImportBatch = %+v, %v", records, err)
 	}
@@ -120,7 +122,7 @@ func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 	for name, payload := range tests {
 		t.Run(name, func(t *testing.T) {
 			staging := newJSONLTestStaging(t)
-			id, err := staging.stage(t.Context(), bytes.NewReader(payload), time.Now())
+			id, err := staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
 			if err != nil {
 				t.Fatalf("stage zip: %v", err)
 			}
@@ -128,7 +130,7 @@ func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("encode cursor: %v", err)
 			}
-			if _, _, _, err := (jsonlReader{staging: staging}).ReadImportBatch(
+			if _, _, _, err := (&jsonlReader{staging: staging}).ReadImportBatch(
 				t.Context(), core.ImportJob{Cursor: cursor},
 			); err == nil {
 				t.Fatal("ReadImportBatch accepted unsafe zip")

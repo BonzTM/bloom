@@ -15,7 +15,8 @@ import (
 
 type serviceStore struct {
 	*workerStore
-	createErr error
+	createErr       error
+	linkBeforeError bool
 }
 
 func (s *serviceStore) CreateImport(_ context.Context, job core.ImportJob) error {
@@ -24,12 +25,15 @@ func (s *serviceStore) CreateImport(_ context.Context, job core.ImportJob) error
 }
 
 func (s *serviceStore) CreateUploadedImport(
-	_ context.Context, job core.ImportJob, _ string,
+	_ context.Context, job core.ImportJob, uploadID string,
 ) error {
+	if s.createErr == nil || s.linkBeforeError {
+		s.job = job
+		s.uploadStore().linkUpload(uploadID)
+	}
 	if s.createErr != nil {
 		return s.createErr
 	}
-	s.job = job
 	return nil
 }
 
@@ -40,9 +44,9 @@ func (s *serviceStore) CancelImport(ctx context.Context, _ string, now time.Time
 		if err != nil {
 			return core.ImportJob{}, err
 		}
-		if err := s.DeleteImportUpload(ctx, cursor.ID); err != nil {
-			return core.ImportJob{}, err
-		}
+		s.uploadStore().mu.Lock()
+		s.uploadStore().deleteUpload(cursor.ID)
+		s.uploadStore().mu.Unlock()
 	}
 	return s.job, nil
 }
@@ -88,6 +92,24 @@ func TestBloomUploadIsRemovedWhenJobCreationConflicts(t *testing.T) {
 	}
 	if _, err := staging.open(t.Context(), stagingID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("failed upload still exists: %v", err)
+	}
+}
+
+func TestBloomUploadSurvivesCommittedLinkReportedAsError(t *testing.T) {
+	store := newServiceStore()
+	store.createErr = errors.Join(core.ErrImportStore, errors.New("commit outcome unknown"))
+	store.linkBeforeError = true
+	service, staging := newService(t, store)
+	stagingID, err := service.StageBloomExport(t.Context(), strings.NewReader("{}\n"))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	_, err = service.CreateBloomExport(t.Context(), importServiceServerID, importServiceAccountID, stagingID)
+	if !errors.Is(err, core.ErrImportStore) {
+		t.Fatalf("CreateBloomExport = %v, want store error", err)
+	}
+	if _, err := staging.open(t.Context(), stagingID); err != nil {
+		t.Fatalf("linked upload was discarded: %v", err)
 	}
 }
 

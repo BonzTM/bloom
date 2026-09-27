@@ -272,6 +272,11 @@ plus `media_server_id` and `source: bloom_export` fields. Bloom detects ZIP by
 content rather than filename. Uploads are limited to 256 MiB, and only one
 upload is staged at a time per process.
 
+An export archive larger than the 256 MiB upload cap cannot be re-imported
+through the browser yet. Its trailing `summary.json` reports the uncompressed
+`watches.jsonl` and `imports.jsonl` byte sizes so an operator can check the
+payload size before attempting an import.
+
 Uploads are held in the database as fixed 1 MiB chunks until the job completes,
 fails, or is cancelled. The terminal state change and chunk deletion use the
 same transaction. Each worker scan also deletes a bounded batch of unlinked
@@ -282,9 +287,9 @@ import data directory or stage uploads on the pod filesystem.
 from bounded database pages. The optional `media_server_id` filter remains;
 there are no `cursor` or `limit` parameters. The archive contains
 `manifest.json`, every watch in newest-first `(started_at, id)` order as
-`watches.jsonl`, import-job provenance as `imports.jsonl`, and record counts in
-the trailing `summary.json`. Import that ZIP on another Bloom instance to move
-watch history between SQLite and PostgreSQL. The previous JSONL shape remains
+`watches.jsonl`, import-job provenance as `imports.jsonl`, and record counts and
+entry byte sizes in the trailing `summary.json`. Import that ZIP on another
+Bloom instance to move watch history between SQLite and PostgreSQL. The previous JSONL shape remains
 accepted for compatibility. Re-import is idempotent because the original watch
 ID is the source record ID. A transfer that does not form a complete ZIP archive
 is truncated and must be retried.

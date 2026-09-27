@@ -64,7 +64,7 @@ type Querier interface {
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
 	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
-	DeleteOrphanImportUpload(ctx context.Context, id string) (int64, error)
+	DeleteOrphanImportUploadChunks(ctx context.Context, arg DeleteOrphanImportUploadChunksParams) (int64, error)
 	DeleteOverlappingImportedWatches(ctx context.Context, arg DeleteOverlappingImportedWatchesParams) error
 	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
 	DeleteRequestProfileTags(ctx context.Context, profileID string) error
@@ -127,7 +127,6 @@ type Querier interface {
 	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]NotificationOutbox, error)
 	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
-	ListOrphanImportUploadIDs(ctx context.Context, arg ListOrphanImportUploadIDsParams) ([]string, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
 	ListRecentPlaybackWatches(ctx context.Context, arg ListRecentPlaybackWatchesParams) ([]ListRecentPlaybackWatchesRow, error)
 	ListRequestProfileTags(ctx context.Context, profileID string) ([]string, error)

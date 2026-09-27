@@ -1518,7 +1518,7 @@ paths:
       tags: [imports]
       operationId: exportWatches
       summary: Stream all matching watches and import provenance as one ZIP archive.
-      description: The archive contains `manifest.json`, newest-first `watches.jsonl`, newest-first `imports.jsonl`, and trailing `summary.json`. The response is streamed directly from bounded database pages and must be retried if the connection ends before a complete ZIP central directory is received.
+      description: The archive contains `manifest.json`, uncompressed newest-first `watches.jsonl`, newest-first `imports.jsonl`, and trailing `summary.json` with record counts and uncompressed entry sizes. The response is streamed directly from bounded database pages and must be retried if the connection ends before a complete ZIP central directory is received.
       security: [{ sessionCookie: [] }]
       parameters:
         - { name: media_server_id, in: query, schema: { type: string, format: uuid } }
@@ -3396,11 +3396,13 @@ components:
         media_server_id: { type: string, format: uuid }
     WatchExportSummary:
       type: object
-      required: [watch_records, import_records]
+      required: [watch_records, import_records, watches_bytes, imports_bytes]
       additionalProperties: false
       properties:
         watch_records: { type: integer, format: int64, minimum: 0 }
         import_records: { type: integer, format: int64, minimum: 0 }
+        watches_bytes: { type: integer, format: int64, minimum: 0 }
+        imports_bytes: { type: integer, format: int64, minimum: 0 }
     PlaybackNowResponse:
       type: object
       required: [items, next_cursor]

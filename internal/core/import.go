@@ -22,8 +22,8 @@ const (
 	ImportUploadChunkBytes = 1 << 20
 	// MaxImportUploadWriteChunks bounds one upload transaction.
 	MaxImportUploadWriteChunks = 8
-	// MaxOrphanImportUploads bounds one worker cleanup transaction.
-	MaxOrphanImportUploads = 100
+	// MaxOrphanImportUploadChunks bounds one worker cleanup transaction.
+	MaxOrphanImportUploadChunks = 256
 )
 
 // ImportSource identifies a supported historical-watch source.

@@ -38,8 +38,8 @@ func NewStaging(store uploadStore, transferTimeout time.Duration) (*Staging, err
 	}, nil
 }
 
-func (s *Staging) stage(ctx context.Context, upload io.Reader, createdAt time.Time) (id string, result error) {
-	if s == nil || upload == nil || createdAt.IsZero() {
+func (s *Staging) stage(ctx context.Context, upload io.Reader, clock core.Clock) (id string, result error) {
+	if s == nil || upload == nil || clock == nil || clock.Now().IsZero() {
 		return "", core.ErrInvalidArgument
 	}
 	id, err := core.NewID()
@@ -51,13 +51,13 @@ func (s *Staging) stage(ctx context.Context, upload io.Reader, createdAt time.Ti
 			result = errors.Join(result, s.store.DeleteImportUpload(ctx, id))
 		}
 	}()
-	if err := s.write(ctx, id, upload, core.NormalizeTime(createdAt)); err != nil {
+	if err := s.write(ctx, id, upload, clock); err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
-func (s *Staging) write(ctx context.Context, id string, upload io.Reader, createdAt time.Time) error {
+func (s *Staging) write(ctx context.Context, id string, upload io.Reader, clock core.Clock) error {
 	reader := io.LimitReader(upload, s.maxBytes+1)
 	chunks := make([]core.ImportUploadChunk, 0, core.MaxImportUploadWriteChunks)
 	var total int64
@@ -73,7 +73,8 @@ func (s *Staging) write(ctx context.Context, id string, upload io.Reader, create
 		}
 		if len(data) > 0 || index == 0 {
 			chunks = append(chunks, core.ImportUploadChunk{
-				ID: id, Index: int64(index), Bytes: data, CreatedAt: createdAt,
+				ID: id, Index: int64(index), Bytes: data,
+				CreatedAt: core.NormalizeTime(clock.Now()),
 			})
 		}
 		if len(chunks) > 0 && (len(chunks) == core.MaxImportUploadWriteChunks || done) {
@@ -103,10 +104,18 @@ func readUploadChunk(reader io.Reader) ([]byte, bool, error) {
 }
 
 func (s *Staging) open(ctx context.Context, id string) (*UploadReader, error) {
+	return s.openWithTimeout(ctx, id, 0)
+}
+
+func (s *Staging) openWithTimeout(
+	ctx context.Context, id string, timeout time.Duration,
+) (*UploadReader, error) {
 	if s == nil || !core.ValidID(id) {
 		return nil, core.ErrInvalidArgument
 	}
-	info, err := s.store.ImportUploadInfo(ctx, id)
+	infoCtx, cancel := storeCallContext(ctx, timeout)
+	info, err := s.store.ImportUploadInfo(infoCtx, id)
+	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("read import upload info: %w", err)
 	}
@@ -114,9 +123,18 @@ func (s *Staging) open(ctx context.Context, id string) (*UploadReader, error) {
 		return nil, fmt.Errorf("validate import upload info: %w", core.ErrInvalidArgument)
 	}
 	readChunk := func(index int64) ([]byte, error) {
-		return s.store.ReadImportUploadChunk(ctx, id, index)
+		readCtx, cancelRead := storeCallContext(ctx, timeout)
+		defer cancelRead()
+		return s.store.ReadImportUploadChunk(readCtx, id, index)
 	}
 	return &UploadReader{info: info, readChunk: readChunk, cachedIndex: -1}, nil
+}
+
+func storeCallContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(parent, timeout)
+	}
+	return context.WithCancel(parent)
 }
 
 func validUploadInfo(info core.ImportUploadInfo) bool {
@@ -148,7 +166,7 @@ func (s *Staging) sweep(ctx context.Context, now time.Time) (int64, error) {
 		return 0, ctx.Err()
 	}
 	before := core.NormalizeTime(now.Add(-s.transferTimeout))
-	return s.store.DeleteOrphanImportUploads(ctx, before, core.MaxOrphanImportUploads)
+	return s.store.DeleteOrphanImportUploads(ctx, before, core.MaxOrphanImportUploadChunks)
 }
 
 // UploadReader exposes sequential and random access over fixed-size database chunks.
