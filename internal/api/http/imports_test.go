@@ -8,10 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +33,7 @@ type fakeImportManager struct {
 	stagingID string
 	discarded string
 	uploadErr error
+	stageSeen chan struct{}
 }
 
 func (f *fakeImportManager) CreatePlaybackReporting(_ context.Context, _, requested string) (core.ImportJob, error) {
@@ -45,6 +48,9 @@ func (f *fakeImportManager) StageBloomExport(_ context.Context, upload io.Reader
 		return "", f.uploadErr
 	}
 	f.stagingID = "44444444-4444-4444-8444-444444444444"
+	if f.stageSeen != nil {
+		close(f.stageSeen)
+	}
 	data, err := io.ReadAll(upload)
 	f.upload = string(data)
 	return f.stagingID, err
@@ -401,9 +407,151 @@ func TestCreateBloomExportExtendsDeadlineForSlowReader(t *testing.T) {
 	request.Header.Set("Content-Type", contentType)
 	handler := loggingMiddleware(server.logger, telemetry.NopMetrics{})(http.HandlerFunc(server.handleCreateImport))
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusCreated || manager.upload != "{}\n" || time.Until(recorder.readDeadline) < time.Second {
-		t.Fatalf("slow upload = %d deadline %s body %q", recorder.Code, time.Until(recorder.readDeadline), manager.upload)
+	if recorder.Code != http.StatusCreated || manager.upload != "{}\n" ||
+		time.Until(recorder.readDeadline) < time.Second || time.Until(recorder.writeDeadline) < time.Second {
+		t.Fatalf(
+			"slow upload = %d read deadline %s write deadline %s body %q",
+			recorder.Code, time.Until(recorder.readDeadline), time.Until(recorder.writeDeadline), manager.upload,
+		)
 	}
+}
+
+func TestCreateBloomExportExtendsWriteDeadlineForSlowBody(t *testing.T) {
+	server, manager, _ := importHandlerServer(t)
+	server.importTransferTimeout = 2 * time.Second
+	manager.stageSeen = make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), accountKey, core.Account{ID: testRequestAccountID})
+		ctx = context.WithValue(ctx, requestIDKey, "request-1")
+		server.handleCreateImport(w, r.WithContext(ctx))
+	})
+	client := newPipeHTTPClient(t, handler, 20*time.Millisecond)
+	bodyReader, bodyWriter := io.Pipe()
+	multipartWriter := multipart.NewWriter(bodyWriter)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://bloom.test/imports", bodyReader)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	request.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+	releaseUpload := make(chan struct{})
+	writeDone := make(chan error, 1)
+	go writeSlowMultipart(releaseUpload, bodyWriter, multipartWriter, writeDone)
+	responseDone := make(chan struct {
+		response *http.Response
+		err      error
+	}, 1)
+	go func() {
+		response, requestErr := client.Do(request)
+		responseDone <- struct {
+			response *http.Response
+			err      error
+		}{response: response, err: requestErr}
+	}()
+	<-manager.stageSeen
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	<-timer.C
+	close(releaseUpload)
+	if err := <-writeDone; err != nil {
+		t.Fatalf("write multipart: %v", err)
+	}
+	result := <-responseDone
+	if result.err != nil {
+		t.Fatalf("slow upload request: %v", result.err)
+	}
+	defer result.response.Body.Close()
+	if result.response.StatusCode != http.StatusCreated {
+		t.Fatalf("slow upload status = %d, want %d", result.response.StatusCode, http.StatusCreated)
+	}
+}
+
+func newPipeHTTPClient(t *testing.T, handler http.Handler, writeTimeout time.Duration) *http.Client {
+	t.Helper()
+	clientConn, serverConn := net.Pipe()
+	listener := newSingleConnListener(serverConn)
+	server := &http.Server{
+		Handler: handler, ReadHeaderTimeout: time.Second, WriteTimeout: writeTimeout,
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+	var dialOnce sync.Once
+	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		var connection net.Conn
+		dialOnce.Do(func() { connection = clientConn })
+		if connection == nil {
+			return nil, errors.New("test connection already used")
+		}
+		return connection, nil
+	}}
+	t.Cleanup(func() {
+		transport.CloseIdleConnections()
+		_ = server.Close()
+		<-serveDone
+	})
+	return &http.Client{Transport: transport}
+}
+
+type singleConnListener struct {
+	conn      net.Conn
+	closed    chan struct{}
+	mu        sync.Mutex
+	closeOnce sync.Once
+}
+
+func newSingleConnListener(conn net.Conn) *singleConnListener {
+	return &singleConnListener{conn: conn, closed: make(chan struct{})}
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
+	if l.conn != nil {
+		connection := l.conn
+		l.conn = nil
+		l.mu.Unlock()
+		return connection, nil
+	}
+	l.mu.Unlock()
+	<-l.closed
+	return nil, net.ErrClosed
+}
+
+func (l *singleConnListener) Close() error {
+	l.closeOnce.Do(func() { close(l.closed) })
+	return nil
+}
+
+func (*singleConnListener) Addr() net.Addr { return testAddr("pipe") }
+
+type testAddr string
+
+func (a testAddr) Network() string { return string(a) }
+func (a testAddr) String() string  { return string(a) }
+
+func writeSlowMultipart(
+	release <-chan struct{}, body *io.PipeWriter, writer *multipart.Writer, done chan<- error,
+) {
+	err := writer.WriteField("media_server_id", importTestServerID)
+	if err == nil {
+		err = writer.WriteField("source", "bloom_export")
+	}
+	var part io.Writer
+	if err == nil {
+		header := make(textproto.MIMEHeader)
+		header["Content-Disposition"] = []string{`form-data; name="file"; filename="watches.jsonl"`}
+		header["Content-Type"] = []string{"application/x-ndjson"}
+		part, err = writer.CreatePart(header)
+	}
+	if err == nil {
+		<-release
+		_, err = io.WriteString(part, "{}\n")
+	}
+	if err == nil {
+		err = writer.Close()
+	}
+	if closeErr := body.CloseWithError(err); err == nil {
+		err = closeErr
+	}
+	done <- err
 }
 
 func TestWatchExportExtendsDeadlineForSlowWriter(t *testing.T) {

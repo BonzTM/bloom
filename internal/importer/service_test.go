@@ -36,6 +36,17 @@ func (s serviceServer) Get(context.Context, string) (core.MediaServerConnection,
 	return core.MediaServerConnection{}, s.err
 }
 
+type blockingServiceServer struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s blockingServiceServer) Get(context.Context, string) (core.MediaServerConnection, error) {
+	close(s.started)
+	<-s.release
+	return core.MediaServerConnection{}, nil
+}
+
 func TestBloomUploadIsRemovedAfterCancellation(t *testing.T) {
 	store := &serviceStore{workerStore: &workerStore{}}
 	service, staging := newService(t, store)
@@ -113,6 +124,69 @@ func TestBloomUploadStagingIsSerialized(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("second StageBloomExport: %v", err)
 	}
+}
+
+func TestBloomUploadSweepDuringCopyKeepsReservedPartial(t *testing.T) {
+	service, staging := newService(t, &serviceStore{workerStore: &workerStore{}})
+	upload := newBlockingReader()
+	type stageResult struct {
+		id  string
+		err error
+	}
+	done := make(chan stageResult, 1)
+	go func() {
+		id, err := service.StageBloomExport(t.Context(), upload)
+		done <- stageResult{id: id, err: err}
+	}()
+	<-upload.started
+	name := onlyStagingEntry(t, staging)
+	ageStagingEntry(t, staging, name)
+	if err := staging.sweep(nil); err != nil {
+		t.Fatalf("sweep during upload: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(staging.root, name)); err != nil {
+		t.Fatalf("reserved partial was removed: %v", err)
+	}
+	close(upload.release)
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("StageBloomExport: %v", result.err)
+	}
+	if err := service.DiscardBloomExport(result.id); err != nil {
+		t.Fatalf("DiscardBloomExport: %v", err)
+	}
+}
+
+func TestBloomUploadSweepBeforeCreateImportKeepsPublishedFile(t *testing.T) {
+	store := &serviceStore{workerStore: &workerStore{}}
+	service, staging := newService(t, store)
+	barrier := blockingServiceServer{started: make(chan struct{}), release: make(chan struct{})}
+	service.servers = barrier
+	stagingID, err := service.StageBloomExport(t.Context(), strings.NewReader("{}\n"))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	ageStagingEntry(t, staging, stagingName(stagingID))
+	done := make(chan error, 1)
+	go func() {
+		_, createErr := service.CreateBloomExport(
+			t.Context(), importServiceServerID, importServiceAccountID, stagingID,
+		)
+		done <- createErr
+	}()
+	<-barrier.started
+	if err := staging.sweep(nil); err != nil {
+		t.Fatalf("sweep before CreateImport: %v", err)
+	}
+	assertStagingFile(t, staging, stagingID, true)
+	close(barrier.release)
+	if err := <-done; err != nil {
+		t.Fatalf("CreateBloomExport: %v", err)
+	}
+	if err := staging.sweep(nil); err != nil {
+		t.Fatalf("sweep after CreateImport: %v", err)
+	}
+	assertStagingFile(t, staging, stagingID, false)
 }
 
 func TestBloomUploadUnavailableDoesNotReadUpload(t *testing.T) {
@@ -234,7 +308,7 @@ func newServiceWithStoreAndDataDirectory(
 	t *testing.T, store core.ImportStore, dataDirectory string,
 ) (*Service, *Staging) {
 	t.Helper()
-	staging, err := NewStaging(dataDirectory)
+	staging, err := NewStaging(dataDirectory, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("NewStaging: %v", err)
 	}
@@ -245,6 +319,31 @@ func newServiceWithStoreAndDataDirectory(
 		t.Fatalf("NewService: %v", err)
 	}
 	return service, staging
+}
+
+func onlyStagingEntry(t *testing.T, staging *Staging) string {
+	t.Helper()
+	entries, err := os.ReadDir(staging.root)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("staging entries = %+v, %v; want one", entries, err)
+	}
+	return entries[0].Name()
+}
+
+func ageStagingEntry(t *testing.T, staging *Staging, name string) {
+	t.Helper()
+	old := time.Now().Add(-staging.transferTimeout - time.Second)
+	if err := os.Chtimes(filepath.Join(staging.root, name), old, old); err != nil {
+		t.Fatalf("age staging entry %q: %v", name, err)
+	}
+}
+
+func assertStagingFile(t *testing.T, staging *Staging, id string, want bool) {
+	t.Helper()
+	_, err := os.Stat(filepath.Join(staging.root, stagingName(id)))
+	if (err == nil) != want {
+		t.Fatalf("staging file exists = %t, %v; want %t", err == nil, err, want)
+	}
 }
 
 type fixedImportClock struct{}

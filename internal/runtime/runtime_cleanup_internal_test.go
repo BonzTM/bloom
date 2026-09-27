@@ -292,7 +292,7 @@ func TestWarnBloomExportUnavailableOnce(t *testing.T) {
 	if err := os.WriteFile(dataDirectory, []byte("not a directory"), 0o600); err != nil {
 		t.Fatalf("block data directory: %v", err)
 	}
-	staging, err := importapp.NewStaging(dataDirectory)
+	staging, err := importapp.NewStaging(dataDirectory, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("NewStaging: %v", err)
 	}

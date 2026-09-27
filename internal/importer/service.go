@@ -87,6 +87,7 @@ func (s *Service) CreateBloomExport(
 		if result != nil {
 			s.removeUnclaimedUpload(ctx, stagingID)
 		}
+		s.staging.release(stagingID)
 	}()
 	if err := s.validateTarget(ctx, mediaServerID, requestedBy); err != nil {
 		return job, err
@@ -103,6 +104,7 @@ func (s *Service) CreateBloomExport(
 
 // DiscardBloomExport removes an unclaimed staged upload.
 func (s *Service) DiscardBloomExport(stagingID string) error {
+	defer s.staging.release(stagingID)
 	return s.staging.remove(stagingID)
 }
 

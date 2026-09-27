@@ -120,8 +120,8 @@ func (s *Server) createReportingImport(
 func (s *Server) createBloomImport(
 	w http.ResponseWriter, r *http.Request, accountID string,
 ) (job core.ImportJob, result error) {
-	if err := s.setImportReadDeadline(w); err != nil {
-		return core.ImportJob{}, fmt.Errorf("extend import upload deadline: %w", err)
+	if err := s.setImportDeadlines(w); err != nil {
+		return core.ImportJob{}, fmt.Errorf("extend import upload deadlines: %w", err)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, importMultipartBytes)
 	reader, err := r.MultipartReader()
@@ -468,8 +468,11 @@ func nextExportQuery(query core.PlaybackQuery, cursor string) (core.PlaybackQuer
 	return query, nil
 }
 
-func (s *Server) setImportReadDeadline(w http.ResponseWriter) error {
-	return setTransferDeadline(w, s.importTransferTimeout, true)
+func (s *Server) setImportDeadlines(w http.ResponseWriter) error {
+	return errors.Join(
+		setTransferDeadline(w, s.importTransferTimeout, true),
+		setTransferDeadline(w, s.importTransferTimeout, false),
+	)
 }
 
 func (s *Server) setExportWriteDeadline(w http.ResponseWriter) error {

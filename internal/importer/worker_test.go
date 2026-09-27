@@ -199,6 +199,9 @@ func TestWorkerSweepKeepsOnlyActiveUploads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage orphan: %v", err)
 	}
+	worker.deps.Staging.release(activeID)
+	worker.deps.Staging.release(orphanID)
+	ageStagingEntry(t, worker.deps.Staging, stagingName(orphanID))
 	cursor, err := encodeFileCursor(fileCursor{ID: activeID})
 	if err != nil {
 		t.Fatalf("encode cursor: %v", err)
@@ -209,6 +212,7 @@ func TestWorkerSweepKeepsOnlyActiveUploads(t *testing.T) {
 	if err := os.WriteFile(partialPath, []byte("partial"), 0o600); err != nil {
 		t.Fatalf("write partial staging file: %v", err)
 	}
+	ageStagingEntry(t, worker.deps.Staging, partialID+partialSuffix)
 	if err := worker.sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -244,7 +248,7 @@ func pendingWorkerJob(t *testing.T) core.ImportJob {
 
 func newTestWorker(t *testing.T, store core.ImportStore, reporting PlaybackReportingService) *Worker {
 	t.Helper()
-	staging, err := NewStaging(t.TempDir())
+	staging, err := NewStaging(t.TempDir(), 10*time.Minute)
 	if err != nil {
 		t.Fatalf("NewStaging: %v", err)
 	}

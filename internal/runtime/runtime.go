@@ -286,7 +286,7 @@ func importDependencies(
 	if err != nil {
 		return nil, nil, fmt.Errorf("build import store: %w", err)
 	}
-	staging, err := importapp.NewStaging(cfg.DataDirectory)
+	staging, err := importapp.NewStaging(cfg.DataDirectory, cfg.HTTP.ImportTransferTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build import staging: %w", err)
 	}

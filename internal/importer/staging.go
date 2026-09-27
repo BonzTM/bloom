@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/BonzTM/bloom/internal/core"
 )
@@ -26,24 +27,29 @@ var errStagingUnavailable = errors.New("import staging unavailable")
 
 // Staging confines uploaded import files to one private local root.
 type Staging struct {
-	root        string
-	slots       chan struct{}
-	maxBytes    int64
-	mu          sync.RWMutex
-	unavailable error
-	established bool
+	root            string
+	slots           chan struct{}
+	maxBytes        int64
+	transferTimeout time.Duration
+	mu              sync.RWMutex
+	reserved        map[string]struct{}
+	unavailable     error
+	established     bool
 }
 
 // NewStaging resolves the private import root and records setup failures for lazy recovery.
-func NewStaging(dataDirectory string) (*Staging, error) {
-	if dataDirectory == "" {
+func NewStaging(dataDirectory string, transferTimeout time.Duration) (*Staging, error) {
+	if dataDirectory == "" || transferTimeout <= 0 {
 		return nil, fmt.Errorf("create import staging: %w", core.ErrInvalidArgument)
 	}
 	root, err := filepath.Abs(filepath.Join(dataDirectory, stagingDirectory))
 	if err != nil {
 		return nil, fmt.Errorf("resolve import staging root: %w", err)
 	}
-	staging := &Staging{root: root, slots: make(chan struct{}, 1), maxBytes: core.MaxImportUploadBytes}
+	staging := &Staging{
+		root: root, slots: make(chan struct{}, 1), maxBytes: core.MaxImportUploadBytes,
+		transferTimeout: transferTimeout, reserved: make(map[string]struct{}),
+	}
 	staging.unavailable = prepareStagingRoot(root)
 	staging.established = staging.unavailable == nil
 	return staging, nil
@@ -149,6 +155,13 @@ func (s *Staging) stage(upload io.Reader) (id string, result error) {
 	if err != nil {
 		return "", fmt.Errorf("create staging identifier: %w", err)
 	}
+	reservedID := id
+	s.reserve(reservedID)
+	defer func() {
+		if result != nil {
+			s.release(reservedID)
+		}
+	}()
 	root, err := os.OpenRoot(s.root)
 	if err != nil {
 		return "", s.markUnavailable(fmt.Errorf("open import staging root: %w", err))
@@ -173,6 +186,28 @@ func (s *Staging) stage(upload io.Reader) (id string, result error) {
 		return "", s.markUnavailable(cause)
 	}
 	return id, nil
+}
+
+func (s *Staging) reserve(id string) {
+	s.mu.Lock()
+	s.reserved[id] = struct{}{}
+	s.mu.Unlock()
+}
+
+func (s *Staging) release(id string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	delete(s.reserved, id)
+	s.mu.Unlock()
+}
+
+func (s *Staging) isReserved(id string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, reserved := s.reserved[id]
+	return reserved
 }
 
 func removeStagingPartial(root *os.Root, name string) error {
@@ -251,7 +286,7 @@ func (s *Staging) sweep(active map[string]struct{}) (result error) {
 		limit := min(stagingSweepChunkSize, maxStagingSweepEntries-processed)
 		entries, readErr := directory.ReadDir(limit)
 		for _, entry := range entries {
-			if err := s.sweepEntry(active, entry.Name()); err != nil {
+			if err := s.sweepEntry(active, entry); err != nil {
 				return err
 			}
 		}
@@ -266,12 +301,26 @@ func (s *Staging) sweep(active map[string]struct{}) (result error) {
 	return nil
 }
 
-func (s *Staging) sweepEntry(active map[string]struct{}, name string) error {
+func (s *Staging) sweepEntry(active map[string]struct{}, entry fs.DirEntry) error {
+	name := entry.Name()
 	id, suffix, ok := stagingEntry(name)
 	if !ok {
 		return nil
 	}
 	if _, referenced := active[id]; referenced && suffix == stagingSuffix {
+		return nil
+	}
+	if s.isReserved(id) {
+		return nil
+	}
+	info, err := entry.Info()
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect import staging entry: %w", err)
+	}
+	if time.Since(info.ModTime()) < s.transferTimeout {
 		return nil
 	}
 	return s.removeNamed(id, suffix)
