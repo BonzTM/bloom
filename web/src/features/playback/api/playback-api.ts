@@ -1,8 +1,12 @@
+import { z } from "zod/v4";
 import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
+  accountMediaUserSchema,
+  accountMediaUsersSchema,
+  linkMediaUserRequestSchema,
+  mediaServerUsersSchema,
   mediaUserIdSchema,
   statsDailySchema,
-  accountMediaUsersSchema,
   statsDaysSchema,
   statsLibrariesSchema,
   statsLibraryIdSchema,
@@ -13,7 +17,9 @@ import {
   statsUserDetailSchema,
   statsUsersSchema,
   statsZoneSchema,
+  type AccountMediaUser,
   type AccountMediaUsers,
+  type MediaServerUsers,
   type StatsDaily,
   type StatsLibraries,
   type StatsOverview,
@@ -152,6 +158,37 @@ export class PlaybackApi {
       statsPath("me", params),
       statsUserDetailSchema,
       { signal },
+    );
+  }
+
+  // A media server's users (admin.settings), for choosing whom to link.
+  mediaServerUsers(
+    mediaServerId: string,
+    signal: AbortSignal,
+  ): Promise<MediaServerUsers> {
+    const id = encodeURIComponent(mediaServerIdSchema.parse(mediaServerId));
+    return this.#client.requestJson(
+      `api/v1/media-servers/${id}/users`,
+      mediaServerUsersSchema,
+      { signal },
+    );
+  }
+
+  // Link one Bloom account to a media user on one server (admin.settings).
+  linkMediaUser(
+    accountId: string,
+    mediaServerId: string,
+    mediaUserId: string,
+  ): Promise<AccountMediaUser> {
+    const account = encodeURIComponent(z.uuid().parse(accountId));
+    const server = encodeURIComponent(mediaServerIdSchema.parse(mediaServerId));
+    return this.#client.requestJson(
+      `api/v1/accounts/${account}/media-users/${server}`,
+      accountMediaUserSchema,
+      {
+        method: "PUT",
+        body: linkMediaUserRequestSchema.parse({ media_user_id: mediaUserId }),
+      },
     );
   }
 

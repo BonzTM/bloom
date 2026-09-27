@@ -194,6 +194,25 @@ export type AccountMediaUsers = z.output<typeof accountMediaUsersSchema>;
 
 export const MEDIA_USER_NOT_LINKED = "media_user_not_linked";
 
+// A media server's users, as an administrator sees them when linking a
+// Bloom account: only what is needed to choose one.
+export const mediaServerUserSchema = z.object({
+  id: z.string().min(1).max(MAX_LIBRARY_ID_BYTES),
+  name: z.string().min(1).max(64),
+});
+
+export type MediaServerUser = z.output<typeof mediaServerUserSchema>;
+
+export const mediaServerUsersSchema = z.object({
+  items: z.array(mediaServerUserSchema).max(1000),
+});
+
+export type MediaServerUsers = z.output<typeof mediaServerUsersSchema>;
+
+export const linkMediaUserRequestSchema = z.strictObject({
+  media_user_id: z.string().min(1).max(MAX_LIBRARY_ID_BYTES),
+});
+
 export const statsUserDetailSchema = z.object({
   window: statsWindowSchema,
   totals: statsTotalsSchema,

@@ -14,7 +14,10 @@ import {
   StatsControls,
   type WindowDays,
 } from "../features/playback/components/stats-controls.js";
+import { LinkMediaUserForm } from "../features/playback/components/link-media-user-form.js";
 import { ReportFailed } from "../features/playback/components/stats-panels.js";
+import { useMediaServers } from "../features/media-servers/hooks/media-servers-queries.js";
+import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { UserDashboard } from "../features/playback/components/user-dashboard.js";
 import {
   useMyMediaUsers,
@@ -31,15 +34,22 @@ export default function MyStatsRoute(): ReactNode {
   usePageTitle(pageTitle("My statistics"));
   const session = useSession();
   const accountId = session.data?.account.id;
+  const canLink =
+    session.data !== undefined &&
+    session.data !== null &&
+    hasPermission(session.data.permissions, permissions.adminSettings);
   if (accountId === undefined) {
     return null;
   }
-  return <MyStatsPage key={accountId} accountId={accountId} />;
+  return (
+    <MyStatsPage key={accountId} accountId={accountId} canLink={canLink} />
+  );
 }
 
 function MyStatsPage({
   accountId,
-}: Readonly<{ accountId: string }>): ReactNode {
+  canLink,
+}: Readonly<{ accountId: string; canLink: boolean }>): ReactNode {
   const [days, setDays] = useState<WindowDays>(30);
   const [serverId, setServerId] = useState<string | undefined>(undefined);
   const timeZone = useMemo(() => browserTimeZone(), []);
@@ -91,7 +101,7 @@ function MyStatsPage({
           confirmed.
         </AsyncStatus>
       ) : notLinked ? (
-        <NotLinked />
+        <NotLinked accountId={accountId} canLink={canLink} />
       ) : me.status === "pending" ? (
         <AsyncStatus>Loading your statistics…</AsyncStatus>
       ) : me.status === "error" ? (
@@ -132,7 +142,14 @@ function LinkedAs({
   );
 }
 
-function NotLinked(): ReactNode {
+function NotLinked({
+  accountId,
+  canLink,
+}: Readonly<{ accountId: string; canLink: boolean }>): ReactNode {
+  const servers = useMediaServers(canLink ? accountId : undefined);
+  const serverOptions = (servers.data?.pages ?? []).flatMap((page) =>
+    page.items.map((server) => ({ id: server.id, name: server.name })),
+  );
   return (
     <section aria-labelledby="not-linked-heading" className="card">
       <h2 id="not-linked-heading">No media-server user is linked yet</h2>
@@ -142,6 +159,17 @@ function NotLinked(): ReactNode {
         when a media-server user has the same username as your account, or when
         an administrator links one for you.
       </p>
+      {canLink ? (
+        servers.status === "pending" ? (
+          <AsyncStatus>Loading media servers…</AsyncStatus>
+        ) : serverOptions.length === 0 ? (
+          <p>Register a media server first, then link your account here.</p>
+        ) : (
+          <LinkMediaUserForm accountId={accountId} servers={serverOptions} />
+        )
+      ) : (
+        <p>Ask an administrator to link your account.</p>
+      )}
     </section>
   );
 }

@@ -86,6 +86,9 @@ contracts) gets an entry here.
   server.
 - `GET /api/v1/media-servers/{id}/users`, guarded by `admin.settings`, lists
   bounded media-server user identities for linking Bloom accounts.
+- Administrators can link their own account to a media-server user from the
+  My statistics page when nothing is linked yet, choosing the server and the
+  user from lists.
 - Stream details on playback watches and bounded position samples, including
   containers, codecs, bitrate, dimensions, framerate, audio channels,
   direct-stream flags, and transcode reasons. Mid-play method and stream

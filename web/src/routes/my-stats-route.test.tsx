@@ -102,3 +102,44 @@ it("picks the server when several users are linked", async () => {
     requested.some((q) => q.includes(`media_server_id=${LIVING_ROOM}`)),
   ).toBe(true);
 });
+
+it("lets an administrator link their own account when nothing is linked", async () => {
+  const user = userEvent.setup();
+  setMockOwnLinks([]);
+  signInMockSession();
+  renderApp("/statistics");
+  const form = await screen.findByRole("form", {
+    name: "Link your account to a media-server user",
+  });
+  await user.selectOptions(
+    within(form).getByLabelText("Media server"),
+    "Cabin",
+  );
+  const users = within(form).getByLabelText("Media-server user");
+  await within(form).findByRole("option", { name: "carol" });
+  await user.selectOptions(users, "alice");
+
+  await user.click(
+    within(form).getByRole("button", { name: "Link my account" }),
+  );
+
+  expect(await screen.findByText("Showing alice on Cabin.")).toBeVisible();
+  expect(screen.getByRole("list", { name: "Totals" })).toHaveTextContent(
+    "Plays17",
+  );
+});
+
+it("tells a non-administrator to ask for a link", async () => {
+  setMockOwnLinks([]);
+  setMockPermissions(["stats.read.own"]);
+  signInMockSession();
+  renderApp("/statistics");
+  expect(
+    await screen.findByText("Ask an administrator to link your account."),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("form", {
+      name: "Link your account to a media-server user",
+    }),
+  ).not.toBeInTheDocument();
+});
