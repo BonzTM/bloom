@@ -13,8 +13,9 @@ import (
 )
 
 type sqlitePlaybackStore struct {
-	pool *sql.DB
-	q    *sqlite.Queries
+	pool         *sql.DB
+	q            *sqlite.Queries
+	resumeWindow time.Duration
 }
 
 var (
@@ -22,8 +23,8 @@ var (
 	_ core.PlaybackLibraryStore = (*sqlitePlaybackStore)(nil)
 )
 
-func newSQLitePlaybackStore(pool *sql.DB) *sqlitePlaybackStore {
-	return &sqlitePlaybackStore{pool: pool, q: sqlite.New(pool)}
+func newSQLitePlaybackStore(pool *sql.DB, resumeWindow time.Duration) *sqlitePlaybackStore {
+	return &sqlitePlaybackStore{pool: pool, q: sqlite.New(pool), resumeWindow: resumeWindow}
 }
 
 func (s *sqlitePlaybackStore) LoadOpenWatches(
@@ -81,28 +82,26 @@ func (s *sqlitePlaybackStore) BackfillWatchLibrary(
 func (s *sqlitePlaybackStore) SaveWatches(
 	ctx context.Context,
 	mutations []core.PlaybackMutation,
-) (result error) {
+) error {
 	if err := validatePlaybackMutations(mutations); err != nil {
 		return fmt.Errorf("save playback watches: %w", err)
 	}
-	tx, err := s.pool.BeginTx(ctx, nil)
-	if err != nil {
-		return playbackStoreError("begin playback transaction", err)
-	}
-	defer rollbackPlayback(tx, &result)
-	queries := s.q.WithTx(tx)
-	for _, mutation := range mutations {
-		if err := saveSQLiteMutation(ctx, queries, mutation); err != nil {
-			return err
+	err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+		queries := sqlite.New(conn)
+		for _, mutation := range mutations {
+			if saveErr := s.saveSQLiteMutation(ctx, queries, mutation); saveErr != nil {
+				return saveErr
+			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return playbackStoreError("commit playback transaction", err)
+		return nil
+	})
+	if err != nil {
+		return playbackStoreError("save playback transaction", err)
 	}
 	return nil
 }
 
-func saveSQLiteMutation(
+func (s *sqlitePlaybackStore) saveSQLiteMutation(
 	ctx context.Context,
 	queries *sqlite.Queries,
 	mutation core.PlaybackMutation,
@@ -113,6 +112,9 @@ func saveSQLiteMutation(
 	}
 	if err := queries.UpsertPlaybackWatch(ctx, params); err != nil {
 		return playbackStoreError("upsert playback watch", err)
+	}
+	if err := s.deleteSQLiteImportDuplicates(ctx, queries, mutation.Watch); err != nil {
+		return err
 	}
 	if mutation.SegmentEnd != nil {
 		params := sqlite.CloseOpenWatchSegmentParams{
@@ -132,6 +134,23 @@ func saveSQLiteMutation(
 		}
 	}
 	return saveSQLitePosition(ctx, queries, mutation.Position)
+}
+
+func (s *sqlitePlaybackStore) deleteSQLiteImportDuplicates(
+	ctx context.Context, queries *sqlite.Queries, watch core.PlaybackWatch,
+) error {
+	if watch.Source == core.WatchSourceImport {
+		return nil
+	}
+	err := queries.DeleteOverlappingImportedWatches(ctx, sqlite.DeleteOverlappingImportedWatchesParams{
+		MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID, ItemID: watch.ItemID,
+		StartAfter:  formatSQLiteTime(watch.StartedAt.Add(-s.resumeWindow)),
+		StartBefore: formatSQLiteTime(watch.StartedAt.Add(s.resumeWindow)),
+	})
+	if err != nil {
+		return playbackStoreError("delete overlapping imported watches", err)
+	}
+	return nil
 }
 
 func saveSQLitePosition(
@@ -375,6 +394,7 @@ func sqliteStoredWatch(
 	ended sql.NullString,
 	activeSeconds, positionMS int64, runtimeMS sql.NullInt64,
 	source, created, updated string,
+	importSource, importRecordID sql.NullString,
 	stream storedStreamDetails,
 ) (core.PlaybackWatch, error) {
 	seasonNumber, err := sqliteInt32(season)
@@ -423,7 +443,8 @@ func sqliteStoredWatch(
 		stream:    details,
 		startedAt: startedAt, lastSeenAt: lastSeenAt, endedAt: endedAt,
 		activeSeconds: activeSeconds, lastPositionMS: positionMS, runtime: runtime,
-		source:    core.WatchSource(source),
+		source:       core.WatchSource(source),
+		importSource: core.ImportSource(importSource.String), importRecordID: importRecordID.String,
 		createdAt: createdAt, updatedAt: updatedAt,
 	}.domain(), nil
 }
@@ -436,6 +457,7 @@ func sqliteOpenWatch(row sqlite.ListOpenPlaybackWatchesRow) (core.PlaybackWatch,
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -450,6 +472,7 @@ func sqliteNowWatch(row sqlite.ListNowPlayingRow) (core.PlaybackWatch, error) {
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -464,6 +487,7 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -478,6 +502,7 @@ func sqliteRecentWatch(row sqlite.FindRecentPlaybackWatchRow) (core.PlaybackWatc
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -492,6 +517,7 @@ func sqliteRecentServerWatch(row sqlite.ListRecentPlaybackWatchesRow) (core.Play
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),

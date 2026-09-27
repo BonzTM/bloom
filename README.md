@@ -242,8 +242,8 @@ within five minutes reopens that watch.
 
 Polling has finite accuracy. A play shorter than the poll interval can be
 missed. Position precision is bounded by the active polling interval. A client
-that remains present and unpaused while stalled is counted as active. Bloom
-does not import activity from before collection started in this release.
+that remains present and unpaused while stalled is counted as active. Bloom can
+import activity from before collection started as described below.
 
 An authenticated account with `stats.read.all` can use cursor-paged
 `GET /api/v1/playback/now` and `GET /api/v1/playback/history`. The history route accepts an optional
@@ -253,6 +253,46 @@ per-user statistics detail responses include the latest stream details when
 available. Those watch responses also include nullable `runtime_ms` so clients
 can calculate progress and remaining time. Successful reads emit no playback audit event;
 authorization denials continue to use the shared security audit stream.
+
+### Importing history
+
+An account with `admin.settings` can create and monitor import jobs through
+`POST /api/v1/imports`, `GET /api/v1/imports`, `GET /api/v1/imports/{id}`,
+and `POST /api/v1/imports/{id}/cancel`. Only one pending or running job for a
+media server and source is allowed. The worker processes one job at a time per
+Bloom process in batches of 500 and checkpoints each batch with its cursor and
+counters. A stopped process resumes after the last committed batch.
+
+The `playback_reporting` source reads Jellyfin's Playback Reporting plugin by
+ascending database `rowid`. The plugin must be installed on the selected
+server. Create this job with JSON containing `media_server_id` and
+`source: "playback_reporting"`. The `bloom_export` source accepts a multipart
+`file` part with `Content-Type: application/x-ndjson`, plus `media_server_id`
+and `source: bloom_export` fields. Bloom streams the file once into the private
+`BLOOM_DATA_DIR/imports` staging directory. Uploads are limited to 256 MiB, and
+only one upload is staged at a time per process. Startup and worker scans remove
+staged files that are not referenced by a pending or running job.
+
+If Bloom cannot create or secure the staging directory, startup continues and
+Playback Reporting imports remain available. Bloom export uploads return `422`
+until `BLOOM_DATA_DIR` is writable. Bloom retries the directory on each upload,
+so correcting the mount does not require a restart.
+
+`GET /api/v1/exports/watches` streams Bloom JSONL in newest-first
+`(started_at, id)` order. `limit` defaults to 1000 and accepts 1 through 10000.
+Pass the `X-Next-Cursor` response trailer back as `cursor` to continue. Import
+that file on another Bloom instance to move watch history between SQLite and
+PostgreSQL. Re-import is idempotent because the original watch ID is the source
+record ID.
+
+Bloom's collected watch wins when an imported and collected watch have the same
+media server, media user, and item and start within
+`BLOOM_PLAYBACK_RESUME_WINDOW`. This rule applies whether collection or import
+commits first. Bloom exports restore the watch snapshot, including device,
+series, library, episode, final-position, stream, and end-time fields. Imported
+watches do not restore segments or position samples. Playback Reporting rows
+with malformed nullable identity or text fields are skipped without blocking
+later rows.
 
 An account with `stats.read.all` can also read the statistics dashboards at
 `GET /api/v1/stats/overview`, `/daily`, `/patterns`, `/titles`, `/users`,
@@ -559,6 +599,7 @@ this table.
 | `BLOOM_PUBLIC_URL` | HTTP(S) origin | no | `http://localhost:8080` | no | Externally visible Bloom origin used for callback-error redirects and OIDC redirect validation. Limited to 2,048 valid UTF-8 bytes with no control characters. |
 | `BLOOM_DB_DRIVER` | `sqlite` \| `postgres` | no | `sqlite` | no | Database engine. Anything else fails startup. |
 | `BLOOM_DB_DSN` | string | postgres: yes | sqlite: `file:bloom.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)` | yes | Data source name. Required when the driver is `postgres`. For compatibility, startup supplies `_pragma=foreign_keys(1)` when a configured SQLite DSN omits a foreign-key pragma; an explicit disable still fails startup. |
+| `BLOOM_DATA_DIR` | path | no | `.` | no | Node-local runtime data root for Bloom export uploads. Bloom creates a private `imports` staging directory beneath it. An unwritable directory disables only Bloom export uploads and is retried on the next upload. Container images default this to `/data`. |
 | `BLOOM_DB_MAX_OPEN_CONNS` | int | no | `25` | no | Pool cap on open connections. |
 | `BLOOM_DB_MAX_IDLE_CONNS` | int | no | `25` | no | Pool idle floor; must be `<=` max open. |
 | `BLOOM_DB_CONN_MAX_LIFETIME` | duration | no | `30m` | no | Bound on connection age. |
@@ -595,6 +636,7 @@ this table.
 | `BLOOM_PLAYBACK_MISSED_POLLS` | int | no | `3` | no | Consecutive successful polls that may omit a session before its watch closes. Valid range: 1-100. |
 | `BLOOM_PLAYBACK_RESUME_WINDOW` | duration | no | `5m` | no | Window in which a matching stopped watch reopens. Valid range: `1s`-`24h`. |
 | `BLOOM_PLAYBACK_STORE_TIMEOUT` | duration | no | `5s` | no | Per-operation deadline for playback database loads, lookups, and saves. Valid range: `100ms`-`30s`. |
+| `BLOOM_IMPORT_WORKER_INTERVAL` | duration | no | `10s` | no | Interval between history-import job scans. Valid range: `1s`-`1h`. |
 | `BLOOM_STATS_CACHE_TTL` | duration | no | `30s` | no | TTL for the bounded in-process statistics result cache. Must be at least `0`; `0` disables caching. |
 | `BLOOM_REQUEST_AVAILABILITY_SOURCE` | `media_server` \| `download_manager` | no | `media_server` | no | Authority used to mark processing requests available. Queue progress is never the authority. |
 | `BLOOM_REQUEST_AVAILABILITY_INTERVAL` | duration | no | `5m` | no | Poll interval while processing requests exist. Valid range: `1m`-`24h`. |
@@ -661,6 +703,11 @@ the recorded stream-detail series.
 Migration `00020_watch_runtime` adds the nullable, bounded `runtime_ms` column
 to watches on both engines. Its down migration removes the column and loses
 the recorded runtimes.
+
+Migration `00022_history_imports` adds leased import jobs, imported-watch
+provenance, and the per-server/source-record uniqueness index on both engines.
+Its down migration removes import jobs and provenance columns but leaves watch
+rows that were imported before rollback.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

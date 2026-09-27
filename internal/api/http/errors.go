@@ -52,6 +52,7 @@ const (
 	codeNotificationFailure     = "notification_channel_failure"
 	codeMediaUserNotLinked      = "media_user_not_linked"
 	codeInviteFailureLeased     = "invite_provisioning_failure_leased"
+	codeImportInProgress        = "import_in_progress"
 	reasonUnreachable           = "unreachable"
 	reasonUnauthorized          = "unauthorized"
 	reasonNotFound              = "not_found"
@@ -83,6 +84,8 @@ func errorClass(err error) (status int, code string) {
 		return http.StatusServiceUnavailable, codeMetadataProviderFailure
 	case errors.Is(err, core.ErrProfileInUse):
 		return http.StatusConflict, codeProfileInUse
+	case errors.Is(err, core.ErrImportInProgress):
+		return http.StatusConflict, codeImportInProgress
 	case errors.Is(err, core.ErrInvalidTransition):
 		return http.StatusConflict, codeInvalidTransition
 	case isMediaServerErrorKind(err, core.MediaServerSaturated):

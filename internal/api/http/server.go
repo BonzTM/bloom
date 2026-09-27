@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -82,6 +83,17 @@ type playbackReader interface {
 	ListWatchPositions(ctx context.Context, watchID string) ([]core.PlaybackPosition, error)
 }
 
+type importManager interface {
+	CreatePlaybackReporting(context.Context, string, string) (core.ImportJob, error)
+	CheckBloomExportUpload() error
+	StageBloomExport(context.Context, io.Reader) (string, error)
+	CreateBloomExport(context.Context, string, string, string) (core.ImportJob, error)
+	DiscardBloomExport(string) error
+	List(context.Context, core.ImportListQuery) ([]core.ImportJob, error)
+	Get(context.Context, string) (core.ImportJob, error)
+	Cancel(context.Context, string) (core.ImportJob, error)
+}
+
 type metadataReader interface {
 	Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error)
 	Movie(context.Context, string) (core.MetadataTitle, error)
@@ -154,6 +166,7 @@ type Server struct {
 	inviteMetrics          telemetry.InviteMetrics
 	accountMediaUsers      accountMediaUserManager
 	playbackReader         playbackReader
+	imports                importManager
 	statsReader            core.StatsReader
 	metadataReader         metadataReader
 	metadataDiscovery      metadataDiscoveryReader
@@ -210,6 +223,8 @@ type Deps struct {
 	AccountMediaUsers accountMediaUserManager
 	// PlaybackReader supplies now-playing and history reads.
 	PlaybackReader playbackReader
+	// Imports supplies history import lifecycle operations.
+	Imports importManager
 	// StatsReader supplies cached statistics dashboard reports.
 	StatsReader core.StatsReader
 	// MetadataReader supplies provider-backed search and detail reads.
@@ -353,6 +368,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		inviteMetrics:          telemetry.NopMetrics{},
 		accountMediaUsers:      deps.AccountMediaUsers,
 		playbackReader:         deps.PlaybackReader,
+		imports:                deps.Imports,
 		statsReader:            deps.StatsReader,
 		metadataReader:         deps.MetadataReader,
 		metadataDiscovery:      deps.MetadataDiscovery,
@@ -470,7 +486,7 @@ func (s *Server) routes() http.Handler {
 	}
 
 	var apiHandler http.Handler = apiMux
-	apiHandler = httputil.MaxBytes(s.maxBodyBytes)(apiHandler)
+	apiHandler = s.requestBodyLimit(apiHandler)
 	apiHandler = loggingMiddleware(s.logger, s.metrics)(apiHandler)
 	apiHandler = otelhttp.NewHandler(apiHandler, "http.server", otelhttp.WithFilter(traceGeneralAPIRequest))
 
@@ -498,6 +514,18 @@ func (s *Server) routes() http.Handler {
 	h = securityHeadersMiddleware(h)
 	h = requestIDMiddleware(h)
 	return h
+}
+
+func (s *Server) requestBodyLimit(next http.Handler) http.Handler {
+	standard := httputil.MaxBytes(s.maxBodyBytes)(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/imports" &&
+			strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		standard.ServeHTTP(w, r)
+	})
 }
 
 func traceGeneralAPIRequest(r *http.Request) bool {
@@ -560,6 +588,8 @@ func csrfAuditResource(path string) string {
 		return auditResourceRequests
 	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
 		return auditResourceRequestQuotas
+	case "/api/v1/imports", "/api/v1/imports/{id}", "/api/v1/imports/{id}/cancel":
+		return "imports"
 	default:
 		return auditResourceRouteUnmatched
 	}

@@ -200,6 +200,8 @@ type PlaybackWatch struct {
 	LastPosition    time.Duration
 	Runtime         *time.Duration
 	Source          WatchSource
+	ImportSource    ImportSource
+	ImportRecordID  string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -826,7 +828,8 @@ func timePointer(value time.Time) *time.Time {
 // ValidatePlaybackWatch rejects invalid values before they cross into storage.
 func ValidatePlaybackWatch(watch PlaybackWatch) error {
 	if !ValidID(watch.ID) || !ValidID(watch.MediaServerID) || watch.MediaUserID == "" ||
-		watch.DeviceID == "" || watch.ItemID == "" || !watch.PlayMethod.Valid() ||
+		(watch.DeviceID == "" && watch.Source != WatchSourceImport) ||
+		watch.ItemID == "" || !watch.PlayMethod.Valid() ||
 		!watch.Source.Valid() || watch.ActiveTime < 0 || watch.LastPosition < 0 {
 		return ErrInvalidArgument
 	}
@@ -834,6 +837,11 @@ func ValidatePlaybackWatch(watch PlaybackWatch) error {
 		return ErrInvalidArgument
 	}
 	if watch.Runtime != nil && *watch.Runtime < 0 {
+		return ErrInvalidArgument
+	}
+	provenance := watch.ImportSource.Valid() && watch.ImportRecordID != "" &&
+		validImportText(watch.ImportRecordID, MaxImportRecordIDBytes)
+	if (watch.Source == WatchSourceImport) != provenance {
 		return ErrInvalidArgument
 	}
 	if (watch.LibraryID == "") != (watch.LibraryName == "") ||

@@ -56,6 +56,15 @@ ON CONFLICT (id) DO UPDATE SET
     runtime_ms = excluded.runtime_ms,
     updated_at = excluded.updated_at;
 
+-- name: DeleteOverlappingImportedWatches :exec
+DELETE FROM watches
+WHERE media_server_id = sqlc.arg(media_server_id)
+  AND media_user_id = sqlc.arg(media_user_id)
+  AND item_id = sqlc.arg(item_id)
+  AND source = 'import'
+  AND started_at >= sqlc.arg(start_after)
+  AND started_at <= sqlc.arg(start_before);
+
 -- name: ListOpenPlaybackWatches :many
 SELECT w.*, ms.name AS media_server_name
 FROM watches w

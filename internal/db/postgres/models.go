@@ -72,6 +72,26 @@ type DownloadManager struct {
 	UpdatedAt            time.Time
 }
 
+type Import struct {
+	ID             string
+	MediaServerID  string
+	Source         string
+	State          string
+	Cursor         string
+	ReadCount      int64
+	ImportedCount  int64
+	SkippedCount   int64
+	DuplicateCount int64
+	LastError      string
+	LeaseToken     string
+	LeaseExpiresAt sql.NullTime
+	RequestedBy    string
+	CreatedAt      time.Time
+	StartedAt      sql.NullTime
+	FinishedAt     sql.NullTime
+	UpdatedAt      time.Time
+}
+
 type Invite struct {
 	ID                 string
 	MediaServerID      string
@@ -313,6 +333,9 @@ type Watch struct {
 	StreamIsAudioDirect       sql.NullBool
 	StreamTranscodeReasons    sql.NullString
 	RuntimeMs                 sql.NullInt64
+	ImportSource              sql.NullString
+	ImportRecordID            sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
 }
 
 type WatchPosition struct {

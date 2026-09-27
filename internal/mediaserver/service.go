@@ -62,6 +62,10 @@ func mediaImageNotFound(err error) bool {
 	return errors.As(err, &mediaErr) && mediaErr.Kind == core.MediaServerNotFound
 }
 
+type playbackReportingReader interface {
+	PlaybackReporting(ctx context.Context, cursor int64, limit int) (core.PlaybackReportingPage, error)
+}
+
 // PlaybackLifecycle coordinates collector shutdown around server deletion.
 type PlaybackLifecycle interface {
 	StopServer(ctx context.Context, id string) error
@@ -392,6 +396,28 @@ func (s *Service) ListSessions(ctx context.Context, id string) ([]core.PlaybackS
 		return nil, fmt.Errorf("list media server sessions: %w", err)
 	}
 	return sessions, nil
+}
+
+// PlaybackReporting reads one bounded history page through a registered adapter.
+func (s *Service) PlaybackReporting(
+	ctx context.Context, id string, cursor int64, limit int,
+) (core.PlaybackReportingPage, error) {
+	call, err := s.adapter(ctx, id, "playback_reporting")
+	if err != nil {
+		return core.PlaybackReportingPage{}, err
+	}
+	defer call.release()
+	reader, ok := call.entry.adapter.(playbackReportingReader)
+	if !ok {
+		return core.PlaybackReportingPage{}, core.ErrImportPluginMissing
+	}
+	callCtx, cancel := dependencyContext(ctx)
+	defer cancel()
+	page, err := reader.PlaybackReporting(callCtx, cursor, limit)
+	if err != nil {
+		return core.PlaybackReportingPage{}, fmt.Errorf("read playback reporting history: %w", err)
+	}
+	return page, nil
 }
 
 // ResolveLibrary maps one item to its collection folder when the adapter supports it.

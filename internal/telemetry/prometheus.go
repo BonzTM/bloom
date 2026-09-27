@@ -60,6 +60,9 @@ type PromMetrics struct {
 	downloadManagerRetries     *prometheus.CounterVec
 	notificationDeliveries     *prometheus.CounterVec
 	notificationOutboxDepth    prometheus.Gauge
+	importJobs                 *prometheus.CounterVec
+	importRecords              *prometheus.CounterVec
+	importsRunning             prometheus.Gauge
 }
 
 // NewPromMetrics constructs a PromMetrics on a fresh, private registry (not the
@@ -103,6 +106,18 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		Namespace: namespace, Name: "notification_outbox_depth",
 		Help: "Current count of pending notification outbox rows.",
 	})
+	importJobs := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "import_jobs_total",
+		Help: "History import jobs by source, terminal state, and bounded outcome.",
+	}, []string{"source", "state", "outcome"})
+	importRecords := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "import_records_total",
+		Help: "History records imported by bounded source.",
+	}, []string{"source"})
+	importsRunning := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "imports_running",
+		Help: "Current import jobs running in this process.",
+	})
 	reg.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		collectors.NewGoCollector(),
@@ -137,6 +152,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		downloadManagerRetries:     downloadCollectors.retries,
 		notificationDeliveries:     notificationDeliveries,
 		notificationOutboxDepth:    notificationOutboxDepth,
+		importJobs:                 importJobs, importRecords: importRecords, importsRunning: importsRunning,
 	}
 	metrics.registerApplicationCollectors()
 	return metrics
@@ -370,7 +386,39 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.downloadManagerRetries,
 		m.notificationDeliveries,
 		m.notificationOutboxDepth,
+		m.importJobs,
+		m.importRecords,
+		m.importsRunning,
 	)
+}
+
+// ObserveImportJob records one bounded terminal job outcome.
+func (m *PromMetrics) ObserveImportJob(source, state, outcome string) {
+	source = boundedImportSource(source)
+	if state != string(core.ImportCompleted) && state != string(core.ImportFailed) && state != string(core.ImportCancelled) {
+		state = "invalid"
+	}
+	if outcome != "success" && outcome != "error" && outcome != "cancelled" {
+		outcome = "invalid"
+	}
+	m.importJobs.WithLabelValues(source, state, outcome).Inc()
+}
+
+// AddImportedRecords records successfully inserted source records.
+func (m *PromMetrics) AddImportedRecords(source string, count int64) {
+	if count > 0 {
+		m.importRecords.WithLabelValues(boundedImportSource(source)).Add(float64(count))
+	}
+}
+
+// SetRunningImports publishes the per-process running-job gauge.
+func (m *PromMetrics) SetRunningImports(count int) { m.importsRunning.Set(float64(max(count, 0))) }
+
+func boundedImportSource(source string) string {
+	if core.ImportSource(source).Valid() {
+		return source
+	}
+	return "invalid"
 }
 
 // ObserveNotificationDelivery records one bounded worker outcome.

@@ -57,6 +57,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runAccountMediaUserEngineTests(t, pool, driver, store)
 	runInviteEngineTests(t, pool, driver, store)
 	runPlaybackEngineTests(t, pool, driver)
+	runImportEngineTests(t, pool, driver)
 	runStatsEngineTests(t, pool, driver)
 	runDownloadManagerEngineTests(t, pool, driver)
 	runMetadataProviderEngineTests(t, pool, driver)
@@ -113,6 +114,9 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("role source migration preserves manual provenance", func(t *testing.T) {
 		testRoleSourceMigrationRoundTrip(t, pool, driver)
 	})
+	t.Run("history import migration backfills legacy provenance", func(t *testing.T) {
+		testHistoryImportMigrationBackfill(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(context.Background(), pool, driver); err != nil {
@@ -127,6 +131,47 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("Migrate (second up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
+}
+
+func testHistoryImportMigrationBackfill(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare history import migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 20); err != nil {
+		t.Fatalf("roll back history import migration: %v", err)
+	}
+	now := migrationCreatedAt(driver)
+	accountID, serverID, watchID := mustID(t), mustID(t), mustID(t)
+	username := "history-import-" + mustID(t)
+	execTestSQL(t, pool,
+		"INSERT INTO accounts (id, username, username_key, created_at) VALUES ($1, $2, $2, $3)",
+		accountID, username, now)
+	execTestSQL(t, pool, `INSERT INTO media_servers
+        (id, kind, name, name_key, base_url, credential_ciphertext, allow_insecure, created_at, updated_at)
+        VALUES ($1, 'jellyfin', $2, $2, 'https://history-import.example.test', $3, FALSE, $4, $4)`,
+		serverID, "History "+serverID, []byte("ciphertext"), now)
+	execTestSQL(t, pool, `INSERT INTO watches
+        (id, media_server_id, media_user_id, username, device_id, device_name, client,
+         server_session_id, item_id, item_name, item_type, series_name, play_method,
+         state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms,
+         source, created_at, updated_at)
+        VALUES ($1, $2, 'user', 'User', '', 'TV', 'Web', '', 'item', 'Title', 'Movie', '',
+                'direct_play', 'stopped', $3, $3, $3, 1, 1, 'import', $3, $3)`,
+		watchID, serverID, now)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("apply history import migration: %v", err)
+	}
+	var source, recordID string
+	if err := pool.QueryRowContext(ctx,
+		"SELECT import_source, import_record_id FROM watches WHERE id = $1", watchID,
+	).Scan(&source, &recordID); err != nil || source != "bloom_export" || recordID != watchID {
+		t.Fatalf("backfilled provenance = %q/%q, %v", source, recordID, err)
+	}
+	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean history import migration fixture: %v", err)
+	}
 }
 
 func runAccountEngineTests(
@@ -1480,6 +1525,8 @@ ORDER BY tc.table_name, kcu.column_name`
 		"account_request_quotas:account_id:accounts:id:CASCADE",
 		"account_roles:account_id:accounts:id:CASCADE",
 		"account_roles:role_id:roles:id:CASCADE",
+		"imports:media_server_id:media_servers:id:CASCADE",
+		"imports:requested_by:accounts:id:RESTRICT",
 		"invite_libraries:invite_id:invites:id:CASCADE",
 		"invite_provisioning_failures:account_id:accounts:id:SET NULL",
 		"invite_provisioning_failures:invite_id:invites:id:RESTRICT",
@@ -1557,7 +1604,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 21)
+	assertMigrationVersion(t, pool, 22)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -1678,7 +1725,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 21)
+	assertMigrationVersion(t, pool, 22)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}
@@ -1813,9 +1860,9 @@ FOR EACH ROW EXECUTE FUNCTION fail_migration_version()`)
 	}
 }
 
-func execTestSQL(t *testing.T, pool *sql.DB, query string) {
+func execTestSQL(t *testing.T, pool *sql.DB, query string, args ...any) {
 	t.Helper()
-	if _, err := pool.ExecContext(context.Background(), query); err != nil {
+	if _, err := pool.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("execute test SQL: %v", err)
 	}
 }

@@ -70,6 +70,7 @@ var (
 	_ core.MediaAvailabilityLookup = (*Client)(nil)
 	_ core.LibraryResolver         = (*Client)(nil)
 	_ core.MediaItemImageReader    = (*Client)(nil)
+	_ core.PlaybackReportingReader = (*Client)(nil)
 )
 
 // New validates cfg and returns a bounded Jellyfin client.

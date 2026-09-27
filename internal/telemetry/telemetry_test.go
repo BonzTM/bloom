@@ -119,6 +119,9 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	m.SetOpenWatches("jellyfin", "server-1", 2)
 	m.SetOpenWatches("jellyfin", "server-2", 3)
 	m.IncWatchesClosed("jellyfin", "timeout")
+	m.ObserveImportJob(string(core.ImportSourcePlaybackReporting), string(core.ImportCompleted), "success")
+	m.AddImportedRecords(string(core.ImportSourcePlaybackReporting), 2)
+	m.SetRunningImports(1)
 	return m
 }
 
@@ -148,6 +151,7 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_playback_open_watches", "bloomtest_playback_watches_closed_total",
 		"bloomtest_playback_refresh_failures_total",
 		"bloomtest_playback_library_resolutions_total",
+		"bloomtest_import_jobs_total", "bloomtest_import_records_total", "bloomtest_imports_running",
 		"bloomtest_stats_query_duration_seconds",
 	} {
 		if !names[want] {
