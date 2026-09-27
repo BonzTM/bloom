@@ -370,6 +370,100 @@ func TestWatchExportMidstreamFailureAbortsTransfer(t *testing.T) {
 	}
 }
 
+func TestWatchExportTransferTimeoutBoundsDatabasePages(t *testing.T) {
+	tests := []struct {
+		name       string
+		blockOn    int
+		watchCount int
+		status     int
+		wantAbort  bool
+	}{
+		{name: "first page", blockOn: 1, status: http.StatusInternalServerError},
+		{name: "later page", blockOn: 2, watchCount: exportBatchSize + 1, status: http.StatusOK, wantAbort: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server, _, _ := importHandlerServer(t)
+			server.importTransferTimeout = 25 * time.Millisecond
+			reader := &blockingExportPlaybackReader{
+				watches: exportTimeoutWatches(test.watchCount), blockOnCall: test.blockOn, release: make(chan struct{}),
+			}
+			server.playbackReader = reader
+			request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
+			recorder := httptest.NewRecorder()
+			started := time.Now()
+			done := make(chan any, 1)
+			go func() {
+				done <- capturePanic(func() { server.handleExportWatches(recorder, request) })
+			}()
+			timer := time.NewTimer(500 * time.Millisecond)
+			defer timer.Stop()
+			var recovered any
+			select {
+			case recovered = <-done:
+				close(reader.release)
+			case <-timer.C:
+				close(reader.release)
+				t.Fatal("watch export did not stop at the transfer timeout")
+			}
+			if elapsed := time.Since(started); elapsed > server.importTransferTimeout+100*time.Millisecond {
+				t.Fatalf("watch export stopped after %s, want transfer timeout %s", elapsed, server.importTransferTimeout)
+			}
+			if recorder.Code != test.status || reader.calls != test.blockOn || !reader.deadlineSeen {
+				t.Fatalf("timed export = status %d calls %d deadline %t", recorder.Code, reader.calls, reader.deadlineSeen)
+			}
+			if reader.deadline.After(started.Add(server.importTransferTimeout + 10*time.Millisecond)) {
+				t.Fatalf("database deadline = %s, want no later than transfer timeout", reader.deadline.Sub(started))
+			}
+			abortErr, aborted := recovered.(error)
+			if test.wantAbort != (aborted && errors.Is(abortErr, http.ErrAbortHandler)) {
+				t.Fatalf("timed export panic = %v, want abort %t", recovered, test.wantAbort)
+			}
+		})
+	}
+}
+
+type blockingExportPlaybackReader struct {
+	watches      []core.PlaybackWatch
+	release      chan struct{}
+	blockOnCall  int
+	calls        int
+	deadline     time.Time
+	deadlineSeen bool
+}
+
+func (r *blockingExportPlaybackReader) ListWatches(
+	ctx context.Context, _ core.PlaybackQuery,
+) ([]core.PlaybackWatch, error) {
+	r.calls++
+	if r.calls != r.blockOnCall {
+		return r.watches, nil
+	}
+	r.deadline, r.deadlineSeen = ctx.Deadline()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.release:
+		return nil, errors.New("export query released before its context ended")
+	}
+}
+
+func (*blockingExportPlaybackReader) ListWatchPositions(
+	context.Context, string,
+) ([]core.PlaybackPosition, error) {
+	return nil, nil
+}
+
+func exportTimeoutWatches(count int) []core.PlaybackWatch {
+	ended := time.Date(2026, 9, 25, 12, 1, 0, 0, time.UTC)
+	watches := make([]core.PlaybackWatch, count)
+	for index := range count {
+		watches[index] = exportHTTPWatch(ended.Add(-time.Duration(index) * time.Minute))
+		watches[index].ID = fmt.Sprintf("33333333-3333-4333-8333-%012d", index)
+	}
+	return watches
+}
+
 func capturePanic(call func()) any {
 	var recovered any
 	func() {

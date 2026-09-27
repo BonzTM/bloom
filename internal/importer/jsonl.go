@@ -28,12 +28,14 @@ const (
 	zipEndRecordBytes              = 22
 	zip64LocatorBytes              = 20
 	zip64EndRecordBytes            = 56
+	zipDirectoryHeaderBytes        = 46
 )
 
 const (
-	zipEndSignature       = 0x06054b50
-	zip64LocatorSignature = 0x07064b50
-	zip64EndSignature     = 0x06064b50
+	zipDirectoryHeaderSignature = 0x02014b50
+	zipEndSignature             = 0x06054b50
+	zip64LocatorSignature       = 0x07064b50
+	zip64EndSignature           = 0x06064b50
 )
 
 var errImportArchiveDirectoryBounds = errors.New("import archive central directory exceeds limits")
@@ -274,10 +276,11 @@ func openWatchUploadWith(
 		}
 		return io.NopCloser(io.NewSectionReader(upload, offset, upload.Size()-offset)), nil
 	}
-	if validationErr := validateZipDirectory(upload, upload.Size()); validationErr != nil {
+	archiveReader := io.NewSectionReader(upload, 0, upload.Size())
+	if validationErr := validateZipDirectory(archiveReader, archiveReader.Size()); validationErr != nil {
 		return nil, fmt.Errorf("validate import archive directory: %w", validationErr)
 	}
-	archive, err := zip.NewReader(upload, upload.Size())
+	archive, err := zip.NewReader(archiveReader, archiveReader.Size())
 	if err != nil {
 		return nil, fmt.Errorf("open import archive: %w", err)
 	}
@@ -360,10 +363,11 @@ func validateOpenWatchEntry(reader io.ReadCloser) (io.ReadCloser, error) {
 }
 
 type zipDirectoryEnd struct {
-	offset     int64
-	records    uint64
-	size       uint64
-	needsZip64 bool
+	offset          int64
+	directoryOffset uint64
+	records         uint64
+	size            uint64
+	needsZip64      bool
 }
 
 func validateZipDirectory(reader io.ReaderAt, size int64) error {
@@ -378,13 +382,82 @@ func validateZipDirectory(reader io.ReaderAt, size int64) error {
 	if end.needsZip64 != found {
 		return errors.New("import archive has malformed ZIP64 metadata")
 	}
+	directory := end
+	directoryEnd := end.offset
 	if found {
-		end.records, end.size = zip64End.records, zip64End.size
+		directory = zip64End
+		directoryEnd = zip64End.offset
 	}
-	if end.records == 0 || end.records > maxImportArchiveEntries || end.size > maxImportCentralDirectoryBytes {
+	start, length, err := zipDirectoryInterval(directory, directoryEnd, size)
+	if err != nil {
+		return err
+	}
+	return validateZipDirectoryEntries(reader, start, length, directory.records)
+}
+
+func zipDirectoryInterval(directory zipDirectoryEnd, endOffset, archiveSize int64) (int64, int64, error) {
+	if directory.records == 0 || directory.records > maxImportArchiveEntries ||
+		directory.size > maxImportCentralDirectoryBytes {
+		return 0, 0, errImportArchiveDirectoryBounds
+	}
+	if endOffset < 0 || endOffset > archiveSize || directory.directoryOffset > uint64(endOffset) {
+		return 0, 0, errors.New("import archive central directory lies outside the archive")
+	}
+	remaining := uint64(endOffset) - directory.directoryOffset
+	if directory.size > remaining {
+		return 0, 0, errors.New("import archive central directory lies outside its declared interval")
+	}
+	if directory.size != remaining {
+		return 0, 0, errors.New("import archive has trailing data after its central directory")
+	}
+	length := int64(directory.size)
+	return endOffset - length, length, nil
+}
+
+func validateZipDirectoryEntries(reader io.ReaderAt, start, size int64, expected uint64) error {
+	section := io.NewSectionReader(reader, start, size)
+	var position int64
+	var records uint64
+	for range maxImportArchiveEntries {
+		if position == size {
+			break
+		}
+		headerSize, err := readZipDirectoryHeaderSize(section, position, size)
+		if err != nil {
+			return err
+		}
+		position += headerSize
+		records++
+	}
+	if position != size {
 		return errImportArchiveDirectoryBounds
 	}
+	if records != expected {
+		return errors.New("import archive central directory entry count does not match its end record")
+	}
 	return nil
+}
+
+func readZipDirectoryHeaderSize(reader io.ReaderAt, offset, directorySize int64) (int64, error) {
+	remaining := directorySize - offset
+	if remaining < zipDirectoryHeaderBytes {
+		return 0, errors.New("import archive central directory header is truncated")
+	}
+	var header [zipDirectoryHeaderBytes]byte
+	if err := readZipBytesAt(reader, header[:], offset); err != nil {
+		return 0, err
+	}
+	if binary.LittleEndian.Uint32(header[0:4]) != zipDirectoryHeaderSignature {
+		return 0, errors.New("import archive central directory has an invalid header")
+	}
+	variableSize := int64(binary.LittleEndian.Uint16(header[28:30])) +
+		int64(binary.LittleEndian.Uint16(header[30:32])) +
+		int64(binary.LittleEndian.Uint16(header[32:34]))
+	headerSize := int64(zipDirectoryHeaderBytes) + variableSize
+	if headerSize > remaining {
+		return 0, errors.New("import archive central directory entry exceeds its declared interval")
+	}
+	return headerSize, nil
 }
 
 func readZipDirectoryEnd(reader io.ReaderAt, size int64) (zipDirectoryEnd, error) {
@@ -412,7 +485,8 @@ func readZipDirectoryEnd(reader io.ReaderAt, size int64) (zipDirectoryEnd, error
 	directorySize := binary.LittleEndian.Uint32(record[12:16])
 	directoryOffset := binary.LittleEndian.Uint32(record[16:20])
 	return zipDirectoryEnd{
-		offset: size - tailSize + int64(index), records: uint64(records), size: uint64(directorySize),
+		offset: size - tailSize + int64(index), directoryOffset: uint64(directoryOffset),
+		records: uint64(records), size: uint64(directorySize),
 		needsZip64: records == math.MaxUint16 || directorySize == math.MaxUint32 || directoryOffset == math.MaxUint32,
 	}, nil
 }
@@ -468,7 +542,7 @@ func parseZip64DirectoryEnd(
 	if recordSize < zip64EndRecordBytes-12 || recordSize > maxImportCentralDirectoryBytes {
 		return zipDirectoryEnd{}, false, errors.New("import archive has invalid ZIP64 record size")
 	}
-	if recordOffset+12+recordSize != locatorOffset {
+	if recordOffset > locatorOffset || locatorOffset-recordOffset != 12+recordSize {
 		return zipDirectoryEnd{}, false, errors.New("import archive has misplaced ZIP64 end record")
 	}
 	if binary.LittleEndian.Uint32(record[16:20]) != 0 || binary.LittleEndian.Uint32(record[20:24]) != 0 {
@@ -479,7 +553,10 @@ func parseZip64DirectoryEnd(
 	if recordsThisDisk != records {
 		return zipDirectoryEnd{}, false, errors.New("import archive has inconsistent ZIP64 entry counts")
 	}
-	return zipDirectoryEnd{records: records, size: binary.LittleEndian.Uint64(record[40:48])}, true, nil
+	return zipDirectoryEnd{
+		offset: int64(recordOffset), directoryOffset: binary.LittleEndian.Uint64(record[48:56]),
+		records: records, size: binary.LittleEndian.Uint64(record[40:48]),
+	}, true, nil
 }
 
 func readZipBytesAt(reader io.ReaderAt, destination []byte, offset int64) error {

@@ -406,7 +406,9 @@ func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
 		s.failWatchExport(w, r, fmt.Errorf("extend watch export deadline: %w", err))
 		return
 	}
-	start, err := s.loadWatchExportStart(r, query)
+	exportCtx, cancel := context.WithTimeout(r.Context(), s.importTransferTimeout)
+	defer cancel()
+	start, err := s.loadWatchExportStart(exportCtx, query)
 	if err != nil {
 		s.failWatchExport(w, r, err)
 		return
@@ -418,7 +420,7 @@ func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
 	))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	if err := s.streamWatchExportZip(w, r, query, start, exportedAt); err != nil {
+	if err := s.streamWatchExportZip(exportCtx, w, query, start, exportedAt); err != nil {
 		s.abortWatchExport(r, err)
 	}
 	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
@@ -455,12 +457,12 @@ func exportQuery(r *http.Request) (core.PlaybackQuery, []httputil.FieldError) {
 	return query, fields
 }
 
-func (s *Server) loadWatchExportStart(r *http.Request, query core.PlaybackQuery) (watchExportStart, error) {
-	watches, watchCursor, err := s.watchExportPage(r, query, exportBatchSize)
+func (s *Server) loadWatchExportStart(ctx context.Context, query core.PlaybackQuery) (watchExportStart, error) {
+	watches, watchCursor, err := s.watchExportPage(ctx, query, exportBatchSize)
 	if err != nil {
 		return watchExportStart{}, err
 	}
-	imports, importCursor, err := s.importExportPage(r, core.ImportListQuery{
+	imports, importCursor, err := s.importExportPage(ctx, core.ImportListQuery{
 		MediaServerID: query.MediaServerID, PageSize: exportBatchSize + 1,
 	})
 	if err != nil {
@@ -472,7 +474,7 @@ func (s *Server) loadWatchExportStart(r *http.Request, query core.PlaybackQuery)
 }
 
 func (s *Server) streamWatchExportZip(
-	w io.Writer, r *http.Request, query core.PlaybackQuery, start watchExportStart, exportedAt time.Time,
+	ctx context.Context, w io.Writer, query core.PlaybackQuery, start watchExportStart, exportedAt time.Time,
 ) error {
 	archive := zip.NewWriter(w)
 	manifest := watchExportManifest{
@@ -482,11 +484,11 @@ func (s *Server) streamWatchExportZip(
 	if err := writeZipJSON(archive, "manifest.json", manifest, exportedAt); err != nil {
 		return err
 	}
-	watchCount, watchBytes, err := s.writeWatchExportEntry(archive, r, query, start, exportedAt)
+	watchCount, watchBytes, err := s.writeWatchExportEntry(ctx, archive, query, start, exportedAt)
 	if err != nil {
 		return err
 	}
-	importCount, importBytes, err := s.writeImportExportEntry(archive, r, query.MediaServerID, start, exportedAt)
+	importCount, importBytes, err := s.writeImportExportEntry(ctx, archive, query.MediaServerID, start, exportedAt)
 	if err != nil {
 		return err
 	}
@@ -503,7 +505,7 @@ func (s *Server) streamWatchExportZip(
 }
 
 func (s *Server) writeWatchExportEntry(
-	archive *zip.Writer, r *http.Request, query core.PlaybackQuery,
+	ctx context.Context, archive *zip.Writer, query core.PlaybackQuery,
 	start watchExportStart, modified time.Time,
 ) (int64, int64, error) {
 	entry, err := createZipEntryWithMethod(archive, "watches.jsonl", modified, zip.Store)
@@ -527,7 +529,7 @@ func (s *Server) writeWatchExportEntry(
 		if err != nil {
 			return 0, 0, err
 		}
-		page, cursor, err = s.watchExportPage(r, query, exportBatchSize)
+		page, cursor, err = s.watchExportPage(ctx, query, exportBatchSize)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -536,7 +538,7 @@ func (s *Server) writeWatchExportEntry(
 }
 
 func (s *Server) writeImportExportEntry(
-	archive *zip.Writer, r *http.Request, mediaServerID string,
+	ctx context.Context, archive *zip.Writer, mediaServerID string,
 	start watchExportStart, modified time.Time,
 ) (int64, int64, error) {
 	entry, err := createZipEntry(archive, "imports.jsonl", modified)
@@ -556,7 +558,7 @@ func (s *Server) writeImportExportEntry(
 		if cursor == nil {
 			return count, counted.count, nil
 		}
-		page, cursor, err = s.importExportPage(r, core.ImportListQuery{
+		page, cursor, err = s.importExportPage(ctx, core.ImportListQuery{
 			Before: cursor, MediaServerID: mediaServerID, PageSize: exportBatchSize + 1,
 		})
 		if err != nil {
@@ -578,9 +580,9 @@ func (w *countingWriter) Write(data []byte) (int, error) {
 }
 
 func (s *Server) importExportPage(
-	r *http.Request, query core.ImportListQuery,
+	ctx context.Context, query core.ImportListQuery,
 ) ([]core.ImportJob, *core.ImportCursor, error) {
-	jobs, err := s.imports.List(r.Context(), query)
+	jobs, err := s.imports.List(ctx, query)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -619,10 +621,10 @@ func createZipEntryWithMethod(
 }
 
 func (s *Server) watchExportPage(
-	r *http.Request, query core.PlaybackQuery, size int,
+	ctx context.Context, query core.PlaybackQuery, size int,
 ) ([]core.PlaybackWatch, string, error) {
 	query.PageSize = size + 1
-	watches, err := s.playbackReader.ListWatches(r.Context(), query)
+	watches, err := s.playbackReader.ListWatches(ctx, query)
 	if err != nil {
 		return nil, "", err
 	}

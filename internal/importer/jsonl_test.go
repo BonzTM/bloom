@@ -87,7 +87,7 @@ func TestReadJSONLLinesCountsBlankLinesWithoutEndingBatch(t *testing.T) {
 	}
 }
 
-func TestBloomUploadDetectsZipByContent(t *testing.T) {
+func TestBloomUploadImportsValidThreeEntryExport(t *testing.T) {
 	staging := newJSONLTestStaging(t)
 	payload := zipFixture(t, map[string]string{
 		"manifest.json": `{}`,
@@ -105,6 +105,12 @@ func TestBloomUploadDetectsZipByContent(t *testing.T) {
 	records, _, _, err := (&jsonlReader{staging: staging}).ReadImportBatch(t.Context(), core.ImportJob{Cursor: cursor})
 	if err != nil || len(records) != 1 || records[0].RecordID == "" {
 		t.Fatalf("ReadImportBatch = %+v, %v", records, err)
+	}
+}
+
+func TestBloomUploadRejectsUnderdeclaredCentralDirectory(t *testing.T) {
+	if err := openStagedWatch(t, underdeclaredCentralDirectoryFixture()); err == nil {
+		t.Fatal("openWatchUpload accepted an underdeclared central directory")
 	}
 }
 
@@ -199,8 +205,9 @@ func openStagedWatch(t *testing.T, payload []byte) error {
 
 func TestBloomUploadRejectsMalformedAndOversizedZip64Records(t *testing.T) {
 	tests := map[string][]byte{
-		"missing locator":  zip64EndFixture(t, false, 44),
-		"oversized record": zip64EndFixture(t, true, maxImportCentralDirectoryBytes+1),
+		"missing locator":          zip64EndFixture(t, false, 44),
+		"oversized record":         zip64EndFixture(t, true, maxImportCentralDirectoryBytes+1),
+		"bogus directory interval": bogusZip64DirectoryFixture(t),
 	}
 	for name, payload := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -209,6 +216,59 @@ func TestBloomUploadRejectsMalformedAndOversizedZip64Records(t *testing.T) {
 			}
 		})
 	}
+}
+
+func underdeclaredCentralDirectoryFixture() []byte {
+	const (
+		localHeaderBytes = 30
+		headerCount      = math.MaxUint16 + 2
+	)
+	payload := make([]byte, localHeaderBytes+headerCount*zipDirectoryHeaderBytes+zipEndRecordBytes)
+	binary.LittleEndian.PutUint32(payload[0:4], 0x04034b50)
+	for index := range headerCount {
+		offset := localHeaderBytes + index*zipDirectoryHeaderBytes
+		binary.LittleEndian.PutUint32(payload[offset:offset+4], zipDirectoryHeaderSignature)
+	}
+	end := len(payload) - zipEndRecordBytes
+	binary.LittleEndian.PutUint32(payload[end:end+4], zipEndSignature)
+	binary.LittleEndian.PutUint16(payload[end+8:end+10], 1)
+	binary.LittleEndian.PutUint16(payload[end+10:end+12], 1)
+	binary.LittleEndian.PutUint32(payload[end+12:end+16], zipDirectoryHeaderBytes)
+	binary.LittleEndian.PutUint32(payload[end+16:end+20], localHeaderBytes)
+	return payload
+}
+
+func bogusZip64DirectoryFixture(t *testing.T) []byte {
+	t.Helper()
+	payload := zipFixture(t, map[string]string{
+		"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json": `{"watch_records":1}`,
+	})
+	end := bytes.LastIndex(payload, []byte{'P', 'K', 0x05, 0x06})
+	if end < 0 {
+		t.Fatal("fixture does not contain an end-of-central-directory record")
+	}
+	directorySize := binary.LittleEndian.Uint32(payload[end+12 : end+16])
+	directoryOffset := binary.LittleEndian.Uint32(payload[end+16 : end+20])
+	record := make([]byte, zip64EndRecordBytes)
+	binary.LittleEndian.PutUint32(record[0:4], zip64EndSignature)
+	binary.LittleEndian.PutUint64(record[4:12], zip64EndRecordBytes-12)
+	binary.LittleEndian.PutUint64(record[24:32], 3)
+	binary.LittleEndian.PutUint64(record[32:40], 3)
+	binary.LittleEndian.PutUint64(record[40:48], uint64(directorySize-1))
+	binary.LittleEndian.PutUint64(record[48:56], uint64(directoryOffset))
+	locator := make([]byte, zip64LocatorBytes)
+	binary.LittleEndian.PutUint32(locator[0:4], zip64LocatorSignature)
+	binary.LittleEndian.PutUint64(locator[8:16], uint64(end))
+	binary.LittleEndian.PutUint32(locator[16:20], 1)
+	result := append(bytes.Clone(payload[:end]), record...)
+	result = append(result, locator...)
+	legacyEnd := bytes.Clone(payload[end:])
+	binary.LittleEndian.PutUint16(legacyEnd[8:10], math.MaxUint16)
+	binary.LittleEndian.PutUint16(legacyEnd[10:12], math.MaxUint16)
+	binary.LittleEndian.PutUint32(legacyEnd[12:16], math.MaxUint32)
+	binary.LittleEndian.PutUint32(legacyEnd[16:20], math.MaxUint32)
+	return append(result, legacyEnd...)
 }
 
 type payloadReaderAt []byte
