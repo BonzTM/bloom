@@ -49,7 +49,10 @@ import {
   requestQuotaInputSchema,
   type RequestQuota,
 } from "../features/roles/api/quota-schemas.js";
-import type { AccountMediaUser } from "../features/playback/api/stats-schemas.js";
+import type {
+  AccountMediaUser,
+  MediaServerUser,
+} from "../features/playback/api/stats-schemas.js";
 import {
   channelRequestSchema,
   type ChannelRequest,
@@ -1957,6 +1960,59 @@ export function resetMockOwnLinks(): void {
   ownLinks = mockOwnLinks;
 }
 
+const mockMediaServerUsers: Readonly<
+  Record<string, readonly MediaServerUser[]>
+> = {
+  [CABIN]: [
+    { id: "u-alice", name: "alice" },
+    { id: "u-carol", name: "carol" },
+  ],
+  [LIVING_ROOM]: [{ id: "u-bob", name: "bob" }],
+};
+
+function linkAccountMediaUser(
+  accountId: string | readonly string[] | undefined,
+  serverId: string | readonly string[] | undefined,
+  mediaUserId: unknown,
+) {
+  if (
+    typeof accountId !== "string" ||
+    typeof serverId !== "string" ||
+    !z.uuid().safeParse(accountId).success ||
+    !z.uuid().safeParse(serverId).success ||
+    typeof mediaUserId !== "string" ||
+    mediaUserId === ""
+  ) {
+    return envelope(422, "validation_failed", "invalid link");
+  }
+  const server = mediaServers.find((candidate) => candidate.id === serverId);
+  const user = (mockMediaServerUsers[serverId] ?? []).find(
+    (candidate) => candidate.id === mediaUserId,
+  );
+  if (
+    server === undefined ||
+    user === undefined ||
+    accountId !== mockAccount.id
+  ) {
+    return envelope(404, "not_found", "server, user, or account not found");
+  }
+  const link: AccountMediaUser = {
+    account_id: accountId,
+    media_server_id: serverId,
+    media_server_name: server.name,
+    media_user_id: user.id,
+    username: user.name,
+    source: "admin",
+    created_at: "2026-09-27T12:00:00Z",
+    updated_at: "2026-09-27T12:00:00Z",
+  };
+  ownLinks = [
+    ...ownLinks.filter((candidate) => candidate.media_server_id !== serverId),
+    link,
+  ];
+  return HttpResponse.json(link);
+}
+
 function ownStatsDenial() {
   if (!signedIn) {
     return envelope(401, "unauthorized", "sign in required");
@@ -2116,6 +2172,42 @@ const statsHandlers = [
           items: statsUsers,
         })),
     ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/users",
+    jsonApi(({ params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const server = mediaServers.find(
+        (candidate) => candidate.id === params.id,
+      );
+      if (server === undefined) {
+        return envelope(404, "not_found", "media server not found");
+      }
+      return HttpResponse.json({
+        items: mockMediaServerUsers[server.id] ?? [],
+      });
+    }),
+  ),
+  http.put(
+    "*/api/v1/accounts/:id/media-users/:serverId",
+    jsonApi(async ({ request, params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (!sendsJson(request)) {
+        return envelope(415, "unsupported_media_type", "expected JSON");
+      }
+      const body: unknown = await request.json();
+      const mediaUserId =
+        typeof body === "object" && body !== null && "media_user_id" in body
+          ? body.media_user_id
+          : undefined;
+      return linkAccountMediaUser(params.id, params.serverId, mediaUserId);
+    }),
   ),
   http.get(
     "*/api/v1/me/media-users",

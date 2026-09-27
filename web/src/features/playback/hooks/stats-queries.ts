@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StatsParams, StatsTitleKind } from "../api/stats-schemas.js";
 import { usePlaybackApi } from "../playback-context.js";
 
@@ -98,6 +98,36 @@ export function useStatsMe(accountId: string, params: StatsParams) {
     queryFn: ({ signal }) => api.statsMe(params, signal),
     staleTime: STALE_MS,
     meta: { sessionScoped: true },
+  });
+}
+
+export function useMediaServerUsers(
+  accountId: string,
+  mediaServerId: string | undefined,
+) {
+  const api = usePlaybackApi();
+  return useQuery({
+    queryKey: [
+      "stats",
+      "server-users",
+      accountId,
+      mediaServerId ?? "",
+    ] as const,
+    queryFn: ({ signal }) => api.mediaServerUsers(mediaServerId ?? "", signal),
+    enabled: mediaServerId !== undefined,
+    staleTime: STALE_MS,
+    meta: { sessionScoped: true },
+  });
+}
+
+// Linking changes what "me" resolves to, so every own-stats query is dropped.
+export function useLinkMediaUser(accountId: string) {
+  const api = usePlaybackApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { mediaServerId: string; mediaUserId: string }) =>
+      api.linkMediaUser(accountId, input.mediaServerId, input.mediaUserId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: statsKeys.all }),
   });
 }
 
