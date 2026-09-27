@@ -76,6 +76,20 @@ func operationFromPath(path string) string {
 		return "probe"
 	case path == "/3/search/multi":
 		return "search"
+	case path == "/3/trending/all/week":
+		return "discover_trending"
+	case path == "/3/movie/popular":
+		return "discover_movies_popular"
+	case path == "/3/tv/popular":
+		return "discover_series_popular"
+	case path == "/3/movie/upcoming":
+		return "discover_movies_upcoming"
+	case path == "/3/tv/on_the_air":
+		return "discover_series_upcoming"
+	case path == "/3/genre/movie/list":
+		return "genres_movie"
+	case path == "/3/genre/tv/list":
+		return "genres_series"
 	case len(path) > len("/3/movie/") && path[:len("/3/movie/")] == "/3/movie/":
 		return "movie"
 	case len(path) > len("/3/tv/") && path[:len("/3/tv/")] == "/3/tv/":

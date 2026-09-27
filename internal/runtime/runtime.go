@@ -432,6 +432,7 @@ func assembleHTTPServer(
 		PlaybackReader:         playbackStore,
 		StatsReader:            statsReader,
 		MetadataReader:         metadataService,
+		MetadataDiscovery:      metadataService,
 		MetadataManager:        metadataService,
 		RequestService:         requestService,
 		DownloadManagerReader:  downloadManagers,
@@ -471,11 +472,11 @@ func requestDependencies(
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("build metadata credential cipher: %w", err)
 	}
-	metadataService, err := buildMetadataService(pool, cfg, metrics, clock, cipher, logger)
+	stores, err := buildRequestStores(pool, cfg)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	stores, err := buildRequestStores(pool, cfg)
+	metadataService, err := buildMetadataService(pool, cfg, metrics, clock, cipher, stores.metadataStates, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -548,6 +549,7 @@ type requestStores struct {
 	profileWriter       core.RequestProfileWriter
 	requestReader       core.RequestReader
 	requestWriter       core.RequestWriter
+	metadataStates      core.MetadataRequestStateReader
 	dispatchWriter      core.RequestDispatchWriter
 	availabilityClaimer core.RequestAvailabilityClaimer
 	quotaReader         core.RequestQuotaReader
@@ -557,14 +559,14 @@ type requestStores struct {
 
 func buildMetadataService(
 	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock,
-	cipher *secrets.Cipher, logger *slog.Logger,
+	cipher *secrets.Cipher, states core.MetadataRequestStateReader, logger *slog.Logger,
 ) (*metadata.Service, error) {
 	reader, writer, err := db.NewMetadataProviderStores(pool, cfg.Database.Driver)
 	if err != nil {
 		return nil, fmt.Errorf("build metadata provider stores: %w", err)
 	}
 	registry := metadata.NewRegistry(tmdb.Dependencies{Metrics: metrics, Clock: clock})
-	service, err := metadata.NewService(reader, writer, cipher, registry, clock, logger)
+	service, err := metadata.NewService(reader, writer, states, cipher, registry, clock, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build metadata service: %w", err)
 	}
@@ -588,9 +590,13 @@ func buildRequestStores(pool *sql.DB, cfg config.Config) (requestStores, error) 
 	if !ok {
 		return requestStores{}, errors.New("build request stores: availability claimer is unavailable")
 	}
+	states, ok := reader.(core.MetadataRequestStateReader)
+	if !ok {
+		return requestStores{}, errors.New("build request stores: metadata request-state reader is unavailable")
+	}
 	return requestStores{
 		profileReader: profiles, profileWriter: profileWriter, requestReader: reader, requestWriter: writer,
-		dispatchWriter: dispatch, availabilityClaimer: claimer,
+		dispatchWriter: dispatch, availabilityClaimer: claimer, metadataStates: states,
 		quotaReader: quotaReader, quotaWriter: quotaWriter, quotaDeleter: quotaDeleter,
 	}, nil
 }

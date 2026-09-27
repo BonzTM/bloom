@@ -54,7 +54,7 @@ func testStoredV3MetadataKey(
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	service, err := metadata.NewService(
-		reader, writer, cipher, metadataEngineFactory{}, testutil.NewFakeClock(now), logger,
+		reader, writer, metadataEngineStates{}, cipher, metadataEngineFactory{}, testutil.NewFakeClock(now), logger,
 	)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -95,6 +95,14 @@ func (metadataEngineFactory) New(core.MetadataProviderKind, string) (core.Metada
 }
 
 type metadataEngineProvider struct{}
+
+type metadataEngineStates struct{}
+
+func (metadataEngineStates) MetadataRequestStates(
+	context.Context, string, []core.MetadataTitle,
+) (map[core.MetadataTitleKey]core.RequestStatus, error) {
+	return map[core.MetadataTitleKey]core.RequestStatus{}, nil
+}
 
 func (metadataEngineProvider) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
 	return nil, nil

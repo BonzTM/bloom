@@ -11,11 +11,14 @@ type cacheKey struct {
 	provider core.MetadataProviderKind
 	id       string
 	kind     core.MediaKind
+	resource string
 }
 
 type cacheValue struct {
 	title  core.MetadataTitle
 	series core.MetadataSeries
+	page   core.MetadataPage
+	genres []core.MetadataGenre
 }
 
 type cacheEntry struct {
@@ -56,14 +59,18 @@ func (c *detailCache) get(key cacheKey) (cacheValue, bool) {
 }
 
 func (c *detailCache) put(key cacheKey, value cacheValue) {
+	c.putFor(key, value, c.ttl)
+}
+
+func (c *detailCache) putFor(key cacheKey, value cacheValue, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if existing := c.entries[key]; existing != nil {
-		existing.value, existing.expiresAt = cloneCacheValue(value), c.clock.Now().Add(c.ttl)
+		existing.value, existing.expiresAt = cloneCacheValue(value), c.clock.Now().Add(ttl)
 		c.touch(existing)
 		return
 	}
-	entry := &cacheEntry{key: key, value: cloneCacheValue(value), expiresAt: c.clock.Now().Add(c.ttl)}
+	entry := &cacheEntry{key: key, value: cloneCacheValue(value), expiresAt: c.clock.Now().Add(ttl)}
 	c.entries[key] = entry
 	c.linkNewest(entry)
 	if len(c.entries) > c.capacity {
@@ -116,5 +123,7 @@ func (c *detailCache) remove(entry *cacheEntry) {
 
 func cloneCacheValue(value cacheValue) cacheValue {
 	value.series.Seasons = append([]core.MetadataSeason(nil), value.series.Seasons...)
+	value.page.Items = append([]core.MetadataTitle(nil), value.page.Items...)
+	value.genres = append([]core.MetadataGenre(nil), value.genres...)
 	return value
 }

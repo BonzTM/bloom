@@ -87,3 +87,63 @@ func (q *Queries) LockRequestTitle(ctx context.Context, lockKey interface{}) err
 	_, err := q.db.ExecContext(ctx, lockRequestTitle, lockKey)
 	return err
 }
+
+const metadataRequestStates = `-- name: MetadataRequestStates :many
+WITH ranked AS (
+    SELECT kind, provider, provider_id, status,
+           ROW_NUMBER() OVER (
+               PARTITION BY kind, provider, provider_id
+               ORDER BY created_at DESC, id DESC
+           ) AS position
+    FROM requests
+    WHERE requester_account_id = ?1
+      AND provider = 'tmdb'
+      AND kind || ':' || provider_id IN (
+          SELECT value FROM json_each(CAST(?2 AS TEXT))
+      )
+)
+SELECT kind, provider, provider_id, status
+FROM ranked
+WHERE position = 1
+ORDER BY kind, provider_id
+`
+
+type MetadataRequestStatesParams struct {
+	RequesterAccountID string
+	TitleKeysJson      string
+}
+
+type MetadataRequestStatesRow struct {
+	Kind       string
+	Provider   string
+	ProviderID string
+	Status     string
+}
+
+func (q *Queries) MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, metadataRequestStates, arg.RequesterAccountID, arg.TitleKeysJson)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MetadataRequestStatesRow{}
+	for rows.Next() {
+		var i MetadataRequestStatesRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Provider,
+			&i.ProviderID,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

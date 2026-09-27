@@ -89,7 +89,13 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/accounts/{id}/media-users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleAccountMediaUsers},
 	{method: http.MethodPut, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetAccountMediaUser},
 	{method: http.MethodDelete, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteAccountMediaUser},
-	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSearch},
+	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSearch},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/trending", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataTrending},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesPopular},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesPopular},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesUpcoming},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesUpcoming},
+	{method: http.MethodGet, path: "/api/v1/metadata/genres", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataGenres},
 	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataMovie},
 	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSeries},
 	{method: http.MethodGet, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMetadataKeyPresence},
@@ -197,6 +203,10 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/metadata") && (s.metadataReader == nil || s.metadataManager == nil) {
+			continue
+		}
+		if (strings.HasPrefix(route.path, "/api/v1/metadata/discover/") || route.path == "/api/v1/metadata/genres") &&
+			s.metadataDiscovery == nil {
 			continue
 		}
 		if (strings.HasPrefix(route.path, "/api/v1/request") || strings.Contains(route.path, "/request-quota")) && s.requestService == nil {

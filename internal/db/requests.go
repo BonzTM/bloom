@@ -29,6 +29,7 @@ var (
 	_ core.RequestWriter              = (*requests)(nil)
 	_ core.RequestDispatchWriter      = (*requests)(nil)
 	_ core.RequestAvailabilityClaimer = (*requests)(nil)
+	_ core.MetadataRequestStateReader = (*requests)(nil)
 	_ core.RequestQuotaReader         = (*requests)(nil)
 	_ core.RequestQuotaWriter         = (*requests)(nil)
 	_ core.AccountRequestQuotaDeleter = (*requests)(nil)

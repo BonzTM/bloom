@@ -15,6 +15,52 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for TrendingAllParamsTimeWindow.
+const (
+	Day  TrendingAllParamsTimeWindow = "day"
+	Week TrendingAllParamsTimeWindow = "week"
+)
+
+// Valid indicates whether the value is a known member of the TrendingAllParamsTimeWindow enum.
+func (e TrendingAllParamsTimeWindow) Valid() bool {
+	switch e {
+	case Day:
+		return true
+	case Week:
+		return true
+	default:
+		return false
+	}
+}
+
+// GenreMovieListParams defines parameters for GenreMovieList.
+type GenreMovieListParams struct {
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+}
+
+// GenreTvListParams defines parameters for GenreTvList.
+type GenreTvListParams struct {
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+}
+
+// MoviePopularListParams defines parameters for MoviePopularList.
+type MoviePopularListParams struct {
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+	Page     *int32  `form:"page,omitempty" json:"page,omitempty"`
+
+	// Region ISO-3166-1 code
+	Region *string `form:"region,omitempty" json:"region,omitempty"`
+}
+
+// MovieUpcomingListParams defines parameters for MovieUpcomingList.
+type MovieUpcomingListParams struct {
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+	Page     *int32  `form:"page,omitempty" json:"page,omitempty"`
+
+	// Region ISO-3166-1 code
+	Region *string `form:"region,omitempty" json:"region,omitempty"`
+}
+
 // MovieDetailsParams defines parameters for MovieDetails.
 type MovieDetailsParams struct {
 	// AppendToResponse comma separated list of endpoints within this namespace, 20 items max
@@ -53,6 +99,28 @@ type SearchTvParams struct {
 
 	// Year Search the first air date and all episode air dates. Valid values are: 1000..9999
 	Year *int32 `form:"year,omitempty" json:"year,omitempty"`
+}
+
+// TrendingAllParams defines parameters for TrendingAll.
+type TrendingAllParams struct {
+	// Language `ISO-639-1`-`ISO-3166-1` code
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+}
+
+// TrendingAllParamsTimeWindow defines parameters for TrendingAll.
+type TrendingAllParamsTimeWindow string
+
+// TvSeriesOnTheAirListParams defines parameters for TvSeriesOnTheAirList.
+type TvSeriesOnTheAirListParams struct {
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+	Page     *int32  `form:"page,omitempty" json:"page,omitempty"`
+	Timezone *string `form:"timezone,omitempty" json:"timezone,omitempty"`
+}
+
+// TvSeriesPopularListParams defines parameters for TvSeriesPopularList.
+type TvSeriesPopularListParams struct {
+	Language *string `form:"language,omitempty" json:"language,omitempty"`
+	Page     *int32  `form:"page,omitempty" json:"page,omitempty"`
 }
 
 // TvSeriesDetailsParams defines parameters for TvSeriesDetails.
@@ -143,6 +211,34 @@ type ClientInterface interface {
 	// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
 	AuthenticationValidateKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GenreMovieList Movie List
+	//
+	// Get the list of official genres for movies.
+	//
+	// Corresponds with GET /3/genre/movie/list (the `GenreMovieList` operationId).
+	GenreMovieList(ctx context.Context, params *GenreMovieListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GenreTvList TV List
+	//
+	// Get the list of official genres for TV shows.
+	//
+	// Corresponds with GET /3/genre/tv/list (the `GenreTvList` operationId).
+	GenreTvList(ctx context.Context, params *GenreTvListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MoviePopularList Popular
+	//
+	// Get a list of movies ordered by popularity.
+	//
+	// Corresponds with GET /3/movie/popular (the `MoviePopularList` operationId).
+	MoviePopularList(ctx context.Context, params *MoviePopularListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MovieUpcomingList Upcoming
+	//
+	// Get a list of movies that are being released soon.
+	//
+	// Corresponds with GET /3/movie/upcoming (the `MovieUpcomingList` operationId).
+	MovieUpcomingList(ctx context.Context, params *MovieUpcomingListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// MovieDetails Details
 	//
 	// Get the top level details of a movie by ID.
@@ -171,6 +267,27 @@ type ClientInterface interface {
 	// Corresponds with GET /3/search/tv (the `SearchTv` operationId).
 	SearchTv(ctx context.Context, params *SearchTvParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// TrendingAll All
+	//
+	// Get the trending movies, TV shows and people.
+	//
+	// Corresponds with GET /3/trending/all/{time_window} (the `TrendingAll` operationId).
+	TrendingAll(ctx context.Context, timeWindow TrendingAllParamsTimeWindow, params *TrendingAllParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TvSeriesOnTheAirList On The Air
+	//
+	// Get a list of TV shows that air in the next 7 days.
+	//
+	// Corresponds with GET /3/tv/on_the_air (the `TvSeriesOnTheAirList` operationId).
+	TvSeriesOnTheAirList(ctx context.Context, params *TvSeriesOnTheAirListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TvSeriesPopularList Popular
+	//
+	// Get a list of TV shows ordered by popularity.
+	//
+	// Corresponds with GET /3/tv/popular (the `TvSeriesPopularList` operationId).
+	TvSeriesPopularList(ctx context.Context, params *TvSeriesPopularListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// TvSeriesDetails Details
 	//
 	// Get the details of a TV show.
@@ -186,6 +303,74 @@ type ClientInterface interface {
 // Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
 func (c *Client) AuthenticationValidateKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAuthenticationValidateKeyRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GenreMovieList Movie List
+//
+// Get the list of official genres for movies.
+//
+// Corresponds with GET /3/genre/movie/list (the `GenreMovieList` operationId).
+func (c *Client) GenreMovieList(ctx context.Context, params *GenreMovieListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGenreMovieListRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GenreTvList TV List
+//
+// Get the list of official genres for TV shows.
+//
+// Corresponds with GET /3/genre/tv/list (the `GenreTvList` operationId).
+func (c *Client) GenreTvList(ctx context.Context, params *GenreTvListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGenreTvListRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// MoviePopularList Popular
+//
+// Get a list of movies ordered by popularity.
+//
+// Corresponds with GET /3/movie/popular (the `MoviePopularList` operationId).
+func (c *Client) MoviePopularList(ctx context.Context, params *MoviePopularListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMoviePopularListRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// MovieUpcomingList Upcoming
+//
+// Get a list of movies that are being released soon.
+//
+// Corresponds with GET /3/movie/upcoming (the `MovieUpcomingList` operationId).
+func (c *Client) MovieUpcomingList(ctx context.Context, params *MovieUpcomingListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMovieUpcomingListRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +449,57 @@ func (c *Client) SearchTv(ctx context.Context, params *SearchTvParams, reqEditor
 	return c.Client.Do(req)
 }
 
+// TrendingAll All
+//
+// Get the trending movies, TV shows and people.
+//
+// Corresponds with GET /3/trending/all/{time_window} (the `TrendingAll` operationId).
+func (c *Client) TrendingAll(ctx context.Context, timeWindow TrendingAllParamsTimeWindow, params *TrendingAllParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTrendingAllRequest(c.Server, timeWindow, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// TvSeriesOnTheAirList On The Air
+//
+// Get a list of TV shows that air in the next 7 days.
+//
+// Corresponds with GET /3/tv/on_the_air (the `TvSeriesOnTheAirList` operationId).
+func (c *Client) TvSeriesOnTheAirList(ctx context.Context, params *TvSeriesOnTheAirListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTvSeriesOnTheAirListRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// TvSeriesPopularList Popular
+//
+// Get a list of TV shows ordered by popularity.
+//
+// Corresponds with GET /3/tv/popular (the `TvSeriesPopularList` operationId).
+func (c *Client) TvSeriesPopularList(ctx context.Context, params *TvSeriesPopularListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTvSeriesPopularListRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // TvSeriesDetails Details
 //
 // Get the details of a TV show.
@@ -298,6 +534,270 @@ func NewAuthenticationValidateKeyRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGenreMovieListRequest constructs an http.Request for the GenreMovieList method
+func NewGenreMovieListRequest(server string, params *GenreMovieListParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/genre/movie/list")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGenreTvListRequest constructs an http.Request for the GenreTvList method
+func NewGenreTvListRequest(server string, params *GenreTvListParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/genre/tv/list")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewMoviePopularListRequest constructs an http.Request for the MoviePopularList method
+func NewMoviePopularListRequest(server string, params *MoviePopularListParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/movie/popular")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Region != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "region", *params.Region, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewMovieUpcomingListRequest constructs an http.Request for the MovieUpcomingList method
+func NewMovieUpcomingListRequest(server string, params *MovieUpcomingListParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/movie/upcoming")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Region != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "region", *params.Region, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -699,6 +1199,211 @@ func NewSearchTvRequest(server string, params *SearchTvParams) (*http.Request, e
 	return req, nil
 }
 
+// NewTrendingAllRequest constructs an http.Request for the TrendingAll method
+func NewTrendingAllRequest(server string, timeWindow TrendingAllParamsTimeWindow, params *TrendingAllParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "time_window", timeWindow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/trending/all/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewTvSeriesOnTheAirListRequest constructs an http.Request for the TvSeriesOnTheAirList method
+func NewTvSeriesOnTheAirListRequest(server string, params *TvSeriesOnTheAirListParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/tv/on_the_air")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Timezone != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "timezone", *params.Timezone, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewTvSeriesPopularListRequest constructs an http.Request for the TvSeriesPopularList method
+func NewTvSeriesPopularListRequest(server string, params *TvSeriesPopularListParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/tv/popular")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewTvSeriesDetailsRequest constructs an http.Request for the TvSeriesDetails method
 func NewTvSeriesDetailsRequest(server string, seriesId int32, params *TvSeriesDetailsParams) (*http.Request, error) {
 	var err error
@@ -825,6 +1530,42 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
 	AuthenticationValidateKeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AuthenticationValidateKeyResponse, error)
 
+	// GenreMovieListWithResponse Movie List
+	//
+	// Get the list of official genres for movies.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/genre/movie/list (the `GenreMovieList` operationId).
+	GenreMovieListWithResponse(ctx context.Context, params *GenreMovieListParams, reqEditors ...RequestEditorFn) (*GenreMovieListResponse, error)
+
+	// GenreTvListWithResponse TV List
+	//
+	// Get the list of official genres for TV shows.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/genre/tv/list (the `GenreTvList` operationId).
+	GenreTvListWithResponse(ctx context.Context, params *GenreTvListParams, reqEditors ...RequestEditorFn) (*GenreTvListResponse, error)
+
+	// MoviePopularListWithResponse Popular
+	//
+	// Get a list of movies ordered by popularity.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/movie/popular (the `MoviePopularList` operationId).
+	MoviePopularListWithResponse(ctx context.Context, params *MoviePopularListParams, reqEditors ...RequestEditorFn) (*MoviePopularListResponse, error)
+
+	// MovieUpcomingListWithResponse Upcoming
+	//
+	// Get a list of movies that are being released soon.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/movie/upcoming (the `MovieUpcomingList` operationId).
+	MovieUpcomingListWithResponse(ctx context.Context, params *MovieUpcomingListParams, reqEditors ...RequestEditorFn) (*MovieUpcomingListResponse, error)
+
 	// MovieDetailsWithResponse Details
 	//
 	// Get the top level details of a movie by ID.
@@ -860,6 +1601,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /3/search/tv (the `SearchTv` operationId).
 	SearchTvWithResponse(ctx context.Context, params *SearchTvParams, reqEditors ...RequestEditorFn) (*SearchTvResponse, error)
+
+	// TrendingAllWithResponse All
+	//
+	// Get the trending movies, TV shows and people.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/trending/all/{time_window} (the `TrendingAll` operationId).
+	TrendingAllWithResponse(ctx context.Context, timeWindow TrendingAllParamsTimeWindow, params *TrendingAllParams, reqEditors ...RequestEditorFn) (*TrendingAllResponse, error)
+
+	// TvSeriesOnTheAirListWithResponse On The Air
+	//
+	// Get a list of TV shows that air in the next 7 days.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/tv/on_the_air (the `TvSeriesOnTheAirList` operationId).
+	TvSeriesOnTheAirListWithResponse(ctx context.Context, params *TvSeriesOnTheAirListParams, reqEditors ...RequestEditorFn) (*TvSeriesOnTheAirListResponse, error)
+
+	// TvSeriesPopularListWithResponse Popular
+	//
+	// Get a list of TV shows ordered by popularity.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/tv/popular (the `TvSeriesPopularList` operationId).
+	TvSeriesPopularListWithResponse(ctx context.Context, params *TvSeriesPopularListParams, reqEditors ...RequestEditorFn) (*TvSeriesPopularListResponse, error)
 
 	// TvSeriesDetailsWithResponse Details
 	//
@@ -929,6 +1697,278 @@ func (r AuthenticationValidateKeyResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r AuthenticationValidateKeyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GenreMovieListResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Genres *[]struct {
+			Id   *int    `json:"id,omitempty"`
+			Name *string `json:"name,omitempty"`
+		} `json:"genres,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GenreMovieListResponse) GetJSON200() *struct {
+	Genres *[]struct {
+		Id   *int    `json:"id,omitempty"`
+		Name *string `json:"name,omitempty"`
+	} `json:"genres,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r GenreMovieListResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GenreMovieListResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GenreMovieListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GenreMovieListResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GenreTvListResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Genres *[]struct {
+			Id   *int    `json:"id,omitempty"`
+			Name *string `json:"name,omitempty"`
+		} `json:"genres,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GenreTvListResponse) GetJSON200() *struct {
+	Genres *[]struct {
+		Id   *int    `json:"id,omitempty"`
+		Name *string `json:"name,omitempty"`
+	} `json:"genres,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r GenreTvListResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GenreTvListResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GenreTvListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GenreTvListResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type MoviePopularListResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			Adult            *bool    `json:"adult,omitempty"`
+			BackdropPath     *string  `json:"backdrop_path,omitempty"`
+			GenreIds         *[]int   `json:"genre_ids,omitempty"`
+			Id               *int     `json:"id,omitempty"`
+			OriginalLanguage *string  `json:"original_language,omitempty"`
+			OriginalTitle    *string  `json:"original_title,omitempty"`
+			Overview         *string  `json:"overview,omitempty"`
+			Popularity       *float32 `json:"popularity,omitempty"`
+			PosterPath       *string  `json:"poster_path,omitempty"`
+			ReleaseDate      *string  `json:"release_date,omitempty"`
+			Title            *string  `json:"title,omitempty"`
+			Video            *bool    `json:"video,omitempty"`
+			VoteAverage      *float32 `json:"vote_average,omitempty"`
+			VoteCount        *int     `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r MoviePopularListResponse) GetJSON200() *struct {
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		Adult            *bool    `json:"adult,omitempty"`
+		BackdropPath     *string  `json:"backdrop_path,omitempty"`
+		GenreIds         *[]int   `json:"genre_ids,omitempty"`
+		Id               *int     `json:"id,omitempty"`
+		OriginalLanguage *string  `json:"original_language,omitempty"`
+		OriginalTitle    *string  `json:"original_title,omitempty"`
+		Overview         *string  `json:"overview,omitempty"`
+		Popularity       *float32 `json:"popularity,omitempty"`
+		PosterPath       *string  `json:"poster_path,omitempty"`
+		ReleaseDate      *string  `json:"release_date,omitempty"`
+		Title            *string  `json:"title,omitempty"`
+		Video            *bool    `json:"video,omitempty"`
+		VoteAverage      *float32 `json:"vote_average,omitempty"`
+		VoteCount        *int     `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r MoviePopularListResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r MoviePopularListResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MoviePopularListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r MoviePopularListResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type MovieUpcomingListResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Dates *struct {
+			Maximum *string `json:"maximum,omitempty"`
+			Minimum *string `json:"minimum,omitempty"`
+		} `json:"dates,omitempty"`
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			Adult            *bool    `json:"adult,omitempty"`
+			BackdropPath     *string  `json:"backdrop_path,omitempty"`
+			GenreIds         *[]int   `json:"genre_ids,omitempty"`
+			Id               *int     `json:"id,omitempty"`
+			OriginalLanguage *string  `json:"original_language,omitempty"`
+			OriginalTitle    *string  `json:"original_title,omitempty"`
+			Overview         *string  `json:"overview,omitempty"`
+			Popularity       *float32 `json:"popularity,omitempty"`
+			PosterPath       *string  `json:"poster_path,omitempty"`
+			ReleaseDate      *string  `json:"release_date,omitempty"`
+			Title            *string  `json:"title,omitempty"`
+			Video            *bool    `json:"video,omitempty"`
+			VoteAverage      *int     `json:"vote_average,omitempty"`
+			VoteCount        *int     `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r MovieUpcomingListResponse) GetJSON200() *struct {
+	Dates *struct {
+		Maximum *string `json:"maximum,omitempty"`
+		Minimum *string `json:"minimum,omitempty"`
+	} `json:"dates,omitempty"`
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		Adult            *bool    `json:"adult,omitempty"`
+		BackdropPath     *string  `json:"backdrop_path,omitempty"`
+		GenreIds         *[]int   `json:"genre_ids,omitempty"`
+		Id               *int     `json:"id,omitempty"`
+		OriginalLanguage *string  `json:"original_language,omitempty"`
+		OriginalTitle    *string  `json:"original_title,omitempty"`
+		Overview         *string  `json:"overview,omitempty"`
+		Popularity       *float32 `json:"popularity,omitempty"`
+		PosterPath       *string  `json:"poster_path,omitempty"`
+		ReleaseDate      *string  `json:"release_date,omitempty"`
+		Title            *string  `json:"title,omitempty"`
+		Video            *bool    `json:"video,omitempty"`
+		VoteAverage      *int     `json:"vote_average,omitempty"`
+		VoteCount        *int     `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r MovieUpcomingListResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r MovieUpcomingListResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MovieUpcomingListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r MovieUpcomingListResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1319,6 +2359,247 @@ func (r SearchTvResponse) ContentType() string {
 	return ""
 }
 
+type TrendingAllResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			Adult            *bool    `json:"adult,omitempty"`
+			BackdropPath     *string  `json:"backdrop_path,omitempty"`
+			GenreIds         *[]int   `json:"genre_ids,omitempty"`
+			Id               *int     `json:"id,omitempty"`
+			MediaType        *string  `json:"media_type,omitempty"`
+			OriginalLanguage *string  `json:"original_language,omitempty"`
+			OriginalTitle    *string  `json:"original_title,omitempty"`
+			Overview         *string  `json:"overview,omitempty"`
+			Popularity       *float32 `json:"popularity,omitempty"`
+			PosterPath       *string  `json:"poster_path,omitempty"`
+			ReleaseDate      *string  `json:"release_date,omitempty"`
+			Title            *string  `json:"title,omitempty"`
+			Video            *bool    `json:"video,omitempty"`
+			VoteAverage      *float32 `json:"vote_average,omitempty"`
+			VoteCount        *int     `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r TrendingAllResponse) GetJSON200() *struct {
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		Adult            *bool    `json:"adult,omitempty"`
+		BackdropPath     *string  `json:"backdrop_path,omitempty"`
+		GenreIds         *[]int   `json:"genre_ids,omitempty"`
+		Id               *int     `json:"id,omitempty"`
+		MediaType        *string  `json:"media_type,omitempty"`
+		OriginalLanguage *string  `json:"original_language,omitempty"`
+		OriginalTitle    *string  `json:"original_title,omitempty"`
+		Overview         *string  `json:"overview,omitempty"`
+		Popularity       *float32 `json:"popularity,omitempty"`
+		PosterPath       *string  `json:"poster_path,omitempty"`
+		ReleaseDate      *string  `json:"release_date,omitempty"`
+		Title            *string  `json:"title,omitempty"`
+		Video            *bool    `json:"video,omitempty"`
+		VoteAverage      *float32 `json:"vote_average,omitempty"`
+		VoteCount        *int     `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r TrendingAllResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r TrendingAllResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TrendingAllResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r TrendingAllResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type TvSeriesOnTheAirListResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			BackdropPath     *string   `json:"backdrop_path,omitempty"`
+			FirstAirDate     *string   `json:"first_air_date,omitempty"`
+			GenreIds         *[]int    `json:"genre_ids,omitempty"`
+			Id               *int      `json:"id,omitempty"`
+			Name             *string   `json:"name,omitempty"`
+			OriginCountry    *[]string `json:"origin_country,omitempty"`
+			OriginalLanguage *string   `json:"original_language,omitempty"`
+			OriginalName     *string   `json:"original_name,omitempty"`
+			Overview         *string   `json:"overview,omitempty"`
+			Popularity       *float32  `json:"popularity,omitempty"`
+			PosterPath       *string   `json:"poster_path,omitempty"`
+			VoteAverage      *int      `json:"vote_average,omitempty"`
+			VoteCount        *int      `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r TvSeriesOnTheAirListResponse) GetJSON200() *struct {
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		BackdropPath     *string   `json:"backdrop_path,omitempty"`
+		FirstAirDate     *string   `json:"first_air_date,omitempty"`
+		GenreIds         *[]int    `json:"genre_ids,omitempty"`
+		Id               *int      `json:"id,omitempty"`
+		Name             *string   `json:"name,omitempty"`
+		OriginCountry    *[]string `json:"origin_country,omitempty"`
+		OriginalLanguage *string   `json:"original_language,omitempty"`
+		OriginalName     *string   `json:"original_name,omitempty"`
+		Overview         *string   `json:"overview,omitempty"`
+		Popularity       *float32  `json:"popularity,omitempty"`
+		PosterPath       *string   `json:"poster_path,omitempty"`
+		VoteAverage      *int      `json:"vote_average,omitempty"`
+		VoteCount        *int      `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r TvSeriesOnTheAirListResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r TvSeriesOnTheAirListResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TvSeriesOnTheAirListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r TvSeriesOnTheAirListResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type TvSeriesPopularListResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			BackdropPath     *string   `json:"backdrop_path,omitempty"`
+			FirstAirDate     *string   `json:"first_air_date,omitempty"`
+			GenreIds         *[]int    `json:"genre_ids,omitempty"`
+			Id               *int      `json:"id,omitempty"`
+			Name             *string   `json:"name,omitempty"`
+			OriginCountry    *[]string `json:"origin_country,omitempty"`
+			OriginalLanguage *string   `json:"original_language,omitempty"`
+			OriginalName     *string   `json:"original_name,omitempty"`
+			Overview         *string   `json:"overview,omitempty"`
+			Popularity       *float32  `json:"popularity,omitempty"`
+			PosterPath       *string   `json:"poster_path,omitempty"`
+			VoteAverage      *int      `json:"vote_average,omitempty"`
+			VoteCount        *int      `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r TvSeriesPopularListResponse) GetJSON200() *struct {
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		BackdropPath     *string   `json:"backdrop_path,omitempty"`
+		FirstAirDate     *string   `json:"first_air_date,omitempty"`
+		GenreIds         *[]int    `json:"genre_ids,omitempty"`
+		Id               *int      `json:"id,omitempty"`
+		Name             *string   `json:"name,omitempty"`
+		OriginCountry    *[]string `json:"origin_country,omitempty"`
+		OriginalLanguage *string   `json:"original_language,omitempty"`
+		OriginalName     *string   `json:"original_name,omitempty"`
+		Overview         *string   `json:"overview,omitempty"`
+		Popularity       *float32  `json:"popularity,omitempty"`
+		PosterPath       *string   `json:"poster_path,omitempty"`
+		VoteAverage      *int      `json:"vote_average,omitempty"`
+		VoteCount        *int      `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r TvSeriesPopularListResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r TvSeriesPopularListResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TvSeriesPopularListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r TvSeriesPopularListResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type TvSeriesDetailsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1537,6 +2818,66 @@ func (c *ClientWithResponses) AuthenticationValidateKeyWithResponse(ctx context.
 	return ParseAuthenticationValidateKeyResponse(rsp)
 }
 
+// GenreMovieListWithResponse Movie List
+//
+// Get the list of official genres for movies.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/genre/movie/list (the `GenreMovieList` operationId).
+func (c *ClientWithResponses) GenreMovieListWithResponse(ctx context.Context, params *GenreMovieListParams, reqEditors ...RequestEditorFn) (*GenreMovieListResponse, error) {
+	rsp, err := c.GenreMovieList(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGenreMovieListResponse(rsp)
+}
+
+// GenreTvListWithResponse TV List
+//
+// Get the list of official genres for TV shows.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/genre/tv/list (the `GenreTvList` operationId).
+func (c *ClientWithResponses) GenreTvListWithResponse(ctx context.Context, params *GenreTvListParams, reqEditors ...RequestEditorFn) (*GenreTvListResponse, error) {
+	rsp, err := c.GenreTvList(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGenreTvListResponse(rsp)
+}
+
+// MoviePopularListWithResponse Popular
+//
+// Get a list of movies ordered by popularity.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/movie/popular (the `MoviePopularList` operationId).
+func (c *ClientWithResponses) MoviePopularListWithResponse(ctx context.Context, params *MoviePopularListParams, reqEditors ...RequestEditorFn) (*MoviePopularListResponse, error) {
+	rsp, err := c.MoviePopularList(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMoviePopularListResponse(rsp)
+}
+
+// MovieUpcomingListWithResponse Upcoming
+//
+// Get a list of movies that are being released soon.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/movie/upcoming (the `MovieUpcomingList` operationId).
+func (c *ClientWithResponses) MovieUpcomingListWithResponse(ctx context.Context, params *MovieUpcomingListParams, reqEditors ...RequestEditorFn) (*MovieUpcomingListResponse, error) {
+	rsp, err := c.MovieUpcomingList(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMovieUpcomingListResponse(rsp)
+}
+
 // MovieDetailsWithResponse Details
 //
 // Get the top level details of a movie by ID.
@@ -1597,6 +2938,51 @@ func (c *ClientWithResponses) SearchTvWithResponse(ctx context.Context, params *
 	return ParseSearchTvResponse(rsp)
 }
 
+// TrendingAllWithResponse All
+//
+// Get the trending movies, TV shows and people.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/trending/all/{time_window} (the `TrendingAll` operationId).
+func (c *ClientWithResponses) TrendingAllWithResponse(ctx context.Context, timeWindow TrendingAllParamsTimeWindow, params *TrendingAllParams, reqEditors ...RequestEditorFn) (*TrendingAllResponse, error) {
+	rsp, err := c.TrendingAll(ctx, timeWindow, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTrendingAllResponse(rsp)
+}
+
+// TvSeriesOnTheAirListWithResponse On The Air
+//
+// Get a list of TV shows that air in the next 7 days.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/tv/on_the_air (the `TvSeriesOnTheAirList` operationId).
+func (c *ClientWithResponses) TvSeriesOnTheAirListWithResponse(ctx context.Context, params *TvSeriesOnTheAirListParams, reqEditors ...RequestEditorFn) (*TvSeriesOnTheAirListResponse, error) {
+	rsp, err := c.TvSeriesOnTheAirList(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTvSeriesOnTheAirListResponse(rsp)
+}
+
+// TvSeriesPopularListWithResponse Popular
+//
+// Get a list of TV shows ordered by popularity.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/tv/popular (the `TvSeriesPopularList` operationId).
+func (c *ClientWithResponses) TvSeriesPopularListWithResponse(ctx context.Context, params *TvSeriesPopularListParams, reqEditors ...RequestEditorFn) (*TvSeriesPopularListResponse, error) {
+	rsp, err := c.TvSeriesPopularList(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTvSeriesPopularListResponse(rsp)
+}
+
 // TvSeriesDetailsWithResponse Details
 //
 // Get the details of a TV show.
@@ -1647,6 +3033,164 @@ func ParseAuthenticationValidateKeyResponse(rsp *http.Response) (*Authentication
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGenreMovieListResponse parses an HTTP response from a GenreMovieListWithResponse call
+func ParseGenreMovieListResponse(rsp *http.Response) (*GenreMovieListResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GenreMovieListResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Genres *[]struct {
+				Id   *int    `json:"id,omitempty"`
+				Name *string `json:"name,omitempty"`
+			} `json:"genres,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGenreTvListResponse parses an HTTP response from a GenreTvListWithResponse call
+func ParseGenreTvListResponse(rsp *http.Response) (*GenreTvListResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GenreTvListResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Genres *[]struct {
+				Id   *int    `json:"id,omitempty"`
+				Name *string `json:"name,omitempty"`
+			} `json:"genres,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMoviePopularListResponse parses an HTTP response from a MoviePopularListWithResponse call
+func ParseMoviePopularListResponse(rsp *http.Response) (*MoviePopularListResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MoviePopularListResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				Adult            *bool    `json:"adult,omitempty"`
+				BackdropPath     *string  `json:"backdrop_path,omitempty"`
+				GenreIds         *[]int   `json:"genre_ids,omitempty"`
+				Id               *int     `json:"id,omitempty"`
+				OriginalLanguage *string  `json:"original_language,omitempty"`
+				OriginalTitle    *string  `json:"original_title,omitempty"`
+				Overview         *string  `json:"overview,omitempty"`
+				Popularity       *float32 `json:"popularity,omitempty"`
+				PosterPath       *string  `json:"poster_path,omitempty"`
+				ReleaseDate      *string  `json:"release_date,omitempty"`
+				Title            *string  `json:"title,omitempty"`
+				Video            *bool    `json:"video,omitempty"`
+				VoteAverage      *float32 `json:"vote_average,omitempty"`
+				VoteCount        *int     `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMovieUpcomingListResponse parses an HTTP response from a MovieUpcomingListWithResponse call
+func ParseMovieUpcomingListResponse(rsp *http.Response) (*MovieUpcomingListResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MovieUpcomingListResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Dates *struct {
+				Maximum *string `json:"maximum,omitempty"`
+				Minimum *string `json:"minimum,omitempty"`
+			} `json:"dates,omitempty"`
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				Adult            *bool    `json:"adult,omitempty"`
+				BackdropPath     *string  `json:"backdrop_path,omitempty"`
+				GenreIds         *[]int   `json:"genre_ids,omitempty"`
+				Id               *int     `json:"id,omitempty"`
+				OriginalLanguage *string  `json:"original_language,omitempty"`
+				OriginalTitle    *string  `json:"original_title,omitempty"`
+				Overview         *string  `json:"overview,omitempty"`
+				Popularity       *float32 `json:"popularity,omitempty"`
+				PosterPath       *string  `json:"poster_path,omitempty"`
+				ReleaseDate      *string  `json:"release_date,omitempty"`
+				Title            *string  `json:"title,omitempty"`
+				Video            *bool    `json:"video,omitempty"`
+				VoteAverage      *int     `json:"vote_average,omitempty"`
+				VoteCount        *int     `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 
@@ -1852,6 +3396,143 @@ func ParseSearchTvResponse(rsp *http.Response) (*SearchTvResponse, error) {
 				Popularity       *float32  `json:"popularity,omitempty"`
 				PosterPath       *string   `json:"poster_path,omitempty"`
 				VoteAverage      *float32  `json:"vote_average,omitempty"`
+				VoteCount        *int      `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTrendingAllResponse parses an HTTP response from a TrendingAllWithResponse call
+func ParseTrendingAllResponse(rsp *http.Response) (*TrendingAllResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TrendingAllResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				Adult            *bool    `json:"adult,omitempty"`
+				BackdropPath     *string  `json:"backdrop_path,omitempty"`
+				GenreIds         *[]int   `json:"genre_ids,omitempty"`
+				Id               *int     `json:"id,omitempty"`
+				MediaType        *string  `json:"media_type,omitempty"`
+				OriginalLanguage *string  `json:"original_language,omitempty"`
+				OriginalTitle    *string  `json:"original_title,omitempty"`
+				Overview         *string  `json:"overview,omitempty"`
+				Popularity       *float32 `json:"popularity,omitempty"`
+				PosterPath       *string  `json:"poster_path,omitempty"`
+				ReleaseDate      *string  `json:"release_date,omitempty"`
+				Title            *string  `json:"title,omitempty"`
+				Video            *bool    `json:"video,omitempty"`
+				VoteAverage      *float32 `json:"vote_average,omitempty"`
+				VoteCount        *int     `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTvSeriesOnTheAirListResponse parses an HTTP response from a TvSeriesOnTheAirListWithResponse call
+func ParseTvSeriesOnTheAirListResponse(rsp *http.Response) (*TvSeriesOnTheAirListResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TvSeriesOnTheAirListResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				BackdropPath     *string   `json:"backdrop_path,omitempty"`
+				FirstAirDate     *string   `json:"first_air_date,omitempty"`
+				GenreIds         *[]int    `json:"genre_ids,omitempty"`
+				Id               *int      `json:"id,omitempty"`
+				Name             *string   `json:"name,omitempty"`
+				OriginCountry    *[]string `json:"origin_country,omitempty"`
+				OriginalLanguage *string   `json:"original_language,omitempty"`
+				OriginalName     *string   `json:"original_name,omitempty"`
+				Overview         *string   `json:"overview,omitempty"`
+				Popularity       *float32  `json:"popularity,omitempty"`
+				PosterPath       *string   `json:"poster_path,omitempty"`
+				VoteAverage      *int      `json:"vote_average,omitempty"`
+				VoteCount        *int      `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTvSeriesPopularListResponse parses an HTTP response from a TvSeriesPopularListWithResponse call
+func ParseTvSeriesPopularListResponse(rsp *http.Response) (*TvSeriesPopularListResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TvSeriesPopularListResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				BackdropPath     *string   `json:"backdrop_path,omitempty"`
+				FirstAirDate     *string   `json:"first_air_date,omitempty"`
+				GenreIds         *[]int    `json:"genre_ids,omitempty"`
+				Id               *int      `json:"id,omitempty"`
+				Name             *string   `json:"name,omitempty"`
+				OriginCountry    *[]string `json:"origin_country,omitempty"`
+				OriginalLanguage *string   `json:"original_language,omitempty"`
+				OriginalName     *string   `json:"original_name,omitempty"`
+				Overview         *string   `json:"overview,omitempty"`
+				Popularity       *float32  `json:"popularity,omitempty"`
+				PosterPath       *string   `json:"poster_path,omitempty"`
+				VoteAverage      *int      `json:"vote_average,omitempty"`
 				VoteCount        *int      `json:"vote_count,omitempty"`
 			} `json:"results,omitempty"`
 			TotalPages   *int `json:"total_pages,omitempty"`

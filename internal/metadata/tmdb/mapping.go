@@ -45,7 +45,7 @@ func mapSearchResults(results []struct {
 		item := core.MetadataTitle{
 			Kind: kind, Provider: core.MetadataProviderTMDB,
 			ProviderID: strconv.Itoa(*result.Id), Title: title, Year: yearFromDate(date),
-			Overview: value(result.Overview), PosterPath: value(result.PosterPath),
+			Overview: value(result.Overview), PosterPath: value(result.PosterPath), BackdropPath: value(result.BackdropPath),
 		}
 		if core.ValidateMetadataTitle(item) == nil {
 			items = append(items, item)
@@ -73,7 +73,7 @@ func mapSeriesResponse(response *tmdbapi.TvSeriesDetailsResponse, includeSpecial
 	title := core.MetadataTitle{
 		Kind: core.MediaKindSeries, Provider: core.MetadataProviderTMDB,
 		ProviderID: strconv.Itoa(*data.Id), Title: *data.Name, Year: yearFromDate(value(data.FirstAirDate)),
-		Overview: value(data.Overview), PosterPath: value(data.PosterPath),
+		Overview: value(data.Overview), PosterPath: value(data.PosterPath), BackdropPath: value(data.BackdropPath),
 	}
 	if err := core.ValidateMetadataTitle(title); err != nil {
 		return core.MetadataSeries{}, classifyError("series", response.StatusCode(), errors.Join(core.ErrMetadataMalformed, err))

@@ -12,13 +12,14 @@ import (
 )
 
 type metadataTitleResponse struct {
-	Kind       core.MediaKind            `json:"kind"`
-	Provider   core.MetadataProviderKind `json:"provider"`
-	ProviderID string                    `json:"provider_id"`
-	Title      string                    `json:"title"`
-	Year       int                       `json:"year"`
-	Overview   string                    `json:"overview"`
-	PosterPath string                    `json:"poster_path"`
+	Kind         core.MediaKind            `json:"kind"`
+	Provider     core.MetadataProviderKind `json:"provider"`
+	ProviderID   string                    `json:"provider_id"`
+	Title        string                    `json:"title"`
+	Year         int                       `json:"year"`
+	Overview     string                    `json:"overview"`
+	PosterPath   string                    `json:"poster_path"`
+	BackdropPath string                    `json:"backdrop_path"`
 }
 
 type metadataSearchResponse struct {
@@ -171,7 +172,7 @@ func (s *Server) emitMetadataAudit(r *http.Request, action string, result teleme
 func metadataTitleDTO(title core.MetadataTitle) metadataTitleResponse {
 	return metadataTitleResponse{
 		Kind: title.Kind, Provider: title.Provider, ProviderID: title.ProviderID, Title: title.Title,
-		Year: title.Year, Overview: title.Overview, PosterPath: title.PosterPath,
+		Year: title.Year, Overview: title.Overview, PosterPath: title.PosterPath, BackdropPath: title.BackdropPath,
 	}
 }
 

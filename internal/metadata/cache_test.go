@@ -47,3 +47,18 @@ func TestDetailCacheClonesSeriesSeasons(t *testing.T) {
 		t.Fatalf("cached clone = %+v, %v", got, ok)
 	}
 }
+
+func TestDetailCacheSupportsGenreDayTTL(t *testing.T) {
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	cache := newDetailCache(clock, 1, time.Minute)
+	key := cacheKey{provider: core.MetadataProviderTMDB, resource: "genres", kind: core.MediaKindMovie}
+	cache.putFor(key, cacheValue{genres: []core.MetadataGenre{{ID: 28, Name: "Action"}}}, 24*time.Hour)
+	clock.Advance(23 * time.Hour)
+	if value, ok := cache.get(key); !ok || len(value.genres) != 1 {
+		t.Fatalf("genre cache before expiry = %+v, %v", value, ok)
+	}
+	clock.Advance(time.Hour)
+	if _, ok := cache.get(key); ok {
+		t.Fatal("genre cache survived its one-day TTL")
+	}
+}

@@ -33,6 +33,9 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("profile round trip", func(t *testing.T) {
 		testRequestProfileRoundTrip(t, profileReader, profileWriter, profile)
 	})
+	t.Run("metadata request states", func(t *testing.T) {
+		testMetadataRequestStates(t, requestReader, requestWriter, account.ID, profile.ID, now)
+	})
 	t.Run("movie transition and active uniqueness", func(t *testing.T) {
 		testRequestTransitionAndUniqueness(t, requestReader, requestWriter, profileWriter, account.ID, profile.ID, now)
 	})
@@ -57,6 +60,46 @@ func runRequestEngineTests(t *testing.T, pool *sql.DB, driver config.Driver, acc
 	t.Run("concurrent quota boundary", func(t *testing.T) {
 		testConcurrentRequestQuota(t, accounts, requestWriter, quotaWriter, profile.ID, now)
 	})
+}
+
+func testMetadataRequestStates(
+	t *testing.T, reader core.RequestReader, writer core.RequestWriter, accountID, profileID string, now time.Time,
+) {
+	t.Helper()
+	stateReader, ok := reader.(core.MetadataRequestStateReader)
+	if !ok {
+		t.Fatal("request store does not implement MetadataRequestStateReader")
+	}
+	declined := requestFixture(t, accountID, profileID, "901", now)
+	if err := writer.CreateRequest(t.Context(), declined, now, true); err != nil {
+		t.Fatalf("create declined request: %v", err)
+	}
+	if _, err := writer.TransitionRequest(t.Context(), declined.ID, core.RequestPending, core.RequestDeclined, accountID, "", now); err != nil {
+		t.Fatalf("decline request: %v", err)
+	}
+	latest := requestFixture(t, accountID, profileID, "901", now.Add(time.Second))
+	if err := writer.CreateRequest(t.Context(), latest, now.Add(time.Second), true); err != nil {
+		t.Fatalf("create latest request: %v", err)
+	}
+	series := seriesRequestFixture(t, accountID, profileID, "902", []int{1}, now)
+	if err := writer.CreateRequest(t.Context(), series, now, true); err != nil {
+		t.Fatalf("create series request: %v", err)
+	}
+	titles := []core.MetadataTitle{
+		{Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "901", Title: "Film"},
+		{Kind: core.MediaKindSeries, Provider: core.MetadataProviderTMDB, ProviderID: "902", Title: "Show"},
+		{Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "903", Title: "Missing"},
+	}
+	states, err := stateReader.MetadataRequestStates(t.Context(), accountID, titles)
+	if err != nil {
+		t.Fatalf("MetadataRequestStates: %v", err)
+	}
+	if states[core.MetadataKey(titles[0])] != core.RequestPending || states[core.MetadataKey(titles[1])] != core.RequestPending {
+		t.Fatalf("metadata request states = %v", states)
+	}
+	if _, exists := states[core.MetadataKey(titles[2])]; exists {
+		t.Fatalf("missing title unexpectedly has state: %v", states)
+	}
 }
 
 func testRequesterUsernameBatch(t *testing.T, accounts core.AccountStore, account core.Account) {
