@@ -1,5 +1,6 @@
 import { http, HttpResponse, type HttpResponseResolver } from "msw";
 import { z } from "zod/v4";
+import type { ProbeFailureReason } from "../lib/api/errors.js";
 import {
   knownPermissions,
   loginRequestSchema,
@@ -218,9 +219,15 @@ export function envelope(
   code: ErrorCode,
   message: string,
   headers: HeadersInit = {},
+  reason?: ProbeFailureReason,
 ) {
   return HttpResponse.json(
-    { code, message, request_id: "req-mock" },
+    {
+      code,
+      message,
+      request_id: "req-mock",
+      ...(reason === undefined ? {} : { reason }),
+    },
     { status, headers },
   );
 }
@@ -507,9 +514,15 @@ async function registerMediaServer(request: Request) {
     return envelope(409, "already_exists", "a media server uses that name");
   }
   if (host === UNREACHABLE_MEDIA_SERVER_HOST) {
-    return envelope(502, "media_server_failure", "media server probe failed", {
-      "Retry-After": "5",
-    });
+    return envelope(
+      502,
+      "media_server_failure",
+      "media server probe failed",
+      {
+        "Retry-After": "5",
+      },
+      "unreachable",
+    );
   }
   if (host === BUSY_MEDIA_SERVER_HOST) {
     return envelope(503, "unavailable", "media server busy", {
@@ -635,9 +648,15 @@ function createMockInvite(input: CreateInviteRequest): Invite {
 function upstreamFailure(server: MediaServer) {
   const host = new URL(server.base_url).hostname;
   if (host === UNREACHABLE_MEDIA_SERVER_HOST) {
-    return envelope(502, "media_server_failure", "media server failed", {
-      "Retry-After": "5",
-    });
+    return envelope(
+      502,
+      "media_server_failure",
+      "media server failed",
+      {
+        "Retry-After": "5",
+      },
+      "unreachable",
+    );
   }
   if (host === BUSY_MEDIA_SERVER_HOST) {
     return envelope(503, "unavailable", "media server busy", {
@@ -1567,7 +1586,13 @@ async function registerManager(request: Request) {
     return envelope(409, "already_exists", "a download manager uses that name");
   }
   if (new URL(input.data.base_url).hostname === UNREACHABLE_MANAGER_HOST) {
-    return envelope(502, "download_manager_failure", "probe failed");
+    return envelope(
+      502,
+      "download_manager_failure",
+      "probe failed",
+      {},
+      "unreachable",
+    );
   }
   registeredManagers += 1;
   const ordinal = String(registeredManagers).padStart(2, "0");

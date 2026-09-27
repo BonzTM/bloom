@@ -1,4 +1,8 @@
-import { ApiError, CSRF_REJECTED } from "../../../lib/api/errors.js";
+import {
+  ApiError,
+  CSRF_REJECTED,
+  type ProbeFailureReason,
+} from "../../../lib/api/errors.js";
 
 const UNREACHABLE =
   "Bloom could not be reached. Check your connection and try again.";
@@ -77,11 +81,28 @@ const managerMessages: Messages = {
   404: "That download manager no longer exists.",
   409: "Another instance already uses that name, or a request profile still references this one.",
   422: "Check the instance fields and try again.",
-  502: "The instance could not be reached or refused the API key.",
+  502: "The instance could not be checked.",
   503: "The instance is busy. Try again in a moment.",
 };
 
+const managerProbeMessages: Readonly<Record<ProbeFailureReason, string>> = {
+  unreachable:
+    "Bloom could not reach the instance at that address. Check the address and port, and that the network between Bloom and the instance allows it.",
+  unauthorized: "The instance rejected the API key.",
+  not_found:
+    "The address answered, but the instance's API was not found there. Check that the address is the instance itself, including any base path.",
+  malformed:
+    "The address answered, but not like a Radarr or Sonarr instance. Check that it points at the instance itself rather than a login page or a redirect.",
+};
+
 export function describeManagerError(error: unknown): string | undefined {
+  if (
+    error instanceof ApiError &&
+    error.status === 502 &&
+    error.reason !== undefined
+  ) {
+    return managerProbeMessages[error.reason];
+  }
   return describe(
     error,
     managerMessages,

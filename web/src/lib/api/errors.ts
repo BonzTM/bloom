@@ -4,10 +4,21 @@ import { z } from "zod/v4";
 // The body is trusted for display only when the whole envelope parses; any
 // other shape, such as a proxy error page, degrades to a generic message so
 // server internals never reach the screen.
+export const probeFailureReasonSchema = z.enum([
+  "unreachable",
+  "unauthorized",
+  "not_found",
+  "malformed",
+]);
+
+export type ProbeFailureReason = z.output<typeof probeFailureReasonSchema>;
+
 const envelopeSchema = z.object({
   code: z.string().min(1).max(100),
   message: z.string().min(1).max(1000),
   request_id: z.string().max(200).optional(),
+  // Present only when an upstream probe failed; says which way it failed.
+  reason: probeFailureReasonSchema.optional(),
 });
 
 export type ApiErrorKind = "aborted" | "http" | "invalid-response" | "network";
@@ -18,6 +29,7 @@ type ApiErrorOptions = Readonly<{
   code?: string;
   requestId?: string;
   retryAfterSeconds?: number;
+  reason?: ProbeFailureReason;
 }>;
 
 export class ApiError extends Error {
@@ -26,6 +38,7 @@ export class ApiError extends Error {
   readonly code: string | undefined;
   readonly requestId: string | undefined;
   readonly retryAfterSeconds: number | undefined;
+  readonly reason: ProbeFailureReason | undefined;
 
   constructor(
     kind: ApiErrorKind,
@@ -39,6 +52,7 @@ export class ApiError extends Error {
     this.code = options.code;
     this.requestId = options.requestId;
     this.retryAfterSeconds = options.retryAfterSeconds;
+    this.reason = options.reason;
   }
 }
 
@@ -89,6 +103,9 @@ export function mapHttpError(
   options.code = envelope.data.code;
   if (envelope.data.request_id !== undefined) {
     options.requestId = envelope.data.request_id;
+  }
+  if (envelope.data.reason !== undefined) {
+    options.reason = envelope.data.reason;
   }
   return new ApiError("http", envelope.data.message, options);
 }

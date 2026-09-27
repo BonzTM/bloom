@@ -167,7 +167,7 @@ it("reports a server that did not answer as Jellyfin", async () => {
   await user.click(screen.getByRole("button", { name: "Register server" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "did not answer as a Jellyfin server, or it rejected the API key. Nothing was saved.",
+    "Bloom could not reach the server at that address.",
   );
   expect(
     screen.queryByRole("rowheader", { name: "Attic" }),
