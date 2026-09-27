@@ -55,7 +55,7 @@ export function AppLayout(): ReactNode {
             </NavItem>
             <PermissionGate anyOf={REQUESTS_PERMISSIONS}>
               <NavItem to="/requests" icon="compass">
-                Requests
+                Discover
               </NavItem>
             </PermissionGate>
             <PermissionGate anyOf={[permissions.statsReadOwn]}>

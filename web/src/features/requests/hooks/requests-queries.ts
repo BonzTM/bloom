@@ -10,7 +10,11 @@ import type {
   RegisterDownloadManagerRequest,
   RegisteredDownloadManager,
 } from "../api/download-manager-schemas.js";
-import type { CreateMediaRequest } from "../api/metadata-schemas.js";
+import type {
+  CreateMediaRequest,
+  DiscoverList,
+  MetadataDiscoverResponse,
+} from "../api/metadata-schemas.js";
 import type { RequestsFilter } from "../api/requests-api.js";
 import type { MediaKind } from "../api/requests-schemas.js";
 import type {
@@ -44,6 +48,8 @@ export const requestsKeys = {
     ["requests", "progress", accountId, requestId] as const,
   search: (accountId: string, query: string, kind: MediaKind | undefined) =>
     ["requests", "search", accountId, query, kind ?? ""] as const,
+  discover: (accountId: string, list: DiscoverList) =>
+    ["requests", "discover", accountId, list] as const,
   title: (accountId: string, kind: MediaKind, providerId: string) =>
     ["requests", "title", accountId, kind, providerId] as const,
 };
@@ -329,6 +335,28 @@ export function useSearchTitles(
     queryFn: ({ signal }) => api.search(query, kind, signal),
     enabled: query !== "",
     staleTime: 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+const firstDiscoverPage: string | undefined = undefined;
+
+// Pages of one discover row for the signed-in account. The request state on
+// each title is the caller's own, so the key carries the account.
+export function useDiscover(
+  accountId: string,
+  list: DiscoverList,
+  enabled: boolean,
+) {
+  const api = useRequestsApi();
+  return useInfiniteQuery({
+    queryKey: requestsKeys.discover(accountId, list),
+    queryFn: ({ pageParam, signal }) => api.discover(list, pageParam, signal),
+    initialPageParam: firstDiscoverPage,
+    getNextPageParam: (page: MetadataDiscoverResponse) =>
+      page.next_cursor === "" ? undefined : page.next_cursor,
+    enabled,
+    staleTime: 5 * 60_000,
     meta: { sessionScoped: true },
   });
 }

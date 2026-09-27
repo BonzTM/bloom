@@ -14,6 +14,9 @@ import {
 } from "./download-manager-schemas.js";
 import {
   createMediaRequestSchema,
+  discoverCursorSchema,
+  discoverListSchema,
+  metadataDiscoverResponseSchema,
   metadataSearchResponseSchema,
   metadataSeriesSchema,
   metadataTitleSchema,
@@ -22,6 +25,8 @@ import {
   type CreateMediaRequest,
   type MetadataSeries,
   type MetadataTitle,
+  type DiscoverList,
+  type MetadataDiscoverResponse,
 } from "./metadata-schemas.js";
 import {
   mediaKindSchema,
@@ -175,6 +180,25 @@ export class RequestsApi {
         { signal },
       )
       .then((response) => response.items);
+  }
+
+  // One page of a discover row; `cursor` is the previous page's
+  // `next_cursor`, omitted for the first page.
+  discover(
+    list: DiscoverList,
+    cursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<MetadataDiscoverResponse> {
+    const params = new URLSearchParams();
+    if (cursor !== undefined) {
+      params.set("cursor", discoverCursorSchema.parse(cursor));
+    }
+    const query = params.size === 0 ? "" : `?${params.toString()}`;
+    return this.#client.requestJson(
+      `${METADATA_PATH}/discover/${discoverListSchema.parse(list)}${query}`,
+      metadataDiscoverResponseSchema,
+      { signal },
+    );
   }
 
   movie(providerId: string, signal: AbortSignal): Promise<MetadataTitle> {

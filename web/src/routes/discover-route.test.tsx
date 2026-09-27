@@ -1,5 +1,5 @@
 import { expect, it } from "@jest/globals";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import {
@@ -29,11 +29,11 @@ it("offers requests from the navigation and the home page", async () => {
   expect(
     await screen.findByRole("link", { name: "Open requests" }),
   ).toHaveAttribute("href", "/requests");
-  await user.click(await screen.findByRole("link", { name: "Requests" }));
+  await user.click(await screen.findByRole("link", { name: "Discover" }));
   expect(
-    await screen.findByRole("heading", { name: "Requests", level: 1 }),
+    await screen.findByRole("heading", { name: "Discover", level: 1 }),
   ).toBeVisible();
-  expect(document.title).toBe("Requests | Bloom");
+  expect(document.title).toBe("Discover | Bloom");
 });
 
 it("hides requests from an account without request permissions", async () => {
@@ -44,7 +44,7 @@ it("hides requests from an account without request permissions", async () => {
     await screen.findByRole("heading", { name: "Access denied" }),
   ).toBeVisible();
   expect(
-    screen.queryByRole("link", { name: "Requests" }),
+    screen.queryByRole("link", { name: "Discover" }),
   ).not.toBeInTheDocument();
 });
 
@@ -192,4 +192,39 @@ it("shows progress for the account's own processing request", async () => {
   expect(
     await within(list).findByLabelText("Progress of The Matrix (1999)"),
   ).toHaveTextContent("75% done");
+});
+
+it("shows discover rows with the viewer's request state and loads more", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/requests");
+  const trending = await screen.findByRole("list", {
+    name: "Trending this week",
+  });
+  expect(within(trending).getAllByRole("listitem").length).toBeGreaterThan(3);
+  expect(screen.getByRole("list", { name: "Popular movies" })).toBeVisible();
+  expect(screen.getByRole("list", { name: "Series on the air" })).toBeVisible();
+  // The mock repeats its small catalogue to fill a row; only the first
+  // copy carries the real id and therefore this account's request.
+  const [prestige] = within(
+    screen.getByRole("list", { name: "Popular movies" }),
+  ).getAllByRole("link", { name: /The Prestige/ });
+  expect(prestige).toHaveTextContent("Declined");
+  await user.click(
+    within(trending).getByRole("button", { name: "More trending this week" }),
+  );
+  await waitFor(() => {
+    expect(within(trending).getAllByRole("listitem").length).toBeGreaterThan(
+      20,
+    );
+  });
+});
+
+it("hides the rows while a search is showing", async () => {
+  signInMockSession();
+  renderApp("/requests?q=heat");
+  await screen.findByRole("list", { name: "Results for heat" });
+  expect(
+    screen.queryByRole("list", { name: "Trending this week" }),
+  ).not.toBeInTheDocument();
 });

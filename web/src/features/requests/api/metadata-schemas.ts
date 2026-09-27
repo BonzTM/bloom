@@ -31,9 +31,59 @@ export const metadataTitleSchema = z.object({
   year: z.number().int().min(0).max(9999),
   overview: boundedBytes(MAX_OVERVIEW_BYTES),
   poster_path: boundedBytes(MAX_POSTER_BYTES),
+  backdrop_path: boundedBytes(MAX_POSTER_BYTES),
 });
 
 export type MetadataTitle = z.output<typeof metadataTitleSchema>;
+
+// The caller's own request for a title, or none.
+export const metadataRequestStateSchema = z.enum([
+  "none",
+  "pending",
+  "approved",
+  "processing",
+  "available",
+  "declined",
+  "failed",
+]);
+
+export type MetadataRequestState = z.output<typeof metadataRequestStateSchema>;
+
+export const metadataDiscoverTitleSchema = metadataTitleSchema.extend({
+  request_state: metadataRequestStateSchema,
+});
+
+export type MetadataDiscoverTitle = z.output<
+  typeof metadataDiscoverTitleSchema
+>;
+
+export const MAX_DISCOVER_PAGE = 20;
+export const MAX_DISCOVER_CURSOR_LENGTH = 4;
+
+export const discoverCursorSchema = z
+  .string()
+  .min(1)
+  .max(MAX_DISCOVER_CURSOR_LENGTH);
+
+export const metadataDiscoverResponseSchema = z.object({
+  items: z.array(metadataDiscoverTitleSchema).max(MAX_DISCOVER_PAGE),
+  next_cursor: z.string().max(MAX_DISCOVER_CURSOR_LENGTH),
+});
+
+export type MetadataDiscoverResponse = z.output<
+  typeof metadataDiscoverResponseSchema
+>;
+
+// The rows the discover page shows, in order, with their API paths.
+export const discoverListSchema = z.enum([
+  "trending",
+  "movies/popular",
+  "series/popular",
+  "movies/upcoming",
+  "series/upcoming",
+]);
+
+export type DiscoverList = z.output<typeof discoverListSchema>;
 
 export const metadataSearchResponseSchema = z.object({
   items: z.array(metadataTitleSchema).max(MAX_RESULTS),
