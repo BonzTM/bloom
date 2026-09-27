@@ -76,7 +76,10 @@ export class ApiClient {
         credentials: "same-origin",
         signal,
       };
-      if (options.body !== undefined) {
+      if (options.body instanceof FormData) {
+        // The browser sets the multipart boundary itself.
+        requestInit.body = options.body;
+      } else if (options.body !== undefined) {
         requestInit.body = JSON.stringify(options.body);
       }
       const response = await fetch(new URL(path, this.#baseUrl), requestInit);
@@ -112,7 +115,7 @@ function combineSignals(
 function buildHeaders(options: RequestOptions): Headers {
   const headers = new Headers(options.headers);
   headers.set("accept", "application/json");
-  if (options.body !== undefined) {
+  if (options.body !== undefined && !(options.body instanceof FormData)) {
     headers.set("content-type", "application/json");
   }
   return headers;

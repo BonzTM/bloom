@@ -172,6 +172,12 @@ const ADMIN_LINKS: readonly AdminLink[] = [
     anyOf: [permissions.adminSettings],
   },
   {
+    to: "/admin/imports",
+    label: "Imports",
+    icon: "upload",
+    anyOf: [permissions.adminSettings],
+  },
+  {
     to: "/admin/invites",
     label: "Invites",
     icon: "ticket",

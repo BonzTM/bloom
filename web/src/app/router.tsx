@@ -43,6 +43,7 @@ const LazyRequestProfilesRoute = lazy(
 const LazyNotificationChannelsRoute = lazy(
   () => import("../routes/notification-channels-route.js"),
 );
+const LazyImportsRoute = lazy(() => import("../routes/imports-route.js"));
 const LazyInviteAcceptRoute = lazy(
   () => import("../routes/invite-accept-route.js"),
 );
@@ -253,6 +254,16 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.adminSettings]}>
                 <LazyPage loading="Loading notifications…">
                   <LazyNotificationChannelsRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "imports",
+            element: (
+              <RequirePermission anyOf={[permissions.adminSettings]}>
+                <LazyPage loading="Loading imports…">
+                  <LazyImportsRoute />
                 </LazyPage>
               </RequirePermission>
             ),

@@ -61,6 +61,17 @@ export default function AdminRoute(): ReactNode {
               <p>Tell a webhook, Discord, or email about requests.</p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.adminSettings]}>
+            <li className="card">
+              <h2>
+                <Link to="/admin/imports">Imports</Link>
+              </h2>
+              <p>
+                Bring in watch history from Playback Reporting or a Bloom
+                export.
+              </p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.statsReadAll]}>
             <li className="card">
               <h2>
