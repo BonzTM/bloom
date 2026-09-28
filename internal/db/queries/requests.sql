@@ -91,10 +91,20 @@ WHERE requests.kind = 'series'
   AND request_seasons.season_number = sqlc.arg(season_number);
 
 -- name: GetRequest :one
-SELECT * FROM requests WHERE id = sqlc.arg(id);
+SELECT id, kind, provider, provider_id, title, release_year, poster_path,
+       requester_account_id, profile_id, status, decision_reason, decided_by_account_id,
+       decided_at, created_at, updated_at, download_manager_item_id, failure_reason,
+       download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags,
+       dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at
+FROM requests WHERE id = sqlc.arg(id);
 
 -- name: ListRequests :many
-SELECT * FROM requests
+SELECT id, kind, provider, provider_id, title, release_year, poster_path,
+       requester_account_id, profile_id, status, decision_reason, decided_by_account_id,
+       decided_at, created_at, updated_at, download_manager_item_id, failure_reason,
+       download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags,
+       dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at
+FROM requests
 WHERE (CAST(sqlc.arg(has_requester) AS INTEGER) = 0 OR requester_account_id = sqlc.arg(requester_id))
   AND (CAST(sqlc.arg(has_status) AS INTEGER) = 0 OR status = sqlc.arg(status_filter))
   AND (CAST(sqlc.arg(has_cursor) AS INTEGER) = 0

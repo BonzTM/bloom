@@ -310,6 +310,7 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Database reads use explicit column projections so additive schema changes remain compatible with older binaries during rolling deployments (#93).
 - A watch's details page reads as a timeline (started, paused, resumed,
   seeked, delivery changes, last seen) instead of every polled sample; the
   raw samples sit behind a disclosure.

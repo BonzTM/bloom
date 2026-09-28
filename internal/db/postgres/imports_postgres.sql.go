@@ -57,6 +57,104 @@ func (q *Queries) FenceImportBatch(ctx context.Context, arg FenceImportBatchPara
 	return id, err
 }
 
+const getImport = `-- name: GetImport :one
+SELECT id, media_server_id, source, state, cursor, read_count, imported_count,
+       skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
+       requested_by, created_at, started_at, finished_at, updated_at
+FROM imports WHERE id = $1
+`
+
+func (q *Queries) GetImport(ctx context.Context, id string) (Import, error) {
+	row := q.db.QueryRowContext(ctx, getImport, id)
+	var i Import
+	err := row.Scan(
+		&i.ID,
+		&i.MediaServerID,
+		&i.Source,
+		&i.State,
+		&i.Cursor,
+		&i.ReadCount,
+		&i.ImportedCount,
+		&i.SkippedCount,
+		&i.DuplicateCount,
+		&i.LastError,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.RequestedBy,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listImports = `-- name: ListImports :many
+SELECT id, media_server_id, source, state, cursor, read_count, imported_count,
+       skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
+       requested_by, created_at, started_at, finished_at, updated_at
+FROM imports
+WHERE (CAST($1 AS TEXT) = ''
+       OR media_server_id = CAST($1 AS TEXT))
+  AND (created_at < $2
+       OR (created_at = $2 AND id < $3))
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListImportsParams struct {
+	MediaServerID   string
+	BeforeCreatedAt time.Time
+	BeforeID        string
+	PageSize        int32
+}
+
+func (q *Queries) ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error) {
+	rows, err := q.db.QueryContext(ctx, listImports,
+		arg.MediaServerID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Import{}
+	for rows.Next() {
+		var i Import
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaServerID,
+			&i.Source,
+			&i.State,
+			&i.Cursor,
+			&i.ReadCount,
+			&i.ImportedCount,
+			&i.SkippedCount,
+			&i.DuplicateCount,
+			&i.LastError,
+			&i.LeaseToken,
+			&i.LeaseExpiresAt,
+			&i.RequestedBy,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockWatchDedup = `-- name: LockWatchDedup :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
 `
@@ -68,7 +166,10 @@ func (q *Queries) LockWatchDedup(ctx context.Context, lockKey string) error {
 
 const selectClaimableImport = `-- name: SelectClaimableImport :one
 
-SELECT id, media_server_id, source, state, cursor, read_count, imported_count, skipped_count, duplicate_count, last_error, lease_token, lease_expires_at, requested_by, created_at, started_at, finished_at, updated_at FROM imports
+SELECT id, media_server_id, source, state, cursor, read_count, imported_count,
+       skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
+       requested_by, created_at, started_at, finished_at, updated_at
+FROM imports
 WHERE state = 'pending' OR (state = 'running' AND lease_expires_at <= $1)
 ORDER BY created_at, id
 LIMIT 1

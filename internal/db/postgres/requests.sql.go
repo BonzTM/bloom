@@ -380,7 +380,12 @@ func (q *Queries) GetMetadataProvider(ctx context.Context, kind string) (Metadat
 }
 
 const getRequest = `-- name: GetRequest :one
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at FROM requests WHERE id = $1
+SELECT id, kind, provider, provider_id, title, release_year, poster_path,
+       requester_account_id, profile_id, status, decision_reason, decided_by_account_id,
+       decided_at, created_at, updated_at, download_manager_item_id, failure_reason,
+       download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags,
+       dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at
+FROM requests WHERE id = $1
 `
 
 func (q *Queries) GetRequest(ctx context.Context, id string) (Request, error) {
@@ -565,7 +570,12 @@ func (q *Queries) ListRequestSeasons(ctx context.Context, requestID string) ([]L
 }
 
 const listRequests = `-- name: ListRequests :many
-SELECT id, kind, provider, provider_id, title, release_year, poster_path, requester_account_id, profile_id, status, decision_reason, decided_by_account_id, decided_at, created_at, updated_at, download_manager_item_id, failure_reason, download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags, dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at FROM requests
+SELECT id, kind, provider, provider_id, title, release_year, poster_path,
+       requester_account_id, profile_id, status, decision_reason, decided_by_account_id,
+       decided_at, created_at, updated_at, download_manager_item_id, failure_reason,
+       download_manager_id, dispatch_quality_profile, dispatch_root_folder, dispatch_tags,
+       dispatch_lease_expires_at, dispatch_lease_token, last_availability_check_at
+FROM requests
 WHERE (CAST($1 AS INTEGER) = 0 OR requester_account_id = $2)
   AND (CAST($3 AS INTEGER) = 0 OR status = $4)
   AND (CAST($5 AS INTEGER) = 0

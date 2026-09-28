@@ -499,7 +499,12 @@ func (q *Queries) FenceLibrarySync(ctx context.Context, arg FenceLibrarySyncPara
 }
 
 const getCatalogItem = `-- name: GetCatalogItem :one
-SELECT media_server_id, item_id, library_id, parent_id, item_type, name, series_id, series_name, season_id, season_number, index_number, runtime_ms, premiere_date, production_year, community_rating, genres, primary_image_tag, date_created, archived, plays, watch_seconds, unique_users, first_played_at, last_played_at, first_seen_at, last_seen_at, updated_at FROM library_items
+SELECT media_server_id, item_id, library_id, parent_id, item_type, name, series_id,
+       series_name, season_id, season_number, index_number, runtime_ms, premiere_date,
+       production_year, community_rating, genres, primary_image_tag, date_created,
+       archived, plays, watch_seconds, unique_users, first_played_at, last_played_at,
+       first_seen_at, last_seen_at, updated_at
+FROM library_items
 WHERE media_server_id = ?1 AND item_id = ?2
 `
 
@@ -544,7 +549,9 @@ func (q *Queries) GetCatalogItem(ctx context.Context, arg GetCatalogItemParams) 
 }
 
 const getLibrarySync = `-- name: GetLibrarySync :one
-SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count, last_error, lease_token, lease_expires_at, started_at, finished_at FROM library_syncs WHERE media_server_id = ?1
+SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count,
+       last_error, lease_token, lease_expires_at, started_at, finished_at
+FROM library_syncs WHERE media_server_id = ?1
 `
 
 func (q *Queries) GetLibrarySync(ctx context.Context, mediaServerID string) (LibrarySync, error) {
@@ -722,20 +729,55 @@ WITH root AS (
         AND li.series_id = root.item_id AND li.item_id <> root.item_id
     WHERE root.item_type = 'Series'
 ), target_watches AS (
-    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard FROM target_items ti
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+           w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+           w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+           w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+           w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+           w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+           w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+           w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+           w.series_id, w.import_source, w.import_provenance_guard
+    FROM target_items ti
     JOIN watches w ON w.media_server_id = ?4 AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
     UNION ALL
-    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard FROM root
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+           w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+           w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+           w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+           w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+           w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+           w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+           w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+           w.series_id, w.import_source, w.import_provenance_guard
+    FROM root
     JOIN watches w ON w.media_server_id = ?4 AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
     UNION ALL
-    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard FROM root
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+           w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+           w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+           w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+           w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+           w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+           w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+           w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+           w.series_id, w.import_source, w.import_provenance_guard
+    FROM root
     JOIN watches w ON w.media_server_id = ?4 AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
     WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
 )
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM target_watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at < ?1
@@ -872,7 +914,13 @@ func (q *Queries) ListCatalogItemHistory(ctx context.Context, arg ListCatalogIte
 }
 
 const listCatalogItemsDateAsc = `-- name: ListCatalogItemsDateAsc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND ((CAST(?4 AS INTEGER) = 0 AND (li.date_created IS NULL OR li.date_created > ?5
@@ -951,7 +999,13 @@ func (q *Queries) ListCatalogItemsDateAsc(ctx context.Context, arg ListCatalogIt
 }
 
 const listCatalogItemsDateAscFiltered = `-- name: ListCatalogItemsDateAscFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1033,7 +1087,13 @@ func (q *Queries) ListCatalogItemsDateAscFiltered(ctx context.Context, arg ListC
 }
 
 const listCatalogItemsDateDesc = `-- name: ListCatalogItemsDateDesc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND ((CAST(?4 AS INTEGER) = 0 AND (li.date_created IS NULL OR li.date_created < ?5
@@ -1112,7 +1172,13 @@ func (q *Queries) ListCatalogItemsDateDesc(ctx context.Context, arg ListCatalogI
 }
 
 const listCatalogItemsDateDescFiltered = `-- name: ListCatalogItemsDateDescFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1194,7 +1260,13 @@ func (q *Queries) ListCatalogItemsDateDescFiltered(ctx context.Context, arg List
 }
 
 const listCatalogItemsLastPlayedAsc = `-- name: ListCatalogItemsLastPlayedAsc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND ((CAST(?4 AS INTEGER) = 0 AND (li.last_played_at IS NULL OR li.last_played_at > ?5
@@ -1273,7 +1345,13 @@ func (q *Queries) ListCatalogItemsLastPlayedAsc(ctx context.Context, arg ListCat
 }
 
 const listCatalogItemsLastPlayedAscFiltered = `-- name: ListCatalogItemsLastPlayedAscFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1355,7 +1433,13 @@ func (q *Queries) ListCatalogItemsLastPlayedAscFiltered(ctx context.Context, arg
 }
 
 const listCatalogItemsLastPlayedDesc = `-- name: ListCatalogItemsLastPlayedDesc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND ((CAST(?4 AS INTEGER) = 0 AND (li.last_played_at IS NULL OR li.last_played_at < ?5
@@ -1434,7 +1518,13 @@ func (q *Queries) ListCatalogItemsLastPlayedDesc(ctx context.Context, arg ListCa
 }
 
 const listCatalogItemsLastPlayedDescFiltered = `-- name: ListCatalogItemsLastPlayedDescFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1516,7 +1606,13 @@ func (q *Queries) ListCatalogItemsLastPlayedDescFiltered(ctx context.Context, ar
 }
 
 const listCatalogItemsNameAsc = `-- name: ListCatalogItemsNameAsc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND (li.name > ?4
@@ -1593,7 +1689,13 @@ func (q *Queries) ListCatalogItemsNameAsc(ctx context.Context, arg ListCatalogIt
 }
 
 const listCatalogItemsNameAscFiltered = `-- name: ListCatalogItemsNameAscFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1672,7 +1774,13 @@ func (q *Queries) ListCatalogItemsNameAscFiltered(ctx context.Context, arg ListC
 }
 
 const listCatalogItemsNameDesc = `-- name: ListCatalogItemsNameDesc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND (li.name < ?4
@@ -1748,7 +1856,13 @@ func (q *Queries) ListCatalogItemsNameDesc(ctx context.Context, arg ListCatalogI
 }
 
 const listCatalogItemsNameDescFiltered = `-- name: ListCatalogItemsNameDescFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1827,7 +1941,13 @@ func (q *Queries) ListCatalogItemsNameDescFiltered(ctx context.Context, arg List
 }
 
 const listCatalogItemsPlaysAsc = `-- name: ListCatalogItemsPlaysAsc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND (li.plays > CAST(?4 AS BIGINT)
@@ -1903,7 +2023,13 @@ func (q *Queries) ListCatalogItemsPlaysAsc(ctx context.Context, arg ListCatalogI
 }
 
 const listCatalogItemsPlaysAscFiltered = `-- name: ListCatalogItemsPlaysAscFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -1982,7 +2108,13 @@ func (q *Queries) ListCatalogItemsPlaysAscFiltered(ctx context.Context, arg List
 }
 
 const listCatalogItemsPlaysDesc = `-- name: ListCatalogItemsPlaysDesc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND (li.plays < CAST(?4 AS BIGINT)
@@ -2058,7 +2190,13 @@ func (q *Queries) ListCatalogItemsPlaysDesc(ctx context.Context, arg ListCatalog
 }
 
 const listCatalogItemsPlaysDescFiltered = `-- name: ListCatalogItemsPlaysDescFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -2137,7 +2275,13 @@ func (q *Queries) ListCatalogItemsPlaysDescFiltered(ctx context.Context, arg Lis
 }
 
 const listCatalogItemsPremiereAsc = `-- name: ListCatalogItemsPremiereAsc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND ((CAST(?4 AS INTEGER) = 0 AND (li.premiere_date IS NULL OR li.premiere_date > ?5
@@ -2216,7 +2360,13 @@ func (q *Queries) ListCatalogItemsPremiereAsc(ctx context.Context, arg ListCatal
 }
 
 const listCatalogItemsPremiereAscFiltered = `-- name: ListCatalogItemsPremiereAscFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -2298,7 +2448,13 @@ func (q *Queries) ListCatalogItemsPremiereAscFiltered(ctx context.Context, arg L
 }
 
 const listCatalogItemsPremiereDesc = `-- name: ListCatalogItemsPremiereDesc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND ((CAST(?4 AS INTEGER) = 0 AND (li.premiere_date IS NULL OR li.premiere_date < ?5
@@ -2377,7 +2533,13 @@ func (q *Queries) ListCatalogItemsPremiereDesc(ctx context.Context, arg ListCata
 }
 
 const listCatalogItemsPremiereDescFiltered = `-- name: ListCatalogItemsPremiereDescFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -2459,7 +2621,13 @@ func (q *Queries) ListCatalogItemsPremiereDescFiltered(ctx context.Context, arg 
 }
 
 const listCatalogItemsWatchAsc = `-- name: ListCatalogItemsWatchAsc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND (li.watch_seconds > CAST(?4 AS BIGINT)
@@ -2535,7 +2703,13 @@ func (q *Queries) ListCatalogItemsWatchAsc(ctx context.Context, arg ListCatalogI
 }
 
 const listCatalogItemsWatchAscFiltered = `-- name: ListCatalogItemsWatchAscFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -2614,7 +2788,13 @@ func (q *Queries) ListCatalogItemsWatchAscFiltered(ctx context.Context, arg List
 }
 
 const listCatalogItemsWatchDesc = `-- name: ListCatalogItemsWatchDesc :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND (li.watch_seconds < CAST(?4 AS BIGINT)
@@ -2690,7 +2870,13 @@ func (q *Queries) ListCatalogItemsWatchDesc(ctx context.Context, arg ListCatalog
 }
 
 const listCatalogItemsWatchDescFiltered = `-- name: ListCatalogItemsWatchDescFiltered :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
       AND li.item_type = CAST(?4 AS TEXT)
@@ -2811,7 +2997,13 @@ func (q *Queries) ListMissingLibraryItemIDs(ctx context.Context, arg ListMissing
 }
 
 const listRecentCatalogItems = `-- name: ListRecentCatalogItems :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
 WHERE li.media_server_id = ?1 AND li.library_id = ?2
   AND li.archived = FALSE
 ORDER BY (li.date_created IS NULL), li.date_created DESC, li.item_id
@@ -2876,7 +3068,13 @@ func (q *Queries) ListRecentCatalogItems(ctx context.Context, arg ListRecentCata
 }
 
 const listStaleCatalogItems = `-- name: ListStaleCatalogItems :many
-SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name, li.series_id, li.series_name, li.season_id, li.season_number, li.index_number, li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres, li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds, li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at, li.last_seen_at, li.updated_at FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
 WHERE li.media_server_id = ?1 AND li.library_id = ?2
   AND li.archived = FALSE AND (li.last_played_at IS NULL OR li.last_played_at < ?3)
   AND ((CAST(?4 AS INTEGER) <> 0 AND
@@ -3028,7 +3226,9 @@ func (q *Queries) RequestLibrarySync(ctx context.Context, mediaServerID string) 
 }
 
 const selectClaimableLibrarySync = `-- name: SelectClaimableLibrarySync :one
-SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count, last_error, lease_token, lease_expires_at, started_at, finished_at FROM library_syncs
+SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count,
+       last_error, lease_token, lease_expires_at, started_at, finished_at
+FROM library_syncs
 WHERE state = 'pending'
    OR (state = 'running' AND lease_expires_at <= ?1)
    OR (state IN ('completed', 'failed') AND finished_at <= ?2)
