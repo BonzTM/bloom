@@ -422,10 +422,7 @@ func classifyError(operation string, status int, err error) error {
 
 func classifyCallError(operation string, err error) error {
 	if responseErr, ok := errors.AsType[*responseReceivedError](err); ok {
-		classification := core.ErrMetadataMalformed
-		if unavailableStatus(responseErr.status) {
-			classification = core.ErrMetadataUnavailable
-		}
+		classification := receivedStatusClassification(operation, responseErr.status)
 		return classifyError(operation, responseErr.status, errors.Join(classification, err))
 	}
 	if retryableError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -463,15 +460,26 @@ func waitContext(ctx context.Context, duration time.Duration) error {
 	}
 }
 
-func retryAfter(response *http.Response) time.Duration {
+func retryAfter(response *http.Response) (time.Duration, bool) {
 	if response == nil {
-		return 0
+		return 0, false
 	}
-	seconds, err := strconv.Atoi(strings.TrimSpace(response.Header.Get("Retry-After")))
-	if err != nil || seconds < 0 || seconds > 30 {
-		return 0
+	value := strings.TrimSpace(response.Header.Get("Retry-After"))
+	if value == "" {
+		return 0, false
 	}
-	return time.Duration(seconds) * time.Second
+	seconds, err := strconv.ParseUint(value, 10, 64)
+	if errors.Is(err, strconv.ErrRange) {
+		return time.Duration(1<<63 - 1), true
+	}
+	if err != nil {
+		return 0, false
+	}
+	const maxSeconds = uint64((1<<63 - 1) / int64(time.Second))
+	if seconds > maxSeconds {
+		return time.Duration(1<<63 - 1), true
+	}
+	return time.Duration(seconds) * time.Second, true
 }
 
 func retryableStatus(status int) bool {
@@ -481,6 +489,15 @@ func retryableStatus(status int) bool {
 
 func unavailableStatus(status int) bool {
 	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError && status <= 599
+}
+
+func receivedStatusClassification(operation string, status int) error {
+	listNotFound := status == http.StatusNotFound &&
+		(strings.HasPrefix(operation, "discover_") || strings.HasPrefix(operation, "genres_"))
+	if unavailableStatus(status) || listNotFound {
+		return core.ErrMetadataUnavailable
+	}
+	return core.ErrMetadataMalformed
 }
 
 func retryableError(err error) bool {

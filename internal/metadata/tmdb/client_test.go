@@ -45,7 +45,7 @@ func TestClientSearchMovieAndSeries(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, nil)
+	client := newTestClient(t, server.URL)
 	results, err := client.Search(t.Context(), core.MetadataSearch{Query: "title"})
 	if err != nil || len(results) != 2 || results[0].Title != "Film" || results[1].Title != "Show" {
 		t.Fatalf("Search = %+v, %v", results, err)
@@ -150,6 +150,54 @@ func TestClientClassifiesListNotFoundAsUnavailable(t *testing.T) {
 	}
 }
 
+func TestClientClassifiesStalledListNotFoundAsUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{
+			name: "discovery",
+			call: func(client *Client) error {
+				_, err := client.Discover(t.Context(), core.MetadataDiscover{List: core.MetadataTrending, Page: 1})
+				return err
+			},
+		},
+		{
+			name: "genres",
+			call: func(client *Client) error {
+				_, err := client.Genres(t.Context(), core.MediaKindMovie)
+				return err
+			},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       &stalledResponseBody{ctx: request.Context()},
+					Request:    request,
+				}, nil
+			})
+			clock := testutil.NewFakeClock(time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC))
+			client, err := New(testReadAccessToken, Dependencies{
+				BaseURL: "https://tmdb.test", Clock: clock, HTTPClient: &http.Client{Transport: transport},
+				AttemptTimeout: 20 * time.Millisecond, OperationTimeout: 40 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			err = testCase.call(client)
+			if !errors.Is(err, core.ErrMetadataUnavailable) || errors.Is(err, core.ErrMetadataMalformed) ||
+				errors.Is(err, core.ErrNotFound) || errors.Is(err, core.ErrMetadataUnreachable) {
+				t.Fatalf("%s error = %v, want only %v", testCase.name, err, core.ErrMetadataUnavailable)
+			}
+			assertResponseReceivedStatus(t, err, http.StatusNotFound)
+		})
+	}
+}
+
 func newDiscoveryTestClient(t *testing.T) *Client {
 	t.Helper()
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -225,7 +273,7 @@ func TestClientProbeClassifiesUnauthorized(t *testing.T) {
 		writeTestResponse(t, w, `{}`)
 	}))
 	defer server.Close()
-	if err := newTestClient(t, server.URL, nil).Probe(t.Context()); !errors.Is(err, core.ErrMetadataUnauthorized) {
+	if err := newTestClient(t, server.URL).Probe(t.Context()); !errors.Is(err, core.ErrMetadataUnauthorized) {
 		t.Fatalf("Probe error = %v, want %v", err, core.ErrMetadataUnauthorized)
 	}
 }
@@ -242,7 +290,7 @@ func TestClientProbeAcceptsValidatedToken(t *testing.T) {
 		writeTestResponse(t, w, `{"success":true,"status_code":1}`)
 	}))
 	defer server.Close()
-	if err := newTestClient(t, server.URL, nil).Probe(t.Context()); err != nil {
+	if err := newTestClient(t, server.URL).Probe(t.Context()); err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 }
@@ -277,7 +325,7 @@ func TestClientClassifiesProviderFailures(t *testing.T) {
 				writeTestResponse(t, w, testCase.body)
 			}))
 			defer server.Close()
-			_, err := newTestClient(t, server.URL, nil).Movie(t.Context(), "11")
+			_, err := newTestClient(t, server.URL).Movie(t.Context(), "11")
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("Movie error = %v, want %v", err, testCase.want)
 			}
@@ -373,7 +421,7 @@ func TestClientBoundsUnreachableOperation(t *testing.T) {
 	if attemptTimeout != 5*time.Second {
 		t.Fatalf("attempt timeout = %s, want 5s", attemptTimeout)
 	}
-	defaultClient := newTestClient(t, "https://tmdb.test", nil)
+	defaultClient := newTestClient(t, "https://tmdb.test")
 	if defaultClient.http.Timeout != metadataOperationTimeout {
 		t.Fatalf("HTTP client timeout = %s, want %s", defaultClient.http.Timeout, metadataOperationTimeout)
 	}
@@ -724,7 +772,7 @@ func TestClientClassifiesInvalidProviderTitleAsMalformed(t *testing.T) {
 		writeTestResponse(t, w, `{"id":11,"title":" "}`)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, nil)
+	client := newTestClient(t, server.URL)
 	_, movieErr := client.Movie(t.Context(), "11")
 	if !errors.Is(movieErr, core.ErrMetadataMalformed) || !errors.Is(movieErr, core.ErrInvalidArgument) {
 		t.Fatalf("invalid movie title error = %v", movieErr)
@@ -735,37 +783,62 @@ func TestClientClassifiesInvalidProviderTitleAsMalformed(t *testing.T) {
 	}
 }
 
-func TestClientRetries429UsingRetryAfter(t *testing.T) {
+func TestClientRetries429UsingLongRetryAfterWhenBudgetFits(t *testing.T) {
+	const retryDelay = 31 * time.Second
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if calls.Add(1) == 1 {
-			w.Header().Set("Retry-After", "2")
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
-		}
-		writeTestResponse(t, w, `{"id":11,"title":"Film"}`)
-	}))
-	defer server.Close()
 	var waited time.Duration
-	client := newTestClient(t, server.URL, func(_ context.Context, delay time.Duration) error {
+	client := newBaseTransportTestClient(t, retryAfterTestTransport(&calls, true), func(_ context.Context, delay time.Duration) error {
 		waited += delay
 		return nil
 	})
-	client.operationTimeout = 8 * time.Second
-	client.http.Timeout = 8 * time.Second
+	client.operationTimeout = 40 * time.Second
+	client.http.Timeout = 40 * time.Second
 	if _, err := client.Movie(t.Context(), "11"); err != nil {
 		t.Fatalf("Movie: %v", err)
 	}
-	if calls.Load() != 2 || waited != 2*time.Second {
+	if calls.Load() != 2 || waited != retryDelay {
 		t.Fatalf("retry calls = %d, waited = %s", calls.Load(), waited)
 	}
 }
 
-func newTestClient(t *testing.T, baseURL string, wait func(context.Context, time.Duration) error) *Client {
+func TestClientReturns429WhenLongRetryAfterExceedsBudget(t *testing.T) {
+	const retryDelay = 31 * time.Second
+	var calls atomic.Int32
+	started := time.Now()
+	client := newBaseTransportTestClient(t, retryAfterTestTransport(&calls, false), nil)
+	_, err := client.Movie(t.Context(), "11")
+	elapsed := time.Since(started)
+	if !errors.Is(err, core.ErrMetadataUnavailable) {
+		t.Fatalf("Movie error = %v, want %v", err, core.ErrMetadataUnavailable)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("provider calls = %d, want 1", calls.Load())
+	}
+	if elapsed >= retryDelay/10 {
+		t.Fatalf("Movie elapsed = %s, want well under Retry-After %s", elapsed, retryDelay)
+	}
+}
+
+func retryAfterTestTransport(calls *atomic.Int32, succeedAfterRetry bool) http.RoundTripper {
+	return roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if calls.Add(1) > 1 && succeedAfterRetry {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":11,"title":"Film"}`)),
+				Request:    request,
+			}, nil
+		}
+		response := statusResponse(request, http.StatusTooManyRequests)
+		response.Header.Set("Retry-After", "31")
+		return response, nil
+	})
+}
+
+func newTestClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
-	client, err := New(testReadAccessToken, Dependencies{BaseURL: baseURL, Clock: clock, Wait: wait, RandomInt64N: func(int64) int64 { return 0 }})
+	client, err := New(testReadAccessToken, Dependencies{BaseURL: baseURL, Clock: clock, RandomInt64N: func(int64) int64 { return 0 }})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -779,7 +852,7 @@ func TestClientCapsResponseBody(t *testing.T) {
 		writeTestResponse(t, w, `{"id":11,"title":"`+strings.Repeat("a", int(maxResponseBytes))+`"}`)
 	}))
 	defer server.Close()
-	_, err := newTestClient(t, server.URL, nil).Movie(t.Context(), "11")
+	_, err := newTestClient(t, server.URL).Movie(t.Context(), "11")
 	if !errors.Is(err, core.ErrMetadataMalformed) {
 		t.Fatalf("oversize error = %v", err)
 	}
@@ -807,7 +880,7 @@ func TestClientSpansNeverContainAPIKey(t *testing.T) {
 		writeTestResponse(t, w, `{"id":11,"title":"Film"}`)
 	}))
 	defer server.Close()
-	if _, err := newTestClient(t, server.URL, nil).Movie(t.Context(), "11"); err != nil {
+	if _, err := newTestClient(t, server.URL).Movie(t.Context(), "11"); err != nil {
 		t.Fatalf("Movie: %v", err)
 	}
 	if rendered := fmt.Sprintf("%+v", exporter.GetSpans()); strings.Contains(rendered, testReadAccessToken) {

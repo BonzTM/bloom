@@ -54,7 +54,7 @@ func (c *Client) Discover(ctx context.Context, input core.MetadataDiscover) (cor
 	operation := "discover_" + string(input.List)
 	started := c.clock.Now()
 	response, err := c.callDiscover(ctx, input)
-	status := responseStatus(response)
+	status := responseStatus(response, err)
 	c.observe(operation, started, status, err)
 	if err != nil {
 		return core.MetadataPage{}, classifyCallError(operation, err)
@@ -150,7 +150,7 @@ func (c *Client) Genres(ctx context.Context, kind core.MediaKind) ([]core.Metada
 	operation := "genres_" + string(kind)
 	started := c.clock.Now()
 	response, err := c.callGenres(ctx, kind)
-	status := responseStatus(response)
+	status := responseStatus(response, err)
 	c.observe(operation, started, status, err)
 	if err != nil {
 		return nil, classifyCallError(operation, err)
@@ -186,8 +186,11 @@ func decodeGenres(body []byte, operation string) ([]core.MetadataGenre, error) {
 	return genres, nil
 }
 
-func responseStatus(response providerResponse) int {
-	if response == nil {
+func responseStatus(response providerResponse, err error) int {
+	if responseErr, ok := errors.AsType[*responseReceivedError](err); ok {
+		return responseErr.status
+	}
+	if err != nil || response == nil {
 		return 0
 	}
 	return response.StatusCode()
