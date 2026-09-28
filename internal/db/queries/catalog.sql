@@ -16,7 +16,9 @@ ON CONFLICT (media_server_id) DO UPDATE SET
 WHERE library_syncs.state NOT IN ('pending', 'running');
 
 -- name: SelectClaimableLibrarySync :one
-SELECT * FROM library_syncs
+SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count,
+       last_error, lease_token, lease_expires_at, started_at, finished_at
+FROM library_syncs
 WHERE state = 'pending'
    OR (state = 'running' AND lease_expires_at <= sqlc.arg(now))
    OR (state IN ('completed', 'failed') AND finished_at <= sqlc.arg(due_before))
@@ -40,7 +42,9 @@ WHERE media_server_id = sqlc.arg(media_server_id)
        OR (state IN ('completed', 'failed') AND finished_at <= sqlc.arg(due_before)));
 
 -- name: GetLibrarySync :one
-SELECT * FROM library_syncs WHERE media_server_id = sqlc.arg(media_server_id);
+SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count,
+       last_error, lease_token, lease_expires_at, started_at, finished_at
+FROM library_syncs WHERE media_server_id = sqlc.arg(media_server_id);
 
 -- name: FenceLibrarySync :one
 SELECT media_server_id FROM library_syncs
@@ -193,7 +197,13 @@ WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id
 
 -- Item pages use fixed filtered and unfiltered plans selected by the adapter.
 -- name: ListCatalogItemsNameAsc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND (li.name > sqlc.arg(after_name)
@@ -201,7 +211,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.name ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsNameAscFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -210,7 +226,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.name ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsNameDesc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND (li.name < sqlc.arg(after_name)
@@ -218,7 +240,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.name DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsNameDescFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -227,7 +255,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.name DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsDateAsc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND ((CAST(sqlc.arg(after_null) AS INTEGER) = 0 AND (li.date_created IS NULL OR li.date_created > sqlc.arg(after_time)
@@ -236,7 +270,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.date_created IS NULL), li.date_created ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsDateAscFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -246,7 +286,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.date_created IS NULL), li.date_created ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsDateDesc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND ((CAST(sqlc.arg(after_null) AS INTEGER) = 0 AND (li.date_created IS NULL OR li.date_created < sqlc.arg(after_time)
@@ -255,7 +301,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.date_created IS NULL), li.date_created DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsDateDescFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -265,7 +317,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.date_created IS NULL), li.date_created DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPremiereAsc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND ((CAST(sqlc.arg(after_null) AS INTEGER) = 0 AND (li.premiere_date IS NULL OR li.premiere_date > sqlc.arg(after_time)
@@ -274,7 +332,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.premiere_date IS NULL), li.premiere_date ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPremiereAscFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -284,7 +348,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.premiere_date IS NULL), li.premiere_date ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPremiereDesc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND ((CAST(sqlc.arg(after_null) AS INTEGER) = 0 AND (li.premiere_date IS NULL OR li.premiere_date < sqlc.arg(after_time)
@@ -293,7 +363,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.premiere_date IS NULL), li.premiere_date DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPremiereDescFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -303,7 +379,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.premiere_date IS NULL), li.premiere_date DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPlaysAsc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND (li.plays > CAST(sqlc.arg(after_number) AS BIGINT)
@@ -311,7 +393,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.plays ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPlaysAscFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -320,7 +408,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.plays ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPlaysDesc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND (li.plays < CAST(sqlc.arg(after_number) AS BIGINT)
@@ -328,7 +422,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.plays DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsPlaysDescFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -337,7 +437,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.plays DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsWatchAsc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND (li.watch_seconds > CAST(sqlc.arg(after_number) AS BIGINT)
@@ -345,7 +451,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.watch_seconds ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsWatchAscFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -354,7 +466,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.watch_seconds ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsWatchDesc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND (li.watch_seconds < CAST(sqlc.arg(after_number) AS BIGINT)
@@ -362,7 +480,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.watch_seconds DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsWatchDescFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -371,7 +495,13 @@ SELECT li.* FROM library_items li
     ORDER BY li.watch_seconds DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsLastPlayedAsc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND ((CAST(sqlc.arg(after_null) AS INTEGER) = 0 AND (li.last_played_at IS NULL OR li.last_played_at > sqlc.arg(after_time)
@@ -380,7 +510,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.last_played_at IS NULL), li.last_played_at ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsLastPlayedAscFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -390,7 +526,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.last_played_at IS NULL), li.last_played_at ASC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsLastPlayedDesc :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND ((CAST(sqlc.arg(after_null) AS INTEGER) = 0 AND (li.last_played_at IS NULL OR li.last_played_at < sqlc.arg(after_time)
@@ -399,7 +541,13 @@ SELECT li.* FROM library_items li
     ORDER BY (li.last_played_at IS NULL), li.last_played_at DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListCatalogItemsLastPlayedDescFiltered :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
       AND li.item_type = CAST(sqlc.arg(item_type_filter) AS TEXT)
@@ -409,7 +557,12 @@ SELECT li.* FROM library_items li
     ORDER BY (li.last_played_at IS NULL), li.last_played_at DESC, li.item_id LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: GetCatalogItem :one
-SELECT * FROM library_items
+SELECT media_server_id, item_id, library_id, parent_id, item_type, name, series_id,
+       series_name, season_id, season_number, index_number, runtime_ms, premiere_date,
+       production_year, community_rating, genres, primary_image_tag, date_created,
+       archived, plays, watch_seconds, unique_users, first_played_at, last_played_at,
+       first_seen_at, last_seen_at, updated_at
+FROM library_items
 WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id);
 
 -- name: CatalogItemPlaySummary :one
@@ -473,20 +626,55 @@ WITH root AS (
         AND li.series_id = root.item_id AND li.item_id <> root.item_id
     WHERE root.item_type = 'Series'
 ), target_watches AS (
-    SELECT w.* FROM target_items ti
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+           w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+           w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+           w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+           w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+           w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+           w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+           w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+           w.series_id, w.import_source, w.import_provenance_guard
+    FROM target_items ti
     JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
     UNION ALL
-    SELECT w.* FROM root
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+           w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+           w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+           w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+           w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+           w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+           w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+           w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+           w.series_id, w.import_source, w.import_provenance_guard
+    FROM root
     JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
     UNION ALL
-    SELECT w.* FROM root
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+           w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+           w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+           w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+           w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+           w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+           w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+           w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+           w.series_id, w.import_source, w.import_provenance_guard
+    FROM root
     JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
     WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
 )
-SELECT w.*, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM target_watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at < sqlc.arg(after_started_at)
@@ -495,7 +683,13 @@ ORDER BY w.started_at DESC, w.id DESC
 LIMIT CAST(sqlc.arg(page_size) AS BIGINT);
 
 -- name: ListRecentCatalogItems :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
 WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
   AND li.archived = FALSE
 ORDER BY (li.date_created IS NULL), li.date_created DESC, li.item_id
@@ -514,7 +708,13 @@ WHERE lig.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.a
 GROUP BY lig.genre ORDER BY lig.genre LIMIT 1001;
 
 -- name: ListStaleCatalogItems :many
-SELECT li.* FROM library_items li
+SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type, li.name,
+       li.series_id, li.series_name, li.season_id, li.season_number, li.index_number,
+       li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
+       li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
+       li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
+       li.last_seen_at, li.updated_at
+FROM library_items li
 WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
   AND li.archived = FALSE AND (li.last_played_at IS NULL OR li.last_played_at < sqlc.arg(stale_before))
   AND ((CAST(sqlc.arg(after_null) AS INTEGER) <> 0 AND

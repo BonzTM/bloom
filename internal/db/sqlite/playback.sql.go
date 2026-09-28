@@ -123,7 +123,15 @@ func (q *Queries) DeleteOverlappingImportedWatches(ctx context.Context, arg Dele
 }
 
 const findRecentPlaybackWatch = `-- name: FindRecentPlaybackWatch :one
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -263,7 +271,15 @@ func (q *Queries) GetPlaybackWatchID(ctx context.Context, id string) (string, er
 }
 
 const listNowPlaying = `-- name: ListNowPlaying :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state <> 'stopped'
@@ -393,7 +409,15 @@ func (q *Queries) ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) 
 }
 
 const listOpenPlaybackWatches = `-- name: ListOpenPlaybackWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.media_server_id = ?1 AND w.state <> 'stopped'
@@ -515,7 +539,15 @@ func (q *Queries) ListOpenPlaybackWatches(ctx context.Context, mediaServerID str
 }
 
 const listPlaybackHistory = `-- name: ListPlaybackHistory :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -653,7 +685,15 @@ func (q *Queries) ListPlaybackHistory(ctx context.Context, arg ListPlaybackHisto
 }
 
 const listRecentPlaybackWatches = `-- name: ListRecentPlaybackWatches :many
-SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id, w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'

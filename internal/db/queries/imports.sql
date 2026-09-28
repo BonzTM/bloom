@@ -13,18 +13,6 @@ INSERT INTO imports (
     sqlc.arg(created_at), sqlc.narg(started_at), sqlc.narg(finished_at), sqlc.arg(updated_at)
 );
 
--- name: GetImport :one
-SELECT * FROM imports WHERE id = sqlc.arg(id);
-
--- name: ListImports :many
-SELECT * FROM imports
-WHERE (CAST(sqlc.arg(media_server_id) AS TEXT) = ''
-       OR media_server_id = CAST(sqlc.arg(media_server_id) AS TEXT))
-  AND (created_at < sqlc.arg(before_created_at)
-       OR (created_at = sqlc.arg(before_created_at) AND id < sqlc.arg(before_id)))
-ORDER BY created_at DESC, id DESC
-LIMIT sqlc.arg(page_size);
-
 -- name: InsertImportUploadChunk :exec
 INSERT INTO import_uploads (id, import_id, chunk_index, bytes, created_at)
 VALUES (sqlc.arg(id), NULL, sqlc.arg(chunk_index), sqlc.arg(bytes), sqlc.arg(created_at));
