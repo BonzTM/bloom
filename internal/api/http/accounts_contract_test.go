@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/BonzTM/bloom/internal/core"
@@ -128,10 +129,15 @@ func TestAccountOpenAPIDocumentsPagingBounds(t *testing.T) {
 		"limit":  {minimum: 1, maximum: core.MaxAccountListPageSize},
 		"cursor": {minimum: 1, maximum: core.MaxAccountListCursorBytes},
 	}
+	sawSearch := false
 	for _, parameter := range operation.Parameters {
 		if parameter.Value.Name == "q" {
+			sawSearch = true
 			if got := fmt.Sprint(parameter.Value.Schema.Value.Extensions["x-max-bytes"]); got != strconv.Itoa(core.MaxAccountSearchBytes) {
 				t.Fatalf("q x-max-bytes = %v, want %d", got, core.MaxAccountSearchBytes)
+			}
+			if pattern := parameter.Value.Schema.Value.Pattern; !strings.Contains(pattern, `\x00-\x1F`) {
+				t.Fatalf("q pattern = %q, want a control-character exclusion", pattern)
 			}
 			continue
 		}
@@ -151,6 +157,9 @@ func TestAccountOpenAPIDocumentsPagingBounds(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing account paging parameters: %v", want)
+	}
+	if !sawSearch {
+		t.Fatal("q parameter missing from the accounts list contract")
 	}
 }
 

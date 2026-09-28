@@ -105,8 +105,7 @@ type AccountAdminReader interface {
 
 // AccountSearchKey normalizes a bounded username substring for username_key matching.
 func AccountSearchKey(value string) (string, error) {
-	if len(value) > MaxAccountSearchBytes || !utf8.ValidString(value) ||
-		strings.ContainsFunc(value, unicode.IsControl) {
+	if len(value) > MaxAccountSearchBytes || !utf8.ValidString(value) {
 		return "", ErrInvalidArgument
 	}
 	return normalizeAccountSearchKey(value)
@@ -115,6 +114,11 @@ func AccountSearchKey(value string) (string, error) {
 func normalizeAccountSearchKey(value string) (string, error) {
 	if value == "" {
 		return "", nil
+	}
+	// Control characters never form a username and PostgreSQL cannot store NUL,
+	// so reject them here where every reader's validation converges.
+	if strings.ContainsFunc(value, unicode.IsControl) {
+		return "", ErrInvalidArgument
 	}
 	key, err := precis.UsernameCaseMapped.CompareKey(value)
 	if err != nil {

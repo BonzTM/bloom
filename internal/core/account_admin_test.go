@@ -69,6 +69,7 @@ func TestAccountListQueryValidation(t *testing.T) {
 		{Limit: MaxAccountListPageSize + 1},
 		{Limit: 1, SearchKey: strings.Repeat("a", maxAccountSearchKeyBytes+1)},
 		{Limit: 1, SearchKey: "Alice"},
+		{Limit: 1, SearchKey: "\x00"},
 		{Limit: 1, After: &AccountListPosition{UsernameKey: "Alice", ID: valid.After.ID}},
 		{Limit: 1, After: &AccountListPosition{UsernameKey: "alice", ID: "bad"}},
 	}

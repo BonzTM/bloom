@@ -63,7 +63,7 @@ func parseAccountSearch(values []string) (string, string) {
 	}
 	key, err := core.AccountSearchKey(values[0])
 	if err != nil {
-		return "", "must contain at most 128 valid UTF-8 bytes"
+		return "", "must contain at most 128 valid UTF-8 bytes and no control characters"
 	}
 	return key, ""
 }
