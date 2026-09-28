@@ -942,7 +942,16 @@ func createClaimedImport(
 	if err := fixture.store.CreateImport(t.Context(), job); err != nil {
 		t.Fatalf("CreateImport: %v", err)
 	}
-	return claimImport(t, fixture.store, fixture.now, "lease-"+job.ID)
+	// The claim query is global and ordered by creation time, so an earlier
+	// subtest's leftover job can come back first; claim until this job does.
+	for range 20 {
+		claimed := claimImport(t, fixture.store, fixture.now, "lease-"+job.ID)
+		if claimed.ID == job.ID {
+			return claimed
+		}
+	}
+	t.Fatalf("createClaimedImport: job %s was not claimed after 20 attempts", job.ID)
+	return core.ImportJob{}
 }
 
 func singleImportBatch(
