@@ -240,19 +240,17 @@ SELECT EXISTS (
     SELECT 1 FROM watches
     WHERE media_server_id = ?1
       AND import_source = 'jellystat'
-      AND (import_origin_record_id = ?2
-           OR import_record_id = ?3)
+      AND import_origin_record_id = ?2
 )
 `
 
 type FindJellystatImportDuplicateParams struct {
 	MediaServerID        string
 	ImportOriginRecordID sql.NullString
-	LegacyImportRecordID sql.NullString
 }
 
 func (q *Queries) FindJellystatImportDuplicate(ctx context.Context, arg FindJellystatImportDuplicateParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, findJellystatImportDuplicate, arg.MediaServerID, arg.ImportOriginRecordID, arg.LegacyImportRecordID)
+	row := q.db.QueryRowContext(ctx, findJellystatImportDuplicate, arg.MediaServerID, arg.ImportOriginRecordID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

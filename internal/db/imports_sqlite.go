@@ -298,7 +298,6 @@ func sqliteCrossSourceDuplicate(
 	case core.ImportSourcePlaybackReporting:
 		duplicate, err = q.FindJellystatImportDuplicate(ctx, sqlite.FindJellystatImportDuplicateParams{
 			MediaServerID: batch.MediaServerID, ImportOriginRecordID: optionalStreamString(record.RecordID),
-			LegacyImportRecordID: optionalStreamString("plugin:" + record.RecordID),
 		})
 	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
 		return false, nil

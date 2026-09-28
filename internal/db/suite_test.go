@@ -153,11 +153,11 @@ func testImportOriginMigration(t *testing.T, pool *sql.DB, driver config.Driver)
 	if err := db.MigrateDownTo(ctx, pool, driver, 25); err != nil {
 		t.Fatalf("roll back import origin migration: %v", err)
 	}
-	serverID, watchID := seedImportOriginMigrationRow(t, pool, driver)
+	serverID, watchID, boundaryID, oversizedID := seedImportOriginMigrationRows(t, pool, driver)
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("apply import origin migration: %v", err)
 	}
-	assertImportOriginBackfill(t, pool, watchID)
+	assertImportOriginBackfill(t, pool, watchID, boundaryID, oversizedID)
 	if err := db.MigrateDownTo(ctx, pool, driver, 25); err != nil {
 		t.Fatalf("roll down import origin migration: %v", err)
 	}
@@ -168,21 +168,31 @@ func testImportOriginMigration(t *testing.T, pool *sql.DB, driver config.Driver)
 	}
 }
 
-func seedImportOriginMigrationRow(t *testing.T, pool *sql.DB, driver config.Driver) (string, string) {
+func seedImportOriginMigrationRows(
+	t *testing.T, pool *sql.DB, driver config.Driver,
+) (string, string, string, string) {
 	t.Helper()
-	accountID, serverID, watchID := mustID(t), mustID(t), mustID(t)
+	accountID, serverID := mustID(t), mustID(t)
+	watchID, boundaryID, oversizedID := mustID(t), mustID(t), mustID(t)
 	now := migrationCreatedAt(driver)
 	seedCatalogUpgradeOwner(t, pool, accountID, serverID, now)
+	seedImportOriginMigrationWatch(t, pool, watchID, serverID, now, "plugin:77")
+	seedImportOriginMigrationWatch(t, pool, boundaryID, serverID, now, "plugin:"+strings.Repeat("b", 128))
+	seedImportOriginMigrationWatch(t, pool, oversizedID, serverID, now, "plugin:"+strings.Repeat("o", 129))
+	return serverID, watchID, boundaryID, oversizedID
+}
+
+func seedImportOriginMigrationWatch(t *testing.T, pool *sql.DB, watchID, serverID string, now any, marker string) {
+	t.Helper()
 	execTestSQL(t, pool, `INSERT INTO watches
         (id,media_server_id,media_user_id,username,device_id,device_name,client,server_session_id,
          item_id,item_name,item_type,series_name,play_method,state,started_at,last_seen_at,ended_at,
          active_seconds,last_position_ms,source,created_at,updated_at,import_source,import_record_id)
         VALUES ($1,$2,'user','User','','','','','item','Title','Movie','','unknown','stopped',
-                $3,$3,$3,1,1,'import',$3,$3,'jellystat','plugin:77')`, watchID, serverID, now)
-	return serverID, watchID
+	                $3,$3,$3,1,1,'import',$3,$3,'jellystat',$4)`, watchID, serverID, now, marker)
 }
 
-func assertImportOriginBackfill(t *testing.T, pool *sql.DB, watchID string) {
+func assertImportOriginBackfill(t *testing.T, pool *sql.DB, watchID, boundaryID, oversizedID string) {
 	t.Helper()
 	var recordID, originID string
 	err := pool.QueryRowContext(t.Context(), `SELECT import_record_id, import_origin_record_id
@@ -190,9 +200,22 @@ func assertImportOriginBackfill(t *testing.T, pool *sql.DB, watchID string) {
 	if err != nil || recordID != "plugin:77" || originID != "77" {
 		t.Fatalf("origin backfill = %q/%q, %v", recordID, originID, err)
 	}
+	assertImportOriginValue(t, pool, boundaryID, strings.Repeat("b", 128))
+	assertImportOriginValue(t, pool, oversizedID, "")
 	if _, err := pool.ExecContext(t.Context(), `UPDATE watches
         SET import_origin_record_id = $1 WHERE id = $2`, strings.Repeat("x", 129), watchID); err == nil {
 		t.Fatal("migration accepted an origin record id over 128 bytes")
+	}
+}
+
+func assertImportOriginValue(t *testing.T, pool *sql.DB, watchID, want string) {
+	t.Helper()
+	var originID sql.NullString
+	err := pool.QueryRowContext(t.Context(),
+		"SELECT import_origin_record_id FROM watches WHERE id = $1", watchID,
+	).Scan(&originID)
+	if err != nil || originID.Valid != (want != "") || originID.String != want {
+		t.Fatalf("origin value = %+v, %v; want %q", originID, err, want)
 	}
 }
 

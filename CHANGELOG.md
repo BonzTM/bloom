@@ -39,9 +39,10 @@ contracts) gets an entry here.
   `00025_jellystat_import_source` adds the new provenance value.
 - SQLite/PostgreSQL migration `00026_watch_import_origin` adds bounded upstream
   import provenance and its partial lookup index. It backfills the Playback
-  Reporting row ID encoded in existing Jellystat `plugin:` markers but cannot
-  recover those rows' original Jellystat activity IDs, so their
-  `import_record_id` values remain unchanged.
+  Reporting row ID encoded in existing Jellystat `plugin:` markers when the
+  encoded ID is at most 128 bytes. Longer suffixes retain a null origin ID.
+  The migration cannot recover those rows' original Jellystat activity IDs,
+  so their `import_record_id` values remain unchanged.
 - The requests page becomes Discover: rows of posters for what is trending
   this week, popular movies and series, upcoming movies, and series on the
   air, each tile carrying your own request state and loading more on demand,

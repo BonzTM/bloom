@@ -116,8 +116,7 @@ SELECT EXISTS (
     SELECT 1 FROM watches
     WHERE media_server_id = sqlc.arg(media_server_id)
       AND import_source = 'jellystat'
-      AND (import_origin_record_id = sqlc.arg(import_origin_record_id)
-           OR import_record_id = sqlc.arg(legacy_import_record_id))
+      AND import_origin_record_id = sqlc.arg(import_origin_record_id)
 );
 
 -- name: InsertImportedWatch :execrows

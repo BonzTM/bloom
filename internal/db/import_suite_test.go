@@ -62,8 +62,11 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("Playback Reporting deduplicates legacy Jellystat marker", func(t *testing.T) {
 		testReportingDeduplicatesLegacyJellystatMarker(t, newImportFixture(t, pool, driver))
 	})
-	t.Run("native Jellystat plugin prefix does not deduplicate", func(t *testing.T) {
-		testNativeJellystatPluginPrefixDoesNotDeduplicate(t, newImportFixture(t, pool, driver))
+	t.Run("Playback Reporting first does not deduplicate native Jellystat plugin prefix", func(t *testing.T) {
+		testReportingFirstNativeJellystatPluginPrefix(t, pool, newImportFixture(t, pool, driver))
+	})
+	t.Run("native Jellystat plugin prefix first does not deduplicate Playback Reporting", func(t *testing.T) {
+		testNativeJellystatPluginPrefixFirst(t, pool, newImportFixture(t, pool, driver))
 	})
 	t.Run("cross-source duplicate preserves unrelated Jellyfin user data", func(t *testing.T) {
 		testCrossSourceDuplicatePreservesUserData(t, pool, newImportFixture(t, pool, driver))
@@ -184,6 +187,7 @@ func testReportingDeduplicatesLegacyJellystatMarker(t *testing.T, fixture import
 	t.Helper()
 	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
 	record := importedRecord("plugin:88", "legacy-cross-source", fixture.now)
+	record.OriginRecordID = "88"
 	commitAndFinishImport(t, fixture, jellystat, record)
 	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
 	record.RecordID = "88"
@@ -193,16 +197,51 @@ func testReportingDeduplicatesLegacyJellystatMarker(t *testing.T, fixture import
 	}
 }
 
-func testNativeJellystatPluginPrefixDoesNotDeduplicate(t *testing.T, fixture importFixture) {
+func testReportingFirstNativeJellystatPluginPrefix(
+	t *testing.T, pool *sql.DB, fixture importFixture,
+) {
 	t.Helper()
 	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
 	record := importedRecord("99", "reporting-native-prefix", fixture.now)
-	commitAndFinishImport(t, fixture, reporting, record)
+	result := commitSingleImport(t, fixture, reporting, record)
+	if result.Imported != 1 || result.Duplicate != 0 {
+		t.Fatalf("Playback Reporting counters = %+v", result)
+	}
+	finishImportFixture(t, fixture, reporting)
 	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
 	record.RecordID = "plugin:99"
+	result = commitSingleImport(t, fixture, jellystat, record)
+	if result.Imported != 1 || result.Duplicate != 0 {
+		t.Fatalf("native Jellystat counters = %+v", result)
+	}
+	assertImportRecordCount(t, pool, fixture.serverID, "99", "plugin:99")
+}
+
+func testNativeJellystatPluginPrefixFirst(t *testing.T, pool *sql.DB, fixture importFixture) {
+	t.Helper()
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	record := importedRecord("plugin:99", "native-prefix-reporting", fixture.now)
 	result := commitSingleImport(t, fixture, jellystat, record)
 	if result.Imported != 1 || result.Duplicate != 0 {
 		t.Fatalf("native Jellystat counters = %+v", result)
+	}
+	finishImportFixture(t, fixture, jellystat)
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	record.RecordID = "99"
+	result = commitSingleImport(t, fixture, reporting, record)
+	if result.Imported != 1 || result.Duplicate != 0 {
+		t.Fatalf("Playback Reporting counters = %+v", result)
+	}
+	assertImportRecordCount(t, pool, fixture.serverID, "plugin:99", "99")
+}
+
+func assertImportRecordCount(t *testing.T, pool *sql.DB, serverID, first, second string) {
+	t.Helper()
+	var count int
+	err := pool.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM watches
+        WHERE media_server_id = $1 AND import_record_id IN ($2, $3)`, serverID, first, second).Scan(&count)
+	if err != nil || count != 2 {
+		t.Fatalf("import record count = %d, %v; want 2", count, err)
 	}
 }
 

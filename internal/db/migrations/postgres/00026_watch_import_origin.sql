@@ -7,12 +7,13 @@ ALTER TABLE watches
         CHECK (import_origin_record_id IS NULL OR octet_length(import_origin_record_id) <= 128);
 -- The old Jellystat importer replaced each imported activity ID with this
 -- marker. Its original Jellystat activity ID cannot be recovered, so retain
--- import_record_id and copy only the encoded Playback Reporting row ID.
+-- import_record_id and copy only encoded Playback Reporting row IDs of 1..128
+-- bytes. Longer suffixes remain with NULL origin provenance.
 UPDATE watches
 SET import_origin_record_id = substring(import_record_id FROM 8)
 WHERE import_source = 'jellystat'
   AND import_record_id LIKE 'plugin:%'
-  AND substring(import_record_id FROM 8) <> '';
+  AND octet_length(substring(import_record_id FROM 8)) BETWEEN 1 AND 128;
 CREATE INDEX watches_import_origin_record_idx
     ON watches (media_server_id, import_origin_record_id)
     WHERE import_origin_record_id IS NOT NULL;

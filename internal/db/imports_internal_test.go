@@ -46,3 +46,20 @@ func TestPostgresImportLockKeysShareCrossSourceActivityKey(t *testing.T) {
 		t.Fatalf("lock keys = %v and %v, shared = %d", reportingKeys, jellystatKeys, shared)
 	}
 }
+
+func TestPostgresImportLockKeysIgnoreNativeJellystatPluginPrefix(t *testing.T) {
+	serverID := "11111111-1111-4111-8111-111111111111"
+	reporting := core.ImportBatch{
+		MediaServerID: serverID, Source: core.ImportSourcePlaybackReporting,
+		Records: []core.ImportedWatch{{RecordID: "99", MediaUserID: "reporting-user", ItemID: "reporting-item"}},
+	}
+	jellystat := core.ImportBatch{
+		MediaServerID: serverID, Source: core.ImportSourceJellystat,
+		Records: []core.ImportedWatch{{RecordID: "plugin:99", MediaUserID: "jellystat-user", ItemID: "jellystat-item"}},
+	}
+	for _, key := range postgresImportLockKeys(reporting) {
+		if slices.Contains(postgresImportLockKeys(jellystat), key) {
+			t.Fatalf("native Jellystat record unexpectedly shares lock key %q", key)
+		}
+	}
+}
