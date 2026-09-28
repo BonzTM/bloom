@@ -85,7 +85,11 @@ func retryFits(ctx context.Context, delay, timeout time.Duration) bool {
 		return false
 	}
 	deadline, ok := ctx.Deadline()
-	return !ok || time.Until(deadline) >= delay+timeout
+	if !ok {
+		return true
+	}
+	remaining := time.Until(deadline)
+	return remaining >= timeout && delay <= remaining-timeout
 }
 
 func shouldRetry(response *http.Response, err error, attempt int) bool {
@@ -96,7 +100,7 @@ func shouldRetry(response *http.Response, err error, attempt int) bool {
 }
 
 func (t *retryTransport) retryDelay(response *http.Response, attempt int) time.Duration {
-	if delay := retryAfter(response); delay > 0 {
+	if delay, valid := retryAfter(response); valid {
 		return delay
 	}
 	maximum := time.Duration(1<<attempt) * 100 * time.Millisecond

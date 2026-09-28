@@ -434,6 +434,14 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Failed TMDB credential probes keep the submitted Read Access Token out of
+  client errors, application logs, and audit events.
+- TMDB discovery and genre lists reject malformed or oversized provider data,
+  and unexpected list-endpoint 404s now return the documented unavailable
+  provider failure instead of an undocumented client 404.
+- TMDB retries are limited to 429, 502, 503, and 504 while every upstream 5xx
+  remains classified as unavailable. The API contract now restricts failure
+  reasons to the combinations emitted by each provider boundary.
 - TMDB operations now have a six-second total deadline across retries. Metadata
   failures include an actionable `reason`, and repeated provider warnings are
   limited to once per minute for each reason.

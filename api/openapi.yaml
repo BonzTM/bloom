@@ -2485,7 +2485,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     MetadataProviderFailure:
-      description: Opaque upstream metadata-provider failure with an unreachable, unauthorized, or malformed reason. Retryable failures may include Retry-After.
+      description: Opaque upstream metadata-provider failure with an unreachable, unauthorized, malformed, or unavailable reason. Retryable failures may include Retry-After.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -4074,6 +4074,26 @@ components:
       description: The single structured error envelope returned by every endpoint.
       required: [code, message, request_id]
       additionalProperties: false
+      oneOf:
+        - title: Failure without an upstream-provider reason
+          properties:
+            code:
+              not:
+                enum: [media_server_failure, download_manager_failure, metadata_provider_failure]
+          not:
+            required: [reason]
+        - title: Media-server failure
+          properties:
+            code: { const: media_server_failure }
+            reason: { enum: [unreachable, unauthorized, not_found, malformed] }
+        - title: Download-manager failure
+          properties:
+            code: { const: download_manager_failure }
+            reason: { enum: [unreachable, unauthorized, not_found, malformed] }
+        - title: Metadata-provider failure
+          properties:
+            code: { const: metadata_provider_failure }
+            reason: { enum: [unreachable, unauthorized, malformed, unavailable] }
       properties:
         code:
           $ref: "#/components/schemas/ErrorCode"
@@ -4086,12 +4106,14 @@ components:
             Present only for `media_server_failure`, `download_manager_failure`,
             and `metadata_provider_failure`. For metadata failures, `unreachable`
             covers connection failures, timeouts, and DNS failures before any
-            response; `unavailable` covers an upstream 429 or 5xx after retries.
-            For other upstream failures, `unreachable` also covers refused
-            destinations and retryable upstream statuses.
-            `unauthorized` covers an upstream 401 or 403; `not_found` covers an
-            upstream 404; `malformed` covers anything else, including unexpected
-            statuses, redirects, and responses that do not fit the upstream's contract.
+            response; `unavailable` covers an upstream 429 or 5xx, plus an
+            unexpected 404 from a list endpoint. Metadata retries only 429, 502,
+            503, and 504. Metadata treats only 401 as `unauthorized`; 403 is
+            `malformed`. For other upstream failures, `unreachable` also covers
+            refused destinations and retryable upstream statuses, and
+            `unauthorized` covers 401 or 403. `not_found` covers an upstream 404.
+            `malformed` covers anything else, including unexpected statuses,
+            redirects, and responses that do not fit the upstream's contract.
           enum: [unreachable, unauthorized, not_found, malformed, unavailable]
         fields:
           type: array

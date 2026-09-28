@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -24,6 +25,7 @@ type metadataManagerStub struct {
 type metadataReaderStub struct {
 	discoverInput core.MetadataDiscover
 	accountID     string
+	discoverErr   error
 }
 
 func (*metadataReaderStub) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
@@ -42,6 +44,9 @@ func (s *metadataReaderStub) Discover(
 	_ context.Context, accountID string, input core.MetadataDiscover,
 ) (core.MetadataDiscoverPage, error) {
 	s.accountID, s.discoverInput = accountID, input
+	if s.discoverErr != nil {
+		return core.MetadataDiscoverPage{}, s.discoverErr
+	}
 	return core.MetadataDiscoverPage{Items: []core.MetadataDiscoverItem{{
 		MetadataTitle: core.MetadataTitle{
 			Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB, ProviderID: "11", Title: "Film",
@@ -91,15 +96,52 @@ func TestSetMetadataKeyRequiresReadAccessToken(t *testing.T) {
 	}
 }
 
-func TestSetMetadataKeyPreservesUnauthorizedProbeClassification(t *testing.T) {
-	manager := &metadataManagerStub{err: core.ErrMetadataUnauthorized}
-	server := metadataHandlerServer(manager)
-	body := `{"api_key":"` + testMetadataReadAccessToken + `"}`
-	request := requestWithAccount(t, http.MethodPut, "/api/v1/metadata/providers/tmdb/key", body, core.PermissionAdminSettings)
-	recorder := httptest.NewRecorder()
-	server.handleSetMetadataKey(recorder, request)
-	if recorder.Code != http.StatusBadGateway || !strings.Contains(recorder.Body.String(), codeMetadataProviderFailure) {
-		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+func TestSetMetadataKeyFailedProbeDoesNotExposeToken(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		reason string
+	}{
+		{name: "unauthorized", err: core.ErrMetadataUnauthorized, status: http.StatusBadGateway, reason: reasonUnauthorized},
+		{name: "unavailable", err: core.ErrMetadataUnavailable, status: http.StatusServiceUnavailable, reason: reasonUnavailable},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			audit := &recordingAudit{}
+			server := &Server{
+				logger: slog.New(slog.NewTextHandler(&logs, nil)), maxBodyBytes: 8192,
+				metadataManager: &metadataManagerStub{err: testCase.err}, audit: audit,
+				auditFailureMetrics: telemetry.NopMetrics{},
+			}
+			body := `{"api_key":"` + testMetadataReadAccessToken + `"}`
+			request := requestWithAccount(
+				t, http.MethodPut, "/api/v1/metadata/providers/tmdb/key", body, core.PermissionAdminSettings,
+			)
+			recorder := httptest.NewRecorder()
+			server.handleSetMetadataKey(recorder, request)
+
+			var response httputil.ErrorResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if recorder.Code != testCase.status || response.Code != codeMetadataProviderFailure || response.Reason != testCase.reason {
+				t.Fatalf("response = %d %+v", recorder.Code, response)
+			}
+			auditEvents := audit.snapshot()
+			events, err := json.Marshal(auditEvents)
+			if err != nil {
+				t.Fatalf("marshal audit events: %v", err)
+			}
+			if len(auditEvents) != 1 || auditEvents[0].Result != telemetry.AuditFailure {
+				t.Fatalf("audit events = %s, want one failure event", events)
+			}
+			observed := recorder.Body.String() + logs.String() + string(events)
+			if strings.Contains(observed, testMetadataReadAccessToken) {
+				t.Fatalf("failed probe exposed submitted token: %s", observed)
+			}
+		})
 	}
 }
 
@@ -138,6 +180,28 @@ func TestMetadataDiscoverRejectsInvalidCursor(t *testing.T) {
 	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), `"field":"cursor"`) {
 		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
 	}
+}
+
+func TestMetadataDiscoverReturnsDocumentedProviderFailure(t *testing.T) {
+	server := &Server{
+		logger:            slog.New(slog.DiscardHandler),
+		metadataDiscovery: &metadataReaderStub{discoverErr: core.ErrMetadataUnavailable},
+	}
+	request := requestWithAccount(
+		t, http.MethodGet, "/api/v1/metadata/discover/trending", "", core.PermissionRequestsReadOwn,
+	)
+	recorder := httptest.NewRecorder()
+	server.handleMetadataTrending(recorder, request)
+
+	var response httputil.ErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if recorder.Code != http.StatusServiceUnavailable || response.Code != codeMetadataProviderFailure ||
+		response.Reason != reasonUnavailable {
+		t.Fatalf("response = %d %+v", recorder.Code, response)
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
 }
 
 func TestMetadataGenresReturnsProviderGenres(t *testing.T) {
