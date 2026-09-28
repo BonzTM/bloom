@@ -218,12 +218,20 @@ const (
 	RequestEventAvailable RequestEventType = "available"
 	// RequestEventFailed records terminal fulfilment failure.
 	RequestEventFailed RequestEventType = "failed"
+	// NotificationEventPlaybackSessionStarted records one newly persisted watch.
+	NotificationEventPlaybackSessionStarted RequestEventType = "playback.session_started"
 )
 
 // Valid reports whether the event belongs to the closed lifecycle set.
 func (t RequestEventType) Valid() bool {
 	return t == RequestEventCreated || t == RequestEventApproved || t == RequestEventDeclined ||
-		t == RequestEventDispatched || t == RequestEventAvailable || t == RequestEventFailed
+		t == RequestEventDispatched || t == RequestEventAvailable || t == RequestEventFailed ||
+		t == NotificationEventPlaybackSessionStarted
+}
+
+// RequestLifecycle reports whether the event belongs to the request lifecycle.
+func (t RequestEventType) RequestLifecycle() bool {
+	return t.Valid() && t != NotificationEventPlaybackSessionStarted
 }
 
 // RequestEvent is the in-process lifecycle payload for later consumers.
@@ -242,7 +250,7 @@ type RequestEvent struct {
 // ValidateRequestEvent checks the durable lifecycle facts recorded with a request mutation.
 func ValidateRequestEvent(event RequestEvent) error {
 	actorValid := event.ActorID == "" || event.ActorID == "system" || ValidID(event.ActorID)
-	if !event.Type.Valid() || !ValidID(event.RequestID) || !ValidID(event.RequesterID) || !actorValid ||
+	if !event.Type.RequestLifecycle() || !ValidID(event.RequestID) || !ValidID(event.RequesterID) || !actorValid ||
 		!event.Kind.Valid() || !event.Status.Valid() || event.At.IsZero() {
 		return ErrInvalidArgument
 	}

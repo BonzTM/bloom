@@ -30,11 +30,11 @@ func TestNotificationPayloadEnrichesRequestEventWithoutNetworkWork(t *testing.T)
 		"actor":     {ID: "actor", Username: "admin"},
 	}
 	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	payload := notificationPayload(t.Context(), accounts, core.RequestEvent{
+	payload := notificationPayload(t.Context(), accounts, core.NotificationEvent{Event: core.RequestEvent{
 		Type: core.RequestEventApproved, RequestID: "00000000-0000-4000-8000-000000000001",
 		RequesterID: "requester", ActorID: "actor", Title: "Example", Kind: core.MediaKindMovie,
 		Status: core.RequestApproved, Reason: "okay", At: at,
-	})
+	}})
 	if payload.RequesterUsername != "alice" || payload.ActorUsername != "admin" {
 		t.Fatalf("payload = %+v", payload)
 	}
@@ -42,7 +42,9 @@ func TestNotificationPayloadEnrichesRequestEventWithoutNetworkWork(t *testing.T)
 
 func TestNotificationPayloadFallsBackWhenEnrichmentFails(t *testing.T) {
 	t.Parallel()
-	payload := notificationPayload(t.Context(), producerAccounts{}, core.RequestEvent{RequesterID: "missing", ActorID: "missing"})
+	payload := notificationPayload(t.Context(), producerAccounts{}, core.NotificationEvent{
+		Event: core.RequestEvent{RequesterID: "missing", ActorID: "missing"},
+	})
 	if payload.RequesterUsername != "" || payload.ActorUsername != "" {
 		t.Fatalf("payload = %+v", payload)
 	}

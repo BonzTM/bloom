@@ -58,6 +58,10 @@ func TestNotificationOpenAPIDocumentsOperationsAndFailures(t *testing.T) {
 		},
 		"/api/v1/notification-channels/{id}/test":       {"post": {"401", "403", "404", "422", "502"}},
 		"/api/v1/notification-channels/{id}/deliveries": {"get": {"401", "403", "404", "422"}},
+		"/api/v1/me/notification-preferences":           {"get": {"401"}, "put": {"401", "415", "422"}},
+		"/api/v1/titles/{provider}/{provider_id}/subscription": {
+			"post": {"401", "403", "422"}, "delete": {"401", "403", "422"},
+		},
 	}
 	for path, methods := range expected {
 		for method, statuses := range methods {
@@ -77,7 +81,8 @@ func TestNotificationOpenAPIDocumentsOperationsAndFailures(t *testing.T) {
 func TestNotificationStateChangesHaveCSRFAuditResources(t *testing.T) {
 	for _, pattern := range []string{
 		"/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
-		"/api/v1/notification-channels/{id}/test",
+		"/api/v1/notification-channels/{id}/test", "/api/v1/me/notification-preferences",
+		"/api/v1/titles/{provider}/{provider_id}/subscription",
 	} {
 		path := strings.TrimPrefix(concreteRequestPath(pattern), "https://bloom.test")
 		if got := csrfAuditResource(path); got == auditResourceRouteUnmatched {

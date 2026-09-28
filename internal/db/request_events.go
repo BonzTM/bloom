@@ -126,6 +126,9 @@ func insertSQLiteNotificationEvents(ctx context.Context, q *sqlite.Queries, even
 		if err != nil {
 			return fmt.Errorf("insert notification event: %w", err)
 		}
+		if err := addSQLiteNotificationRecipients(ctx, q, id, event); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -146,6 +149,55 @@ func insertPostgresNotificationEvents(ctx context.Context, q *postgres.Queries, 
 		if err != nil {
 			return fmt.Errorf("insert notification event: %w", err)
 		}
+		if err := addPostgresNotificationRecipients(ctx, q, id, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addSQLiteNotificationRecipients(
+	ctx context.Context, q *sqlite.Queries, eventID string, event core.RequestEvent,
+) error {
+	if err := q.AddNotificationEventRecipient(ctx, sqlite.AddNotificationEventRecipientParams{
+		EventID: eventID, AccountID: event.RequesterID,
+	}); err != nil {
+		return fmt.Errorf("add notification requester: %w", err)
+	}
+	if event.Type != core.RequestEventAvailable {
+		return nil
+	}
+	request, err := q.GetRequest(ctx, event.RequestID)
+	if err != nil {
+		return fmt.Errorf("get available request subscribers: %w", err)
+	}
+	if err := q.AddAvailabilityNotificationRecipients(ctx, sqlite.AddAvailabilityNotificationRecipientsParams{
+		EventID: eventID, Provider: request.Provider, ProviderID: request.ProviderID,
+	}); err != nil {
+		return fmt.Errorf("add available request subscribers: %w", err)
+	}
+	return nil
+}
+
+func addPostgresNotificationRecipients(
+	ctx context.Context, q *postgres.Queries, eventID string, event core.RequestEvent,
+) error {
+	if err := q.AddNotificationEventRecipient(ctx, postgres.AddNotificationEventRecipientParams{
+		EventID: eventID, AccountID: event.RequesterID,
+	}); err != nil {
+		return fmt.Errorf("add notification requester: %w", err)
+	}
+	if event.Type != core.RequestEventAvailable {
+		return nil
+	}
+	request, err := q.GetRequest(ctx, event.RequestID)
+	if err != nil {
+		return fmt.Errorf("get available request subscribers: %w", err)
+	}
+	if err := q.AddAvailabilityNotificationRecipients(ctx, postgres.AddAvailabilityNotificationRecipientsParams{
+		EventID: eventID, Provider: request.Provider, ProviderID: request.ProviderID,
+	}); err != nil {
+		return fmt.Errorf("add available request subscribers: %w", err)
 	}
 	return nil
 }

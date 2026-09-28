@@ -329,7 +329,8 @@ func routeResource(r *http.Request) string {
 	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
 		return auditResourceDownloadManagers
 	case "/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
-		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries":
+		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries",
+		"/api/v1/me/notification-preferences":
 		return auditResourceNotifications
 	case "/api/v1/invites", "/api/v1/invites/{id}", "/api/v1/invites/servers",
 		"/api/v1/invites/provisioning-failures", "/api/v1/invites/provisioning-failures/{id}":
@@ -357,7 +358,8 @@ func routeResource(r *http.Request) string {
 	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
 		return auditResourceRequestProfiles
 	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/progress",
-		"/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
+		"/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline",
+		"/api/v1/titles/{provider}/{provider_id}/subscription":
 		return auditResourceRequests
 	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
 		return auditResourceRequestQuotas

@@ -172,8 +172,8 @@ func (w *Worker) fanOutEvents(ctx context.Context) error {
 		if err != nil {
 			return errors.Join(result, fmt.Errorf("get notification event: %w", err))
 		}
-		payload := notificationPayload(ctx, w.deps.Accounts, event.Event)
-		if _, err := w.deps.Events.FanOutNotificationEvent(ctx, event.ID, payload, event.Event.At); err != nil {
+		payload := notificationPayload(ctx, w.deps.Accounts, event)
+		if _, err := w.deps.Events.FanOutNotificationEvent(ctx, event.ID, payload, payload.OccurredAt); err != nil {
 			return errors.Join(result, fmt.Errorf("fan out notification event: %w", err))
 		}
 	}

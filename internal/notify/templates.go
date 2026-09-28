@@ -22,29 +22,36 @@ type TemplateData struct {
 	Reason     string
 	RequestID  string
 	OccurredAt time.Time
+	MediaUser  string
+	Item       string
+	Client     string
+	Device     string
 }
 
 var allowedTemplateFields = map[string]struct{}{
 	"Title": {}, "Kind": {}, "Status": {}, "Requester": {}, "Actor": {},
 	"Reason": {}, "RequestID": {}, "OccurredAt": {},
+	"MediaUser": {}, "Item": {}, "Client": {}, "Device": {},
 }
 
 var defaultSubjects = map[core.RequestEventType]string{
-	core.RequestEventCreated:    `Request created: {{.Title}}`,
-	core.RequestEventApproved:   `Request approved: {{.Title}}`,
-	core.RequestEventDeclined:   `Request declined: {{.Title}}`,
-	core.RequestEventDispatched: `Request dispatched: {{.Title}}`,
-	core.RequestEventAvailable:  `Request available: {{.Title}}`,
-	core.RequestEventFailed:     `Request failed: {{.Title}}`,
+	core.RequestEventCreated:                     `Request created: {{.Title}}`,
+	core.RequestEventApproved:                    `Request approved: {{.Title}}`,
+	core.RequestEventDeclined:                    `Request declined: {{.Title}}`,
+	core.RequestEventDispatched:                  `Request dispatched: {{.Title}}`,
+	core.RequestEventAvailable:                   `Request available: {{.Title}}`,
+	core.RequestEventFailed:                      `Request failed: {{.Title}}`,
+	core.NotificationEventPlaybackSessionStarted: `Playback started: {{.Item}}`,
 }
 
 var defaultBodies = map[core.RequestEventType]string{
-	core.RequestEventCreated:    `{{.Requester}} requested {{.Title}} ({{.Kind}}).`,
-	core.RequestEventApproved:   `{{.Actor}} approved {{.Requester}}'s request for {{.Title}}.`,
-	core.RequestEventDeclined:   `{{.Actor}} declined {{.Requester}}'s request for {{.Title}}. {{.Reason}}`,
-	core.RequestEventDispatched: `{{.Title}} was sent to the download manager.`,
-	core.RequestEventAvailable:  `{{.Title}} is now available.`,
-	core.RequestEventFailed:     `{{.Title}} could not be fulfilled. {{.Reason}}`,
+	core.RequestEventCreated:                     `{{.Requester}} requested {{.Title}} ({{.Kind}}).`,
+	core.RequestEventApproved:                    `{{.Actor}} approved {{.Requester}}'s request for {{.Title}}.`,
+	core.RequestEventDeclined:                    `{{.Actor}} declined {{.Requester}}'s request for {{.Title}}. {{.Reason}}`,
+	core.RequestEventDispatched:                  `{{.Title}} was sent to the download manager.`,
+	core.RequestEventAvailable:                   `{{.Title}} is now available.`,
+	core.RequestEventFailed:                      `{{.Title}} could not be fulfilled. {{.Reason}}`,
+	core.NotificationEventPlaybackSessionStarted: `{{.MediaUser}} started {{.Item}} on {{.Client}} ({{.Device}}).`,
 }
 
 // ValidateTemplates rejects functions, control flow, and unknown fields.
@@ -117,6 +124,8 @@ func RenderMessage(payload core.NotificationPayload, settings core.NotificationS
 		Title: payload.Title, Kind: string(payload.Kind), Status: string(payload.Status),
 		Requester: payload.RequesterUsername, Actor: payload.ActorUsername, Reason: payload.Reason,
 		RequestID: payload.RequestID, OccurredAt: payload.OccurredAt,
+		MediaUser: payload.MediaUsername, Item: payload.ItemName,
+		Client: payload.Client, Device: payload.DeviceName,
 	}
 	renderedSubject, err := executeTemplate(subject, data)
 	if err != nil {

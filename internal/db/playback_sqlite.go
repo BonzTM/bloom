@@ -139,7 +139,42 @@ func (s *sqlitePlaybackStore) saveSQLiteMutation(
 			return playbackStoreError("create playback segment", err)
 		}
 	}
-	return saveSQLitePosition(ctx, queries, mutation.Position)
+	if err := saveSQLitePosition(ctx, queries, mutation.Position); err != nil {
+		return err
+	}
+	return createSQLitePlaybackNotification(ctx, queries, mutation.Watch)
+}
+
+func createSQLitePlaybackNotification(
+	ctx context.Context, queries *sqlite.Queries, watch core.PlaybackWatch,
+) error {
+	if !isNewCollectedWatch(watch) {
+		return nil
+	}
+	event, payload, err := playbackSessionStartedEvent(watch)
+	if err != nil {
+		return err
+	}
+	id, err := core.NewID()
+	if err != nil {
+		return fmt.Errorf("create playback notification id: %w", err)
+	}
+	rows, err := queries.CreatePlaybackNotificationEvent(ctx, sqlite.CreatePlaybackNotificationEventParams{
+		ID: id, WatchID: event.WatchID, Title: event.ItemName, SourcePayloadJson: payload,
+		OccurredAt: formatSQLiteTime(event.At), CreatedAt: formatSQLiteTime(event.At),
+	})
+	if err != nil {
+		return playbackStoreError("insert playback notification", err)
+	}
+	if rows == 0 {
+		return nil
+	}
+	if err := queries.AddPlaybackNotificationRecipients(ctx, sqlite.AddPlaybackNotificationRecipientsParams{
+		EventID: id, MediaServerID: event.MediaServerID, MediaUserID: event.MediaUserID,
+	}); err != nil {
+		return playbackStoreError("address playback notification", err)
+	}
+	return nil
 }
 
 func (s *sqlitePlaybackStore) deleteSQLiteImportDuplicates(

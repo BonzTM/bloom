@@ -601,8 +601,9 @@ and are cached for one day; discover pages use the existing metadata cache
 TTL.
 If a metadata error reports the `unreachable` reason, the Bloom server cannot
 reach `api.themoviedb.org`; a firewall or network policy is the usual cause.
-Accounts with `requests.create` can open movie or series details and submit a
-movie or selected series seasons to `POST /api/v1/requests`.
+Accounts with `requests.create` or `requests.read.own` can open movie or series
+details. Submitting a movie or selected series seasons to
+`POST /api/v1/requests` still requires `requests.create`.
 Accounts with `requests.approve` are exempt from quotas and their own requests
 are approved immediately. Other requests remain pending until an approver uses
 the request's `/approve` or `/decline` route. Approved requests are dispatched
@@ -658,8 +659,11 @@ destination ranges. Loopback, unspecified, multicast, link-local, and
 cloud-metadata destinations remain denied even with that opt-in, and redirects
 remain disabled.
 
-Each channel subscribes to one or more request events: `created`, `approved`,
-`declined`, `dispatched`, `available`, or `failed`. Credentials and full
+Each channel subscribes to one or more events: `created`, `approved`,
+`declined`, `dispatched`, `available`, `failed`, or
+`playback.session_started`. Playback session events are emitted once when a
+new collected watch is committed. Their payload includes the media user, item,
+client, and device. Imported watches do not emit them. Credentials and full
 webhook URLs are encrypted under `BLOOM_SECRET_KEY`. Read routes return only
 credential-presence flags. Creating a channel requires its kind-specific
 credentials: a webhook URL and shared secret, a Discord webhook URL, or an SMTP
@@ -667,7 +671,8 @@ password. Updating a channel without those credentials retains the stored
 values. The `/test` route sends immediately and records an audit event.
 
 Subject and body templates may use only `Title`, `Kind`, `Status`, `Requester`,
-`Actor`, `Reason`, `RequestID`, and `OccurredAt`. Each template is limited to
+`Actor`, `Reason`, `RequestID`, `OccurredAt`, `MediaUser`, `Item`, `Client`,
+and `Device`. Each template is limited to
 4096 bytes and is parsed before storage. Bloom supplies defaults for every
 event. Every Discord embed title, description, field name, and field value is
 Markdown-escaped before provider limits are applied. Email and generic webhooks
@@ -676,7 +681,8 @@ receive plain text or the structured event payload.
 Every request create and state transition commits a durable event in the same
 database transaction as the request mutation. The in-process bus only wakes a
 supervised worker, which enriches unfanned events and atomically creates one
-delivery row for every enabled subscribed channel. Missing account display
+delivery row for every addressed account and enabled subscribed channel that
+the account selected. Missing account display
 names become empty payload fields and never discard an event. The request path
 performs no notification network call. The worker claims deliveries with
 expiring leases and retries transient failures with capped exponential backoff
@@ -687,6 +693,20 @@ route exposes safe recent status, attempt, and timestamp fields. Delivery
 counters and outbox depth are exported as metrics.
 Sent and terminally failed rows, followed by their fully fanned event rows, are
 pruned in bounded batches after `BLOOM_NOTIFY_RETENTION`.
+
+Every signed-in account can read and replace its complete event-to-channel
+matrix through `GET` and `PUT /api/v1/me/notification-preferences`. Existing
+request events default on for every channel, which preserves prior delivery
+behavior. `playback.session_started` defaults off and requires both a channel
+subscription and an account opt-in.
+
+An account with `requests.read.own` can idempotently follow or unfollow a title
+with `POST` or `DELETE` on
+`/api/v1/titles/{provider}/{provider_id}/subscription`. Each account may follow
+at most 500 titles. Movie and series detail responses include `subscribed` for
+the signed-in account. When a request becomes available, Bloom addresses the
+requester and every follower once, even when the requester also follows the
+title.
 
 Delivery is at-least-once. A process failure after an external provider accepts
 a message but before Bloom records completion can cause the same delivery to be

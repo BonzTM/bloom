@@ -18,6 +18,9 @@ import (
 
 func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
+	t.Run("session start event is idempotent across restart", func(t *testing.T) {
+		testPlaybackSessionEventRestart(t, pool, driver)
+	})
 	t.Run("playback persistence and cascade", func(t *testing.T) {
 		reader, writer, err := db.NewMediaServerStores(pool, driver)
 		if err != nil {
@@ -142,6 +145,28 @@ func assertPlaybackWatchRead(
 	}
 	if watch.ID != watchID || watch.State != state || watch.MediaServerName == "" || watch.Stream == nil {
 		t.Fatalf("GetWatch(%s) = %+v", watchID, watch)
+func testPlaybackSessionEventRestart(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Event restart")
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 14, 0, 0, 0, time.UTC))
+	watch := playbackStoreWatch(t, server.ID, now)
+	first := newPlaybackTestStore(t, pool, driver)
+	if err := first.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+		t.Fatalf("first SaveWatches: %v", err)
+	}
+	restarted := newPlaybackTestStore(t, pool, driver)
+	if err := restarted.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+		t.Fatalf("restart SaveWatches: %v", err)
+	}
+	assertRowCount(t, pool,
+		"SELECT COUNT(*) FROM notification_events WHERE event_type = 'playback.session_started' AND request_id = $1",
+		watch.ID, 1,
+	)
+	event, err := notificationEventStore(t, pool, driver).GetUnfannedNotificationEvent(t.Context())
+	if err != nil || event.Playback == nil || event.Playback.WatchID != watch.ID ||
+		event.Playback.MediaUserID != watch.MediaUserID || event.Playback.ItemID != watch.ItemID ||
+		event.Playback.Client != watch.Client || event.Playback.DeviceID != watch.DeviceID {
+		t.Fatalf("playback notification event = %+v, %v", event, err)
 	}
 }
 

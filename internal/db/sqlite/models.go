@@ -39,6 +39,13 @@ type AccountMediaUser struct {
 	SuppressedAt  sql.NullString
 }
 
+type AccountNotificationPreference struct {
+	AccountID string
+	EventType string
+	ChannelID string
+	Enabled   int64
+}
+
 type AccountRequestQuota struct {
 	AccountID           string
 	MovieLimit          int64
@@ -246,37 +253,44 @@ type NotificationChannelSubscription struct {
 }
 
 type NotificationEvent struct {
-	ID            string
-	EventType     string
-	RequestID     string
-	RequesterID   string
-	ActorID       string
-	MediaKind     string
-	Title         string
-	RequestStatus string
-	Reason        string
-	EventSequence int64
-	OccurredAt    string
-	FannedAt      sql.NullString
-	CreatedAt     string
+	ID                string
+	EventType         string
+	RequestID         string
+	RequesterID       string
+	ActorID           string
+	MediaKind         string
+	Title             string
+	RequestStatus     string
+	Reason            string
+	SourcePayloadJson string
+	EventSequence     int64
+	OccurredAt        string
+	FannedAt          sql.NullString
+	CreatedAt         string
+}
+
+type NotificationEventRecipient struct {
+	EventID   string
+	AccountID string
 }
 
 type NotificationOutbox struct {
-	ID             string
-	EventID        string
-	ChannelID      string
-	ChannelKind    string
-	EventType      string
-	PayloadJson    string
-	Status         string
-	Attempts       int64
-	NextAttemptAt  string
-	LeaseToken     string
-	LeaseExpiresAt sql.NullString
-	LastError      string
-	SentAt         sql.NullString
-	CreatedAt      string
-	UpdatedAt      string
+	ID                 string
+	EventID            string
+	ChannelID          string
+	RecipientAccountID string
+	ChannelKind        string
+	EventType          string
+	PayloadJson        string
+	Status             string
+	Attempts           int64
+	NextAttemptAt      string
+	LeaseToken         string
+	LeaseExpiresAt     sql.NullString
+	LastError          string
+	SentAt             sql.NullString
+	CreatedAt          string
+	UpdatedAt          string
 }
 
 type Request struct {
@@ -356,6 +370,13 @@ type Session struct {
 	Token  string
 	Data   []byte
 	Expiry int64
+}
+
+type TitleAvailabilitySubscription struct {
+	AccountID  string
+	Provider   string
+	ProviderID string
+	CreatedAt  string
 }
 
 type Watch struct {

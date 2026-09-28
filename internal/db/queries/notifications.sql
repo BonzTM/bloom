@@ -62,16 +62,49 @@ ORDER BY c.id;
 -- name: CreateNotificationEvent :exec
 INSERT INTO notification_events (
     id, event_type, request_id, requester_id, actor_id, media_kind, title,
-    request_status, reason, event_sequence, occurred_at, fanned_at, created_at
+    request_status, reason, source_payload_json, event_sequence, occurred_at, fanned_at, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(event_type), sqlc.arg(request_id), sqlc.arg(requester_id),
     sqlc.arg(actor_id), sqlc.arg(media_kind), sqlc.arg(title), sqlc.arg(request_status),
-    sqlc.arg(reason), sqlc.arg(event_sequence), sqlc.arg(occurred_at), NULL, sqlc.arg(created_at)
+    sqlc.arg(reason), '{}', sqlc.arg(event_sequence), sqlc.arg(occurred_at), NULL, sqlc.arg(created_at)
 );
+
+-- name: CreatePlaybackNotificationEvent :execrows
+INSERT INTO notification_events (
+    id, event_type, request_id, requester_id, actor_id, media_kind, title,
+    request_status, reason, source_payload_json, event_sequence, occurred_at, fanned_at, created_at
+) VALUES (
+    sqlc.arg(id), 'playback.session_started', sqlc.arg(watch_id),
+    '00000000-0000-4000-8000-000000000000', 'system', 'movie', sqlc.arg(title),
+    'available', '', sqlc.arg(source_payload_json), 0, sqlc.arg(occurred_at), NULL, sqlc.arg(created_at)
+)
+ON CONFLICT DO NOTHING;
+
+-- name: AddNotificationEventRecipient :exec
+INSERT INTO notification_event_recipients (event_id, account_id)
+VALUES (sqlc.arg(event_id), sqlc.arg(account_id))
+ON CONFLICT DO NOTHING;
+
+-- name: AddAvailabilityNotificationRecipients :exec
+INSERT INTO notification_event_recipients (event_id, account_id)
+SELECT sqlc.arg(event_id), subscription.account_id
+FROM title_availability_subscriptions AS subscription
+WHERE subscription.provider = sqlc.arg(provider)
+  AND subscription.provider_id = sqlc.arg(provider_id)
+ON CONFLICT DO NOTHING;
+
+-- name: AddPlaybackNotificationRecipients :exec
+INSERT INTO notification_event_recipients (event_id, account_id)
+SELECT sqlc.arg(event_id), link.account_id
+FROM account_media_users AS link
+WHERE link.media_server_id = sqlc.arg(media_server_id)
+  AND link.media_user_id = sqlc.arg(media_user_id)
+  AND link.suppressed_at IS NULL
+ON CONFLICT DO NOTHING;
 
 -- name: GetUnfannedNotificationEvent :one
 SELECT id, event_type, request_id, requester_id, actor_id, media_kind, title,
-       request_status, reason, event_sequence, occurred_at, fanned_at, created_at
+       request_status, reason, source_payload_json, event_sequence, occurred_at, fanned_at, created_at
 FROM notification_events
 WHERE fanned_at IS NULL
 ORDER BY created_at, event_sequence, id LIMIT 1;
@@ -82,10 +115,10 @@ WHERE id = sqlc.arg(id) AND fanned_at IS NULL;
 
 -- name: CreateNotificationOutbox :exec
 INSERT INTO notification_outbox (
-    id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
+    id, event_id, channel_id, recipient_account_id, channel_kind, event_type, payload_json, status, attempts,
     next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(event_id), sqlc.arg(channel_id), sqlc.arg(channel_kind), sqlc.arg(event_type),
+    sqlc.arg(id), sqlc.arg(event_id), sqlc.arg(channel_id), sqlc.arg(recipient_account_id), sqlc.arg(channel_kind), sqlc.arg(event_type),
     sqlc.arg(payload_json), 'pending', 0, sqlc.arg(next_attempt_at), '', NULL, '', NULL,
     sqlc.arg(created_at), sqlc.arg(updated_at)
 );
@@ -118,7 +151,7 @@ AND EXISTS (
 	SELECT 1 FROM notification_channels AS channel
 	WHERE channel.id = sqlc.arg(channel_id) AND channel.enabled = TRUE AND channel.deleted_at IS NULL
 )
-RETURNING id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
+RETURNING id, event_id, channel_id, recipient_account_id, channel_kind, event_type, payload_json, status, attempts,
           next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at;
 
 -- name: CompleteNotificationOutbox :execrows
@@ -133,13 +166,44 @@ UPDATE notification_outbox SET status = sqlc.arg(status), next_attempt_at = sqlc
 WHERE id = sqlc.arg(id) AND status = 'pending' AND lease_token = sqlc.arg(lease_token);
 
 -- name: ListNotificationDeliveries :many
-SELECT id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
+SELECT id, event_id, channel_id, recipient_account_id, channel_kind, event_type, payload_json, status, attempts,
        next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at
 FROM notification_outbox
 WHERE channel_id = sqlc.arg(channel_id)
   AND (created_at < sqlc.arg(after_created_at)
        OR (created_at = sqlc.arg(after_created_at) AND id < sqlc.arg(after_id)))
 ORDER BY created_at DESC, id DESC LIMIT sqlc.arg(page_size);
+
+-- name: ListNotificationPreferenceOverrides :many
+SELECT event_type, channel_id, enabled
+FROM account_notification_preferences
+WHERE account_id = sqlc.arg(account_id)
+ORDER BY event_type, channel_id;
+
+-- name: DeleteNotificationPreferenceOverrides :exec
+DELETE FROM account_notification_preferences WHERE account_id = sqlc.arg(account_id);
+
+-- name: AddNotificationPreferenceOverride :exec
+INSERT INTO account_notification_preferences (account_id, event_type, channel_id, enabled)
+VALUES (sqlc.arg(account_id), sqlc.arg(event_type), sqlc.arg(channel_id), sqlc.arg(enabled));
+
+-- name: CountTitleSubscriptions :one
+SELECT COUNT(*) FROM title_availability_subscriptions WHERE account_id = sqlc.arg(account_id);
+
+-- name: CreateTitleSubscription :exec
+INSERT INTO title_availability_subscriptions (account_id, provider, provider_id, created_at)
+VALUES (sqlc.arg(account_id), sqlc.arg(provider), sqlc.arg(provider_id), sqlc.arg(created_at))
+ON CONFLICT DO NOTHING;
+
+-- name: DeleteTitleSubscription :exec
+DELETE FROM title_availability_subscriptions
+WHERE account_id = sqlc.arg(account_id) AND provider = sqlc.arg(provider) AND provider_id = sqlc.arg(provider_id);
+
+-- name: TitleSubscriptionExists :one
+SELECT EXISTS (
+    SELECT 1 FROM title_availability_subscriptions
+    WHERE account_id = sqlc.arg(account_id) AND provider = sqlc.arg(provider) AND provider_id = sqlc.arg(provider_id)
+);
 
 -- name: NotificationOutboxDepth :one
 SELECT COUNT(*) FROM notification_outbox WHERE status = 'pending';

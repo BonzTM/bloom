@@ -145,7 +145,42 @@ func (s *postgresPlaybackStore) savePostgresMutation(
 			return playbackStoreError("create playback segment", err)
 		}
 	}
-	return savePostgresPosition(ctx, queries, mutation.Position)
+	if err := savePostgresPosition(ctx, queries, mutation.Position); err != nil {
+		return err
+	}
+	return createPostgresPlaybackNotification(ctx, queries, mutation.Watch)
+}
+
+func createPostgresPlaybackNotification(
+	ctx context.Context, queries *postgres.Queries, watch core.PlaybackWatch,
+) error {
+	if !isNewCollectedWatch(watch) {
+		return nil
+	}
+	event, payload, err := playbackSessionStartedEvent(watch)
+	if err != nil {
+		return err
+	}
+	id, err := core.NewID()
+	if err != nil {
+		return fmt.Errorf("create playback notification id: %w", err)
+	}
+	rows, err := queries.CreatePlaybackNotificationEvent(ctx, postgres.CreatePlaybackNotificationEventParams{
+		ID: id, WatchID: event.WatchID, Title: event.ItemName, SourcePayloadJson: payload,
+		OccurredAt: event.At, CreatedAt: event.At,
+	})
+	if err != nil {
+		return playbackStoreError("insert playback notification", err)
+	}
+	if rows == 0 {
+		return nil
+	}
+	if err := queries.AddPlaybackNotificationRecipients(ctx, postgres.AddPlaybackNotificationRecipientsParams{
+		EventID: id, MediaServerID: event.MediaServerID, MediaUserID: event.MediaUserID,
+	}); err != nil {
+		return playbackStoreError("address playback notification", err)
+	}
+	return nil
 }
 
 func lockPostgresCollectedKeys(
