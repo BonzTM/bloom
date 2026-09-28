@@ -917,10 +917,10 @@ func TestProviderJWKSCacheDropsRevokedKeyAfterExpiry(t *testing.T) {
 func TestProviderJWKSConcurrentMissesCollapse(t *testing.T) {
 	const callers = 8
 	fake := newFakeProvider(t)
-	fake.tokenStarted = make(chan struct{}, callers)
-	fake.jwksStarted = make(chan struct{}, callers)
 	fake.jwksRelease = make(chan struct{})
 	provider := newAdapter(t, fake)
+	waiterAdded := make(chan struct{}, callers)
+	adapter.SetJWKSWaiterAddedForTest(provider, func() { waiterAdded <- struct{}{} })
 	errorsCh := make(chan error, callers)
 	for range callers {
 		go func() {
@@ -929,9 +929,8 @@ func TestProviderJWKSConcurrentMissesCollapse(t *testing.T) {
 		}()
 	}
 	for range callers {
-		<-fake.tokenStarted
+		<-waiterAdded
 	}
-	<-fake.jwksStarted
 	close(fake.jwksRelease)
 	for range callers {
 		if err := <-errorsCh; err != nil {
