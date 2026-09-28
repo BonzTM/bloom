@@ -73,23 +73,24 @@ type DownloadManager struct {
 }
 
 type Import struct {
-	ID             string
-	MediaServerID  string
-	Source         string
-	State          string
-	Cursor         string
-	ReadCount      int64
-	ImportedCount  int64
-	SkippedCount   int64
-	DuplicateCount int64
-	LastError      string
-	LeaseToken     string
-	LeaseExpiresAt sql.NullTime
-	RequestedBy    string
-	CreatedAt      time.Time
-	StartedAt      sql.NullTime
-	FinishedAt     sql.NullTime
-	UpdatedAt      time.Time
+	ID                     string
+	MediaServerID          string
+	Source                 string
+	State                  string
+	Cursor                 string
+	ReadCount              int64
+	ImportedCount          int64
+	SkippedCount           int64
+	DuplicateCount         int64
+	LastError              string
+	LeaseToken             string
+	LeaseExpiresAt         sql.NullTime
+	RequestedBy            string
+	CreatedAt              time.Time
+	StartedAt              sql.NullTime
+	FinishedAt             sql.NullTime
+	UpdatedAt              time.Time
+	UnresolvedLibraryCount int64
 }
 
 type ImportUpload struct {
@@ -207,6 +208,12 @@ type MediaServer struct {
 	CredentialCiphertext []byte
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+}
+
+type MediaServerExclusion struct {
+	MediaServerID string
+	Kind          string
+	ExternalID    string
 }
 
 type MetadataProvider struct {

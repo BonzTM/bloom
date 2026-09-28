@@ -2,11 +2,30 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db/postgres"
 )
+
+func (s *postgresCatalogStore) ResolveImportLibrary(
+	ctx context.Context, serverID, itemID string,
+) (string, bool, error) {
+	if !core.ValidID(serverID) || !core.ValidCatalogID(itemID) {
+		return "", false, core.ErrInvalidArgument
+	}
+	libraryID, err := s.q.GetCatalogItemLibrary(ctx, postgres.GetCatalogItemLibraryParams{
+		MediaServerID: serverID, ItemID: itemID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, catalogStoreError("resolve import library", err)
+	}
+	return libraryID, true, nil
+}
 
 func (s *postgresCatalogStore) ListCatalogLibraries(
 	ctx context.Context, serverID string, window core.CatalogWindow,

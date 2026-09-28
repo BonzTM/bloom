@@ -37,20 +37,23 @@ SET cursor = $1, read_count = read_count + $2,
     imported_count = imported_count + $3,
     skipped_count = skipped_count + $4,
     duplicate_count = duplicate_count + $5,
-    lease_expires_at = $6, updated_at = $7
-WHERE id = $8 AND state = 'running' AND lease_token = $9
+    unresolved_library_count = unresolved_library_count + CASE
+        WHEN cursor = $1 THEN 0 ELSE $6 END,
+    lease_expires_at = $7, updated_at = $8
+WHERE id = $9 AND state = 'running' AND lease_token = $10
 `
 
 type CheckpointImportParams struct {
-	Cursor         string
-	ReadDelta      int64
-	ImportedDelta  int64
-	SkippedDelta   int64
-	DuplicateDelta int64
-	ExpiresAt      sql.NullTime
-	Now            time.Time
-	ID             string
-	Token          string
+	Cursor                 string
+	ReadDelta              int64
+	ImportedDelta          int64
+	SkippedDelta           int64
+	DuplicateDelta         int64
+	UnresolvedLibraryDelta int64
+	ExpiresAt              sql.NullTime
+	Now                    time.Time
+	ID                     string
+	Token                  string
 }
 
 func (q *Queries) CheckpointImport(ctx context.Context, arg CheckpointImportParams) (int64, error) {
@@ -60,6 +63,7 @@ func (q *Queries) CheckpointImport(ctx context.Context, arg CheckpointImportPara
 		arg.ImportedDelta,
 		arg.SkippedDelta,
 		arg.DuplicateDelta,
+		arg.UnresolvedLibraryDelta,
 		arg.ExpiresAt,
 		arg.Now,
 		arg.ID,
@@ -75,35 +79,36 @@ const createImport = `-- name: CreateImport :exec
 
 INSERT INTO imports (
     id, media_server_id, source, state, cursor, read_count, imported_count,
-    skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
+    skipped_count, duplicate_count, unresolved_library_count, last_error, lease_token, lease_expires_at,
     requested_by, created_at, started_at, finished_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
-    $8, $9, $10,
-    $11, $12, $13,
-    $14, $15, $16, $17
+    $8, $9, $10, $11,
+    $12, $13, $14,
+    $15, $16, $17, $18
 )
 `
 
 type CreateImportParams struct {
-	ID             string
-	MediaServerID  string
-	Source         string
-	State          string
-	Cursor         string
-	ReadCount      int64
-	ImportedCount  int64
-	SkippedCount   int64
-	DuplicateCount int64
-	LastError      string
-	LeaseToken     string
-	LeaseExpiresAt sql.NullTime
-	RequestedBy    string
-	CreatedAt      time.Time
-	StartedAt      sql.NullTime
-	FinishedAt     sql.NullTime
-	UpdatedAt      time.Time
+	ID                     string
+	MediaServerID          string
+	Source                 string
+	State                  string
+	Cursor                 string
+	ReadCount              int64
+	ImportedCount          int64
+	SkippedCount           int64
+	DuplicateCount         int64
+	UnresolvedLibraryCount int64
+	LastError              string
+	LeaseToken             string
+	LeaseExpiresAt         sql.NullTime
+	RequestedBy            string
+	CreatedAt              time.Time
+	StartedAt              sql.NullTime
+	FinishedAt             sql.NullTime
+	UpdatedAt              time.Time
 }
 
 // History-import queries shared by SQLite and PostgreSQL.
@@ -118,6 +123,7 @@ func (q *Queries) CreateImport(ctx context.Context, arg CreateImportParams) erro
 		arg.ImportedCount,
 		arg.SkippedCount,
 		arg.DuplicateCount,
+		arg.UnresolvedLibraryCount,
 		arg.LastError,
 		arg.LeaseToken,
 		arg.LeaseExpiresAt,

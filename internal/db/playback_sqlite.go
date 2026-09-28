@@ -21,6 +21,7 @@ type sqlitePlaybackStore struct {
 var (
 	_ core.PlaybackStore        = (*sqlitePlaybackStore)(nil)
 	_ core.PlaybackLibraryStore = (*sqlitePlaybackStore)(nil)
+	_ core.ActivityStore        = (*sqlitePlaybackStore)(nil)
 )
 
 func newSQLitePlaybackStore(pool *sql.DB, resumeWindow time.Duration) *sqlitePlaybackStore {
@@ -310,6 +311,161 @@ func (s *sqlitePlaybackStore) listHistory(
 	return watches, nil
 }
 
+func (s *sqlitePlaybackStore) ListActivity(
+	ctx context.Context, query core.ActivityQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := validateActivityQuery(query); err != nil {
+		return nil, fmt.Errorf("list activity: %w", err)
+	}
+	beforeTime, beforeID := sqliteActivityCursor(query.Before)
+	params := newSQLiteActivityParams(query, beforeTime, beforeID)
+	rows, err := s.listActivityRows(ctx, query, params)
+	if err != nil {
+		return nil, playbackStoreError("list activity", err)
+	}
+	result := make([]core.PlaybackWatch, 0, len(rows))
+	for _, row := range rows {
+		watch, mapErr := sqliteActivityWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map activity watch", mapErr)
+		}
+		result = append(result, watch)
+	}
+	return result, nil
+}
+
+type sqliteActivityParams struct {
+	library, itemType, client, device, playMethod, source, importSource string
+	startedAfterSet, startedBeforeSet, pageSize                         int64
+	startedAfter, startedBefore, search, beforeTime, beforeID           string
+}
+
+func newSQLiteActivityParams(query core.ActivityQuery, beforeTime, beforeID string) sqliteActivityParams {
+	minimum := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	maximum := time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
+	return sqliteActivityParams{
+		library: query.LibraryID, itemType: query.ItemType, client: query.Client, device: query.DeviceID,
+		playMethod: string(query.PlayMethod), source: string(query.Source), importSource: string(query.ImportSource),
+		startedAfterSet:  boolToInt64(query.StartedAfter != nil),
+		startedAfter:     formatSQLiteTime(activityTime(query.StartedAfter, minimum)),
+		startedBeforeSet: boolToInt64(query.StartedBefore != nil),
+		startedBefore:    formatSQLiteTime(activityTime(query.StartedBefore, maximum)),
+		search:           query.Search, beforeTime: beforeTime, beforeID: beforeID, pageSize: int64(query.Limit),
+	}
+}
+
+func (s *sqlitePlaybackStore) listActivityRows(
+	ctx context.Context, query core.ActivityQuery, params sqliteActivityParams,
+) ([]sqlite.ListActivityWatchesRow, error) {
+	switch {
+	case query.MediaServerID != "" && query.MediaUserID != "":
+		rows, err := s.q.ListServerUserActivityWatches(ctx, params.serverUser(query.MediaServerID, query.MediaUserID))
+		return normalizeSQLiteActivityRows(rows), err
+	case query.MediaServerID != "":
+		rows, err := s.q.ListServerActivityWatches(ctx, params.server(query.MediaServerID))
+		return normalizeSQLiteActivityRows(rows), err
+	case query.MediaUserID != "":
+		rows, err := s.q.ListUserActivityWatches(ctx, params.user(query.MediaUserID))
+		return normalizeSQLiteActivityRows(rows), err
+	default:
+		return s.q.ListActivityWatches(ctx, params.global())
+	}
+}
+
+func (p sqliteActivityParams) global() sqlite.ListActivityWatchesParams {
+	return sqlite.ListActivityWatchesParams{
+		LibraryFilter: p.library, ItemTypeFilter: p.itemType, ClientFilter: p.client,
+		DeviceFilter: p.device, PlayMethodFilter: p.playMethod, SourceFilter: p.source,
+		ImportSourceFilter: p.importSource, StartedAfterSet: p.startedAfterSet, StartedAfter: p.startedAfter,
+		StartedBeforeSet: p.startedBeforeSet, StartedBefore: p.startedBefore, SearchText: p.search,
+		BeforeStartedAt: p.beforeTime, BeforeID: p.beforeID, PageSize: p.pageSize,
+	}
+}
+
+func (p sqliteActivityParams) user(userID string) sqlite.ListUserActivityWatchesParams {
+	base := p.global()
+	return sqlite.ListUserActivityWatchesParams{
+		MediaUserID: userID, LibraryFilter: base.LibraryFilter, ItemTypeFilter: base.ItemTypeFilter,
+		ClientFilter: base.ClientFilter, DeviceFilter: base.DeviceFilter, PlayMethodFilter: base.PlayMethodFilter,
+		SourceFilter: base.SourceFilter, ImportSourceFilter: base.ImportSourceFilter,
+		StartedAfterSet: base.StartedAfterSet, StartedAfter: base.StartedAfter,
+		StartedBeforeSet: base.StartedBeforeSet, StartedBefore: base.StartedBefore,
+		SearchText: base.SearchText, BeforeStartedAt: base.BeforeStartedAt,
+		BeforeID: base.BeforeID, PageSize: base.PageSize,
+	}
+}
+
+func (p sqliteActivityParams) server(serverID string) sqlite.ListServerActivityWatchesParams {
+	base := p.global()
+	return sqlite.ListServerActivityWatchesParams{
+		MediaServerID: serverID, LibraryFilter: base.LibraryFilter, ItemTypeFilter: base.ItemTypeFilter,
+		ClientFilter: base.ClientFilter, DeviceFilter: base.DeviceFilter, PlayMethodFilter: base.PlayMethodFilter,
+		SourceFilter: base.SourceFilter, ImportSourceFilter: base.ImportSourceFilter,
+		StartedAfterSet: base.StartedAfterSet, StartedAfter: base.StartedAfter,
+		StartedBeforeSet: base.StartedBeforeSet, StartedBefore: base.StartedBefore,
+		SearchText: base.SearchText, BeforeStartedAt: base.BeforeStartedAt,
+		BeforeID: base.BeforeID, PageSize: base.PageSize,
+	}
+}
+
+func (p sqliteActivityParams) serverUser(serverID, userID string) sqlite.ListServerUserActivityWatchesParams {
+	base := p.server(serverID)
+	return sqlite.ListServerUserActivityWatchesParams{
+		MediaServerID: serverID, MediaUserID: userID, LibraryFilter: base.LibraryFilter,
+		ItemTypeFilter: base.ItemTypeFilter, ClientFilter: base.ClientFilter, DeviceFilter: base.DeviceFilter,
+		PlayMethodFilter: base.PlayMethodFilter, SourceFilter: base.SourceFilter,
+		ImportSourceFilter: base.ImportSourceFilter, StartedAfterSet: base.StartedAfterSet,
+		StartedAfter: base.StartedAfter, StartedBeforeSet: base.StartedBeforeSet,
+		StartedBefore: base.StartedBefore, SearchText: base.SearchText,
+		BeforeStartedAt: base.BeforeStartedAt, BeforeID: base.BeforeID, PageSize: base.PageSize,
+	}
+}
+
+type sqliteActivityRow interface {
+	sqlite.ListActivityWatchesRow | sqlite.ListUserActivityWatchesRow |
+		sqlite.ListServerActivityWatchesRow | sqlite.ListServerUserActivityWatchesRow
+}
+
+func normalizeSQLiteActivityRows[T sqliteActivityRow](rows []T) []sqlite.ListActivityWatchesRow {
+	result := make([]sqlite.ListActivityWatchesRow, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, sqlite.ListActivityWatchesRow(row))
+	}
+	return result
+}
+
+func (s *sqlitePlaybackStore) ListTimelineWatches(
+	ctx context.Context, query core.TimelineWatchQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := validateTimelineWatchQuery(query); err != nil {
+		return nil, fmt.Errorf("list timeline watches: %w", err)
+	}
+	beforeTime, beforeID := sqliteActivityCursor(query.Before)
+	rows, err := s.q.ListTimelineWatches(ctx, sqlite.ListTimelineWatchesParams{
+		MediaServerID: query.MediaServerID, MediaUserID: query.MediaUserID,
+		BeforeStartedAt: beforeTime, BeforeID: beforeID, PageSize: int64(query.Limit),
+	})
+	if err != nil {
+		return nil, playbackStoreError("list timeline watches", err)
+	}
+	result := make([]core.PlaybackWatch, 0, len(rows))
+	for _, row := range rows {
+		watch, mapErr := sqliteTimelineWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map timeline watch", mapErr)
+		}
+		result = append(result, watch)
+	}
+	return result, nil
+}
+
+func sqliteActivityCursor(cursor *core.ActivityCursor) (string, string) {
+	if cursor == nil {
+		return formatSQLiteTime(time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)), "\uffff"
+	}
+	return formatSQLiteTime(cursor.StartedAt), cursor.ID
+}
+
 func (s *sqlitePlaybackStore) findRecent(
 	ctx context.Context,
 	query core.PlaybackQuery,
@@ -498,6 +654,34 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func sqliteActivityWatch(row sqlite.ListActivityWatchesRow) (core.PlaybackWatch, error) {
+	return sqliteStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt,
+		row.EndedAt, row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func sqliteTimelineWatch(row sqlite.ListTimelineWatchesRow) (core.PlaybackWatch, error) {
+	return sqliteStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt,
+		row.EndedAt, row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,

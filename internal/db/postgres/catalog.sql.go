@@ -111,7 +111,19 @@ func (q *Queries) CatalogChildSummary(ctx context.Context, arg CatalogChildSumma
 }
 
 const catalogItemPlaySummary = `-- name: CatalogItemPlaySummary :one
-WITH root AS (
+WITH visible_watches AS (
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id, w.import_origin_record_id FROM watches w
+    WHERE NOT EXISTS (
+        SELECT 1 FROM media_server_exclusions e
+        WHERE e.media_server_id = w.media_server_id
+          AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+            OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+                SELECT 1 FROM library_items excluded_item
+                WHERE excluded_item.media_server_id = w.media_server_id
+                  AND excluded_item.item_id = w.item_id
+                  AND excluded_item.library_id = e.external_id))))
+    )
+), root AS (
     SELECT library_items.item_id, library_items.item_type FROM library_items
     WHERE library_items.media_server_id = $1
       AND library_items.item_id = $2
@@ -129,15 +141,15 @@ WITH root AS (
     WHERE root.item_type = 'Series'
 ), target_watches AS (
     SELECT w.active_seconds, w.media_user_id, w.started_at FROM target_items ti
-    JOIN watches w ON w.media_server_id = $1 AND w.item_id = ti.item_id
+    JOIN visible_watches w ON w.media_server_id = $1 AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
     UNION ALL
     SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
-    JOIN watches w ON w.media_server_id = $1 AND w.item_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = $1 AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
     UNION ALL
     SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
-    JOIN watches w ON w.media_server_id = $1 AND w.series_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = $1 AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
     WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
 )
@@ -177,9 +189,19 @@ const catalogItemWindowSummary = `-- name: CatalogItemWindowSummary :one
 SELECT COUNT(*) AS plays, COALESCE(SUM(active_seconds), 0) AS watch_seconds,
        COUNT(DISTINCT media_user_id) AS unique_users,
        MIN(started_at) AS first_played_at, MAX(started_at) AS last_played_at
-FROM watches
-WHERE media_server_id = $1 AND item_id = $2
-  AND started_at >= $3 AND started_at < $4
+FROM watches w
+WHERE w.media_server_id = $1 AND w.item_id = $2
+  AND w.started_at >= $3 AND w.started_at < $4
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items excluded_item
+              WHERE excluded_item.media_server_id = w.media_server_id
+                AND excluded_item.item_id = w.item_id
+                AND excluded_item.library_id = e.external_id))))
+  )
 `
 
 type CatalogItemWindowSummaryParams struct {
@@ -217,13 +239,23 @@ func (q *Queries) CatalogItemWindowSummary(ctx context.Context, arg CatalogItemW
 
 const catalogLibraryTypeRows = `-- name: CatalogLibraryTypeRows :many
 WITH watch_stats AS (
-    SELECT media_server_id, item_id, COUNT(*) AS plays,
-           COALESCE(SUM(active_seconds), 0) AS watch_seconds
-    FROM watches
-    WHERE media_server_id = $1
+    SELECT w.media_server_id, w.item_id, COUNT(*) AS plays,
+           COALESCE(SUM(w.active_seconds), 0) AS watch_seconds
+    FROM watches w
+    WHERE w.media_server_id = $1
+      AND NOT EXISTS (
+          SELECT 1 FROM media_server_exclusions e
+          WHERE e.media_server_id = w.media_server_id
+            AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+              OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+                  SELECT 1 FROM library_items excluded_item
+                  WHERE excluded_item.media_server_id = w.media_server_id
+                    AND excluded_item.item_id = w.item_id
+                    AND excluded_item.library_id = e.external_id))))
+      )
       AND (CAST($2 AS INTEGER) = 0
-           OR (started_at >= $3 AND started_at < $4))
-    GROUP BY media_server_id, item_id
+           OR (w.started_at >= $3 AND w.started_at < $4))
+    GROUP BY w.media_server_id, w.item_id
 )
 SELECT li.library_id, li.item_type, COUNT(*) AS item_count,
        COALESCE(SUM(ws.plays), 0) AS plays,
@@ -549,6 +581,23 @@ func (q *Queries) GetCatalogItem(ctx context.Context, arg GetCatalogItemParams) 
 	return i, err
 }
 
+const getCatalogItemLibrary = `-- name: GetCatalogItemLibrary :one
+SELECT library_id FROM library_items
+WHERE media_server_id = $1 AND item_id = $2
+`
+
+type GetCatalogItemLibraryParams struct {
+	MediaServerID string
+	ItemID        string
+}
+
+func (q *Queries) GetCatalogItemLibrary(ctx context.Context, arg GetCatalogItemLibraryParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getCatalogItemLibrary, arg.MediaServerID, arg.ItemID)
+	var library_id string
+	err := row.Scan(&library_id)
+	return library_id, err
+}
+
 const getLibrarySync = `-- name: GetLibrarySync :one
 SELECT media_server_id, state, cursor, seen_count, upserted_count, archived_count,
        last_error, lease_token, lease_expires_at, started_at, finished_at
@@ -598,6 +647,12 @@ JOIN library_items li ON li.media_server_id = lig.media_server_id AND li.item_id
 LEFT JOIN watches w ON w.media_server_id = lig.media_server_id AND w.item_id = lig.item_id
   AND (CAST($1 AS INTEGER) = 0
        OR (w.started_at >= $2 AND w.started_at < $3))
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND e.external_id = li.library_id))
+  )
 WHERE lig.media_server_id = $4 AND li.library_id = $5
   AND li.archived = FALSE
 GROUP BY lig.genre ORDER BY lig.genre LIMIT 1001
@@ -713,7 +768,19 @@ func (q *Queries) ListCatalogImportItems(ctx context.Context, arg ListCatalogImp
 }
 
 const listCatalogItemHistory = `-- name: ListCatalogItemHistory :many
-WITH root AS (
+WITH visible_watches AS (
+    SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name, w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name, w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at, w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at, w.library_id, w.library_name, w.stream_container, w.stream_video_codec, w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height, w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct, w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_source, w.import_record_id, w.import_provenance_guard, w.series_id, w.import_origin_record_id FROM watches w
+    WHERE NOT EXISTS (
+        SELECT 1 FROM media_server_exclusions e
+        WHERE e.media_server_id = w.media_server_id
+          AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+            OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+                SELECT 1 FROM library_items excluded_item
+                WHERE excluded_item.media_server_id = w.media_server_id
+                  AND excluded_item.item_id = w.item_id
+                  AND excluded_item.library_id = e.external_id))))
+    )
+), root AS (
     SELECT library_items.item_id, library_items.item_type FROM library_items
     WHERE library_items.media_server_id = $4
       AND library_items.item_id = $5
@@ -740,7 +807,7 @@ WITH root AS (
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
            w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM target_items ti
-    JOIN watches w ON w.media_server_id = $4 AND w.item_id = ti.item_id
+    JOIN visible_watches w ON w.media_server_id = $4 AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
     UNION ALL
     SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
@@ -753,7 +820,7 @@ WITH root AS (
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
            w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM root
-    JOIN watches w ON w.media_server_id = $4 AND w.item_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = $4 AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
     UNION ALL
     SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
@@ -766,7 +833,7 @@ WITH root AS (
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
            w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM root
-    JOIN watches w ON w.media_server_id = $4 AND w.series_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = $4 AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
     WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
 )
@@ -3168,15 +3235,30 @@ func (q *Queries) ListStaleCatalogItems(ctx context.Context, arg ListStaleCatalo
 const rebuildLibraryItemRollup = `-- name: RebuildLibraryItemRollup :exec
 UPDATE library_items
 SET plays = (SELECT COUNT(*) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     watch_seconds = COALESCE((SELECT SUM(w.active_seconds) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id), 0),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))), 0),
     unique_users = (SELECT COUNT(DISTINCT w.media_user_id) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     first_played_at = (SELECT MIN(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     last_played_at = (SELECT MAX(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id)
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id))))
 WHERE library_items.media_server_id = $1
   AND library_items.item_id = $2
 `
@@ -3194,15 +3276,30 @@ func (q *Queries) RebuildLibraryItemRollup(ctx context.Context, arg RebuildLibra
 const rebuildLibraryItemRollups = `-- name: RebuildLibraryItemRollups :exec
 UPDATE library_items
 SET plays = (SELECT COUNT(*) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     watch_seconds = COALESCE((SELECT SUM(w.active_seconds) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id), 0),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))), 0),
     unique_users = (SELECT COUNT(DISTINCT w.media_user_id) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     first_played_at = (SELECT MIN(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     last_played_at = (SELECT MAX(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id)
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id))))
 WHERE library_items.media_server_id = $1
 `
 

@@ -180,7 +180,7 @@ func (s *postgresImportStore) CommitImportBatch(ctx context.Context, batch core.
 	rows, err := q.CheckpointImport(ctx, postgres.CheckpointImportParams{
 		ID: batch.JobID, Token: batch.LeaseToken, Cursor: batch.Cursor,
 		ReadDelta: int64(len(batch.Records)) + batch.Skipped, ImportedDelta: imported,
-		SkippedDelta: batch.Skipped, DuplicateDelta: duplicate,
+		SkippedDelta: batch.Skipped, DuplicateDelta: duplicate, UnresolvedLibraryDelta: batch.UnresolvedLibrary,
 		ExpiresAt: nullableTime(&batch.LeaseExpiresAt), Now: core.NormalizeTime(batch.Now),
 	})
 	if checkpointErr := importRowsError("checkpoint import", rows, err, core.ErrImportLeaseLost); checkpointErr != nil {
@@ -391,7 +391,8 @@ func postgresCreateImportParams(job core.ImportJob) postgres.CreateImportParams 
 	return postgres.CreateImportParams{
 		ID: job.ID, MediaServerID: job.MediaServerID, Source: string(job.Source), State: string(job.State),
 		Cursor: job.Cursor, ReadCount: job.Read, ImportedCount: job.Imported,
-		SkippedCount: job.Skipped, DuplicateCount: job.Duplicate, LastError: job.LastError,
+		SkippedCount: job.Skipped, DuplicateCount: job.Duplicate, UnresolvedLibraryCount: job.UnresolvedLibrary,
+		LastError:  job.LastError,
 		LeaseToken: job.LeaseToken, LeaseExpiresAt: nullableTime(job.LeaseExpiresAt), RequestedBy: job.RequestedBy,
 		CreatedAt: core.NormalizeTime(job.CreatedAt), StartedAt: nullableTime(job.StartedAt),
 		FinishedAt: nullableTime(job.FinishedAt), UpdatedAt: core.NormalizeTime(job.UpdatedAt),
@@ -402,7 +403,8 @@ func postgresImport(row postgres.Import) (core.ImportJob, error) {
 	job := core.ImportJob{
 		ID: row.ID, MediaServerID: row.MediaServerID, Source: core.ImportSource(row.Source), State: core.ImportState(row.State),
 		Cursor: row.Cursor, Read: row.ReadCount, Imported: row.ImportedCount, Skipped: row.SkippedCount,
-		Duplicate: row.DuplicateCount, LastError: row.LastError, LeaseToken: row.LeaseToken,
+		Duplicate: row.DuplicateCount, UnresolvedLibrary: row.UnresolvedLibraryCount,
+		LastError: row.LastError, LeaseToken: row.LeaseToken,
 		LeaseExpiresAt: timeFromNull(row.LeaseExpiresAt), RequestedBy: row.RequestedBy,
 		CreatedAt: core.NormalizeTime(row.CreatedAt), StartedAt: timeFromNull(row.StartedAt),
 		FinishedAt: timeFromNull(row.FinishedAt), UpdatedAt: core.NormalizeTime(row.UpdatedAt),

@@ -22,6 +22,11 @@ type Metrics interface {
 	SetRunningImports(int)
 }
 
+// LibraryResolver maps an imported item through its media server.
+type LibraryResolver interface {
+	ResolveLibrary(context.Context, string, string) (core.Library, bool, error)
+}
+
 // WorkerConfig bounds scheduling, leases, and duplicate matching.
 type WorkerConfig struct {
 	Interval, LeaseDuration, ResumeWindow, StoreTimeout time.Duration
@@ -29,14 +34,17 @@ type WorkerConfig struct {
 
 // WorkerDependencies contains injected worker boundaries.
 type WorkerDependencies struct {
-	Store     core.ImportStore
-	Reporting PlaybackReportingService
-	UserData  UserDataService
-	Clock     core.Clock
-	Metrics   Metrics
-	Logger    *slog.Logger
-	Staging   *Staging
-	Wait      func(context.Context, time.Duration) error
+	Store      core.ImportStore
+	Reporting  PlaybackReportingService
+	UserData   UserDataService
+	Clock      core.Clock
+	Metrics    Metrics
+	Logger     *slog.Logger
+	Staging    *Staging
+	Exclusions core.ExclusionReader
+	Libraries  core.ImportLibraryResolver
+	Items      LibraryResolver
+	Wait       func(context.Context, time.Duration) error
 }
 
 // Worker processes at most one import at a time in this process.
@@ -142,7 +150,12 @@ func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error)
 		if len(records) == 0 && skipped == 0 {
 			return w.complete(ctx, job)
 		}
-		result, commitErr := w.commit(ctx, job, records, cursor, skipped)
+		records, exclusionSkipped, unresolved, exclusionErr := w.filterExcluded(ctx, job.MediaServerID, records)
+		if exclusionErr != nil {
+			return w.fail(ctx, job, exclusionErr)
+		}
+		skipped += exclusionSkipped
+		result, commitErr := w.commit(ctx, job, records, cursor, skipped, unresolved)
 		if commitErr != nil {
 			if errors.Is(commitErr, core.ErrImportLeaseLost) {
 				return w.handleLeaseLoss(ctx, job)
@@ -155,10 +168,98 @@ func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error)
 		w.deps.Metrics.AddImportedRecords(string(job.Source), result.Imported-job.Imported)
 		job.Cursor, job.Read, job.Imported = cursor, result.Read, result.Imported
 		job.Skipped, job.Duplicate = result.Skipped, result.Duplicate
+		job.UnresolvedLibrary = result.UnresolvedLibrary
 		if job.Source != core.ImportSourceJellyfinUserData && len(records)+int(skipped) < core.ImportBatchSize {
 			return w.complete(ctx, job)
 		}
 	}
+}
+
+func (w *Worker) filterExcluded(
+	ctx context.Context, serverID string, records []core.ImportedWatch,
+) ([]core.ImportedWatch, int64, int64, error) {
+	if w.deps.Exclusions == nil || len(records) == 0 {
+		return records, 0, 0, nil
+	}
+	exclusions, err := w.deps.Exclusions.GetExclusions(ctx, serverID)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("load import exclusions: %w", err)
+	}
+	filtered := make([]core.ImportedWatch, 0, len(records))
+	resolutions := make(map[string]importLibraryResolution, len(records))
+	var skipped, unresolved int64
+	for _, record := range records {
+		if exclusions.ExcludesUser(record.MediaUserID) {
+			skipped++
+			continue
+		}
+		resolution, resolveErr := w.importLibrary(ctx, serverID, record, exclusions, resolutions)
+		if resolveErr != nil {
+			return nil, 0, 0, resolveErr
+		}
+		if exclusions.ExcludesLibrary(resolution.library.ID) {
+			skipped++
+			continue
+		}
+		if !resolution.found && record.LibraryID == "" && len(exclusions.LibraryIDs) > 0 {
+			skipped++
+			unresolved++
+			continue
+		}
+		if resolution.found && record.LibraryID == "" {
+			record.LibraryID, record.LibraryName = resolution.library.ID, resolution.library.Name
+		}
+		filtered = append(filtered, record)
+	}
+	return filtered, skipped, unresolved, nil
+}
+
+type importLibraryResolution struct {
+	library core.Library
+	found   bool
+}
+
+func (w *Worker) importLibrary(
+	ctx context.Context, serverID string, record core.ImportedWatch,
+	exclusions core.MediaServerExclusions, known map[string]importLibraryResolution,
+) (importLibraryResolution, error) {
+	if record.LibraryID != "" {
+		return importLibraryResolution{library: core.Library{ID: record.LibraryID, Name: record.LibraryName}, found: true}, nil
+	}
+	if len(exclusions.LibraryIDs) == 0 {
+		return importLibraryResolution{}, nil
+	}
+	if resolution, ok := known[record.ItemID]; ok {
+		return resolution, nil
+	}
+	resolution, err := w.resolveImportLibrary(ctx, serverID, record.ItemID)
+	if err != nil {
+		return importLibraryResolution{}, err
+	}
+	known[record.ItemID] = resolution
+	return resolution, nil
+}
+
+func (w *Worker) resolveImportLibrary(
+	ctx context.Context, serverID, itemID string,
+) (importLibraryResolution, error) {
+	if w.deps.Libraries != nil {
+		libraryID, found, err := w.deps.Libraries.ResolveImportLibrary(ctx, serverID, itemID)
+		if err != nil {
+			return importLibraryResolution{}, fmt.Errorf("resolve import catalog library: %w", err)
+		}
+		if found {
+			return importLibraryResolution{library: core.Library{ID: libraryID}, found: true}, nil
+		}
+	}
+	if w.deps.Items == nil {
+		return importLibraryResolution{}, nil
+	}
+	library, found, err := w.deps.Items.ResolveLibrary(ctx, serverID, itemID)
+	if err != nil {
+		return importLibraryResolution{}, fmt.Errorf("resolve import media library: %w", err)
+	}
+	return importLibraryResolution{library: library, found: found}, nil
 }
 
 func (w *Worker) handleLeaseLoss(ctx context.Context, job core.ImportJob) error {
@@ -175,7 +276,7 @@ func (w *Worker) handleLeaseLoss(ctx context.Context, job core.ImportJob) error 
 }
 
 func (w *Worker) commit(
-	ctx context.Context, job core.ImportJob, records []core.ImportedWatch, cursor string, skipped int64,
+	ctx context.Context, job core.ImportJob, records []core.ImportedWatch, cursor string, skipped, unresolved int64,
 ) (core.ImportBatchResult, error) {
 	now := core.NormalizeTime(w.deps.Clock.Now())
 	lease := core.ImportLease{Token: job.LeaseToken, ExpiresAt: now.Add(w.config.LeaseDuration)}
@@ -189,7 +290,7 @@ func (w *Worker) commit(
 	defer cancelCommit()
 	return w.deps.Store.CommitImportBatch(commitCtx, core.ImportBatch{
 		JobID: job.ID, LeaseToken: job.LeaseToken, Cursor: cursor, Source: job.Source,
-		MediaServerID: job.MediaServerID, Records: records, Skipped: skipped,
+		MediaServerID: job.MediaServerID, Records: records, Skipped: skipped, UnresolvedLibrary: unresolved,
 		ResumeWindow: w.config.ResumeWindow, Now: now, LeaseExpiresAt: lease.ExpiresAt,
 	})
 }

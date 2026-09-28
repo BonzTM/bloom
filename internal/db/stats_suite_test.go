@@ -31,7 +31,30 @@ func runStatsEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 		assertStatsLibraries(t, pool, driver, reader, fixture.end)
 		assertStatsRejectsUnsafeUserIDs(t, reader, fixture)
 		assertStatsTitleOrdering(t, pool, driver, reader, fixture)
+		assertStatsExclusions(t, pool, driver, reader, fixture)
 	})
+}
+
+func assertStatsExclusions(
+	t *testing.T, pool *sql.DB, driver config.Driver, reader core.StatsReader, fixture statsFixture,
+) {
+	t.Helper()
+	store, err := db.NewExclusionStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewExclusionStore: %v", err)
+	}
+	settings := core.MediaServerExclusions{
+		MediaServerID: fixture.serverA, MediaUserIDs: []string{"stats-user-b"}, LibraryIDs: []string{"library-a"},
+	}
+	if err = store.ReplaceExclusions(t.Context(), settings); err != nil {
+		t.Fatalf("ReplaceExclusions: %v", err)
+	}
+	query := statsQuery(t, fixture, core.StatsReportOverview, "UTC")
+	query.Window.MediaServerID = fixture.serverA
+	result, err := reader.ReadStats(t.Context(), query)
+	if err != nil || result.Totals != (core.StatsTotals{Plays: 1, WatchSeconds: 200, UniqueUsers: 1, UniqueTitles: 1}) {
+		t.Fatalf("excluded overview = %+v, %v", result.Totals, err)
+	}
 }
 
 type statsFixture struct {

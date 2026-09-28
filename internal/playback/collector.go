@@ -54,6 +54,7 @@ type Config struct {
 type Dependencies struct {
 	Store       core.PlaybackPersistence
 	Source      Source
+	Exclusions  core.ExclusionReader
 	Clock       core.Clock
 	Logger      *slog.Logger
 	Observer    Observer
@@ -209,6 +210,11 @@ func (c *Collector) poll(ctx context.Context) error {
 		c.observePoll("failure", started)
 		return fmt.Errorf("list playback sessions: %w", err)
 	}
+	sessions, err = c.filterExcludedSessions(ctx, sessions)
+	if err != nil {
+		c.observePoll("failure", started)
+		return err
+	}
 	now := core.NormalizeTime(c.deps.Clock.Now())
 	if restoreErr := c.restoreRecent(ctx, now, sessions); restoreErr != nil {
 		c.observePoll("failure", started)
@@ -231,6 +237,39 @@ func (c *Collector) poll(ctx context.Context) error {
 		c.resolution.requestBackfill()
 	}
 	return nil
+}
+
+func (c *Collector) filterExcludedSessions(
+	ctx context.Context, sessions []core.PlaybackSession,
+) ([]core.PlaybackSession, error) {
+	if c.deps.Exclusions == nil || len(sessions) == 0 {
+		return sessions, nil
+	}
+	exclusions, err := c.deps.Exclusions.GetExclusions(ctx, c.server.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load playback exclusions: %w", err)
+	}
+	filtered := make([]core.PlaybackSession, 0, len(sessions))
+	resolver, canResolve := c.deps.Source.(core.LibraryResolver)
+	for _, session := range sessions {
+		if exclusions.ExcludesUser(session.MediaUserID) {
+			continue
+		}
+		if len(exclusions.LibraryIDs) > 0 {
+			if !canResolve {
+				continue
+			}
+			library, found, resolveErr := resolver.ResolveLibrary(ctx, session.ItemID)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("resolve playback exclusion library: %w", resolveErr)
+			}
+			if !found || exclusions.ExcludesLibrary(library.ID) {
+				continue
+			}
+		}
+		filtered = append(filtered, session)
+	}
+	return filtered, nil
 }
 
 func (c *Collector) restoreRecent(

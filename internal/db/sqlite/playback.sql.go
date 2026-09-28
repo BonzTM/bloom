@@ -263,7 +263,16 @@ func (q *Queries) FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPla
 }
 
 const getPlaybackWatchID = `-- name: GetPlaybackWatchID :one
-SELECT id FROM watches WHERE id = ?1
+SELECT w.id FROM watches w
+WHERE w.id = ?1
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                AND li.item_id = w.item_id AND li.library_id = e.external_id))))
+  )
 `
 
 func (q *Queries) GetPlaybackWatchID(ctx context.Context, id string) (string, error) {
@@ -287,6 +296,14 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state <> 'stopped'
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                AND li.item_id = w.item_id AND li.library_id = e.external_id))))
+  )
   AND (w.started_at < ?1
        OR (w.started_at = ?1 AND w.id < ?2))
 ORDER BY w.started_at DESC, w.id DESC
@@ -561,6 +578,14 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                AND li.item_id = w.item_id AND li.library_id = e.external_id))))
+  )
   AND (CAST(?1 AS TEXT) = ''
        OR w.media_server_id = CAST(?1 AS TEXT))
   AND (w.started_at < ?2

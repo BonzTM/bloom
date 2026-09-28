@@ -77,7 +77,8 @@ func validateUploadChunks(chunks []core.ImportUploadChunk) error {
 func validateImportBatch(batch core.ImportBatch) error {
 	if !core.ValidID(batch.JobID) || !core.ValidID(batch.MediaServerID) || batch.LeaseToken == "" ||
 		!batch.Source.Valid() || len(batch.Cursor) > core.MaxImportCursorBytes ||
-		len(batch.Records) > core.ImportBatchSize || batch.Skipped < 0 || batch.ResumeWindow <= 0 ||
+		len(batch.Records) > core.ImportBatchSize || batch.Skipped < 0 || batch.UnresolvedLibrary < 0 ||
+		batch.UnresolvedLibrary > batch.Skipped || batch.ResumeWindow <= 0 ||
 		batch.Now.IsZero() || !batch.LeaseExpiresAt.After(batch.Now) {
 		return core.ErrInvalidArgument
 	}

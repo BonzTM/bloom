@@ -60,7 +60,7 @@ func (q *Queries) FenceImportBatch(ctx context.Context, arg FenceImportBatchPara
 const getImport = `-- name: GetImport :one
 SELECT id, media_server_id, source, state, cursor, read_count, imported_count,
        skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
-       requested_by, created_at, started_at, finished_at, updated_at
+       requested_by, created_at, started_at, finished_at, updated_at, unresolved_library_count
 FROM imports WHERE id = $1
 `
 
@@ -85,6 +85,7 @@ func (q *Queries) GetImport(ctx context.Context, id string) (Import, error) {
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.UpdatedAt,
+		&i.UnresolvedLibraryCount,
 	)
 	return i, err
 }
@@ -92,7 +93,7 @@ func (q *Queries) GetImport(ctx context.Context, id string) (Import, error) {
 const listImports = `-- name: ListImports :many
 SELECT id, media_server_id, source, state, cursor, read_count, imported_count,
        skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
-       requested_by, created_at, started_at, finished_at, updated_at
+       requested_by, created_at, started_at, finished_at, updated_at, unresolved_library_count
 FROM imports
 WHERE (CAST($1 AS TEXT) = ''
        OR media_server_id = CAST($1 AS TEXT))
@@ -141,6 +142,7 @@ func (q *Queries) ListImports(ctx context.Context, arg ListImportsParams) ([]Imp
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.UpdatedAt,
+			&i.UnresolvedLibraryCount,
 		); err != nil {
 			return nil, err
 		}
@@ -168,7 +170,7 @@ const selectClaimableImport = `-- name: SelectClaimableImport :one
 
 SELECT id, media_server_id, source, state, cursor, read_count, imported_count,
        skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
-       requested_by, created_at, started_at, finished_at, updated_at
+       requested_by, created_at, started_at, finished_at, updated_at, unresolved_library_count
 FROM imports
 WHERE state = 'pending' OR (state = 'running' AND lease_expires_at <= $1)
 ORDER BY created_at, id
@@ -198,6 +200,7 @@ func (q *Queries) SelectClaimableImport(ctx context.Context, now sql.NullTime) (
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.UpdatedAt,
+		&i.UnresolvedLibraryCount,
 	)
 	return i, err
 }

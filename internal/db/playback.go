@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
@@ -201,6 +204,55 @@ func validatePlaybackCursor(query core.PlaybackQuery) error {
 		return core.ErrInvalidArgument
 	}
 	return nil
+}
+
+func validateActivityQuery(query core.ActivityQuery) error {
+	if query.Limit < 1 || query.Limit > core.MaxActivityPageSize+1 ||
+		query.MediaServerID != "" && !core.ValidID(query.MediaServerID) ||
+		!validActivityText(query.MediaUserID) || !validActivityText(query.LibraryID) ||
+		!validActivityText(query.ItemType) || !validActivityText(query.Client) ||
+		!validActivityText(query.DeviceID) || len(query.Search) > core.MaxActivitySearchBytes ||
+		!utf8.ValidString(query.Search) || strings.IndexFunc(query.Search, unicode.IsControl) >= 0 ||
+		query.PlayMethod != "" && !query.PlayMethod.Valid() ||
+		query.Source != "" && !query.Source.Valid() ||
+		query.ImportSource != "" && !query.ImportSource.Valid() {
+		return core.ErrInvalidArgument
+	}
+	if query.StartedAfter != nil && query.StartedBefore != nil &&
+		!query.StartedAfter.Before(*query.StartedBefore) {
+		return core.ErrInvalidArgument
+	}
+	return validateActivityCursor(query.Before)
+}
+
+func validateTimelineWatchQuery(query core.TimelineWatchQuery) error {
+	if !core.ValidID(query.MediaServerID) || !validActivityText(query.MediaUserID) ||
+		query.MediaUserID == "" || query.Limit < 1 || query.Limit > core.MaxTimelineWatchFetch {
+		return core.ErrInvalidArgument
+	}
+	return validateActivityCursor(query.Before)
+}
+
+func validateActivityCursor(cursor *core.ActivityCursor) error {
+	if cursor == nil {
+		return nil
+	}
+	if cursor.StartedAt.IsZero() || !core.ValidID(cursor.ID) {
+		return core.ErrInvalidArgument
+	}
+	return nil
+}
+
+func validActivityText(value string) bool {
+	return len(value) <= core.MaxExclusionIDBytes && utf8.ValidString(value) &&
+		strings.IndexFunc(value, unicode.IsControl) < 0
+}
+
+func activityTime(value *time.Time, fallback time.Time) time.Time {
+	if value == nil {
+		return fallback
+	}
+	return core.NormalizeTime(*value)
 }
 
 func validatePlaybackMutations(mutations []core.PlaybackMutation) error {

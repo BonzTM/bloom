@@ -15,8 +15,9 @@ type Service struct {
 	servers interface {
 		Get(context.Context, string) (core.MediaServerConnection, error)
 	}
-	wake  chan<- struct{}
-	cache *resultCache
+	wake       chan<- struct{}
+	cache      *resultCache
+	exclusions core.ExclusionReader
 }
 
 // NewService validates and constructs a catalog service.
@@ -25,12 +26,16 @@ func NewService(
 	servers interface {
 		Get(context.Context, string) (core.MediaServerConnection, error)
 	},
-	wake chan<- struct{}, clock core.Clock, cacheTTL time.Duration,
+	wake chan<- struct{}, clock core.Clock, cacheTTL time.Duration, supplied ...core.ExclusionReader,
 ) (*Service, error) {
 	if store == nil || servers == nil || clock == nil || cacheTTL < 0 {
 		return nil, fmt.Errorf("catalog service: %w", core.ErrInvalidArgument)
 	}
-	return &Service{store: store, servers: servers, wake: wake, cache: newResultCache(clock, cacheTTL)}, nil
+	service := &Service{store: store, servers: servers, wake: wake, cache: newResultCache(clock, cacheTTL)}
+	if len(supplied) > 0 {
+		service.exclusions = supplied[0]
+	}
+	return service, nil
 }
 
 // RequestSync durably schedules an immediate full walk.
@@ -42,7 +47,7 @@ func (s *Service) RequestSync(ctx context.Context, serverID string) (core.Librar
 	if err != nil {
 		return core.LibrarySync{}, err
 	}
-	s.cache.clear()
+	s.cache.clear(serverID)
 	if s.wake != nil {
 		select {
 		case s.wake <- struct{}{}:
@@ -58,12 +63,16 @@ func (s *Service) ListLibraries(
 ) ([]core.CatalogLibrarySummary, error) {
 	window = canonicalWindow(window, s.cache.ttl)
 	key := catalogCacheKey{kind: cacheLibraries, serverID: serverID, window: window}
-	if value, ok := s.cache.getLibraries(key); ok {
+	value, generation, ok := s.cache.getLibraries(key)
+	if ok {
 		return value, nil
 	}
 	value, err := s.store.ListCatalogLibraries(ctx, serverID, window)
 	if err == nil {
-		s.cache.putLibraries(key, value)
+		value, err = s.filterLibraries(ctx, serverID, value)
+	}
+	if err == nil {
+		s.cache.putLibraries(key, value, generation)
 	}
 	return value, err
 }
@@ -72,12 +81,26 @@ func (s *Service) ListLibraries(
 func (s *Service) ListItems(
 	ctx context.Context, query core.CatalogItemQuery,
 ) ([]core.CatalogItemStats, error) {
+	if excluded, err := s.libraryExcluded(ctx, query.MediaServerID, query.LibraryID); err != nil || excluded {
+		return nil, err
+	}
 	return s.store.ListCatalogItems(ctx, query)
 }
 
 // Item returns catalog metadata, descendants, and play totals for one item.
 func (s *Service) Item(ctx context.Context, serverID, itemID string) (core.CatalogItemDetail, error) {
-	return s.store.GetCatalogItem(ctx, serverID, itemID)
+	item, err := s.store.GetCatalogItem(ctx, serverID, itemID)
+	if err != nil {
+		return core.CatalogItemDetail{}, err
+	}
+	excluded, err := s.libraryExcluded(ctx, serverID, item.Item.Item.LibraryID)
+	if err != nil {
+		return core.CatalogItemDetail{}, err
+	}
+	if excluded {
+		return core.CatalogItemDetail{}, core.ErrNotFound
+	}
+	return item, nil
 }
 
 // History returns one bounded item-or-descendant watch page.
@@ -91,6 +114,9 @@ func (s *Service) History(
 func (s *Service) Recent(
 	ctx context.Context, serverID, libraryID string, limit int,
 ) ([]core.CatalogItemStats, error) {
+	if excluded, err := s.libraryExcluded(ctx, serverID, libraryID); err != nil || excluded {
+		return nil, err
+	}
 	return s.store.ListRecentCatalogItems(ctx, serverID, libraryID, limit)
 }
 
@@ -99,13 +125,17 @@ func (s *Service) Genres(
 	ctx context.Context, serverID, libraryID string, window core.CatalogWindow,
 ) ([]core.CatalogGenreSummary, error) {
 	window = canonicalWindow(window, s.cache.ttl)
+	if excluded, err := s.libraryExcluded(ctx, serverID, libraryID); err != nil || excluded {
+		return nil, err
+	}
 	key := catalogCacheKey{kind: cacheGenres, serverID: serverID, libraryID: libraryID, window: window}
-	if value, ok := s.cache.getGenres(key); ok {
+	value, generation, ok := s.cache.getGenres(key)
+	if ok {
 		return value, nil
 	}
 	value, err := s.store.ListCatalogGenres(ctx, serverID, libraryID, window)
 	if err == nil {
-		s.cache.putGenres(key, value)
+		s.cache.putGenres(key, value, generation)
 	}
 	return value, err
 }
@@ -114,5 +144,38 @@ func (s *Service) Genres(
 func (s *Service) Stale(
 	ctx context.Context, query core.CatalogStaleQuery,
 ) ([]core.CatalogItemStats, error) {
+	if excluded, err := s.libraryExcluded(ctx, query.MediaServerID, query.LibraryID); err != nil || excluded {
+		return nil, err
+	}
 	return s.store.ListStaleCatalogItems(ctx, query)
+}
+
+// Invalidate clears catalog aggregate caches after visibility settings change.
+func (s *Service) Invalidate(serverID string) { s.cache.clear(serverID) }
+
+func (s *Service) libraryExcluded(ctx context.Context, serverID, libraryID string) (bool, error) {
+	if s.exclusions == nil || libraryID == "" {
+		return false, nil
+	}
+	value, err := s.exclusions.GetExclusions(ctx, serverID)
+	return value.ExcludesLibrary(libraryID), err
+}
+
+func (s *Service) filterLibraries(
+	ctx context.Context, serverID string, values []core.CatalogLibrarySummary,
+) ([]core.CatalogLibrarySummary, error) {
+	if s.exclusions == nil {
+		return values, nil
+	}
+	settings, err := s.exclusions.GetExclusions(ctx, serverID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]core.CatalogLibrarySummary, 0, len(values))
+	for _, value := range values {
+		if !settings.ExcludesLibrary(value.LibraryID) {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered, nil
 }

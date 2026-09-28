@@ -21,6 +21,7 @@ type postgresPlaybackStore struct {
 var (
 	_ core.PlaybackStore        = (*postgresPlaybackStore)(nil)
 	_ core.PlaybackLibraryStore = (*postgresPlaybackStore)(nil)
+	_ core.ActivityStore        = (*postgresPlaybackStore)(nil)
 )
 
 func newPostgresPlaybackStore(pool *sql.DB, resumeWindow time.Duration) *postgresPlaybackStore {
@@ -336,6 +337,165 @@ func (s *postgresPlaybackStore) listHistory(
 	return watches, nil
 }
 
+func (s *postgresPlaybackStore) ListActivity(
+	ctx context.Context, query core.ActivityQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := validateActivityQuery(query); err != nil {
+		return nil, fmt.Errorf("list activity: %w", err)
+	}
+	beforeTime, beforeID := postgresActivityCursor(query.Before)
+	params := newPostgresActivityParams(query, beforeTime, beforeID)
+	rows, err := s.listActivityRows(ctx, query, params)
+	if err != nil {
+		return nil, playbackStoreError("list activity", err)
+	}
+	result := make([]core.PlaybackWatch, 0, len(rows))
+	for _, row := range rows {
+		watch, mapErr := postgresActivityWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map activity watch", mapErr)
+		}
+		result = append(result, watch)
+	}
+	return result, nil
+}
+
+type postgresActivityParams struct {
+	library, itemType, client, device, playMethod, source, importSource string
+	startedAfterSet, startedBeforeSet, pageSize                         int32
+	startedAfter, startedBefore, beforeTime                             time.Time
+	search, beforeID                                                    string
+}
+
+func newPostgresActivityParams(
+	query core.ActivityQuery, beforeTime time.Time, beforeID string,
+) postgresActivityParams {
+	minimum := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	maximum := time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
+	return postgresActivityParams{
+		library: query.LibraryID, itemType: query.ItemType, client: query.Client, device: query.DeviceID,
+		playMethod: string(query.PlayMethod), source: string(query.Source), importSource: string(query.ImportSource),
+		startedAfterSet:  boolToInt32(query.StartedAfter != nil),
+		startedAfter:     activityTime(query.StartedAfter, minimum),
+		startedBeforeSet: boolToInt32(query.StartedBefore != nil),
+		startedBefore:    activityTime(query.StartedBefore, maximum), search: query.Search,
+		beforeTime: beforeTime, beforeID: beforeID, pageSize: int32(query.Limit), //nolint:gosec // validated above.
+	}
+}
+
+func (s *postgresPlaybackStore) listActivityRows(
+	ctx context.Context, query core.ActivityQuery, params postgresActivityParams,
+) ([]postgres.ListActivityWatchesRow, error) {
+	switch {
+	case query.MediaServerID != "" && query.MediaUserID != "":
+		rows, err := s.q.ListServerUserActivityWatches(ctx, params.serverUser(query.MediaServerID, query.MediaUserID))
+		return normalizePostgresActivityRows(rows), err
+	case query.MediaServerID != "":
+		rows, err := s.q.ListServerActivityWatches(ctx, params.server(query.MediaServerID))
+		return normalizePostgresActivityRows(rows), err
+	case query.MediaUserID != "":
+		rows, err := s.q.ListUserActivityWatches(ctx, params.user(query.MediaUserID))
+		return normalizePostgresActivityRows(rows), err
+	default:
+		return s.q.ListActivityWatches(ctx, params.global())
+	}
+}
+
+func (p postgresActivityParams) global() postgres.ListActivityWatchesParams {
+	return postgres.ListActivityWatchesParams{
+		LibraryFilter: p.library, ItemTypeFilter: p.itemType, ClientFilter: p.client,
+		DeviceFilter: p.device, PlayMethodFilter: p.playMethod, SourceFilter: p.source,
+		ImportSourceFilter: p.importSource, StartedAfterSet: p.startedAfterSet, StartedAfter: p.startedAfter,
+		StartedBeforeSet: p.startedBeforeSet, StartedBefore: p.startedBefore, SearchText: p.search,
+		BeforeStartedAt: p.beforeTime, BeforeID: p.beforeID, PageSize: p.pageSize,
+	}
+}
+
+func (p postgresActivityParams) user(userID string) postgres.ListUserActivityWatchesParams {
+	base := p.global()
+	return postgres.ListUserActivityWatchesParams{
+		MediaUserID: userID, LibraryFilter: base.LibraryFilter, ItemTypeFilter: base.ItemTypeFilter,
+		ClientFilter: base.ClientFilter, DeviceFilter: base.DeviceFilter, PlayMethodFilter: base.PlayMethodFilter,
+		SourceFilter: base.SourceFilter, ImportSourceFilter: base.ImportSourceFilter,
+		StartedAfterSet: base.StartedAfterSet, StartedAfter: base.StartedAfter,
+		StartedBeforeSet: base.StartedBeforeSet, StartedBefore: base.StartedBefore,
+		SearchText: base.SearchText, BeforeStartedAt: base.BeforeStartedAt,
+		BeforeID: base.BeforeID, PageSize: base.PageSize,
+	}
+}
+
+func (p postgresActivityParams) server(serverID string) postgres.ListServerActivityWatchesParams {
+	base := p.global()
+	return postgres.ListServerActivityWatchesParams{
+		MediaServerID: serverID, LibraryFilter: base.LibraryFilter, ItemTypeFilter: base.ItemTypeFilter,
+		ClientFilter: base.ClientFilter, DeviceFilter: base.DeviceFilter, PlayMethodFilter: base.PlayMethodFilter,
+		SourceFilter: base.SourceFilter, ImportSourceFilter: base.ImportSourceFilter,
+		StartedAfterSet: base.StartedAfterSet, StartedAfter: base.StartedAfter,
+		StartedBeforeSet: base.StartedBeforeSet, StartedBefore: base.StartedBefore,
+		SearchText: base.SearchText, BeforeStartedAt: base.BeforeStartedAt,
+		BeforeID: base.BeforeID, PageSize: base.PageSize,
+	}
+}
+
+func (p postgresActivityParams) serverUser(serverID, userID string) postgres.ListServerUserActivityWatchesParams {
+	base := p.server(serverID)
+	return postgres.ListServerUserActivityWatchesParams{
+		MediaServerID: serverID, MediaUserID: userID, LibraryFilter: base.LibraryFilter,
+		ItemTypeFilter: base.ItemTypeFilter, ClientFilter: base.ClientFilter, DeviceFilter: base.DeviceFilter,
+		PlayMethodFilter: base.PlayMethodFilter, SourceFilter: base.SourceFilter,
+		ImportSourceFilter: base.ImportSourceFilter, StartedAfterSet: base.StartedAfterSet,
+		StartedAfter: base.StartedAfter, StartedBeforeSet: base.StartedBeforeSet,
+		StartedBefore: base.StartedBefore, SearchText: base.SearchText,
+		BeforeStartedAt: base.BeforeStartedAt, BeforeID: base.BeforeID, PageSize: base.PageSize,
+	}
+}
+
+type postgresActivityRow interface {
+	postgres.ListActivityWatchesRow | postgres.ListUserActivityWatchesRow |
+		postgres.ListServerActivityWatchesRow | postgres.ListServerUserActivityWatchesRow
+}
+
+func normalizePostgresActivityRows[T postgresActivityRow](rows []T) []postgres.ListActivityWatchesRow {
+	result := make([]postgres.ListActivityWatchesRow, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, postgres.ListActivityWatchesRow(row))
+	}
+	return result
+}
+
+func (s *postgresPlaybackStore) ListTimelineWatches(
+	ctx context.Context, query core.TimelineWatchQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := validateTimelineWatchQuery(query); err != nil {
+		return nil, fmt.Errorf("list timeline watches: %w", err)
+	}
+	beforeTime, beforeID := postgresActivityCursor(query.Before)
+	rows, err := s.q.ListTimelineWatches(ctx, postgres.ListTimelineWatchesParams{
+		MediaServerID: query.MediaServerID, MediaUserID: query.MediaUserID,
+		BeforeStartedAt: beforeTime, BeforeID: beforeID,
+		PageSize: int32(query.Limit), //nolint:gosec // validated above.
+	})
+	if err != nil {
+		return nil, playbackStoreError("list timeline watches", err)
+	}
+	result := make([]core.PlaybackWatch, 0, len(rows))
+	for _, row := range rows {
+		watch, mapErr := postgresTimelineWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map timeline watch", mapErr)
+		}
+		result = append(result, watch)
+	}
+	return result, nil
+}
+
+func postgresActivityCursor(cursor *core.ActivityCursor) (time.Time, string) {
+	if cursor == nil {
+		return time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC), "\uffff"
+	}
+	return core.NormalizeTime(cursor.StartedAt), cursor.ID
+}
+
 func (s *postgresPlaybackStore) findRecent(
 	ctx context.Context,
 	query core.PlaybackQuery,
@@ -470,6 +630,34 @@ func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) (core.PlaybackWat
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func postgresActivityWatch(row postgres.ListActivityWatchesRow) (core.PlaybackWatch, error) {
+	return postgresStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt,
+		row.EndedAt, row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func postgresTimelineWatch(row postgres.ListTimelineWatchesRow) (core.PlaybackWatch, error) {
+	return postgresStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt,
+		row.EndedAt, row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,

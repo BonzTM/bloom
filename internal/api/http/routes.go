@@ -87,6 +87,10 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
 	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
 	{method: http.MethodGet, path: "/api/v1/playback/watches/{id}/positions", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackPositions},
+	{method: http.MethodGet, path: "/api/v1/activity", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleActivity},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users/{media_user_id}/timeline", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleTimeline},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/exclusions", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetExclusions},
+	{method: http.MethodPut, path: "/api/v1/media-servers/{id}/exclusions", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handlePutExclusions},
 	{method: http.MethodGet, path: "/api/v1/exports/watches", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleExportWatches},
 	{method: http.MethodPost, path: "/api/v1/imports", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateImport},
 	{method: http.MethodGet, path: "/api/v1/imports", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListImports},
@@ -312,6 +316,10 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		handler = sanitizedInviteTrace(route)(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/playback") {
+		handler = s.mediaServerOperationMiddleware(handler)
+	}
+	if route.path == "/api/v1/activity" || strings.HasSuffix(route.path, "/timeline") ||
+		strings.HasSuffix(route.path, "/exclusions") {
 		handler = s.mediaServerOperationMiddleware(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/stats") {

@@ -27,19 +27,20 @@ type cacheEntry struct {
 }
 
 type resultCache struct {
-	mu       sync.Mutex
-	clock    core.Clock
-	capacity int
-	ttl      time.Duration
-	entries  map[cacheKey]*cacheEntry
-	newest   *cacheEntry
-	oldest   *cacheEntry
+	mu         sync.Mutex
+	clock      core.Clock
+	capacity   int
+	ttl        time.Duration
+	entries    map[cacheKey]*cacheEntry
+	generation map[string]uint64
+	newest     *cacheEntry
+	oldest     *cacheEntry
 }
 
 func newResultCache(clock core.Clock, capacity int, ttl time.Duration) *resultCache {
 	return &resultCache{
 		clock: clock, capacity: capacity, ttl: ttl,
-		entries: make(map[cacheKey]*cacheEntry, capacity),
+		entries: make(map[cacheKey]*cacheEntry, capacity), generation: make(map[string]uint64),
 	}
 }
 
@@ -59,30 +60,34 @@ func resultCacheKey(query core.StatsQuery) cacheKey {
 	}
 }
 
-func (c *resultCache) get(key cacheKey) (core.StatsResult, bool) {
+func (c *resultCache) get(key cacheKey) (core.StatsResult, uint64, bool) {
 	if c.ttl == 0 {
-		return core.StatsResult{}, false
+		return core.StatsResult{}, 0, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	generation := c.generation[key.server]
 	entry := c.entries[key]
 	if entry == nil {
-		return core.StatsResult{}, false
+		return core.StatsResult{}, generation, false
 	}
 	if !c.clock.Now().Before(entry.expiresAt) {
 		c.remove(entry)
-		return core.StatsResult{}, false
+		return core.StatsResult{}, generation, false
 	}
 	c.touch(entry)
-	return cloneResult(entry.value), true
+	return cloneResult(entry.value), generation, true
 }
 
-func (c *resultCache) put(key cacheKey, value core.StatsResult) {
+func (c *resultCache) put(key cacheKey, value core.StatsResult, generation uint64) {
 	if c.ttl == 0 {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.generation[key.server] != generation {
+		return
+	}
 	if existing := c.entries[key]; existing != nil {
 		existing.value, existing.expiresAt = cloneResult(value), c.clock.Now().Add(c.ttl)
 		c.touch(existing)
@@ -130,6 +135,20 @@ func (c *resultCache) detach(entry *cacheEntry) {
 func (c *resultCache) remove(entry *cacheEntry) {
 	delete(c.entries, entry.key)
 	c.detach(entry)
+}
+
+func (c *resultCache) clear(serverID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.generation[serverID]++
+	if serverID != "" {
+		c.generation[""]++
+	}
+	for key, entry := range c.entries {
+		if key.server == serverID || key.server == "" {
+			c.remove(entry)
+		}
+	}
 }
 
 func cloneResult(value core.StatsResult) core.StatsResult {

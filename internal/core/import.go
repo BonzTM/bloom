@@ -85,17 +85,21 @@ type ImportJob struct {
 	Cursor                         string
 	Read, Imported, Skipped        int64
 	Duplicate                      int64
-	LastError, LeaseToken          string
-	LeaseExpiresAt                 *time.Time
-	CreatedAt, UpdatedAt           time.Time
-	StartedAt, FinishedAt          *time.Time
+	// UnresolvedLibrary counts rows skipped because their library could not be
+	// resolved while the media server had at least one excluded library.
+	UnresolvedLibrary     int64
+	LastError, LeaseToken string
+	LeaseExpiresAt        *time.Time
+	CreatedAt, UpdatedAt  time.Time
+	StartedAt, FinishedAt *time.Time
 }
 
 // Valid reports whether a job can safely cross the persistence boundary.
 func (j ImportJob) Valid() bool {
 	if !ValidID(j.ID) || !ValidID(j.MediaServerID) || !ValidID(j.RequestedBy) ||
 		!j.Source.Valid() || !j.State.Valid() || !validImportText(j.Cursor, MaxImportCursorBytes) ||
-		!validImportText(j.LastError, MaxImportErrorBytes) || min(j.Read, j.Imported, j.Skipped, j.Duplicate) < 0 ||
+		!validImportText(j.LastError, MaxImportErrorBytes) ||
+		min(j.Read, j.Imported, j.Skipped, j.Duplicate, j.UnresolvedLibrary) < 0 ||
 		!validImportCounters(j) || j.CreatedAt.IsZero() || j.UpdatedAt.IsZero() {
 		return false
 	}
@@ -114,7 +118,7 @@ func validImportCounters(job ImportJob) bool {
 	if job.Imported > job.Read || job.Skipped > job.Read-job.Imported {
 		return false
 	}
-	return job.Duplicate == job.Read-job.Imported-job.Skipped
+	return job.Duplicate == job.Read-job.Imported-job.Skipped && job.UnresolvedLibrary <= job.Skipped
 }
 
 // ImportCursor is the newest-first list position.
@@ -210,13 +214,16 @@ type ImportBatch struct {
 	MediaServerID             string
 	Records                   []ImportedWatch
 	Skipped                   int64
-	ResumeWindow              time.Duration
-	Now, LeaseExpiresAt       time.Time
+	// UnresolvedLibrary is the subset of Skipped records rejected because
+	// library exclusions were active and their library could not be resolved.
+	UnresolvedLibrary   int64
+	ResumeWindow        time.Duration
+	Now, LeaseExpiresAt time.Time
 }
 
 // ImportBatchResult contains the cumulative durable counters.
 type ImportBatchResult struct {
-	Read, Imported, Skipped, Duplicate int64
+	Read, Imported, Skipped, Duplicate, UnresolvedLibrary int64
 }
 
 // ImportStore is the durable job, lease, and atomic batch seam.
@@ -279,4 +286,9 @@ type PlaybackReportingReader interface {
 // ImportSourceReader reads one normalized page and returns its next cursor.
 type ImportSourceReader interface {
 	ReadImportBatch(context.Context, ImportJob) ([]ImportedWatch, string, int64, error)
+}
+
+// ImportLibraryResolver supplies a known catalog library for an imported item.
+type ImportLibraryResolver interface {
+	ResolveImportLibrary(context.Context, string, string) (string, bool, error)
 }

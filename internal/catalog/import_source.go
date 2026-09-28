@@ -60,3 +60,14 @@ func (s *UserDataSource) CatalogUserData(
 ) ([]core.LibraryUserData, error) {
 	return s.source.CatalogUserData(ctx, serverID, userID, itemIDs)
 }
+
+// ResolveImportLibrary returns the item's catalog library when it is known.
+func (s *UserDataSource) ResolveImportLibrary(
+	ctx context.Context, serverID, itemID string,
+) (string, bool, error) {
+	resolver, ok := s.store.(core.ImportLibraryResolver)
+	if !ok {
+		return "", false, nil
+	}
+	return resolver.ResolveImportLibrary(ctx, serverID, itemID)
+}

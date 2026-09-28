@@ -83,6 +83,16 @@ type playbackReader interface {
 	ListWatchPositions(ctx context.Context, watchID string) ([]core.PlaybackPosition, error)
 }
 
+type activityReader interface {
+	ListActivity(context.Context, core.ActivityQuery) ([]core.PlaybackWatch, error)
+	ListTimelineWatches(context.Context, core.TimelineWatchQuery) ([]core.PlaybackWatch, error)
+}
+
+type exclusionManager interface {
+	Read(context.Context, string) (core.MediaServerExclusions, error)
+	Replace(context.Context, core.MediaServerExclusions) (core.MediaServerExclusions, error)
+}
+
 type importManager interface {
 	CreatePlaybackReporting(context.Context, string, string) (core.ImportJob, error)
 	StageBloomExport(context.Context, io.Reader) (string, error)
@@ -183,6 +193,8 @@ type Server struct {
 	inviteMetrics          telemetry.InviteMetrics
 	accountMediaUsers      accountMediaUserManager
 	playbackReader         playbackReader
+	activityReader         activityReader
+	exclusions             exclusionManager
 	imports                importManager
 	catalog                catalogReader
 	statsReader            core.StatsReader
@@ -243,6 +255,10 @@ type Deps struct {
 	AccountMediaUsers accountMediaUserManager
 	// PlaybackReader supplies now-playing and history reads.
 	PlaybackReader playbackReader
+	// ActivityReader supplies filtered activity and per-user timeline reads.
+	ActivityReader activityReader
+	// Exclusions supplies cached per-media-server collection settings.
+	Exclusions exclusionManager
 	// Imports supplies history import lifecycle operations.
 	Imports importManager
 	// Catalog supplies library sync commands and type-agnostic reads.
@@ -392,6 +408,8 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		inviteMetrics:          telemetry.NopMetrics{},
 		accountMediaUsers:      deps.AccountMediaUsers,
 		playbackReader:         deps.PlaybackReader,
+		activityReader:         deps.ActivityReader,
+		exclusions:             deps.Exclusions,
 		imports:                deps.Imports,
 		catalog:                deps.Catalog,
 		statsReader:            deps.StatsReader,

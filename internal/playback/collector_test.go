@@ -1001,6 +1001,74 @@ func TestCollectorClosesRestoreOverflowWithLogAndMetric(t *testing.T) {
 	}
 }
 
+func TestCollectorSkipsExcludedUser(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	store := &memoryPlaybackStore{}
+	collector, err := NewCollector(managerTestServer(), Config{
+		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
+		MissedPolls: 1, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+	}, Dependencies{
+		Store: store, Source: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}}},
+		Exclusions: playbackExclusions{value: core.MediaServerExclusions{
+			MediaServerID: collectorServerID, MediaUserIDs: []string{"user"},
+		}},
+		Clock: testutil.NewFakeClock(now), Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewCollector: %v", err)
+	}
+	if err = collector.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.mutations) != 0 {
+		t.Fatalf("excluded user mutations = %+v, want none", store.mutations)
+	}
+}
+
+func TestCollectorLibraryResolutionPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		exclusions []string
+		found      bool
+		want       int
+		wantCalls  int
+	}{
+		{name: "unresolved with an excluded library", exclusions: []string{"excluded-library"}, wantCalls: 1},
+		{name: "unresolved without excluded libraries", want: 1},
+		{name: "resolved excluded library", exclusions: []string{"excluded-library"}, found: true, wantCalls: 1},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			source := &resolvingSource{
+				sequenceSource: &sequenceSource{},
+				responses:      map[string]core.Library{"item": {ID: "excluded-library", Name: "Excluded"}},
+				found:          map[string]bool{"item": testCase.found},
+			}
+			collector := &Collector{
+				server: managerTestServer(),
+				deps: Dependencies{
+					Source: source,
+					Exclusions: playbackExclusions{value: core.MediaServerExclusions{
+						MediaServerID: collectorServerID, LibraryIDs: testCase.exclusions,
+					}},
+				},
+			}
+			filtered, err := collector.filterExcludedSessions(t.Context(), []core.PlaybackSession{collectorSession()})
+			if err != nil || len(filtered) != testCase.want || len(source.calls) != testCase.wantCalls {
+				t.Fatalf("filterExcludedSessions = %+v, calls %v, %v", filtered, source.calls, err)
+			}
+		})
+	}
+}
+
+type playbackExclusions struct{ value core.MediaServerExclusions }
+
+func (e playbackExclusions) GetExclusions(context.Context, string) (core.MediaServerExclusions, error) {
+	return e.value, nil
+}
+
 func collectorSession() core.PlaybackSession {
 	return core.PlaybackSession{
 		ServerSessionID: "session", MediaUserID: "user", DeviceID: "device", ItemID: "item",

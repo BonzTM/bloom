@@ -286,6 +286,8 @@ const (
 	auditResourceInvites          = "route:invites"
 	auditResourceInvitePublic     = "route:invite_public"
 	auditResourcePlayback         = "route:playback"
+	auditResourceActivity         = "route:activity"
+	auditResourceExclusions       = "route:exclusions"
 	auditResourceImports          = "route:imports"
 	auditResourceWatchExports     = "route:watch_exports"
 	auditResourceStats            = "route:stats"
@@ -336,6 +338,10 @@ func routeResource(r *http.Request) string {
 		return auditResourceInvitePublic
 	case "/api/v1/playback/now", "/api/v1/playback/history", "/api/v1/playback/watches/{id}/positions":
 		return auditResourcePlayback
+	case "/api/v1/activity", "/api/v1/media-servers/{id}/users/{media_user_id}/timeline":
+		return auditResourceActivity
+	case "/api/v1/media-servers/{id}/exclusions":
+		return auditResourceExclusions
 	case "/api/v1/stats/overview", "/api/v1/stats/daily", "/api/v1/stats/patterns",
 		"/api/v1/stats/titles", "/api/v1/stats/users", "/api/v1/stats/libraries",
 		"/api/v1/stats/users/{media_server_id}/{media_user_id}", "/api/v1/stats/me",

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +19,8 @@ const (
 	catalogPagingServerID = "82000000-0000-4000-8000-000000000001"
 	catalogPlanServerID   = "87000000-0000-4000-8000-000000000001"
 	catalogPlanSeriesID   = "catalog-plan-series"
-	catalogPlanWatchCount = 5000
+	catalogPlanUserID     = "catalog-plan-user-000"
+	catalogPlanWatchCount = 1500
 )
 
 func runCatalogEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -585,6 +587,7 @@ SELECT media_server_id,item_id,'Large' FROM library_items WHERE media_server_id=
 
 func testCatalogPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
+	seedCatalogSortPlanFixture(t, pool, driver)
 	fields := []catalogPlanField{
 		{name: "name", column: "name", kind: "text"},
 		{name: "date", column: "date_created", kind: "nullable"},
@@ -645,10 +648,13 @@ ORDER BY started_at DESC,id DESC LIMIT 10`, catalogPlanServerID, catalogPlanSeri
 func seedCatalogPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
 	now := time.Date(2026, 9, 27, 18, 0, 0, 0, time.UTC)
+	// Seeding thousands of rows is the slow part of the suite under the race
+	// detector, so the fixture is seeded once and kept for every plan test;
+	// the suite's final migration teardown removes it.
+	if catalogPlanServerExists(t, pool, catalogPlanServerID) {
+		return
+	}
 	createCatalogServer(t, pool, driver, catalogPlanServerID, "Catalog Plan", now)
-	t.Cleanup(func() {
-		execTestSQL(t, pool, "DELETE FROM media_servers WHERE id=$1", catalogPlanServerID)
-	})
 	store, err := db.NewLibraryCatalogStore(pool, driver)
 	if err != nil {
 		t.Fatalf("NewLibraryCatalogStore: %v", err)
@@ -662,6 +668,67 @@ func seedCatalogPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("finish catalog plan items: %v", err)
 	}
 	seedCatalogPlanWatches(t, pool, driver, now)
+}
+
+const (
+	catalogSortPlanServerID = "87000000-0000-4000-8000-0000000000c3"
+	catalogPlanLibraryID    = "catalog-plan-library"
+	catalogPlanItemCount    = 800
+)
+
+// seedCatalogSortPlanFixture fills one library on its own server with enough
+// items that a sorted page is cheaper through its index than through a sort,
+// as it is in production; the detail and history plan fixture stays untouched.
+func seedCatalogSortPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	now := time.Date(2026, 9, 27, 18, 0, 0, 0, time.UTC)
+	if catalogPlanServerExists(t, pool, catalogSortPlanServerID) {
+		analyzeCatalogPlanTables(t, pool, driver)
+		return
+	}
+	createCatalogServer(t, pool, driver, catalogSortPlanServerID, "Catalog Sort Plan", now)
+	store, err := db.NewLibraryCatalogStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	sync := claimCatalogSync(t, store, catalogSortPlanServerID, now)
+	bulk := catalogPlanBulkItems(now)
+	for start := 0; start < len(bulk); start += core.CatalogPageSize {
+		end := min(start+core.CatalogPageSize, len(bulk))
+		sync, err = store.CommitLibrarySyncPage(t.Context(), sync, bulk[start:end], "", now)
+		if err != nil {
+			t.Fatalf("seed catalog sort plan library: %v", err)
+		}
+	}
+	if _, err = store.FinishLibrarySync(t.Context(), sync, now); err != nil {
+		t.Fatalf("finish catalog sort plan library: %v", err)
+	}
+	analyzeCatalogPlanTables(t, pool, driver)
+}
+
+// catalogPlanBulkItems spreads names, dates, and plays so every sort field
+// has distinct values and the planner sees a real distribution.
+func catalogPlanServerExists(t *testing.T, pool *sql.DB, serverID string) bool {
+	t.Helper()
+	var count int
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM media_servers WHERE id=$1", serverID).Scan(&count); err != nil {
+		t.Fatalf("count plan server: %v", err)
+	}
+	return count > 0
+}
+
+func catalogPlanBulkItems(now time.Time) []core.LibraryItem {
+	items := make([]core.LibraryItem, 0, catalogPlanItemCount)
+	for index := range catalogPlanItemCount {
+		item := catalogSuiteItem(catalogSortPlanServerID,
+			fmt.Sprintf("catalog-plan-movie-%04d", index), fmt.Sprintf("Plan Movie %04d", (index*7919)%catalogPlanItemCount), now)
+		item.LibraryID, item.ItemType = catalogPlanLibraryID, "Movie"
+		created := now.Add(-time.Duration(index) * time.Hour)
+		item.DateCreated, item.PremiereDate = &created, &created
+		items = append(items, item)
+	}
+	return items
 }
 
 func catalogPlanItems(now time.Time) []core.LibraryItem {
@@ -686,6 +753,7 @@ func seedCatalogPlanWatches(t *testing.T, pool *sql.DB, driver config.Driver, no
 	mutations := make([]core.PlaybackMutation, 0, catalogPlanWatchCount)
 	for index := range catalogPlanWatchCount {
 		watch := playbackStoreWatch(t, catalogPlanServerID, now.Add(time.Duration(index)*time.Second))
+		watch.MediaUserID = fmt.Sprintf("catalog-plan-user-%03d", index%256)
 		watch.ItemID = fmt.Sprintf("catalog-plan-item-%03d", index%128)
 		watch.SeriesID = fmt.Sprintf("catalog-plan-decoy-series-%02d", index%64)
 		watch.ServerSessionID = fmt.Sprintf("catalog-plan-session-%03d", index)
@@ -708,11 +776,10 @@ func seedCatalogPlanWatches(t *testing.T, pool *sql.DB, driver config.Driver, no
 
 func analyzeCatalogPlanTables(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
-	if driver != config.DriverPostgres {
-		return
-	}
-	if _, err := pool.ExecContext(t.Context(), "ANALYZE watches, library_items"); err != nil {
-		t.Fatalf("analyze catalog plan tables: %v", err)
+	for _, statement := range []string{"ANALYZE watches", "ANALYZE library_items"} {
+		if _, err := pool.ExecContext(t.Context(), statement); err != nil {
+			t.Fatalf("analyze catalog plan tables for %s: %v", driver, err)
+		}
 	}
 }
 
@@ -742,7 +809,7 @@ func assertCatalogPlan(
 ) {
 	t.Helper()
 	filter, prefix := "", ""
-	args := []any{catalogPagingServerID, "library-1", false}
+	args := []any{catalogSortPlanServerID, catalogPlanLibraryID, false}
 	if filtered {
 		filter, prefix = " AND item_type=$4", "type_"
 		args = append(args, "UnexpectedType")
@@ -761,23 +828,27 @@ ORDER BY %s LIMIT 10`, filter, after, innerOrder)
 }
 
 func catalogPlanAfter(field catalogPlanField, direction string, first int) (string, []any) {
-	comparison := ">"
+	// A first-page boundary sits beyond the data in the direction of travel,
+	// so the planner estimates the whole library rather than one row.
+	comparison, text, number := ">", "", int64(-1)
+	date := time.Unix(0, 0).UTC()
 	if direction == "DESC" {
-		comparison = "<"
+		comparison, text, number = "<", "\U0010FFFF", int64(math.MaxInt64)
+		date = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
 	}
 	switch field.kind {
 	case "text":
 		return fmt.Sprintf("(li.%s %s $%d OR (li.%s=$%d AND li.item_id>$%d))",
-			field.column, comparison, first, field.column, first, first+1), []any{"", ""}
+			field.column, comparison, first, field.column, first, first+1), []any{text, ""}
 	case "number":
 		return fmt.Sprintf("(li.%s %s $%d OR (li.%s=$%d AND li.item_id>$%d))",
-			field.column, comparison, first, field.column, first, first+1), []any{int64(-1), ""}
+			field.column, comparison, first, field.column, first, first+1), []any{number, ""}
 	default:
 		condition := fmt.Sprintf(`(($%d=0 AND (li.%s IS NULL OR li.%s %s $%d OR
 (li.%s=$%d AND li.item_id>$%d))) OR ($%d<>0 AND li.%s IS NULL AND li.item_id>$%d))`,
 			first, field.column, field.column, comparison, first+1, field.column, first+1, first+2,
 			first, field.column, first+2)
-		return condition, []any{0, time.Unix(0, 0).UTC(), ""}
+		return condition, []any{0, date, ""}
 	}
 }
 
@@ -806,6 +877,7 @@ func explainCatalogQuery(t *testing.T, pool *sql.DB, driver config.Driver, query
 			t.Fatalf("scan query plan: %v", err)
 		}
 		plan.WriteString(detail)
+		plan.WriteByte('\n')
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("catalog query plan = %q, %v", plan.String(), err)
@@ -815,15 +887,7 @@ func explainCatalogQuery(t *testing.T, pool *sql.DB, driver config.Driver, query
 
 func explainPostgresCatalogQuery(t *testing.T, pool *sql.DB, query string, args ...any) string {
 	t.Helper()
-	conn, err := pool.Conn(t.Context())
-	if err != nil {
-		t.Fatalf("catalog EXPLAIN connection: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-	if _, err = conn.ExecContext(t.Context(), "SET enable_seqscan=off"); err != nil {
-		t.Fatalf("disable sequential scan: %v", err)
-	}
-	rows, err := conn.QueryContext(t.Context(), "EXPLAIN "+query, args...)
+	rows, err := pool.QueryContext(t.Context(), "EXPLAIN "+query, args...)
 	if err != nil {
 		t.Fatalf("EXPLAIN: %v", err)
 	}
@@ -835,6 +899,7 @@ func explainPostgresCatalogQuery(t *testing.T, pool *sql.DB, query string, args 
 			t.Fatalf("scan PostgreSQL plan: %v", err)
 		}
 		plan.WriteString(line)
+		plan.WriteByte('\n')
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("PostgreSQL catalog query plan = %q, %v", plan.String(), err)

@@ -39,6 +39,7 @@ type ManagerOptions struct {
 	Wait        func(context.Context, time.Duration) error
 	RandomInt64 func(int64) int64
 	NewID       func() (string, error)
+	Exclusions  core.ExclusionReader
 }
 
 // Manager keeps exactly one collector running for each registered media server.
@@ -55,6 +56,7 @@ type Manager struct {
 	wait           func(context.Context, time.Duration) error
 	randomInt64    func(int64) int64
 	newID          func() (string, error)
+	exclusions     core.ExclusionReader
 
 	operationMu sync.Mutex
 	mu          sync.Mutex
@@ -84,6 +86,7 @@ func NewManager(
 		servers: servers, store: store, config: config, factory: factory,
 		clock: clock, logger: logger, metrics: metrics, refreshTrigger: options.Refresh,
 		wait: options.Wait, randomInt64: options.RandomInt64, newID: options.NewID,
+		exclusions: options.Exclusions,
 		collectors: make(map[string]managedCollector), deleting: make(map[string]bool),
 		errors: make(chan error, 1),
 	}
@@ -220,7 +223,8 @@ func (m *Manager) startCollector(runCtx context.Context, server core.MediaServer
 	}
 	collector, err := NewCollector(server, m.config, Dependencies{
 		Store: m.store, Source: m.factory(server), Clock: m.clock,
-		Logger: m.logger, Observer: m.metrics, Wait: m.wait,
+		Exclusions: m.exclusions,
+		Logger:     m.logger, Observer: m.metrics, Wait: m.wait,
 		RandomInt64: m.randomInt64, NewID: m.newID,
 	})
 	if err != nil {
