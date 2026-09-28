@@ -202,8 +202,16 @@ func commitSQLiteImportBatch(
 func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		if err := supersedeSQLiteUserData(ctx, q, batch, record); err != nil {
-			return 0, 0, importStoreError("supersede Jellyfin user-data watch", err)
+		crossDuplicate, err := sqliteCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if crossDuplicate {
+			duplicate++
+			continue
+		}
+		if supersedeErr := supersedeSQLiteUserData(ctx, q, batch, record); supersedeErr != nil {
+			return 0, 0, importStoreError("supersede Jellyfin user-data watch", supersedeErr)
 		}
 		dupe, err := sqliteImportDuplicate(ctx, q, batch, record)
 		if err != nil {
@@ -214,14 +222,6 @@ func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch cor
 			if rebuildErr := rebuildSQLiteImportRollup(ctx, q, batch.MediaServerID, record.ItemID); rebuildErr != nil {
 				return 0, 0, rebuildErr
 			}
-			continue
-		}
-		crossDuplicate, err := sqliteCrossSourceDuplicate(ctx, q, batch, record.RecordID)
-		if err != nil {
-			return 0, 0, err
-		}
-		if crossDuplicate {
-			duplicate++
 			continue
 		}
 		id, err := core.NewID()

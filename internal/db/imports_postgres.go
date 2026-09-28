@@ -209,13 +209,7 @@ func fencePostgresImport(ctx context.Context, q *postgres.Queries, batch core.Im
 }
 
 func lockPostgresImportKeys(ctx context.Context, q *postgres.Queries, batch core.ImportBatch) error {
-	keys := make([]string, 0, len(batch.Records))
-	for _, record := range batch.Records {
-		keys = append(keys, watchDedupKey(batch.MediaServerID, record.MediaUserID, record.ItemID))
-	}
-	slices.Sort(keys)
-	keys = slices.Compact(keys)
-	for _, key := range keys {
+	for _, key := range postgresImportLockKeys(batch) {
 		if err := q.LockWatchDedup(ctx, key); err != nil {
 			return importStoreError("lock watch deduplication key", err)
 		}
@@ -223,11 +217,31 @@ func lockPostgresImportKeys(ctx context.Context, q *postgres.Queries, batch core
 	return nil
 }
 
+func postgresImportLockKeys(batch core.ImportBatch) []string {
+	keys := make([]string, 0, 2*len(batch.Records))
+	for _, record := range batch.Records {
+		keys = append(keys, watchDedupKey(batch.MediaServerID, record.MediaUserID, record.ItemID))
+		if key, ok := crossSourceActivityLockKey(batch.MediaServerID, batch.Source, record.RecordID); ok {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
 func insertPostgresImportRecords(ctx context.Context, q *postgres.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		if err := supersedePostgresUserData(ctx, q, batch, record); err != nil {
-			return 0, 0, importStoreError("supersede Jellyfin user-data watch", err)
+		crossDuplicate, err := postgresCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if crossDuplicate {
+			duplicate++
+			continue
+		}
+		if supersedeErr := supersedePostgresUserData(ctx, q, batch, record); supersedeErr != nil {
+			return 0, 0, importStoreError("supersede Jellyfin user-data watch", supersedeErr)
 		}
 		dupe, err := postgresImportDuplicate(ctx, q, batch, record)
 		if err != nil {
@@ -238,14 +252,6 @@ func insertPostgresImportRecords(ctx context.Context, q *postgres.Queries, batch
 			if rebuildErr := rebuildPostgresImportRollup(ctx, q, batch.MediaServerID, record.ItemID); rebuildErr != nil {
 				return 0, 0, rebuildErr
 			}
-			continue
-		}
-		crossDuplicate, err := postgresCrossSourceDuplicate(ctx, q, batch, record.RecordID)
-		if err != nil {
-			return 0, 0, err
-		}
-		if crossDuplicate {
-			duplicate++
 			continue
 		}
 		id, err := core.NewID()

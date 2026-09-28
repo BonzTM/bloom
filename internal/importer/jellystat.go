@@ -480,6 +480,9 @@ func mapJellystatItem(record *core.ImportedWatch, row jellystatActivityRow, look
 		if episode, ok := lookups.episodes[episodeID]; ok {
 			record.ItemName = episode.Name
 			record.SeasonNumber, record.EpisodeNumber, record.Runtime = episode.SeasonNumber, episode.EpisodeNumber, episode.Runtime
+			if core.ValidCatalogID(episode.SeriesID) {
+				record.SeriesID = episode.SeriesID
+			}
 			if episode.SeriesName != "" {
 				record.SeriesName = episode.SeriesName
 			} else if series, found := lookups.items[episode.SeriesID]; found {

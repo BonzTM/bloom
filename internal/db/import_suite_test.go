@@ -56,6 +56,9 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("Playback Reporting deduplicates Jellystat plugin rows", func(t *testing.T) {
 		testPlaybackReportingJellystatCrossDedup(t, newImportFixture(t, pool, driver))
 	})
+	t.Run("cross-source duplicate preserves unrelated Jellyfin user data", func(t *testing.T) {
+		testCrossSourceDuplicatePreservesUserData(t, pool, newImportFixture(t, pool, driver))
+	})
 	t.Run("database upload chunks and terminal cleanup", func(t *testing.T) {
 		testDatabaseUploadLifecycle(t, newImportFixture(t, pool, driver))
 	})
@@ -106,6 +109,13 @@ func testDatabaseJellystatImport(
 	if err != nil || len(watches) != 4 {
 		t.Fatalf("Jellystat watches = %d, %v", len(watches), err)
 	}
+	var seriesID sql.NullString
+	err = pool.QueryRowContext(t.Context(), `SELECT series_id FROM watches
+        WHERE media_server_id = $1 AND import_record_id = 'activity-episode'`, fixture.serverID).
+		Scan(&seriesID)
+	if err != nil || !seriesID.Valid || seriesID.String != "series-1" {
+		t.Fatalf("Jellystat episode series id = %+v, %v", seriesID, err)
+	}
 }
 
 func createDatabaseJellystatJob(
@@ -153,6 +163,33 @@ func testPlaybackReportingJellystatCrossDedup(t *testing.T, fixture importFixtur
 	if result.Imported != 0 || result.Duplicate != 1 {
 		t.Fatalf("Playback Reporting cross-source counters = %+v", result)
 	}
+}
+
+func testCrossSourceDuplicatePreservesUserData(
+	t *testing.T, pool *sql.DB, fixture importFixture,
+) {
+	t.Helper()
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	existing := importedRecord("77", "original-item", fixture.now)
+	existing.MediaUserID = "original-user"
+	commitSingleImport(t, fixture, reporting, existing)
+	finishImportFixture(t, fixture, reporting)
+
+	userData := createClaimedImport(t, fixture, core.ImportSourceJellyfinUserData, "{}")
+	synthetic := userDataRecord("synthetic-user", "synthetic-item", fixture.now)
+	commitSingleImport(t, fixture, userData, synthetic)
+	finishImportFixture(t, fixture, userData)
+
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	conflict := importedRecord("plugin:77", synthetic.ItemID, fixture.now)
+	conflict.MediaUserID = synthetic.MediaUserID
+	result := commitSingleImport(t, fixture, jellystat, conflict)
+	if result.Imported != 0 || result.Duplicate != 1 {
+		t.Fatalf("cross-source duplicate counters = %+v", result)
+	}
+	assertSingleImportSource(
+		t, pool, fixture.serverID, synthetic.MediaUserID, synthetic.ItemID, "jellyfin_userdata",
+	)
 }
 
 type importFixtureServer struct{}

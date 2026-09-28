@@ -178,7 +178,11 @@ func TestJellystatActivityValidatesAndUsesFallbackNames(t *testing.T) {
 	lookups := newJellystatLookups()
 	lookups.users[row.UserID] = "lookup user"
 	lookups.episodes[valueOrEmpty(row.EpisodeID)] = jellystatEpisode{
-		Name: "lookup item", SeriesName: "lookup series",
+		Name: "lookup item", SeriesID: "lookup-series-id", SeriesName: "lookup series",
+	}
+	record, err = mapJellystatActivity(row, lookups)
+	if err != nil || record.SeriesID != "lookup-series-id" {
+		t.Fatalf("mapJellystatActivity series id = %q, %v", record.SeriesID, err)
 	}
 	invalid := "bad\nname"
 	for _, mutate := range []func(*jellystatActivityRow){
@@ -191,6 +195,18 @@ func TestJellystatActivityValidatesAndUsesFallbackNames(t *testing.T) {
 		if _, err := mapJellystatActivity(candidate, lookups); !errors.Is(err, core.ErrInvalidArgument) {
 			t.Fatalf("mapJellystatActivity accepted invalid fallback: %v", err)
 		}
+	}
+}
+
+func TestJellystatActivityDropsOversizedEpisodeSeriesID(t *testing.T) {
+	row := validJellystatActivityRow()
+	lookups := newJellystatLookups()
+	lookups.episodes[valueOrEmpty(row.EpisodeID)] = jellystatEpisode{
+		Name: "lookup item", SeriesID: strings.Repeat("s", core.MaxLibraryIDBytes+1),
+	}
+	record, err := mapJellystatActivity(row, lookups)
+	if err != nil || record.SeriesID != "" || record.ItemID != valueOrEmpty(row.EpisodeID) {
+		t.Fatalf("mapJellystatActivity = %+v, %v", record, err)
 	}
 }
 
@@ -321,7 +337,7 @@ func assertJellystatMovie(t *testing.T, record core.ImportedWatch) {
 func assertJellystatEpisode(t *testing.T, record core.ImportedWatch) {
 	t.Helper()
 	if record.ItemID != "episode-1" || record.ItemName != "Fixture Episode" ||
-		record.ItemType != "Episode" || record.SeriesName != "Fixture Series" ||
+		record.ItemType != "Episode" || record.SeriesID != "series-1" || record.SeriesName != "Fixture Series" ||
 		record.SeasonNumber == nil || *record.SeasonNumber != 2 ||
 		record.EpisodeNumber == nil || *record.EpisodeNumber != 3 ||
 		record.Runtime == nil || *record.Runtime != 30*time.Minute ||
