@@ -153,3 +153,17 @@ func TestAccountOpenAPIDocumentsPagingBounds(t *testing.T) {
 		t.Fatalf("missing account paging parameters: %v", want)
 	}
 }
+
+func TestAccountOpenAPIDocumentsNestedBounds(t *testing.T) {
+	account := loadOpenAPI(t).validator.Components.Schemas["AdminAccount"].Value
+	want := map[string]uint64{
+		"roles":       core.MaxAccountRoleAssignments,
+		"media_users": core.MaxAccountLinkedMediaUsers,
+	}
+	for name, maximum := range want {
+		schema := account.Properties[name].Value
+		if schema.MaxItems == nil || *schema.MaxItems != maximum {
+			t.Fatalf("%s maxItems = %v, want %d", name, schema.MaxItems, maximum)
+		}
+	}
+}

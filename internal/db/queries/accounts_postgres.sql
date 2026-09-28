@@ -7,9 +7,10 @@ SELECT a.id, a.username, a.username_key, a.created_at,
 FROM accounts AS a
 WHERE (CAST(sqlc.arg(search_key) AS TEXT) = ''
        OR POSITION(CAST(sqlc.arg(search_key) AS TEXT) IN a.username_key) > 0)
-  AND (a.username_key > sqlc.arg(after_username_key)
-       OR (a.username_key = sqlc.arg(after_username_key) AND a.id > sqlc.arg(after_id)))
-ORDER BY a.username_key, a.id
+  AND (a.username_key COLLATE "C" > sqlc.arg(after_username_key)
+       OR (a.username_key COLLATE "C" = sqlc.arg(after_username_key) AND a.id > sqlc.arg(after_id)))
+-- The accounts table is small; explicit C ordering guarantees engine parity without a collation-specific index.
+ORDER BY a.username_key COLLATE "C", a.id
 LIMIT sqlc.arg(page_size);
 
 -- name: GetAdminAccount :one
@@ -26,7 +27,8 @@ JOIN roles AS r ON r.id = ar.role_id
 WHERE ar.account_id IN (
     SELECT value FROM jsonb_array_elements_text(CAST(sqlc.arg(account_ids_json) AS jsonb))
 )
-ORDER BY ar.account_id, r.name, ar.source;
+ORDER BY ar.account_id, r.name COLLATE "C", ar.source
+LIMIT sqlc.arg(row_limit);
 
 -- name: ListAdminAccountMediaUsers :many
 SELECT amu.account_id, amu.media_server_id, ms.name AS media_server_name,
@@ -36,7 +38,8 @@ JOIN media_servers AS ms ON ms.id = amu.media_server_id
 WHERE amu.account_id IN (
     SELECT value FROM jsonb_array_elements_text(CAST(sqlc.arg(account_ids_json) AS jsonb))
 )
-ORDER BY amu.account_id, ms.name_key, amu.media_server_id;
+ORDER BY amu.account_id, ms.name_key, amu.media_server_id
+LIMIT sqlc.arg(row_limit);
 
 -- name: UsernamesByAccountIDs :many
 SELECT id, username

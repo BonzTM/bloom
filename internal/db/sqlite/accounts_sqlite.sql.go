@@ -50,7 +50,13 @@ WHERE amu.account_id IN (
     SELECT value FROM json_each(CAST(?1 AS TEXT))
 )
 ORDER BY amu.account_id, ms.name_key, amu.media_server_id
+LIMIT ?2
 `
+
+type ListAdminAccountMediaUsersParams struct {
+	AccountIdsJson string
+	RowLimit       int64
+}
 
 type ListAdminAccountMediaUsersRow struct {
 	AccountID       string
@@ -64,8 +70,8 @@ type ListAdminAccountMediaUsersRow struct {
 	SuppressedAt    sql.NullString
 }
 
-func (q *Queries) ListAdminAccountMediaUsers(ctx context.Context, accountIdsJson string) ([]ListAdminAccountMediaUsersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAdminAccountMediaUsers, accountIdsJson)
+func (q *Queries) ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccountMediaUsers, arg.AccountIdsJson, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +111,13 @@ WHERE ar.account_id IN (
     SELECT value FROM json_each(CAST(?1 AS TEXT))
 )
 ORDER BY ar.account_id, r.name, ar.source
+LIMIT ?2
 `
+
+type ListAdminAccountRolesParams struct {
+	AccountIdsJson string
+	RowLimit       int64
+}
 
 type ListAdminAccountRolesRow struct {
 	AccountID string
@@ -113,8 +125,8 @@ type ListAdminAccountRolesRow struct {
 	Source    string
 }
 
-func (q *Queries) ListAdminAccountRoles(ctx context.Context, accountIdsJson string) ([]ListAdminAccountRolesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAdminAccountRoles, accountIdsJson)
+func (q *Queries) ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccountRoles, arg.AccountIdsJson, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

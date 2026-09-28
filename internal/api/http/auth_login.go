@@ -279,6 +279,7 @@ const (
 	auditResourceAuthOIDCStart    = "route:auth.oidc.start"
 	auditResourceAuthOIDCCallback = "route:auth.oidc.callback"
 	auditResourceRoles            = "route:roles"
+	auditResourceAccounts         = "route:accounts"
 	auditResourceMediaServers     = "route:media_servers"
 	auditResourceDownloadManagers = "route:download_managers"
 	auditResourceNotifications    = "route:notification_channels"
@@ -316,6 +317,8 @@ func routeResource(r *http.Request) string {
 		return auditResourceAuthOIDCCallback
 	case "/api/v1/roles":
 		return auditResourceRoles
+	case "/api/v1/accounts", "/api/v1/accounts/{id}":
+		return auditResourceAccounts
 	case "/api/v1/media-servers", "/api/v1/media-servers/{id}",
 		"/api/v1/media-servers/{id}/probe", "/api/v1/media-servers/{id}/libraries",
 		"/api/v1/media-servers/{id}/users",

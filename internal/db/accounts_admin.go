@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -59,11 +60,44 @@ func accountIndexes(accounts []core.AdminAccount) map[string]int {
 	return indexes
 }
 
+type accountEnrichmentKind uint8
+
+const (
+	accountRoleEnrichment accountEnrichmentKind = iota + 1
+	accountMediaUserEnrichment
+)
+
+func accountEnrichmentRowLimit(accountCount int, kind accountEnrichmentKind) (int, error) {
+	if accountCount < 1 || accountCount > core.MaxAccountListPageSize {
+		return 0, errors.New("invalid administrative account enrichment bounds")
+	}
+	var perAccountBound int
+	switch kind {
+	case accountRoleEnrichment:
+		perAccountBound = core.MaxAccountRoleAssignments
+	case accountMediaUserEnrichment:
+		perAccountBound = core.MaxAccountLinkedMediaUsers
+	default:
+		return 0, errors.New("invalid administrative account enrichment kind")
+	}
+	return accountCount*perAccountBound + 1, nil
+}
+
+func checkAccountEnrichmentLookahead(rowCount, rowLimit int, kind string) error {
+	if rowCount < rowLimit {
+		return nil
+	}
+	return fmt.Errorf("administrative account %s enrichment exceeds its enforced bound", kind)
+}
+
 func appendAdminRole(accounts []core.AdminAccount, indexes map[string]int, accountID, name, source string) error {
 	index, ok := indexes[accountID]
 	roleSource := core.AccountRoleSource(source)
 	if !ok || !core.ValidRoleName(name) || !roleSource.Valid() {
 		return fmt.Errorf("invalid stored account role for %q", accountID)
+	}
+	if len(accounts[index].Roles) >= core.MaxAccountRoleAssignments {
+		return errors.New("administrative account role enrichment exceeds its enforced per-account bound")
 	}
 	accounts[index].Roles = append(accounts[index].Roles, core.AccountRoleAssignment{Name: name, Source: roleSource})
 	return nil
@@ -75,6 +109,9 @@ func appendAdminMediaUser(
 	index, ok := indexes[link.AccountID]
 	if !ok {
 		return fmt.Errorf("invalid stored account media user for %q", link.AccountID)
+	}
+	if len(accounts[index].MediaUsers) >= core.MaxAccountLinkedMediaUsers {
+		return errors.New("administrative account media-user enrichment exceeds its enforced per-account bound")
 	}
 	accounts[index].MediaUsers = append(accounts[index].MediaUsers, link)
 	return nil

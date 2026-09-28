@@ -92,18 +92,51 @@ func (s *sqliteAccountAdminReader) enrich(ctx context.Context, accounts []core.A
 		return fmt.Errorf("encode administrative account page: %w", err)
 	}
 	indexes := accountIndexes(accounts)
-	roles, err := s.q.ListAdminAccountRoles(ctx, encoded)
+	if err := s.enrichRoles(ctx, accounts, indexes, encoded); err != nil {
+		return err
+	}
+	return s.enrichMediaUsers(ctx, accounts, indexes, encoded)
+}
+
+func (s *sqliteAccountAdminReader) enrichRoles(
+	ctx context.Context, accounts []core.AdminAccount, indexes map[string]int, encoded string,
+) error {
+	rowLimit, err := accountEnrichmentRowLimit(len(accounts), accountRoleEnrichment)
+	if err != nil {
+		return err
+	}
+	roles, err := s.q.ListAdminAccountRoles(ctx, sqlite.ListAdminAccountRolesParams{
+		AccountIdsJson: encoded, RowLimit: int64(rowLimit),
+	})
 	if err != nil {
 		return fmt.Errorf("list administrative account roles: %w", err)
+	}
+	if err := checkAccountEnrichmentLookahead(len(roles), rowLimit, "role"); err != nil {
+		return err
 	}
 	for _, role := range roles {
 		if roleErr := appendAdminRole(accounts, indexes, role.AccountID, role.Name, role.Source); roleErr != nil {
 			return roleErr
 		}
 	}
-	links, err := s.q.ListAdminAccountMediaUsers(ctx, encoded)
+	return nil
+}
+
+func (s *sqliteAccountAdminReader) enrichMediaUsers(
+	ctx context.Context, accounts []core.AdminAccount, indexes map[string]int, encoded string,
+) error {
+	rowLimit, err := accountEnrichmentRowLimit(len(accounts), accountMediaUserEnrichment)
+	if err != nil {
+		return err
+	}
+	links, err := s.q.ListAdminAccountMediaUsers(ctx, sqlite.ListAdminAccountMediaUsersParams{
+		AccountIdsJson: encoded, RowLimit: int64(rowLimit),
+	})
 	if err != nil {
 		return fmt.Errorf("list administrative account media users: %w", err)
+	}
+	if err := checkAccountEnrichmentLookahead(len(links), rowLimit, "media-user"); err != nil {
+		return err
 	}
 	for _, row := range links {
 		link, mapErr := sqliteAccountMediaUser(

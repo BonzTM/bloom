@@ -12,6 +12,10 @@ import (
 const (
 	// MaxAccountListPageSize bounds one administrative account page.
 	MaxAccountListPageSize = 100
+	// MaxAccountRoleAssignments bounds roles returned for one account.
+	MaxAccountRoleAssignments = 100
+	// MaxAccountLinkedMediaUsers bounds media-user links returned for one account.
+	MaxAccountLinkedMediaUsers = 100
 	// MaxAccountSearchBytes bounds a submitted username substring before normalization.
 	MaxAccountSearchBytes = 128
 	// MaxAccountListCursorBytes bounds an opaque public account-list cursor.

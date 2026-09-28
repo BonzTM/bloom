@@ -4076,9 +4076,11 @@ components:
         sign_in_method: { type: string, enum: [local, oidc, both] }
         roles:
           type: array
+          maxItems: 100
           items: { $ref: "#/components/schemas/AccountRoleAssignment" }
         media_users:
           type: array
+          maxItems: 100
           items: { $ref: "#/components/schemas/AccountLinkedMediaUser" }
         is_self: { type: boolean }
     AdminAccountsResponse:

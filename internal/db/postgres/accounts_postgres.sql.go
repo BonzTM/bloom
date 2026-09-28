@@ -52,7 +52,13 @@ WHERE amu.account_id IN (
     SELECT value FROM jsonb_array_elements_text(CAST($1 AS jsonb))
 )
 ORDER BY amu.account_id, ms.name_key, amu.media_server_id
+LIMIT $2
 `
+
+type ListAdminAccountMediaUsersParams struct {
+	AccountIdsJson json.RawMessage
+	RowLimit       int32
+}
 
 type ListAdminAccountMediaUsersRow struct {
 	AccountID       string
@@ -66,8 +72,8 @@ type ListAdminAccountMediaUsersRow struct {
 	SuppressedAt    sql.NullTime
 }
 
-func (q *Queries) ListAdminAccountMediaUsers(ctx context.Context, accountIdsJson json.RawMessage) ([]ListAdminAccountMediaUsersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAdminAccountMediaUsers, accountIdsJson)
+func (q *Queries) ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccountMediaUsers, arg.AccountIdsJson, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +112,14 @@ JOIN roles AS r ON r.id = ar.role_id
 WHERE ar.account_id IN (
     SELECT value FROM jsonb_array_elements_text(CAST($1 AS jsonb))
 )
-ORDER BY ar.account_id, r.name, ar.source
+ORDER BY ar.account_id, r.name COLLATE "C", ar.source
+LIMIT $2
 `
+
+type ListAdminAccountRolesParams struct {
+	AccountIdsJson json.RawMessage
+	RowLimit       int32
+}
 
 type ListAdminAccountRolesRow struct {
 	AccountID string
@@ -115,8 +127,8 @@ type ListAdminAccountRolesRow struct {
 	Source    string
 }
 
-func (q *Queries) ListAdminAccountRoles(ctx context.Context, accountIdsJson json.RawMessage) ([]ListAdminAccountRolesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAdminAccountRoles, accountIdsJson)
+func (q *Queries) ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccountRoles, arg.AccountIdsJson, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +158,9 @@ SELECT a.id, a.username, a.username_key, a.created_at,
 FROM accounts AS a
 WHERE (CAST($1 AS TEXT) = ''
        OR POSITION(CAST($1 AS TEXT) IN a.username_key) > 0)
-  AND (a.username_key > $2
-       OR (a.username_key = $2 AND a.id > $3))
-ORDER BY a.username_key, a.id
+  AND (a.username_key COLLATE "C" > $2
+       OR (a.username_key COLLATE "C" = $2 AND a.id > $3))
+ORDER BY a.username_key COLLATE "C", a.id
 LIMIT $4
 `
 
@@ -169,6 +181,7 @@ type ListAdminAccountsRow struct {
 }
 
 // PostgreSQL account queries whose parameter syntax is engine-specific.
+// The accounts table is small; explicit C ordering guarantees engine parity without a collation-specific index.
 func (q *Queries) ListAdminAccounts(ctx context.Context, arg ListAdminAccountsParams) ([]ListAdminAccountsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAdminAccounts,
 		arg.SearchKey,

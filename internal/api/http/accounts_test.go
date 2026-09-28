@@ -2,15 +2,27 @@ package http
 
 import (
 	"context"
+	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
+	"github.com/BonzTM/bloom/internal/db"
+)
+
+const (
+	accountPasswordHashCanary = "account-password-hash-canary-7f31"
+	accountOIDCIssuerCanary   = "https://oidc-issuer-canary-91ac.example.test"
+	accountOIDCSubjectCanary  = "oidc-subject-canary-c54e"
+	accountOIDCClaimCanary    = "oidc-claim-canary-e28b"
 )
 
 type fakeAccountAdminReader struct {
@@ -100,6 +112,94 @@ func TestAccountsReturnsSecretFreeAdministrativeShape(t *testing.T) {
 	}
 }
 
+func TestAccountsDoNotLeakStoredCredentialCanaries(t *testing.T) {
+	reader := sqliteAccountAdminReaderWithCanaries(t)
+	h := newAuthHarness(t, nil)
+	h.server.accountAdmin = reader
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.logs.Reset()
+
+	list := h.request(t, http.MethodGet, "/api/v1/accounts", "", cookie)
+	detail := h.request(t, http.MethodGet, "/api/v1/accounts/11111111-1111-4111-8111-111111111111", "", cookie)
+	if list.Code != http.StatusOK || detail.Code != http.StatusOK {
+		t.Fatalf("real-reader responses = list %d, detail %d", list.Code, detail.Code)
+	}
+	assertAccountCanariesAbsent(t, "list response", list.Body.String())
+	assertAccountCanariesAbsent(t, "detail response", detail.Body.String())
+	if h.logs.Len() == 0 {
+		t.Fatal("captured application log is empty")
+	}
+	assertAccountCanariesAbsent(t, "application log", h.logs.String())
+	events := h.audit.snapshot()
+	if len(events) == 0 {
+		t.Fatal("captured audit events are empty")
+	}
+	audit, err := json.Marshal(events)
+	if err != nil {
+		t.Fatalf("marshal audit events: %v", err)
+	}
+	assertAccountCanariesAbsent(t, "audit events", string(audit))
+}
+
+func sqliteAccountAdminReaderWithCanaries(t *testing.T) core.AccountAdminReader {
+	t.Helper()
+	pool, err := db.Open(t.Context(), config.DatabaseConfig{
+		Driver: config.DriverSQLite, DSN: "file:account-admin-leakage?mode=memory&cache=shared",
+		MaxOpenConns: 1, MaxIdleConns: 1, ConnMaxLifetime: time.Hour, ConnMaxIdleTime: time.Hour,
+	}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("open SQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	if migrateErr := db.Migrate(t.Context(), pool, config.DriverSQLite); migrateErr != nil {
+		t.Fatalf("migrate SQLite: %v", migrateErr)
+	}
+	accounts, _, err := db.NewAccountStores(pool, config.DriverSQLite)
+	if err != nil {
+		t.Fatalf("NewAccountStores: %v", err)
+	}
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	account := core.Account{
+		ID: "11111111-1111-4111-8111-111111111111", Username: "alice",
+		PasswordHash: new(accountPasswordHashCanary), CreatedAt: now,
+	}
+	if createErr := accounts.CreateAccount(t.Context(), account); createErr != nil {
+		t.Fatalf("create canary account: %v", createErr)
+	}
+	seedAccountIdentityCanaries(t, pool, account.ID, now)
+	reader, err := db.NewAccountAdminReader(pool, config.DriverSQLite)
+	if err != nil {
+		t.Fatalf("NewAccountAdminReader: %v", err)
+	}
+	return reader
+}
+
+func seedAccountIdentityCanaries(t *testing.T, pool interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, accountID string, now time.Time,
+) {
+	t.Helper()
+	stored := now.Format("2006-01-02T15:04:05.000000Z")
+	_, err := pool.ExecContext(t.Context(), `INSERT INTO account_identities
+        (account_id, provider, issuer, subject, username_claim, mapped_roles, created_at, last_login_at)
+        VALUES (?, 'oidc', ?, ?, ?, '[]', ?, ?)`, accountID, accountOIDCIssuerCanary,
+		accountOIDCSubjectCanary, accountOIDCClaimCanary, stored, stored)
+	if err != nil {
+		t.Fatalf("seed canary identity: %v", err)
+	}
+}
+
+func assertAccountCanariesAbsent(t *testing.T, location, value string) {
+	t.Helper()
+	for _, canary := range [...]string{
+		accountPasswordHashCanary, accountOIDCIssuerCanary, accountOIDCSubjectCanary, accountOIDCClaimCanary,
+	} {
+		if strings.Contains(value, canary) {
+			t.Fatalf("%s contains credential canary %q", location, canary)
+		}
+	}
+}
+
 func TestAccountsCursorRoundTripAndQueryBinding(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
@@ -124,6 +224,7 @@ func TestAccountsCursorRoundTripAndQueryBinding(t *testing.T) {
 }
 
 func TestAccountsLimitAndSearchValidation(t *testing.T) {
+	malformedJSONCursor := base64.RawURLEncoding.EncodeToString([]byte("{"))
 	tests := []struct {
 		name, query, field string
 	}{
@@ -133,6 +234,10 @@ func TestAccountsLimitAndSearchValidation(t *testing.T) {
 		{name: "oversized search", query: "?q=" + strings.Repeat("a", core.MaxAccountSearchBytes+1), field: "q"},
 		{name: "duplicate search", query: "?q=a&q=b", field: "q"},
 		{name: "invalid cursor", query: "?cursor=***", field: "cursor"},
+		{name: "oversized cursor", query: "?cursor=" + strings.Repeat("a", core.MaxAccountListCursorBytes+1), field: "cursor"},
+		{name: "duplicate cursor", query: "?cursor=a&cursor=b", field: "cursor"},
+		{name: "empty cursor", query: "?cursor=", field: "cursor"},
+		{name: "malformed cursor JSON", query: "?cursor=" + malformedJSONCursor, field: "cursor"},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -145,6 +250,47 @@ func TestAccountsLimitAndSearchValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAccountsAcceptsExactSearchAndCursorBounds(t *testing.T) {
+	t.Run("search", func(t *testing.T) {
+		h := newAuthHarness(t, nil)
+		cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+		search := strings.Repeat("a", core.MaxAccountSearchBytes)
+		recorder := h.request(t, http.MethodGet, "/api/v1/accounts?q="+search, "", cookie)
+		if recorder.Code != http.StatusOK || h.accountAdmin.listCalls != 1 || h.accountAdmin.lastQuery.SearchKey != search {
+			t.Fatalf("exact search boundary = %d, calls %d, query %+v", recorder.Code, h.accountAdmin.listCalls, h.accountAdmin.lastQuery)
+		}
+	})
+	t.Run("cursor", func(t *testing.T) {
+		h := newAuthHarness(t, nil)
+		cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+		cursor := exactSizedAccountCursor(t)
+		recorder := h.request(t, http.MethodGet, "/api/v1/accounts?cursor="+cursor, "", cookie)
+		if recorder.Code != http.StatusOK || h.accountAdmin.listCalls != 1 {
+			t.Fatalf("exact cursor boundary = %d, calls %d: %s", recorder.Code, h.accountAdmin.listCalls, recorder.Body.String())
+		}
+	})
+}
+
+func exactSizedAccountCursor(t *testing.T) string {
+	t.Helper()
+	payload, err := json.Marshal(accountCursorPayload{
+		UsernameKey: "alice", ID: "11111111-1111-4111-8111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("marshal cursor payload: %v", err)
+	}
+	const decodedBoundary = core.MaxAccountListCursorBytes * 3 / 4
+	if len(payload) > decodedBoundary {
+		t.Fatalf("cursor payload bytes = %d, exceed boundary %d", len(payload), decodedBoundary)
+	}
+	payload = append(payload, []byte(strings.Repeat(" ", decodedBoundary-len(payload)))...)
+	cursor := base64.RawURLEncoding.EncodeToString(payload)
+	if len(cursor) != core.MaxAccountListCursorBytes {
+		t.Fatalf("cursor bytes = %d, want %d", len(cursor), core.MaxAccountListCursorBytes)
+	}
+	return cursor
 }
 
 func TestAccountsUsesDefaultAndMaximumLimits(t *testing.T) {
@@ -161,12 +307,26 @@ func TestAccountsUsesDefaultAndMaximumLimits(t *testing.T) {
 }
 
 func TestAccountsRequiresUsersManage(t *testing.T) {
-	h := newAuthHarness(t, nil)
-	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
-	h.authorization.permissions[h.store.accounts["alice"].ID] = []core.Permission{core.PermissionAdminRoles, core.PermissionUsersInvite}
-	recorder := h.request(t, http.MethodGet, "/api/v1/accounts", "", cookie)
-	if recorder.Code != http.StatusForbidden || h.accountAdmin.listCalls != 0 {
-		t.Fatalf("accounts denial = %d, list calls %d", recorder.Code, h.accountAdmin.listCalls)
+	for _, path := range []string{
+		"/api/v1/accounts",
+		"/api/v1/accounts/11111111-1111-4111-8111-111111111111",
+	} {
+		t.Run(path, func(t *testing.T) {
+			h := newAuthHarness(t, nil)
+			cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+			h.audit.reset()
+			h.authorization.permissions[h.store.accounts["alice"].ID] = []core.Permission{
+				core.PermissionAdminRoles, core.PermissionUsersInvite,
+			}
+			recorder := h.request(t, http.MethodGet, path, "", cookie)
+			event := h.audit.last(t)
+			if recorder.Code != http.StatusForbidden || h.accountAdmin.listCalls != 0 || h.accountAdmin.getCalls != 0 {
+				t.Fatalf("accounts denial = %d, list calls %d, get calls %d", recorder.Code, h.accountAdmin.listCalls, h.accountAdmin.getCalls)
+			}
+			if event.Resource != auditResourceAccounts || event.Permission != string(core.PermissionUsersManage) {
+				t.Fatalf("accounts denial audit = %+v", event)
+			}
+		})
 	}
 }
 

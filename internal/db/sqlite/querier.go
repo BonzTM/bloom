@@ -139,8 +139,8 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
-	ListAdminAccountMediaUsers(ctx context.Context, accountIdsJson string) ([]ListAdminAccountMediaUsersRow, error)
-	ListAdminAccountRoles(ctx context.Context, accountIdsJson string) ([]ListAdminAccountRolesRow, error)
+	ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error)
+	ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error)
 	// SQLite account queries whose parameter syntax is engine-specific.
 	ListAdminAccounts(ctx context.Context, arg ListAdminAccountsParams) ([]ListAdminAccountsRow, error)
 	ListCatalogGenreRows(ctx context.Context, arg ListCatalogGenreRowsParams) ([]ListCatalogGenreRowsRow, error)

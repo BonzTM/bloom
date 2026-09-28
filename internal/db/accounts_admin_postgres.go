@@ -89,18 +89,53 @@ func (s *postgresAccountAdminReader) enrich(ctx context.Context, accounts []core
 		return fmt.Errorf("encode administrative account page: %w", err)
 	}
 	indexes := accountIndexes(accounts)
-	roles, err := s.q.ListAdminAccountRoles(ctx, json.RawMessage(encoded))
+	if err := s.enrichRoles(ctx, accounts, indexes, json.RawMessage(encoded)); err != nil {
+		return err
+	}
+	return s.enrichMediaUsers(ctx, accounts, indexes, json.RawMessage(encoded))
+}
+
+func (s *postgresAccountAdminReader) enrichRoles(
+	ctx context.Context, accounts []core.AdminAccount, indexes map[string]int, encoded json.RawMessage,
+) error {
+	rowLimit, err := accountEnrichmentRowLimit(len(accounts), accountRoleEnrichment)
+	if err != nil {
+		return err
+	}
+	roles, err := s.q.ListAdminAccountRoles(ctx, postgres.ListAdminAccountRolesParams{
+		AccountIdsJson: encoded,
+		RowLimit:       int32(rowLimit), //nolint:gosec // page and per-account bounds cap this at 10001.
+	})
 	if err != nil {
 		return fmt.Errorf("list administrative account roles: %w", err)
+	}
+	if err := checkAccountEnrichmentLookahead(len(roles), rowLimit, "role"); err != nil {
+		return err
 	}
 	for _, role := range roles {
 		if roleErr := appendAdminRole(accounts, indexes, role.AccountID, role.Name, role.Source); roleErr != nil {
 			return roleErr
 		}
 	}
-	links, err := s.q.ListAdminAccountMediaUsers(ctx, json.RawMessage(encoded))
+	return nil
+}
+
+func (s *postgresAccountAdminReader) enrichMediaUsers(
+	ctx context.Context, accounts []core.AdminAccount, indexes map[string]int, encoded json.RawMessage,
+) error {
+	rowLimit, err := accountEnrichmentRowLimit(len(accounts), accountMediaUserEnrichment)
+	if err != nil {
+		return err
+	}
+	links, err := s.q.ListAdminAccountMediaUsers(ctx, postgres.ListAdminAccountMediaUsersParams{
+		AccountIdsJson: encoded,
+		RowLimit:       int32(rowLimit), //nolint:gosec // page and per-account bounds cap this at 10001.
+	})
 	if err != nil {
 		return fmt.Errorf("list administrative account media users: %w", err)
+	}
+	if err := checkAccountEnrichmentLookahead(len(links), rowLimit, "media-user"); err != nil {
+		return err
 	}
 	for _, row := range links {
 		link := postgresAccountMediaUser(
