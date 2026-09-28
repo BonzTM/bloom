@@ -61,6 +61,11 @@ func TestJellystatActivityKeepsNativeAndImportedRecordIDs(t *testing.T) {
 		{name: "imported", id: "77", origin: "77", imported: true},
 		{name: "native", id: "native-activity"},
 		{name: "native plugin prefix", id: "plugin:77"},
+		{
+			name: "imported at the origin bound", id: strings.Repeat("a", core.MaxImportOriginRecordIDBytes),
+			origin: strings.Repeat("a", core.MaxImportOriginRecordIDBytes), imported: true,
+		},
+		{name: "imported over the origin bound", id: strings.Repeat("a", core.MaxImportOriginRecordIDBytes+1), imported: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

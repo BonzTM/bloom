@@ -431,7 +431,9 @@ func mapJellystatActivity(row jellystatActivityRow, lookups jellystatLookups) (c
 	if !plausibleJellystatDuration(duration, record.Runtime) {
 		return core.ImportedWatch{}, core.ErrInvalidArgument
 	}
-	if row.Imported {
+	// Jellystat allows longer activity ids than the origin column holds;
+	// keep the activity and drop only its provenance, as migration 00026 does.
+	if row.Imported && len(row.ID) <= core.MaxImportOriginRecordIDBytes {
 		record.OriginRecordID = row.ID
 	}
 	if !record.Valid() {
