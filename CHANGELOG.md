@@ -11,6 +11,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- An Accounts page for administrators with `users.manage`: every account
+  searchable by username, with its roles and where each came from, how it
+  signs in, and its linked media users; one account opens on its own page.
 - Administrator account list and detail API routes with username search,
   keyset pagination, derived sign-in methods, role-assignment sources, linked
   media users, and secret-free responses on SQLite and PostgreSQL.

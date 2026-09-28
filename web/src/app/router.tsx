@@ -45,6 +45,8 @@ const LazyNotificationChannelsRoute = lazy(
 );
 const LazyImportsRoute = lazy(() => import("../routes/imports-route.js"));
 const LazyLibrariesRoute = lazy(() => import("../routes/libraries-route.js"));
+const LazyAccountsRoute = lazy(() => import("../routes/accounts-route.js"));
+const LazyAccountRoute = lazy(() => import("../routes/account-route.js"));
 const LazyLibraryRoute = lazy(() => import("../routes/library-route.js"));
 const LazyItemRoute = lazy(() => import("../routes/item-route.js"));
 const LazyInviteAcceptRoute = lazy(
@@ -149,6 +151,26 @@ const routes: RouteObject[] = [
               <LazyPage loading="Loading administration…">
                 <LazyAdminRoute />
               </LazyPage>
+            ),
+          },
+          {
+            path: "accounts",
+            element: (
+              <RequirePermission anyOf={[permissions.usersManage]}>
+                <LazyPage loading="Loading accounts…">
+                  <LazyAccountsRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "accounts/:accountId",
+            element: (
+              <RequirePermission anyOf={[permissions.usersManage]}>
+                <LazyPage loading="Loading account…">
+                  <LazyAccountRoute />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {

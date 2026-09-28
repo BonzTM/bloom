@@ -3268,7 +3268,143 @@ const catalogHandlers = [
   ),
 ];
 
+// Accounts the administrator sees: the signed-in administrator, a member the
+// identity provider manages, one with no links, and enough members that the
+// default page of 50 needs a second page.
+interface MockAdminAccount {
+  id: string;
+  username: string;
+  created_at: string;
+  sign_in_method: "local" | "oidc" | "both";
+  roles: { name: string; source: "manual" | "oidc" }[];
+  media_users: {
+    media_server_id: string;
+    media_server_name: string;
+    media_user_id: string;
+    username: string;
+    suppressed: boolean;
+  }[];
+}
+
+function memberAccount(index: number): MockAdminAccount {
+  const ordinal = String(index).padStart(2, "0");
+  return {
+    id: `7a000000-0000-4000-8000-0000000000${ordinal}`,
+    username: `member-${ordinal}`,
+    created_at: "2026-09-01T12:00:00Z",
+    sign_in_method: "local",
+    roles: [{ name: "viewer", source: "manual" }],
+    media_users: [],
+  };
+}
+
+export const mockAdminAccounts: readonly MockAdminAccount[] = [
+  {
+    id: mockAccount.id,
+    username: mockAccount.username,
+    created_at: "2026-09-20T09:30:00Z",
+    sign_in_method: "both",
+    roles: [{ name: "admin", source: "manual" }],
+    media_users: [
+      {
+        media_server_id: CABIN,
+        media_server_name: "Cabin",
+        media_user_id: "jf-admin",
+        username: "josh",
+        suppressed: false,
+      },
+    ],
+  },
+  {
+    id: "7a000000-0000-4000-8000-0000000000a1",
+    username: "alice",
+    created_at: "2026-09-22T18:15:00Z",
+    sign_in_method: "oidc",
+    roles: [
+      { name: "viewer", source: "oidc" },
+      { name: "requester", source: "manual" },
+    ],
+    media_users: [
+      {
+        media_server_id: CABIN,
+        media_server_name: "Cabin",
+        media_user_id: "jf-alice",
+        username: "alice",
+        suppressed: true,
+      },
+    ],
+  },
+  {
+    id: "7a000000-0000-4000-8000-0000000000c1",
+    username: "carol",
+    created_at: "2026-09-25T08:00:00Z",
+    sign_in_method: "local",
+    roles: [],
+    media_users: [],
+  },
+  ...Array.from({ length: 52 }, (_, index) => memberAccount(index + 1)),
+];
+
+function accountsDenial() {
+  if (!signedIn) {
+    return envelope(401, "unauthorized", "sign in required");
+  }
+  if (!granted.includes("users.manage")) {
+    return envelope(403, "forbidden", "missing permission users.manage");
+  }
+  return undefined;
+}
+
+function adminAccountJson(account: MockAdminAccount) {
+  return { ...account, is_self: account.id === mockAccount.id };
+}
+
+const accountHandlers = [
+  http.get(
+    "*/api/v1/accounts",
+    jsonApi(({ request }) => {
+      const denied = accountsDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const url = new URL(request.url);
+      const search = (url.searchParams.get("q") ?? "").toLowerCase();
+      const matching = [...mockAdminAccounts]
+        .filter((account) => account.username.toLowerCase().includes(search))
+        .sort((a, b) => a.username.localeCompare(b.username))
+        .map(adminAccountJson);
+      const limit = Number(url.searchParams.get("limit") ?? "50");
+      const cursor = url.searchParams.get("cursor");
+      const offset =
+        cursor === null ? 0 : Number(cursor.replace("offset:", ""));
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100 || offset < 0) {
+        return envelope(422, "validation_failed", "invalid page");
+      }
+      const next = offset + limit;
+      return HttpResponse.json({
+        items: matching.slice(offset, next),
+        next_cursor: next < matching.length ? `offset:${String(next)}` : "",
+      });
+    }),
+  ),
+  http.get(
+    "*/api/v1/accounts/:id",
+    jsonApi(({ params }) => {
+      const denied = accountsDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const account = mockAdminAccounts.find((item) => item.id === params.id);
+      if (account === undefined) {
+        return envelope(404, "not_found", "no such account");
+      }
+      return HttpResponse.json(adminAccountJson(account));
+    }),
+  ),
+];
+
 export const handlers = [
+  ...accountHandlers,
   ...catalogHandlers,
   ...discoverHandlers,
   ...importHandlers,

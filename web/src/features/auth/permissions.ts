@@ -7,6 +7,7 @@ export const permissions = {
   adminSettings: "admin.settings",
   adminRoles: "admin.roles",
   usersInvite: "users.invite",
+  usersManage: "users.manage",
   statsReadAll: "stats.read.all",
   statsReadOwn: "stats.read.own",
   requestsApprove: "requests.approve",
@@ -18,6 +19,7 @@ export const ADMIN_PERMISSIONS: readonly KnownPermission[] = [
   permissions.adminSettings,
   permissions.adminRoles,
   permissions.usersInvite,
+  permissions.usersManage,
   permissions.statsReadAll,
   permissions.requestsApprove,
 ];
