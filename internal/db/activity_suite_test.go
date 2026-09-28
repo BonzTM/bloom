@@ -3,6 +3,7 @@ package db_test
 import (
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,24 @@ func runActivityEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("activity cursor is stable across equal start times", func(t *testing.T) {
 		testActivityCursorBoundary(t, pool, driver)
 	})
+	t.Run("exclusion replacement rejects a missing server", func(t *testing.T) {
+		testMissingServerExclusionReplacement(t, pool, driver)
+	})
+}
+
+func testMissingServerExclusionReplacement(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	store, err := db.NewExclusionStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewExclusionStore: %v", err)
+	}
+	err = store.ReplaceExclusions(t.Context(), core.MediaServerExclusions{
+		MediaServerID: "87000000-0000-4000-8000-000000000099",
+		MediaUserIDs:  []string{"missing-user"},
+	})
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ReplaceExclusions(missing server) = %v, want ErrNotFound", err)
+	}
 }
 
 func testActivityVisibility(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -61,6 +80,12 @@ func testActivityVisibility(t *testing.T, pool *sql.DB, driver config.Driver) {
 	watches, err := activity.ListActivity(t.Context(), core.ActivityQuery{Search: "%_", Limit: 10})
 	if err != nil || len(watches) != 1 || watches[0].ID != visible.ID {
 		t.Fatalf("ListActivity = %+v, %v", watches, err)
+	}
+	userWatches, err := activity.ListActivity(t.Context(), core.ActivityQuery{
+		MediaUserID: visible.MediaUserID, Limit: 10,
+	})
+	if err != nil || len(userWatches) != 1 || userWatches[0].ID != visible.ID {
+		t.Fatalf("ListActivity by user = %+v, %v", userWatches, err)
 	}
 	timeline, err := activity.ListTimelineWatches(t.Context(), core.TimelineWatchQuery{
 		MediaServerID: activityServerID, MediaUserID: "excluded-user", Limit: 10,
@@ -100,28 +125,30 @@ func testActivityPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
 	seedCatalogPlanFixture(t, pool, driver)
 	analyzeCatalogPlanTables(t, pool, driver)
-	statement, err := db.ActivityStatement(driver)
-	if err != nil {
-		t.Fatalf("ActivityStatement: %v", err)
-	}
-	selectiveIndex := "watches_started_idx"
-	if driver == config.DriverPostgres {
-		selectiveIndex = "watches_server_user_started_idx"
-	}
 	tests := []struct {
 		name, index string
 		filters     activityPlanFilters
+		terms       []string
 	}{
-		{name: "empty filters", index: "watches_started_idx"},
-		{name: "selective user", index: selectiveIndex, filters: activityPlanFilters{
-			serverID: activityServerID, userID: "visible",
-		}},
-		{name: "title search", index: "watches_started_idx", filters: activityPlanFilters{search: "literal"}},
+		{name: "empty filters", index: "watches_started_idx", terms: []string{"started_at", "id"}},
+		{name: "per server", index: "watches_server_started_idx", filters: activityPlanFilters{
+			serverID: catalogPlanServerID,
+		}, terms: []string{"started_at", "id"}},
+		{name: "selective user", index: "watches_server_user_started_idx", filters: activityPlanFilters{
+			serverID: catalogPlanServerID, userID: catalogPlanUserID,
+		}, terms: []string{"media_server_id", "media_user_id", "started_at", "id"}},
+		{name: "title search", index: "watches_started_idx", filters: activityPlanFilters{
+			search: "literal",
+		}, terms: []string{"started_at", "id"}},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			statement, err := db.ActivityStatement(driver, testCase.filters.serverID, testCase.filters.userID)
+			if err != nil {
+				t.Fatalf("ActivityStatement: %v", err)
+			}
 			plan := explainCatalogQuery(t, pool, driver, statement, activityPlanArgs(testCase.filters)...)
-			assertActivityPlan(t, plan, testCase.index, testCase.name)
+			assertActivityPlan(t, driver, plan, testCase.index, testCase.name, testCase.terms)
 		})
 	}
 	timeline, err := db.TimelineStatement(driver)
@@ -134,25 +161,64 @@ func testActivityPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
 	}
 	plan := explainCatalogQuery(t, pool, driver, timeline,
 		catalogPlanServerID, catalogPlanUserID, before, "z", 50)
-	assertTimelinePlan(t, plan)
+	assertTimelinePlan(t, driver, plan)
 }
 
-func assertActivityPlan(t *testing.T, plan, index, shape string) {
+func assertActivityPlan(
+	t *testing.T, driver config.Driver, plan, index, shape string, terms []string,
+) {
 	t.Helper()
-	if !strings.Contains(plan, index) || strings.Contains(plan, "TEMP B-TREE") ||
-		strings.Contains(plan, "Sort") || strings.Contains(plan, "Seq Scan on watches") ||
-		(strings.Contains(plan, "SCAN w") && !strings.Contains(plan, "SCAN w USING INDEX")) {
-		t.Fatalf("%s activity plan = %q; want %s without sort or sequential scan", shape, plan, index)
+	if strings.Contains(plan, "TEMP B-TREE") || strings.Contains(plan, "Sort") ||
+		strings.Contains(plan, "Seq Scan on watches") || strings.Contains(plan, "SCAN w USING INDEX") {
+		t.Fatalf("%s activity plan = %q; want an ordered seek without a scan or sort", shape, plan)
+	}
+	assertActivityIndexCondition(t, driver, plan, index, terms)
+}
+
+func assertTimelinePlan(t *testing.T, driver config.Driver, plan string) {
+	t.Helper()
+	if strings.Contains(plan, "TEMP B-TREE") || strings.Contains(plan, "Sort") ||
+		strings.Contains(plan, "Seq Scan on watches") || strings.Contains(plan, "SCAN w USING INDEX") {
+		t.Fatalf("timeline plan = %q; want an ordered seek without a scan or sort", plan)
+	}
+	assertActivityIndexCondition(t, driver, plan, "watches_server_user_started_idx",
+		[]string{"media_server_id", "media_user_id", "started_at", "id"})
+}
+
+func assertActivityIndexCondition(
+	t *testing.T, driver config.Driver, plan, index string, terms []string,
+) {
+	t.Helper()
+	prefix := "SEARCH w USING INDEX " + index
+	if driver == config.DriverPostgres {
+		prefix = "Index Cond:"
+	}
+	condition := activityPlanCondition(plan, prefix)
+	// A server filter on a server that holds most of the table is not
+	// selective, so the planner may walk the time index and filter instead of
+	// seeking the server index; both are ordered seeks on the keyset.
+	acceptable := []string{index}
+	if index == "watches_server_started_idx" {
+		acceptable = append(acceptable, "watches_started_idx")
+	}
+	if !slices.ContainsFunc(acceptable, func(name string) bool { return strings.Contains(plan, name) }) ||
+		condition == "" {
+		t.Fatalf("plan = %q; want %s with an index condition", plan, index)
+	}
+	for _, term := range terms {
+		if !strings.Contains(condition, term) {
+			t.Fatalf("plan condition = %q; want term %s in %q", condition, term, plan)
+		}
 	}
 }
 
-func assertTimelinePlan(t *testing.T, plan string) {
-	t.Helper()
-	if !strings.Contains(plan, "watches_server_user_started_idx") || strings.Contains(plan, "TEMP B-TREE") ||
-		strings.Contains(plan, "Sort") || strings.Contains(plan, "Seq Scan on watches") ||
-		(strings.Contains(plan, "SCAN w") && !strings.Contains(plan, "SCAN w USING INDEX")) {
-		t.Fatalf("timeline plan = %q; want watches_server_user_started_idx without a watch sort or scan", plan)
+func activityPlanCondition(plan, prefix string) string {
+	for line := range strings.SplitSeq(plan, "\n") {
+		if strings.Contains(line, prefix) {
+			return line
+		}
 	}
+	return ""
 }
 
 type activityPlanFilters struct{ serverID, userID, search string }
@@ -160,10 +226,15 @@ type activityPlanFilters struct{ serverID, userID, search string }
 func activityPlanArgs(filters activityPlanFilters) []any {
 	minimum := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
 	maximum := time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
-	return []any{
-		filters.serverID, filters.userID, "", "", "", "", "", "", "",
-		0, minimum, 0, maximum, filters.search, maximum, "z", 50,
+	args := make([]any, 0, 17)
+	if filters.serverID != "" {
+		args = append(args, filters.serverID)
 	}
+	if filters.userID != "" {
+		args = append(args, filters.userID)
+	}
+	return append(args, "", "", "", "", "", "", "", 0, minimum, 0, maximum,
+		filters.search, maximum, "z", 50)
 }
 
 func testActivitySearchParity(t *testing.T, pool *sql.DB, driver config.Driver) {

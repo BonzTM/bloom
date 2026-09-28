@@ -62,6 +62,12 @@ func (s *sqliteExclusionStore) ReplaceExclusions(
 	}
 	err := withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
 		queries := sqlite.New(conn)
+		if _, lockErr := queries.LockMediaServerForExclusionReplace(ctx, value.MediaServerID); lockErr != nil {
+			if errors.Is(lockErr, sql.ErrNoRows) {
+				return core.ErrNotFound
+			}
+			return fmt.Errorf("lock media server for exclusion replacement: %w", lockErr)
+		}
 		if deleteErr := queries.DeleteMediaServerExclusions(ctx, value.MediaServerID); deleteErr != nil {
 			return deleteErr
 		}

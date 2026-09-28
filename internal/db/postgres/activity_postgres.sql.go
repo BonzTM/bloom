@@ -25,24 +25,21 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
-WHERE (CAST($1 AS TEXT) = '' OR w.media_server_id = CAST($1 AS TEXT))
-  AND (CAST($2 AS TEXT) = '' OR w.media_user_id = CAST($2 AS TEXT))
-  AND (CAST($3 AS TEXT) = '' OR w.library_id = CAST($3 AS TEXT)
+WHERE (CAST($1 AS TEXT) = '' OR w.library_id = CAST($1 AS TEXT)
        OR EXISTS (SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
-                  AND li.item_id = w.item_id AND li.library_id = CAST($3 AS TEXT)))
-  AND (CAST($4 AS TEXT) = '' OR w.item_type = CAST($4 AS TEXT))
-  AND (CAST($5 AS TEXT) = '' OR w.client = CAST($5 AS TEXT))
-  AND (CAST($6 AS TEXT) = '' OR w.device_id = CAST($6 AS TEXT))
-  AND (CAST($7 AS TEXT) = '' OR w.play_method = CAST($7 AS TEXT))
-  AND (CAST($8 AS TEXT) = '' OR w.source = CAST($8 AS TEXT))
-  AND (CAST($9 AS TEXT) = '' OR w.import_source = CAST($9 AS TEXT))
-  AND (CAST($10 AS INTEGER) = 0 OR w.started_at >= $11)
-  AND (CAST($12 AS INTEGER) = 0 OR w.started_at < $13)
-  AND (CAST($14 AS TEXT) = ''
-       OR strpos(lower(w.item_name COLLATE "C"), lower(CAST($14 AS TEXT) COLLATE "C")) > 0
-       OR strpos(lower(w.series_name COLLATE "C"), lower(CAST($14 AS TEXT) COLLATE "C")) > 0)
-  AND (w.started_at < $15
-       OR (w.started_at = $15 AND w.id < $16))
+                  AND li.item_id = w.item_id AND li.library_id = CAST($1 AS TEXT)))
+  AND (CAST($2 AS TEXT) = '' OR w.item_type = CAST($2 AS TEXT))
+  AND (CAST($3 AS TEXT) = '' OR w.client = CAST($3 AS TEXT))
+  AND (CAST($4 AS TEXT) = '' OR w.device_id = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = '' OR w.play_method = CAST($5 AS TEXT))
+  AND (CAST($6 AS TEXT) = '' OR w.source = CAST($6 AS TEXT))
+  AND (CAST($7 AS TEXT) = '' OR w.import_source = CAST($7 AS TEXT))
+  AND (CAST($8 AS INTEGER) = 0 OR w.started_at >= $9)
+  AND (CAST($10 AS INTEGER) = 0 OR w.started_at < $11)
+  AND (CAST($12 AS TEXT) = ''
+       OR strpos(lower(w.item_name COLLATE "C"), lower(CAST($12 AS TEXT) COLLATE "C")) > 0
+       OR strpos(lower(w.series_name COLLATE "C"), lower(CAST($12 AS TEXT) COLLATE "C")) > 0)
+  AND (w.started_at, w.id) < ($13, CAST($14 AS TEXT))
   AND NOT EXISTS (
       SELECT 1 FROM media_server_exclusions e
       WHERE e.media_server_id = w.media_server_id
@@ -54,12 +51,10 @@ WHERE (CAST($1 AS TEXT) = '' OR w.media_server_id = CAST($1 AS TEXT))
                 AND excluded_item.library_id = e.external_id))))
   )
 ORDER BY w.started_at DESC, w.id DESC
-LIMIT $17
+LIMIT $15
 `
 
 type ListActivityWatchesParams struct {
-	MediaServerFilter  string
-	MediaUserFilter    string
 	LibraryFilter      string
 	ItemTypeFilter     string
 	ClientFilter       string
@@ -124,11 +119,10 @@ type ListActivityWatchesRow struct {
 	MediaServerName           string
 }
 
-// PostgreSQL activity query. strpos() treats q as a literal substring.
+// PostgreSQL activity queries. strpos() treats q as a literal substring.
+// Separate statements keep each ordered-index prefix seekable.
 func (q *Queries) ListActivityWatches(ctx context.Context, arg ListActivityWatchesParams) ([]ListActivityWatchesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listActivityWatches,
-		arg.MediaServerFilter,
-		arg.MediaUserFilter,
 		arg.LibraryFilter,
 		arg.ItemTypeFilter,
 		arg.ClientFilter,
@@ -152,6 +146,591 @@ func (q *Queries) ListActivityWatches(ctx context.Context, arg ListActivityWatch
 	items := []ListActivityWatchesRow{}
 	for rows.Next() {
 		var i ListActivityWatchesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaServerID,
+			&i.MediaUserID,
+			&i.Username,
+			&i.DeviceID,
+			&i.DeviceName,
+			&i.Client,
+			&i.ServerSessionID,
+			&i.ItemID,
+			&i.ItemName,
+			&i.ItemType,
+			&i.SeriesName,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.PlayMethod,
+			&i.State,
+			&i.StartedAt,
+			&i.LastSeenAt,
+			&i.EndedAt,
+			&i.ActiveSeconds,
+			&i.LastPositionMs,
+			&i.Source,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LibraryID,
+			&i.LibraryName,
+			&i.StreamContainer,
+			&i.StreamVideoCodec,
+			&i.StreamAudioCodec,
+			&i.StreamBitrate,
+			&i.StreamWidth,
+			&i.StreamHeight,
+			&i.StreamFramerateHundredths,
+			&i.StreamAudioChannels,
+			&i.StreamIsVideoDirect,
+			&i.StreamIsAudioDirect,
+			&i.StreamTranscodeReasons,
+			&i.RuntimeMs,
+			&i.ImportRecordID,
+			&i.SeriesID,
+			&i.ImportSource,
+			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
+			&i.MediaServerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerActivityWatches = `-- name: ListServerActivityWatches :many
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
+FROM watches w
+JOIN media_servers ms ON ms.id = w.media_server_id
+WHERE w.media_server_id = $1
+  AND (CAST($2 AS TEXT) = '' OR w.library_id = CAST($2 AS TEXT)
+       OR EXISTS (SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                  AND li.item_id = w.item_id AND li.library_id = CAST($2 AS TEXT)))
+  AND (CAST($3 AS TEXT) = '' OR w.item_type = CAST($3 AS TEXT))
+  AND (CAST($4 AS TEXT) = '' OR w.client = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = '' OR w.device_id = CAST($5 AS TEXT))
+  AND (CAST($6 AS TEXT) = '' OR w.play_method = CAST($6 AS TEXT))
+  AND (CAST($7 AS TEXT) = '' OR w.source = CAST($7 AS TEXT))
+  AND (CAST($8 AS TEXT) = '' OR w.import_source = CAST($8 AS TEXT))
+  AND (CAST($9 AS INTEGER) = 0 OR w.started_at >= $10)
+  AND (CAST($11 AS INTEGER) = 0 OR w.started_at < $12)
+  AND (CAST($13 AS TEXT) = ''
+       OR strpos(lower(w.item_name COLLATE "C"), lower(CAST($13 AS TEXT) COLLATE "C")) > 0
+       OR strpos(lower(w.series_name COLLATE "C"), lower(CAST($13 AS TEXT) COLLATE "C")) > 0)
+  AND (w.started_at, w.id) < ($14, CAST($15 AS TEXT))
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items excluded_item
+              WHERE excluded_item.media_server_id = w.media_server_id
+                AND excluded_item.item_id = w.item_id
+                AND excluded_item.library_id = e.external_id))))
+  )
+ORDER BY w.started_at DESC, w.id DESC
+LIMIT $16
+`
+
+type ListServerActivityWatchesParams struct {
+	MediaServerID      string
+	LibraryFilter      string
+	ItemTypeFilter     string
+	ClientFilter       string
+	DeviceFilter       string
+	PlayMethodFilter   string
+	SourceFilter       string
+	ImportSourceFilter string
+	StartedAfterSet    int32
+	StartedAfter       time.Time
+	StartedBeforeSet   int32
+	StartedBefore      time.Time
+	SearchText         string
+	BeforeStartedAt    time.Time
+	BeforeID           string
+	PageSize           int32
+}
+
+type ListServerActivityWatchesRow struct {
+	ID                        string
+	MediaServerID             string
+	MediaUserID               string
+	Username                  string
+	DeviceID                  string
+	DeviceName                string
+	Client                    string
+	ServerSessionID           string
+	ItemID                    string
+	ItemName                  string
+	ItemType                  string
+	SeriesName                string
+	SeasonNumber              sql.NullInt32
+	EpisodeNumber             sql.NullInt32
+	PlayMethod                string
+	State                     string
+	StartedAt                 time.Time
+	LastSeenAt                time.Time
+	EndedAt                   sql.NullTime
+	ActiveSeconds             int64
+	LastPositionMs            int64
+	Source                    string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	LibraryID                 string
+	LibraryName               string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt32
+	StreamHeight              sql.NullInt32
+	StreamFramerateHundredths sql.NullInt32
+	StreamAudioChannels       sql.NullInt32
+	StreamIsVideoDirect       sql.NullBool
+	StreamIsAudioDirect       sql.NullBool
+	StreamTranscodeReasons    sql.NullString
+	RuntimeMs                 sql.NullInt64
+	ImportRecordID            sql.NullString
+	SeriesID                  sql.NullString
+	ImportSource              sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
+	ImportOriginRecordID      sql.NullString
+	MediaServerName           string
+}
+
+func (q *Queries) ListServerActivityWatches(ctx context.Context, arg ListServerActivityWatchesParams) ([]ListServerActivityWatchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listServerActivityWatches,
+		arg.MediaServerID,
+		arg.LibraryFilter,
+		arg.ItemTypeFilter,
+		arg.ClientFilter,
+		arg.DeviceFilter,
+		arg.PlayMethodFilter,
+		arg.SourceFilter,
+		arg.ImportSourceFilter,
+		arg.StartedAfterSet,
+		arg.StartedAfter,
+		arg.StartedBeforeSet,
+		arg.StartedBefore,
+		arg.SearchText,
+		arg.BeforeStartedAt,
+		arg.BeforeID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerActivityWatchesRow{}
+	for rows.Next() {
+		var i ListServerActivityWatchesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaServerID,
+			&i.MediaUserID,
+			&i.Username,
+			&i.DeviceID,
+			&i.DeviceName,
+			&i.Client,
+			&i.ServerSessionID,
+			&i.ItemID,
+			&i.ItemName,
+			&i.ItemType,
+			&i.SeriesName,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.PlayMethod,
+			&i.State,
+			&i.StartedAt,
+			&i.LastSeenAt,
+			&i.EndedAt,
+			&i.ActiveSeconds,
+			&i.LastPositionMs,
+			&i.Source,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LibraryID,
+			&i.LibraryName,
+			&i.StreamContainer,
+			&i.StreamVideoCodec,
+			&i.StreamAudioCodec,
+			&i.StreamBitrate,
+			&i.StreamWidth,
+			&i.StreamHeight,
+			&i.StreamFramerateHundredths,
+			&i.StreamAudioChannels,
+			&i.StreamIsVideoDirect,
+			&i.StreamIsAudioDirect,
+			&i.StreamTranscodeReasons,
+			&i.RuntimeMs,
+			&i.ImportRecordID,
+			&i.SeriesID,
+			&i.ImportSource,
+			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
+			&i.MediaServerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServerUserActivityWatches = `-- name: ListServerUserActivityWatches :many
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
+FROM watches w
+JOIN media_servers ms ON ms.id = w.media_server_id
+WHERE w.media_server_id = $1
+  AND w.media_user_id = $2
+  AND (CAST($3 AS TEXT) = '' OR w.library_id = CAST($3 AS TEXT)
+       OR EXISTS (SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                  AND li.item_id = w.item_id AND li.library_id = CAST($3 AS TEXT)))
+  AND (CAST($4 AS TEXT) = '' OR w.item_type = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = '' OR w.client = CAST($5 AS TEXT))
+  AND (CAST($6 AS TEXT) = '' OR w.device_id = CAST($6 AS TEXT))
+  AND (CAST($7 AS TEXT) = '' OR w.play_method = CAST($7 AS TEXT))
+  AND (CAST($8 AS TEXT) = '' OR w.source = CAST($8 AS TEXT))
+  AND (CAST($9 AS TEXT) = '' OR w.import_source = CAST($9 AS TEXT))
+  AND (CAST($10 AS INTEGER) = 0 OR w.started_at >= $11)
+  AND (CAST($12 AS INTEGER) = 0 OR w.started_at < $13)
+  AND (CAST($14 AS TEXT) = ''
+       OR strpos(lower(w.item_name COLLATE "C"), lower(CAST($14 AS TEXT) COLLATE "C")) > 0
+       OR strpos(lower(w.series_name COLLATE "C"), lower(CAST($14 AS TEXT) COLLATE "C")) > 0)
+  AND (w.started_at, w.id) < ($15, CAST($16 AS TEXT))
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items excluded_item
+              WHERE excluded_item.media_server_id = w.media_server_id
+                AND excluded_item.item_id = w.item_id
+                AND excluded_item.library_id = e.external_id))))
+  )
+ORDER BY w.started_at DESC, w.id DESC
+LIMIT $17
+`
+
+type ListServerUserActivityWatchesParams struct {
+	MediaServerID      string
+	MediaUserID        string
+	LibraryFilter      string
+	ItemTypeFilter     string
+	ClientFilter       string
+	DeviceFilter       string
+	PlayMethodFilter   string
+	SourceFilter       string
+	ImportSourceFilter string
+	StartedAfterSet    int32
+	StartedAfter       time.Time
+	StartedBeforeSet   int32
+	StartedBefore      time.Time
+	SearchText         string
+	BeforeStartedAt    time.Time
+	BeforeID           string
+	PageSize           int32
+}
+
+type ListServerUserActivityWatchesRow struct {
+	ID                        string
+	MediaServerID             string
+	MediaUserID               string
+	Username                  string
+	DeviceID                  string
+	DeviceName                string
+	Client                    string
+	ServerSessionID           string
+	ItemID                    string
+	ItemName                  string
+	ItemType                  string
+	SeriesName                string
+	SeasonNumber              sql.NullInt32
+	EpisodeNumber             sql.NullInt32
+	PlayMethod                string
+	State                     string
+	StartedAt                 time.Time
+	LastSeenAt                time.Time
+	EndedAt                   sql.NullTime
+	ActiveSeconds             int64
+	LastPositionMs            int64
+	Source                    string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	LibraryID                 string
+	LibraryName               string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt32
+	StreamHeight              sql.NullInt32
+	StreamFramerateHundredths sql.NullInt32
+	StreamAudioChannels       sql.NullInt32
+	StreamIsVideoDirect       sql.NullBool
+	StreamIsAudioDirect       sql.NullBool
+	StreamTranscodeReasons    sql.NullString
+	RuntimeMs                 sql.NullInt64
+	ImportRecordID            sql.NullString
+	SeriesID                  sql.NullString
+	ImportSource              sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
+	ImportOriginRecordID      sql.NullString
+	MediaServerName           string
+}
+
+func (q *Queries) ListServerUserActivityWatches(ctx context.Context, arg ListServerUserActivityWatchesParams) ([]ListServerUserActivityWatchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listServerUserActivityWatches,
+		arg.MediaServerID,
+		arg.MediaUserID,
+		arg.LibraryFilter,
+		arg.ItemTypeFilter,
+		arg.ClientFilter,
+		arg.DeviceFilter,
+		arg.PlayMethodFilter,
+		arg.SourceFilter,
+		arg.ImportSourceFilter,
+		arg.StartedAfterSet,
+		arg.StartedAfter,
+		arg.StartedBeforeSet,
+		arg.StartedBefore,
+		arg.SearchText,
+		arg.BeforeStartedAt,
+		arg.BeforeID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServerUserActivityWatchesRow{}
+	for rows.Next() {
+		var i ListServerUserActivityWatchesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaServerID,
+			&i.MediaUserID,
+			&i.Username,
+			&i.DeviceID,
+			&i.DeviceName,
+			&i.Client,
+			&i.ServerSessionID,
+			&i.ItemID,
+			&i.ItemName,
+			&i.ItemType,
+			&i.SeriesName,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.PlayMethod,
+			&i.State,
+			&i.StartedAt,
+			&i.LastSeenAt,
+			&i.EndedAt,
+			&i.ActiveSeconds,
+			&i.LastPositionMs,
+			&i.Source,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LibraryID,
+			&i.LibraryName,
+			&i.StreamContainer,
+			&i.StreamVideoCodec,
+			&i.StreamAudioCodec,
+			&i.StreamBitrate,
+			&i.StreamWidth,
+			&i.StreamHeight,
+			&i.StreamFramerateHundredths,
+			&i.StreamAudioChannels,
+			&i.StreamIsVideoDirect,
+			&i.StreamIsAudioDirect,
+			&i.StreamTranscodeReasons,
+			&i.RuntimeMs,
+			&i.ImportRecordID,
+			&i.SeriesID,
+			&i.ImportSource,
+			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
+			&i.MediaServerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserActivityWatches = `-- name: ListUserActivityWatches :many
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
+FROM watches w
+JOIN media_servers ms ON ms.id = w.media_server_id
+WHERE w.media_user_id = $1
+  AND (CAST($2 AS TEXT) = '' OR w.library_id = CAST($2 AS TEXT)
+       OR EXISTS (SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                  AND li.item_id = w.item_id AND li.library_id = CAST($2 AS TEXT)))
+  AND (CAST($3 AS TEXT) = '' OR w.item_type = CAST($3 AS TEXT))
+  AND (CAST($4 AS TEXT) = '' OR w.client = CAST($4 AS TEXT))
+  AND (CAST($5 AS TEXT) = '' OR w.device_id = CAST($5 AS TEXT))
+  AND (CAST($6 AS TEXT) = '' OR w.play_method = CAST($6 AS TEXT))
+  AND (CAST($7 AS TEXT) = '' OR w.source = CAST($7 AS TEXT))
+  AND (CAST($8 AS TEXT) = '' OR w.import_source = CAST($8 AS TEXT))
+  AND (CAST($9 AS INTEGER) = 0 OR w.started_at >= $10)
+  AND (CAST($11 AS INTEGER) = 0 OR w.started_at < $12)
+  AND (CAST($13 AS TEXT) = ''
+       OR strpos(lower(w.item_name COLLATE "C"), lower(CAST($13 AS TEXT) COLLATE "C")) > 0
+       OR strpos(lower(w.series_name COLLATE "C"), lower(CAST($13 AS TEXT) COLLATE "C")) > 0)
+  AND (w.started_at, w.id) < ($14, CAST($15 AS TEXT))
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items excluded_item
+              WHERE excluded_item.media_server_id = w.media_server_id
+                AND excluded_item.item_id = w.item_id
+                AND excluded_item.library_id = e.external_id))))
+  )
+ORDER BY w.started_at DESC, w.id DESC
+LIMIT $16
+`
+
+type ListUserActivityWatchesParams struct {
+	MediaUserID        string
+	LibraryFilter      string
+	ItemTypeFilter     string
+	ClientFilter       string
+	DeviceFilter       string
+	PlayMethodFilter   string
+	SourceFilter       string
+	ImportSourceFilter string
+	StartedAfterSet    int32
+	StartedAfter       time.Time
+	StartedBeforeSet   int32
+	StartedBefore      time.Time
+	SearchText         string
+	BeforeStartedAt    time.Time
+	BeforeID           string
+	PageSize           int32
+}
+
+type ListUserActivityWatchesRow struct {
+	ID                        string
+	MediaServerID             string
+	MediaUserID               string
+	Username                  string
+	DeviceID                  string
+	DeviceName                string
+	Client                    string
+	ServerSessionID           string
+	ItemID                    string
+	ItemName                  string
+	ItemType                  string
+	SeriesName                string
+	SeasonNumber              sql.NullInt32
+	EpisodeNumber             sql.NullInt32
+	PlayMethod                string
+	State                     string
+	StartedAt                 time.Time
+	LastSeenAt                time.Time
+	EndedAt                   sql.NullTime
+	ActiveSeconds             int64
+	LastPositionMs            int64
+	Source                    string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	LibraryID                 string
+	LibraryName               string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt32
+	StreamHeight              sql.NullInt32
+	StreamFramerateHundredths sql.NullInt32
+	StreamAudioChannels       sql.NullInt32
+	StreamIsVideoDirect       sql.NullBool
+	StreamIsAudioDirect       sql.NullBool
+	StreamTranscodeReasons    sql.NullString
+	RuntimeMs                 sql.NullInt64
+	ImportRecordID            sql.NullString
+	SeriesID                  sql.NullString
+	ImportSource              sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
+	ImportOriginRecordID      sql.NullString
+	MediaServerName           string
+}
+
+func (q *Queries) ListUserActivityWatches(ctx context.Context, arg ListUserActivityWatchesParams) ([]ListUserActivityWatchesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUserActivityWatches,
+		arg.MediaUserID,
+		arg.LibraryFilter,
+		arg.ItemTypeFilter,
+		arg.ClientFilter,
+		arg.DeviceFilter,
+		arg.PlayMethodFilter,
+		arg.SourceFilter,
+		arg.ImportSourceFilter,
+		arg.StartedAfterSet,
+		arg.StartedAfter,
+		arg.StartedBeforeSet,
+		arg.StartedBefore,
+		arg.SearchText,
+		arg.BeforeStartedAt,
+		arg.BeforeID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserActivityWatchesRow{}
+	for rows.Next() {
+		var i ListUserActivityWatchesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MediaServerID,

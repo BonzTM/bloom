@@ -27,8 +27,7 @@ FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.media_server_id = $1
   AND w.media_user_id = $2
-  AND (w.started_at < $3
-       OR (w.started_at = $3 AND w.id < $4))
+  AND (w.started_at, w.id) < ($3, CAST($4 AS TEXT))
   AND NOT EXISTS (
       SELECT 1 FROM media_server_exclusions e
       WHERE e.media_server_id = w.media_server_id

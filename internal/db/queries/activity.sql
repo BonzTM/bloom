@@ -16,8 +16,7 @@ FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.media_server_id = sqlc.arg(media_server_id)
   AND w.media_user_id = sqlc.arg(media_user_id)
-  AND (w.started_at < sqlc.arg(before_started_at)
-       OR (w.started_at = sqlc.arg(before_started_at) AND w.id < sqlc.arg(before_id)))
+  AND (w.started_at, w.id) < (sqlc.arg(before_started_at), CAST(sqlc.arg(before_id) AS TEXT))
   AND NOT EXISTS (
       SELECT 1 FROM media_server_exclusions e
       WHERE e.media_server_id = w.media_server_id

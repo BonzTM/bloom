@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
+
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/httputil"
 )
@@ -152,6 +154,40 @@ func TestActivityAndTimelineResponses(t *testing.T) {
 	if timeline.Code != http.StatusOK || h.activity.timelineCalls != 1 || h.activity.timelineQuery.Limit != core.MaxTimelineWatchFetch {
 		t.Fatalf("timeline = %d calls %d query %+v: %s", timeline.Code, h.activity.timelineCalls, h.activity.timelineQuery, timeline.Body.String())
 	}
+}
+
+func TestActivityTextConstraintsAreDocumented(t *testing.T) {
+	document := loadOpenAPI(t).validator
+	const pattern = `^[^\x00-\x1F\x7F-\x9F]+$`
+	activity := document.Paths.Find("/api/v1/activity").Get
+	for _, name := range []string{"media_user_id", "library_id", "item_type", "client", "device_id", "q"} {
+		assertOpenAPIParameterPattern(t, activity.Parameters, name, pattern)
+	}
+	timeline := document.Paths.Find("/api/v1/media-servers/{id}/users/{media_user_id}/timeline").Get
+	assertOpenAPIParameterPattern(t, timeline.Parameters, "media_user_id", pattern)
+	for _, schemaName := range []string{"ReplaceMediaServerExclusions", "MediaServerExclusions"} {
+		schema := document.Components.Schemas[schemaName].Value
+		for _, name := range []string{"excluded_media_user_ids", "excluded_library_ids"} {
+			if got := schema.Properties[name].Value.Items.Value.Pattern; got != pattern {
+				t.Errorf("%s.%s pattern = %q, want %q", schemaName, name, got, pattern)
+			}
+		}
+	}
+}
+
+func assertOpenAPIParameterPattern(
+	t *testing.T, parameters openapi3.Parameters, name, want string,
+) {
+	t.Helper()
+	for _, parameter := range parameters {
+		if parameter.Value.Name == name {
+			if got := parameter.Value.Schema.Value.Pattern; got != want {
+				t.Errorf("%s pattern = %q, want %q", name, got, want)
+			}
+			return
+		}
+	}
+	t.Errorf("parameter %s is missing", name)
 }
 
 func TestReplaceExclusionsBoundsAndAudit(t *testing.T) {

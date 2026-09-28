@@ -136,9 +136,6 @@ func (w *Worker) walk(ctx context.Context, sync core.LibrarySync) error {
 		var libraries []core.Library
 		libraries, err = w.deps.Source.Libraries(ctx, sync.MediaServerID)
 		if err == nil {
-			libraries, err = w.filterExcludedLibraries(ctx, sync.MediaServerID, libraries)
-		}
-		if err == nil {
 			libraries = orderedLibraries(libraries)
 			err = w.walkLibraries(ctx, &sync, libraries)
 		}
@@ -160,25 +157,6 @@ func (w *Worker) walk(ctx context.Context, sync core.LibrarySync) error {
 	return nil
 }
 
-func (w *Worker) filterExcludedLibraries(
-	ctx context.Context, serverID string, libraries []core.Library,
-) ([]core.Library, error) {
-	if w.deps.Exclusions == nil || len(libraries) == 0 {
-		return libraries, nil
-	}
-	exclusions, err := w.deps.Exclusions.GetExclusions(ctx, serverID)
-	if err != nil {
-		return nil, fmt.Errorf("load catalog exclusions: %w", err)
-	}
-	filtered := make([]core.Library, 0, len(libraries))
-	for _, library := range libraries {
-		if !exclusions.ExcludesLibrary(library.ID) {
-			filtered = append(filtered, library)
-		}
-	}
-	return filtered, nil
-}
-
 func (w *Worker) walkLibraries(ctx context.Context, sync *core.LibrarySync, libraries []core.Library) error {
 	if len(libraries) > core.MaxMediaServerLibraries {
 		return errors.New("library count exceeds bound")
@@ -191,8 +169,9 @@ func (w *Worker) walkLibraries(ctx context.Context, sync *core.LibrarySync, libr
 	if err != nil {
 		return err
 	}
-	for ; index < len(libraries); index++ {
-		if err := w.walkLibrary(ctx, sync, libraries[index], 0, libraries, index); err != nil {
+	for index < len(libraries) {
+		index, err = w.walkLibrary(ctx, sync, libraries[index], 0, libraries, index)
+		if err != nil {
 			return err
 		}
 	}
@@ -207,26 +186,75 @@ func orderedLibraries(libraries []core.Library) []core.Library {
 
 func (w *Worker) walkLibrary(
 	ctx context.Context, sync *core.LibrarySync, library core.Library, start int, libraries []core.Library, libraryIndex int,
-) error {
+) (int, error) {
 	for pageNumber := start / core.CatalogPageSize; pageNumber < core.MaxCatalogPagesPerLibrary; pageNumber++ {
+		nextIndex, excluded, err := w.stopExcludedLibrary(ctx, sync, libraries, libraryIndex)
+		if err != nil || excluded {
+			return nextIndex, err
+		}
 		page, err := w.deps.Source.CatalogItems(ctx, sync.MediaServerID, library.ID, start, core.CatalogPageSize)
 		if err != nil {
-			return err
+			return libraryIndex, err
 		}
-		if err := validatePage(page, start); err != nil {
-			return err
+		err = validatePage(page, start)
+		if err != nil {
+			return libraryIndex, err
 		}
 		next := start + len(page.Items)
+		nextIndex, excluded, err = w.stopExcludedLibrary(ctx, sync, libraries, libraryIndex)
+		if err != nil || excluded {
+			return nextIndex, err
+		}
 		cursor := nextCursor(libraries, libraryIndex, next, page.Total)
 		if err := w.commitPage(ctx, sync, library.ID, page.Items, cursor); err != nil {
-			return err
+			return libraryIndex, err
 		}
 		if next >= page.Total {
-			return nil
+			return libraryIndex + 1, nil
 		}
 		start = next
 	}
-	return errors.New("library page bound exceeded")
+	return libraryIndex, errors.New("library page bound exceeded")
+}
+
+func (w *Worker) stopExcludedLibrary(
+	ctx context.Context, sync *core.LibrarySync, libraries []core.Library, index int,
+) (int, bool, error) {
+	cursor, next, excluded, err := w.excludedLibraryCursor(ctx, sync.MediaServerID, libraries, index)
+	if err != nil || !excluded {
+		return index, false, err
+	}
+	err = w.commitPage(ctx, sync, libraries[index].ID, nil, cursor)
+	return next, true, err
+}
+
+func (w *Worker) excludedLibraryCursor(
+	ctx context.Context, serverID string, libraries []core.Library, index int,
+) (syncCursor, int, bool, error) {
+	if w.deps.Exclusions == nil {
+		return syncCursor{}, index, false, nil
+	}
+	exclusions, err := w.deps.Exclusions.GetExclusions(ctx, serverID)
+	if err != nil {
+		return syncCursor{}, index, false, fmt.Errorf("load catalog exclusions: %w", err)
+	}
+	if !exclusions.ExcludesLibrary(libraries[index].ID) {
+		return syncCursor{}, index, false, nil
+	}
+	next := nextVisibleLibrary(exclusions, libraries, index+1)
+	if next < len(libraries) {
+		return syncCursor{LibraryID: libraries[next].ID}, next, true, nil
+	}
+	return syncCursor{Phase: syncPhaseRevalidation}, next, true, nil
+}
+
+func nextVisibleLibrary(exclusions core.MediaServerExclusions, libraries []core.Library, start int) int {
+	for index := start; index < len(libraries); index++ {
+		if !exclusions.ExcludesLibrary(libraries[index].ID) {
+			return index
+		}
+	}
+	return len(libraries)
 }
 
 func (w *Worker) commitPage(

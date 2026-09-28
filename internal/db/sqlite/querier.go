@@ -142,7 +142,8 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
-	// SQLite activity query. instr() treats q as a literal substring.
+	// SQLite activity queries. instr() treats q as a literal substring. Separate
+	// statements keep each ordered-index prefix seekable.
 	ListActivityWatches(ctx context.Context, arg ListActivityWatchesParams) ([]ListActivityWatchesRow, error)
 	ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error)
 	ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error)
@@ -199,12 +200,15 @@ type Querier interface {
 	ListRequestsForAvailability(ctx context.Context, pageSize int64) ([]Request, error)
 	ListRoleRequestQuotasForAccount(ctx context.Context, accountID string) ([]RoleRequestQuota, error)
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
+	ListServerActivityWatches(ctx context.Context, arg ListServerActivityWatchesParams) ([]ListServerActivityWatchesRow, error)
+	ListServerUserActivityWatches(ctx context.Context, arg ListServerUserActivityWatchesParams) ([]ListServerUserActivityWatchesRow, error)
 	ListStaleCatalogItems(ctx context.Context, arg ListStaleCatalogItemsParams) ([]LibraryItem, error)
 	ListSubscribedNotificationChannels(ctx context.Context, arg ListSubscribedNotificationChannelsParams) ([]ListSubscribedNotificationChannelsRow, error)
 	// Per-user timeline query shared by SQLite and PostgreSQL. Activity title
 	// matching is engine-specific so q remains a literal substring.
 	ListTimelineWatches(ctx context.Context, arg ListTimelineWatchesParams) ([]ListTimelineWatchesRow, error)
 	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
+	ListUserActivityWatches(ctx context.Context, arg ListUserActivityWatchesParams) ([]ListUserActivityWatchesRow, error)
 	ListWatchPositions(ctx context.Context, watchID string) ([]WatchPosition, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (Invite, error)

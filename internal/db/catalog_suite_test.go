@@ -20,7 +20,7 @@ const (
 	catalogPlanServerID   = "87000000-0000-4000-8000-000000000001"
 	catalogPlanSeriesID   = "catalog-plan-series"
 	catalogPlanUserID     = "catalog-plan-user-000"
-	catalogPlanWatchCount = 5000
+	catalogPlanWatchCount = 1500
 )
 
 func runCatalogEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -648,10 +648,13 @@ ORDER BY started_at DESC,id DESC LIMIT 10`, catalogPlanServerID, catalogPlanSeri
 func seedCatalogPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
 	now := time.Date(2026, 9, 27, 18, 0, 0, 0, time.UTC)
+	// Seeding thousands of rows is the slow part of the suite under the race
+	// detector, so the fixture is seeded once and kept for every plan test;
+	// the suite's final migration teardown removes it.
+	if catalogPlanServerExists(t, pool, catalogPlanServerID) {
+		return
+	}
 	createCatalogServer(t, pool, driver, catalogPlanServerID, "Catalog Plan", now)
-	t.Cleanup(func() {
-		execTestSQL(t, pool, "DELETE FROM media_servers WHERE id=$1", catalogPlanServerID)
-	})
 	store, err := db.NewLibraryCatalogStore(pool, driver)
 	if err != nil {
 		t.Fatalf("NewLibraryCatalogStore: %v", err)
@@ -670,7 +673,7 @@ func seedCatalogPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
 const (
 	catalogSortPlanServerID = "87000000-0000-4000-8000-0000000000c3"
 	catalogPlanLibraryID    = "catalog-plan-library"
-	catalogPlanItemCount    = 2000
+	catalogPlanItemCount    = 800
 )
 
 // seedCatalogSortPlanFixture fills one library on its own server with enough
@@ -679,10 +682,11 @@ const (
 func seedCatalogSortPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
 	now := time.Date(2026, 9, 27, 18, 0, 0, 0, time.UTC)
+	if catalogPlanServerExists(t, pool, catalogSortPlanServerID) {
+		analyzeCatalogPlanTables(t, pool, driver)
+		return
+	}
 	createCatalogServer(t, pool, driver, catalogSortPlanServerID, "Catalog Sort Plan", now)
-	t.Cleanup(func() {
-		execTestSQL(t, pool, "DELETE FROM media_servers WHERE id=$1", catalogSortPlanServerID)
-	})
 	store, err := db.NewLibraryCatalogStore(pool, driver)
 	if err != nil {
 		t.Fatalf("NewLibraryCatalogStore: %v", err)
@@ -704,6 +708,16 @@ func seedCatalogSortPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver
 
 // catalogPlanBulkItems spreads names, dates, and plays so every sort field
 // has distinct values and the planner sees a real distribution.
+func catalogPlanServerExists(t *testing.T, pool *sql.DB, serverID string) bool {
+	t.Helper()
+	var count int
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM media_servers WHERE id=$1", serverID).Scan(&count); err != nil {
+		t.Fatalf("count plan server: %v", err)
+	}
+	return count > 0
+}
+
 func catalogPlanBulkItems(now time.Time) []core.LibraryItem {
 	items := make([]core.LibraryItem, 0, catalogPlanItemCount)
 	for index := range catalogPlanItemCount {
@@ -863,6 +877,7 @@ func explainCatalogQuery(t *testing.T, pool *sql.DB, driver config.Driver, query
 			t.Fatalf("scan query plan: %v", err)
 		}
 		plan.WriteString(detail)
+		plan.WriteByte('\n')
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("catalog query plan = %q, %v", plan.String(), err)
@@ -884,6 +899,7 @@ func explainPostgresCatalogQuery(t *testing.T, pool *sql.DB, query string, args 
 			t.Fatalf("scan PostgreSQL plan: %v", err)
 		}
 		plan.WriteString(line)
+		plan.WriteByte('\n')
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("PostgreSQL catalog query plan = %q, %v", plan.String(), err)

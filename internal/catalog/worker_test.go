@@ -23,6 +23,7 @@ type fakeCatalogStore struct {
 	claimed      bool
 	committed    []core.LibraryItem
 	cursor       string
+	cursors      []string
 	finished     bool
 	failedWith   string
 	libraryCalls int
@@ -50,6 +51,7 @@ func (f *fakeCatalogStore) CommitLibrarySyncPage(
 ) (core.LibrarySync, error) {
 	f.committed = append(f.committed, items...)
 	f.cursor = cursor
+	f.cursors = append(f.cursors, cursor)
 	sync.Cursor = cursor
 	sync.Seen += int64(len(items))
 	sync.Upserted += int64(len(items))
@@ -450,6 +452,89 @@ type catalogExclusions struct{ value core.MediaServerExclusions }
 
 func (e catalogExclusions) GetExclusions(context.Context, string) (core.MediaServerExclusions, error) {
 	return e.value, nil
+}
+
+type changingCatalogExclusions struct {
+	calls        int
+	excludeAfter int
+}
+
+func (e *changingCatalogExclusions) GetExclusions(
+	context.Context, string,
+) (core.MediaServerExclusions, error) {
+	e.calls++
+	value := core.MediaServerExclusions{MediaServerID: catalogWorkerServerID}
+	if e.calls > e.excludeAfter {
+		value.LibraryIDs = []string{"library"}
+	}
+	return value, nil
+}
+
+type twoPageCatalogSource struct{ starts []int }
+
+func (*twoPageCatalogSource) Libraries(context.Context, string) ([]core.Library, error) {
+	return []core.Library{{ID: "library", Name: "Library"}}, nil
+}
+
+func (s *twoPageCatalogSource) CatalogItems(
+	_ context.Context, _, libraryID string, start, _ int,
+) (core.LibraryCatalogPage, error) {
+	s.starts = append(s.starts, start)
+	return core.LibraryCatalogPage{StartIndex: start, Total: 2, Items: []core.LibraryItem{{
+		ItemID: fmt.Sprintf("item-%d", start), LibraryID: libraryID,
+		ItemType: "Movie", Name: "Item", Genres: []string{},
+	}}}, nil
+}
+
+func (*twoPageCatalogSource) CatalogItemIDs(
+	_ context.Context, _ string, itemIDs []string,
+) ([]string, error) {
+	return itemIDs, nil
+}
+
+func TestWorkerStopsLibraryExcludedBetweenPages(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	source := &twoPageCatalogSource{}
+	exclusions := &changingCatalogExclusions{excludeAfter: 2}
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: source, Clock: testutil.NewFakeClock(now), Metrics: &fakeCatalogMetrics{},
+		Logger: slog.New(slog.DiscardHandler), Exclusions: exclusions,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err = worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if !store.finished || !slices.Equal(source.starts, []int{0}) || len(store.committed) != 1 {
+		t.Fatalf("excluded between pages = finished %t, starts %v, committed %d",
+			store.finished, source.starts, len(store.committed))
+	}
+}
+
+func TestWorkerResumesPastNewlyExcludedCursorLibrary(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	store.sync.Cursor = `{"library_id":"excluded","start":200}`
+	source := &excludingCatalogSource{}
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: source, Clock: testutil.NewFakeClock(now), Metrics: &fakeCatalogMetrics{},
+		Logger: slog.New(slog.DiscardHandler), Exclusions: catalogExclusions{value: core.MediaServerExclusions{
+			MediaServerID: catalogWorkerServerID, LibraryIDs: []string{"excluded"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err = worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if !store.finished || !slices.Equal(source.walked, []string{"included"}) ||
+		len(store.cursors) == 0 || store.cursors[0] != `{"library_id":"included"}` {
+		t.Fatalf("excluded cursor resume = finished %t, walked %v, cursors %v",
+			store.finished, source.walked, store.cursors)
+	}
 }
 
 func TestWorkerFailureDoesNotArchive(t *testing.T) {

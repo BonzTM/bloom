@@ -1344,17 +1344,17 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters:
         - { name: media_server_id, in: query, schema: { type: string, format: uuid } }
-        - { name: media_user_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
-        - { name: library_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
-        - { name: item_type, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
-        - { name: client, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
-        - { name: device_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: media_user_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
+        - { name: library_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
+        - { name: item_type, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
+        - { name: client, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
+        - { name: device_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
         - { name: play_method, in: query, schema: { $ref: "#/components/schemas/PlayMethod" } }
         - { name: source, in: query, schema: { $ref: "#/components/schemas/PlaybackSource" } }
         - { name: import_source, in: query, schema: { $ref: "#/components/schemas/ImportSource" } }
         - { name: started_after, in: query, schema: { type: string, format: date-time } }
         - { name: started_before, in: query, schema: { type: string, format: date-time } }
-        - { name: q, in: query, description: "ASCII case-insensitive literal substring matched against item and series names; other scripts match exactly.", schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: q, in: query, description: "ASCII case-insensitive literal substring matched against item and series names; other scripts match exactly.", schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
         - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 256 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
       responses:
@@ -1373,7 +1373,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters:
         - { $ref: "#/components/parameters/EntityID" }
-        - { name: media_user_id, in: path, required: true, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: media_user_id, in: path, required: true, schema: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
         - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 256 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { name: gap_seconds, in: query, schema: { type: integer, minimum: 1, maximum: 604800, default: 21600 } }
@@ -3929,8 +3929,8 @@ components:
       required: [excluded_media_user_ids, excluded_library_ids]
       additionalProperties: false
       properties:
-        excluded_media_user_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
-        excluded_library_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
+        excluded_media_user_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
+        excluded_library_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
       description: The two arrays may contain at most 500 entries in total.
     MediaServerExclusions:
       type: object
@@ -3938,8 +3938,8 @@ components:
       additionalProperties: false
       properties:
         media_server_id: { type: string, format: uuid }
-        excluded_media_user_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
-        excluded_library_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
+        excluded_media_user_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
+        excluded_library_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' } }
     StatsTitleKind:
       type: string
       enum: [movie, series, other]
