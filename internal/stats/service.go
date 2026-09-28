@@ -44,7 +44,8 @@ func (s *Service) ReadStats(ctx context.Context, query core.StatsQuery) (core.St
 	}
 	query = canonicalQuery(query, s.cache.ttl)
 	key := resultCacheKey(query)
-	if result, ok := s.cache.get(key); ok {
+	result, generation, ok := s.cache.get(key)
+	if ok {
 		return result, nil
 	}
 	started := s.clock.Now()
@@ -53,7 +54,7 @@ func (s *Service) ReadStats(ctx context.Context, query core.StatsQuery) (core.St
 	if err != nil {
 		outcome = "error"
 	} else {
-		s.cache.put(key, result)
+		s.cache.put(key, result, generation)
 	}
 	s.metrics.ObserveStatsQuery(string(query.Report), outcome, s.clock.Now().Sub(started).Seconds())
 	if err != nil {
@@ -61,6 +62,9 @@ func (s *Service) ReadStats(ctx context.Context, query core.StatsQuery) (core.St
 	}
 	return result, nil
 }
+
+// Invalidate clears cached reports after visibility settings change.
+func (s *Service) Invalidate(serverID string) { s.cache.clear(serverID) }
 
 func canonicalQuery(query core.StatsQuery, ttl time.Duration) core.StatsQuery {
 	resolution := ttl

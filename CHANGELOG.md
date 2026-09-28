@@ -17,6 +17,18 @@ contracts) gets an entry here.
 - Administrator account list and detail API routes with username search,
   keyset pagination, derived sign-in methods, role-assignment sources, linked
   media users, and secret-free responses on SQLite and PostgreSQL.
+- Cross-user activity and grouped per-user timeline APIs, guarded by
+  `stats.read.all`, with bounded filters, literal title search, stable keyset
+  pagination, and SQLite/PostgreSQL index-plan coverage.
+- Per-media-server user and library collection exclusions through `GET` and
+  audited `PUT /api/v1/media-servers/{id}/exclusions` administrator routes.
+  The collector, all four import sources, catalog synchronization, playback,
+  statistics, catalog, activity, and timeline reads honor the settings without
+  deleting existing rows.
+- SQLite/PostgreSQL migration `00027_activity_exclusions` adds the exclusion
+  settings table, the per-user timeline keyset index, and the import job's
+  unresolved-library counter. Migration number `00026` remains reserved for
+  watch import-origin provenance.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

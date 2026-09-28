@@ -261,6 +261,8 @@ type authHarness struct {
 	downloadManagers  *fakeDownloadManagerService
 	invites           *fakeInviteService
 	playback          *fakePlaybackReader
+	activity          *fakeActivityReader
+	exclusions        *fakeExclusionManager
 	imports           *fakeImportManager
 	stats             *fakeStatsReader
 	accountMediaUsers *fakeAccountMediaUsers
@@ -419,6 +421,8 @@ func newAuthHarnessConfigured(
 	downloadManagers := newFakeDownloadManagerService()
 	invites := newFakeInviteService(clock.Now())
 	playback := &fakePlaybackReader{}
+	activity := &fakeActivityReader{}
+	exclusions := &fakeExclusionManager{}
 	imports := &fakeImportManager{}
 	stats := &fakeStatsReader{}
 	accountMediaUsers := &fakeAccountMediaUsers{}
@@ -431,7 +435,8 @@ func newAuthHarnessConfigured(
 		Authorizer: authorization, Roles: authorization, AccountAdmin: accountAdmin,
 		MediaServerReader: mediaServers, MediaServerManager: mediaServers,
 		DownloadManagerReader: downloadManagers, DownloadManagerManager: downloadManagers,
-		InviteReader: invites, InviteManager: invites, PlaybackReader: playback, Imports: imports, StatsReader: stats,
+		InviteReader: invites, InviteManager: invites, PlaybackReader: playback, ActivityReader: activity,
+		Exclusions: exclusions, Imports: imports, StatsReader: stats,
 		AccountMediaUsers: accountMediaUsers, Sessions: sessions, Audit: audit, Clock: clock, Auth: authCfg,
 		AuditCorrelationKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
@@ -440,7 +445,8 @@ func newAuthHarnessConfigured(
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
 		authorization: authorization, accountAdmin: accountAdmin,
 		mediaServers: mediaServers, downloadManagers: downloadManagers,
-		invites: invites, playback: playback, imports: imports, stats: stats, accountMediaUsers: accountMediaUsers,
+		invites: invites, playback: playback, activity: activity, exclusions: exclusions,
+		imports: imports, stats: stats, accountMediaUsers: accountMediaUsers,
 	}
 }
 

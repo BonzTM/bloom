@@ -1001,6 +1001,38 @@ func TestCollectorClosesRestoreOverflowWithLogAndMetric(t *testing.T) {
 	}
 }
 
+func TestCollectorSkipsExcludedUser(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	store := &memoryPlaybackStore{}
+	collector, err := NewCollector(managerTestServer(), Config{
+		ActiveInterval: 5 * time.Second, IdleInterval: 30 * time.Second,
+		MissedPolls: 1, ResumeWindow: 5 * time.Minute, StoreTimeout: time.Second,
+	}, Dependencies{
+		Store: store, Source: &sequenceSource{responses: [][]core.PlaybackSession{{collectorSession()}}},
+		Exclusions: playbackExclusions{value: core.MediaServerExclusions{
+			MediaServerID: collectorServerID, MediaUserIDs: []string{"user"},
+		}},
+		Clock: testutil.NewFakeClock(now), Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewCollector: %v", err)
+	}
+	if err = collector.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.mutations) != 0 {
+		t.Fatalf("excluded user mutations = %+v, want none", store.mutations)
+	}
+}
+
+type playbackExclusions struct{ value core.MediaServerExclusions }
+
+func (e playbackExclusions) GetExclusions(context.Context, string) (core.MediaServerExclusions, error) {
+	return e.value, nil
+}
+
 func collectorSession() core.PlaybackSession {
 	return core.PlaybackSession{
 		ServerSessionID: "session", MediaUserID: "user", DeviceID: "device", ItemID: "item",

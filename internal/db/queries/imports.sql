@@ -3,12 +3,12 @@
 -- name: CreateImport :exec
 INSERT INTO imports (
     id, media_server_id, source, state, cursor, read_count, imported_count,
-    skipped_count, duplicate_count, last_error, lease_token, lease_expires_at,
+    skipped_count, duplicate_count, unresolved_library_count, last_error, lease_token, lease_expires_at,
     requested_by, created_at, started_at, finished_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(source), sqlc.arg(state),
     sqlc.arg(cursor), sqlc.arg(read_count), sqlc.arg(imported_count),
-    sqlc.arg(skipped_count), sqlc.arg(duplicate_count), sqlc.arg(last_error),
+    sqlc.arg(skipped_count), sqlc.arg(duplicate_count), sqlc.arg(unresolved_library_count), sqlc.arg(last_error),
     sqlc.arg(lease_token), sqlc.narg(lease_expires_at), sqlc.arg(requested_by),
     sqlc.arg(created_at), sqlc.narg(started_at), sqlc.narg(finished_at), sqlc.arg(updated_at)
 );
@@ -81,6 +81,7 @@ SET cursor = sqlc.arg(cursor), read_count = read_count + sqlc.arg(read_delta),
     imported_count = imported_count + sqlc.arg(imported_delta),
     skipped_count = skipped_count + sqlc.arg(skipped_delta),
     duplicate_count = duplicate_count + sqlc.arg(duplicate_delta),
+    unresolved_library_count = unresolved_library_count + sqlc.arg(unresolved_library_delta),
     lease_expires_at = sqlc.arg(expires_at), updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id) AND state = 'running' AND lease_token = sqlc.arg(token);
 

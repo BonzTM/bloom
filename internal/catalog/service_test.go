@@ -65,3 +65,34 @@ func TestRequestSyncRejectsUnknownServerBeforePersistence(t *testing.T) {
 		t.Fatal("RequestLibrarySync was called for an unknown server")
 	}
 }
+
+func TestServiceFiltersExcludedLibraries(t *testing.T) {
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC))
+	store := &fakeCatalogStore{libraries: []core.CatalogLibrarySummary{
+		{LibraryID: "included"}, {LibraryID: "excluded"},
+	}}
+	service, err := NewService(store, catalogServerStub{}, nil, clock, time.Minute,
+		catalogServiceExclusions{value: core.MediaServerExclusions{
+			MediaServerID: catalogWorkerServerID, LibraryIDs: []string{"excluded"},
+		}})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	libraries, err := service.ListLibraries(t.Context(), catalogWorkerServerID, core.CatalogWindow{})
+	if err != nil || len(libraries) != 1 || libraries[0].LibraryID != "included" {
+		t.Fatalf("libraries = %+v, %v", libraries, err)
+	}
+	items, err := service.ListItems(t.Context(), core.CatalogItemQuery{
+		MediaServerID: catalogWorkerServerID, LibraryID: "excluded",
+		Sort: core.CatalogSortName, Order: core.SortAscending, Limit: 10,
+	})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("excluded items = %+v, %v", items, err)
+	}
+}
+
+type catalogServiceExclusions struct{ value core.MediaServerExclusions }
+
+func (e catalogServiceExclusions) GetExclusions(context.Context, string) (core.MediaServerExclusions, error) {
+	return e.value, nil
+}

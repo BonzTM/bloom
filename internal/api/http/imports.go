@@ -37,20 +37,21 @@ type createImportRequest struct {
 }
 
 type importWire struct {
-	ID            string            `json:"id"`
-	MediaServerID string            `json:"media_server_id"`
-	Source        core.ImportSource `json:"source"`
-	State         core.ImportState  `json:"state"`
-	Read          int64             `json:"read"`
-	Imported      int64             `json:"imported"`
-	Skipped       int64             `json:"skipped"`
-	Duplicate     int64             `json:"duplicate"`
-	LastError     string            `json:"last_error"`
-	RequestedBy   string            `json:"requested_by"`
-	CreatedAt     time.Time         `json:"created_at"`
-	StartedAt     *time.Time        `json:"started_at,omitempty"`
-	FinishedAt    *time.Time        `json:"finished_at,omitempty"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	ID                string            `json:"id"`
+	MediaServerID     string            `json:"media_server_id"`
+	Source            core.ImportSource `json:"source"`
+	State             core.ImportState  `json:"state"`
+	Read              int64             `json:"read"`
+	Imported          int64             `json:"imported"`
+	Skipped           int64             `json:"skipped"`
+	Duplicate         int64             `json:"duplicate"`
+	UnresolvedLibrary int64             `json:"unresolved_library"`
+	LastError         string            `json:"last_error"`
+	RequestedBy       string            `json:"requested_by"`
+	CreatedAt         time.Time         `json:"created_at"`
+	StartedAt         *time.Time        `json:"started_at,omitempty"`
+	FinishedAt        *time.Time        `json:"finished_at,omitempty"`
+	UpdatedAt         time.Time         `json:"updated_at"`
 }
 
 type importsResponse struct {
@@ -340,7 +341,8 @@ func importDTO(job core.ImportJob) importWire {
 	return importWire{
 		ID: job.ID, MediaServerID: job.MediaServerID, Source: job.Source, State: job.State,
 		Read: job.Read, Imported: job.Imported, Skipped: job.Skipped, Duplicate: job.Duplicate,
-		LastError: job.LastError, RequestedBy: job.RequestedBy, CreatedAt: job.CreatedAt,
+		UnresolvedLibrary: job.UnresolvedLibrary,
+		LastError:         job.LastError, RequestedBy: job.RequestedBy, CreatedAt: job.CreatedAt,
 		StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, UpdatedAt: job.UpdatedAt,
 	}
 }

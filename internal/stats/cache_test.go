@@ -15,18 +15,18 @@ func TestResultCacheEvictsLeastRecentlyUsedAndClones(t *testing.T) {
 	first := cacheKey{startUnixNano: 1, kind: "first"}
 	second := cacheKey{startUnixNano: 1, kind: "second"}
 	third := cacheKey{startUnixNano: 1, kind: "third"}
-	cache.put(first, core.StatsResult{Titles: []core.StatsTitle{{Name: "first"}}})
-	cache.put(second, core.StatsResult{Titles: []core.StatsTitle{{Name: "second"}}})
-	value, ok := cache.get(first)
+	cache.put(first, core.StatsResult{Titles: []core.StatsTitle{{Name: "first"}}}, 0)
+	cache.put(second, core.StatsResult{Titles: []core.StatsTitle{{Name: "second"}}}, 0)
+	value, _, ok := cache.get(first)
 	if !ok {
 		t.Fatal("first cache entry missed")
 	}
 	value.Titles[0].Name = "mutated"
-	cache.put(third, core.StatsResult{})
-	if _, found := cache.get(second); found {
+	cache.put(third, core.StatsResult{}, 0)
+	if _, _, found := cache.get(second); found {
 		t.Fatal("least-recently-used entry was retained")
 	}
-	value, ok = cache.get(first)
+	value, _, ok = cache.get(first)
 	if !ok || value.Titles[0].Name != "first" {
 		t.Fatalf("cached clone = %+v, %t", value, ok)
 	}
@@ -68,14 +68,14 @@ func TestResultCacheClonesWatchStreamDetails(t *testing.T) {
 			VideoCodec: "h264", IsVideoDirect: &direct,
 			TranscodeReasons: []string{"VideoCodecNotSupported"},
 		},
-	}}})
-	first, ok := cache.get(key)
+	}}}, 0)
+	first, _, ok := cache.get(key)
 	if !ok {
 		t.Fatal("cached result missing")
 	}
 	first.Watches[0].Stream.VideoCodec = "changed"
 	first.Watches[0].Stream.TranscodeReasons[0] = "changed"
-	second, _ := cache.get(key)
+	second, _, _ := cache.get(key)
 	if second.Watches[0].Stream.VideoCodec != "h264" ||
 		second.Watches[0].Stream.TranscodeReasons[0] != "VideoCodecNotSupported" {
 		t.Fatalf("cached stream was aliased: %+v", second.Watches[0].Stream)
@@ -88,14 +88,14 @@ func TestResultCacheClonesWatchRuntime(t *testing.T) {
 	cache := newResultCache(clock, 1, time.Minute)
 	key := cacheKey{kind: "user"}
 	runtime := 45 * time.Minute
-	cache.put(key, core.StatsResult{Watches: []core.PlaybackWatch{{Runtime: &runtime}}})
+	cache.put(key, core.StatsResult{Watches: []core.PlaybackWatch{{Runtime: &runtime}}}, 0)
 	runtime = time.Hour
-	first, ok := cache.get(key)
+	first, _, ok := cache.get(key)
 	if !ok || first.Watches[0].Runtime == nil || *first.Watches[0].Runtime != 45*time.Minute {
 		t.Fatalf("cached runtime = %+v, found = %t", first.Watches[0].Runtime, ok)
 	}
 	*first.Watches[0].Runtime = 90 * time.Minute
-	second, _ := cache.get(key)
+	second, _, _ := cache.get(key)
 	if second.Watches[0].Runtime == nil || *second.Watches[0].Runtime != 45*time.Minute {
 		t.Fatalf("cached runtime was aliased: %+v", second.Watches[0].Runtime)
 	}

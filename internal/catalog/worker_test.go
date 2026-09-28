@@ -408,6 +408,50 @@ func TestWorkerCompletesFullWalkAndFillsPersistenceFields(t *testing.T) {
 	}
 }
 
+func TestWorkerDoesNotWalkExcludedLibrary(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	source := &excludingCatalogSource{}
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: source, Clock: testutil.NewFakeClock(now), Metrics: &fakeCatalogMetrics{},
+		Logger: slog.New(slog.DiscardHandler), Exclusions: catalogExclusions{value: core.MediaServerExclusions{
+			MediaServerID: catalogWorkerServerID, LibraryIDs: []string{"excluded"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err = worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if !slices.Equal(source.walked, []string{"included"}) {
+		t.Fatalf("walked libraries = %v, want [included]", source.walked)
+	}
+}
+
+type excludingCatalogSource struct{ walked []string }
+
+func (*excludingCatalogSource) Libraries(context.Context, string) ([]core.Library, error) {
+	return []core.Library{{ID: "included", Name: "Included"}, {ID: "excluded", Name: "Excluded"}}, nil
+}
+
+func (s *excludingCatalogSource) CatalogItems(
+	_ context.Context, _, libraryID string, start, _ int,
+) (core.LibraryCatalogPage, error) {
+	s.walked = append(s.walked, libraryID)
+	return core.LibraryCatalogPage{StartIndex: start, Total: 0}, nil
+}
+
+func (*excludingCatalogSource) CatalogItemIDs(_ context.Context, _ string, itemIDs []string) ([]string, error) {
+	return itemIDs, nil
+}
+
+type catalogExclusions struct{ value core.MediaServerExclusions }
+
+func (e catalogExclusions) GetExclusions(context.Context, string) (core.MediaServerExclusions, error) {
+	return e.value, nil
+}
+
 func TestWorkerFailureDoesNotArchive(t *testing.T) {
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	store := catalogWorkerStore(now)

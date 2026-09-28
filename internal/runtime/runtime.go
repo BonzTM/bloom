@@ -28,6 +28,7 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
 	"github.com/BonzTM/bloom/internal/downloadmanager"
+	exclusionapp "github.com/BonzTM/bloom/internal/exclusion"
 	"github.com/BonzTM/bloom/internal/fulfilment"
 	importapp "github.com/BonzTM/bloom/internal/importer"
 	inviteapp "github.com/BonzTM/bloom/internal/invite"
@@ -185,13 +186,19 @@ type serviceWiring struct {
 	importWorker       *importapp.Worker
 	catalog            *catalogapp.Service
 	catalogWorker      *catalogapp.Worker
-	playbackStore      core.PlaybackStore
+	playbackStore      runtimePlaybackStore
 	playbackManager    *playback.Manager
 	stats              *statsapp.Service
 	accountMediaUsers  *accountmedia.Service
+	exclusions         *exclusionapp.Service
 	oidcProvider       oidcLifecycle
 	oidcAccounts       core.OIDCAccountStore
 	oidcFlows          core.OIDCFlowStore
+}
+
+type runtimePlaybackStore interface {
+	core.PlaybackStore
+	core.ActivityStore
 }
 
 func wireServiceDependencies(
@@ -249,16 +256,22 @@ func wirePlaybackAndIdentity(
 	wiring serviceWiring,
 ) (serviceWiring, error) {
 	mediaServers := wiring.mediaServers
-	playbackStore, playbackManager, err := playbackDependencies(pool, cfg, mediaServers, metrics, logger, deps.Clock, deps.newPlaybackManager)
+	exclusions, err := exclusionDependencies(pool, cfg, mediaServers, deps.Clock)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	playbackStore, playbackManager, err := playbackDependencies(pool, cfg, mediaServers, exclusions, metrics, logger, deps.Clock, deps.newPlaybackManager)
 	if err != nil {
 		return serviceWiring{}, err
 	}
 	ownership.playback = playbackManager
-	catalog, catalogWorker, userData, err := catalogDependencies(pool, cfg, mediaServers, deps.Clock, metrics, logger)
+	catalog, catalogWorker, userData, err := catalogDependencies(pool, cfg, mediaServers, exclusions, deps.Clock, metrics, logger)
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	imports, importWorker, err := importDependencies(pool, cfg, mediaServers, userData, deps.Clock, metrics, logger)
+	imports, importWorker, err := importDependencies(
+		pool, cfg, mediaServers, userData, userData, mediaServers, exclusions, deps.Clock, metrics, logger,
+	)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -266,6 +279,8 @@ func wirePlaybackAndIdentity(
 	if err != nil {
 		return serviceWiring{}, err
 	}
+	exclusions.AddInvalidator(catalog.Invalidate)
+	exclusions.AddInvalidator(statsService.Invalidate)
 	if roleErr := validateOIDCRoles(ctx, wiring.roles, cfg.OIDC); roleErr != nil {
 		return serviceWiring{}, roleErr
 	}
@@ -276,6 +291,7 @@ func wirePlaybackAndIdentity(
 	ownership.provider = provider
 	wiring.imports, wiring.importWorker = imports, importWorker
 	wiring.catalog, wiring.catalogWorker = catalog, catalogWorker
+	wiring.exclusions = exclusions
 	wiring.playbackStore, wiring.playbackManager, wiring.stats = playbackStore, playbackManager, statsService
 	wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows = provider, oidcAccounts, oidcFlows
 	return wiring, nil
@@ -286,6 +302,9 @@ func importDependencies(
 	cfg config.Config,
 	servers *mediaserver.Service,
 	userData importapp.UserDataService,
+	libraries core.ImportLibraryResolver,
+	items importapp.LibraryResolver,
+	exclusions core.ExclusionReader,
 	clock core.Clock,
 	metrics *telemetry.PromMetrics,
 	logger *slog.Logger,
@@ -310,6 +329,7 @@ func importDependencies(
 		Interval: interval, ResumeWindow: cfg.Playback.ResumeWindow,
 	}, importapp.WorkerDependencies{
 		Store: store, Reporting: servers, UserData: userData, Clock: clock, Metrics: metrics, Logger: logger,
+		Exclusions: exclusions, Libraries: libraries, Items: items,
 		Staging: staging,
 	})
 	if err != nil {
@@ -319,7 +339,7 @@ func importDependencies(
 }
 
 func catalogDependencies(
-	pool *sql.DB, cfg config.Config, servers *mediaserver.Service, clock core.Clock,
+	pool *sql.DB, cfg config.Config, servers *mediaserver.Service, exclusions core.ExclusionReader, clock core.Clock,
 	metrics *telemetry.PromMetrics, logger *slog.Logger,
 ) (*catalogapp.Service, *catalogapp.Worker, *catalogapp.UserDataSource, error) {
 	interval := cfg.Catalog.SyncInterval
@@ -331,12 +351,13 @@ func catalogDependencies(
 		return nil, nil, nil, fmt.Errorf("build library catalog store: %w", err)
 	}
 	wake := make(chan struct{}, 1)
-	service, err := catalogapp.NewService(store, servers, wake, clock, cfg.Stats.CacheTTL)
+	service, err := catalogapp.NewService(store, servers, wake, clock, cfg.Stats.CacheTTL, exclusions)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build library catalog service: %w", err)
 	}
 	worker, err := catalogapp.NewWorker(catalogapp.WorkerConfig{Interval: interval}, catalogapp.WorkerDependencies{
 		Store: store, Source: servers, Clock: clock, Metrics: metrics, Logger: logger, Wake: wake,
+		Exclusions: exclusions,
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build library catalog worker: %w", err)
@@ -346,6 +367,20 @@ func catalogDependencies(
 		return nil, nil, nil, fmt.Errorf("build Jellyfin user-data source: %w", err)
 	}
 	return service, worker, userData, nil
+}
+
+func exclusionDependencies(
+	pool *sql.DB, cfg config.Config, servers *mediaserver.Service, clock core.Clock,
+) (*exclusionapp.Service, error) {
+	store, err := db.NewExclusionStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build exclusion store: %w", err)
+	}
+	service, err := exclusionapp.NewService(store, servers, clock, time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("build exclusion service: %w", err)
+	}
+	return service, nil
 }
 
 func statsDependencies(
@@ -419,7 +454,7 @@ func runtimeDependencies(supplied []Dependencies) Dependencies {
 		deps.newPlaybackManager = func(input playbackManagerDependencies) (*playback.Manager, error) {
 			return playback.NewManager(
 				input.servers, input.store, input.config, input.factory, input.clock,
-				input.logger, input.metrics, playback.ManagerOptions{},
+				input.logger, input.metrics, playback.ManagerOptions{Exclusions: input.exclusions},
 			)
 		}
 	}
@@ -503,8 +538,10 @@ func assembleHTTPServer(
 		InviteManager:          wiring.invites,
 		Imports:                wiring.imports,
 		Catalog:                wiring.catalog,
+		Exclusions:             wiring.exclusions,
 		AccountMediaUsers:      wiring.accountMediaUsers,
 		PlaybackReader:         wiring.playbackStore,
+		ActivityReader:         wiring.playbackStore,
 		StatsReader:            wiring.stats,
 		MetadataReader:         wiring.metadata,
 		MetadataDiscovery:      wiring.metadata,
@@ -756,14 +793,19 @@ func playbackDependencies(
 	pool *sql.DB,
 	cfg config.Config,
 	mediaServers *mediaserver.Service,
+	exclusions core.ExclusionReader,
 	metrics *telemetry.PromMetrics,
 	logger *slog.Logger,
 	clock core.Clock,
 	newManager func(playbackManagerDependencies) (*playback.Manager, error),
-) (core.PlaybackStore, *playback.Manager, error) {
+) (runtimePlaybackStore, *playback.Manager, error) {
 	store, err := db.NewPlaybackStore(pool, cfg.Database.Driver, cfg.Playback.ResumeWindow)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build playback store: %w", err)
+	}
+	activityStore, ok := store.(runtimePlaybackStore)
+	if !ok {
+		return nil, nil, errors.New("build playback store: activity reads are unavailable")
 	}
 	collectorConfig := playback.Config{
 		ActiveInterval: cfg.Playback.PollActive, IdleInterval: cfg.Playback.PollIdle,
@@ -775,13 +817,13 @@ func playbackDependencies(
 	}
 	manager, err := newManager(playbackManagerDependencies{
 		servers: mediaServers, store: store, config: collectorConfig, factory: factory,
-		clock: clock, logger: logger, metrics: metrics,
+		clock: clock, logger: logger, metrics: metrics, exclusions: exclusions,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("build playback manager: %w", err)
 	}
 	mediaServers.SetPlaybackLifecycle(manager)
-	return store, manager, nil
+	return activityStore, manager, nil
 }
 
 type mediaPlaybackSource struct {
@@ -800,13 +842,14 @@ func (s mediaPlaybackSource) ResolveLibrary(
 }
 
 type playbackManagerDependencies struct {
-	servers *mediaserver.Service
-	store   core.PlaybackPersistence
-	config  playback.Config
-	factory playback.SourceFactory
-	clock   core.Clock
-	logger  *slog.Logger
-	metrics playback.Observer
+	servers    *mediaserver.Service
+	store      core.PlaybackPersistence
+	config     playback.Config
+	factory    playback.SourceFactory
+	clock      core.Clock
+	logger     *slog.Logger
+	metrics    playback.Observer
+	exclusions core.ExclusionReader
 }
 
 func mediaServerDependencies(

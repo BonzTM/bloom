@@ -127,30 +127,60 @@ WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id
 -- name: RebuildLibraryItemRollup :exec
 UPDATE library_items
 SET plays = (SELECT COUNT(*) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     watch_seconds = COALESCE((SELECT SUM(w.active_seconds) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id), 0),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))), 0),
     unique_users = (SELECT COUNT(DISTINCT w.media_user_id) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     first_played_at = (SELECT MIN(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     last_played_at = (SELECT MAX(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id)
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id))))
 WHERE library_items.media_server_id = sqlc.arg(media_server_id)
   AND library_items.item_id = sqlc.arg(item_id);
 
 -- name: RebuildLibraryItemRollups :exec
 UPDATE library_items
 SET plays = (SELECT COUNT(*) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     watch_seconds = COALESCE((SELECT SUM(w.active_seconds) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id), 0),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))), 0),
     unique_users = (SELECT COUNT(DISTINCT w.media_user_id) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     first_played_at = (SELECT MIN(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id),
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id)))),
     last_played_at = (SELECT MAX(w.started_at) FROM watches w
-             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id)
+             WHERE w.media_server_id = library_items.media_server_id AND w.item_id = library_items.item_id
+               AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
+                   AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+                     OR (e.kind = 'library' AND e.external_id = library_items.library_id))))
 WHERE library_items.media_server_id = sqlc.arg(media_server_id);
 
 -- name: CompleteLibrarySync :execrows
@@ -169,13 +199,23 @@ WHERE media_server_id = sqlc.arg(media_server_id)
 
 -- name: CatalogLibraryTypeRows :many
 WITH watch_stats AS (
-    SELECT media_server_id, item_id, COUNT(*) AS plays,
-           COALESCE(SUM(active_seconds), 0) AS watch_seconds
-    FROM watches
-    WHERE media_server_id = sqlc.arg(media_server_id)
+    SELECT w.media_server_id, w.item_id, COUNT(*) AS plays,
+           COALESCE(SUM(w.active_seconds), 0) AS watch_seconds
+    FROM watches w
+    WHERE w.media_server_id = sqlc.arg(media_server_id)
+      AND NOT EXISTS (
+          SELECT 1 FROM media_server_exclusions e
+          WHERE e.media_server_id = w.media_server_id
+            AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+              OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+                  SELECT 1 FROM library_items excluded_item
+                  WHERE excluded_item.media_server_id = w.media_server_id
+                    AND excluded_item.item_id = w.item_id
+                    AND excluded_item.library_id = e.external_id))))
+      )
       AND (CAST(sqlc.arg(window_enabled) AS INTEGER) = 0
-           OR (started_at >= sqlc.arg(window_start) AND started_at < sqlc.arg(window_end)))
-    GROUP BY media_server_id, item_id
+           OR (w.started_at >= sqlc.arg(window_start) AND w.started_at < sqlc.arg(window_end)))
+    GROUP BY w.media_server_id, w.item_id
 )
 SELECT li.library_id, li.item_type, COUNT(*) AS item_count,
        COALESCE(SUM(ws.plays), 0) AS plays,
@@ -191,9 +231,19 @@ LIMIT 10001;
 SELECT COUNT(*) AS plays, COALESCE(SUM(active_seconds), 0) AS watch_seconds,
        COUNT(DISTINCT media_user_id) AS unique_users,
        MIN(started_at) AS first_played_at, MAX(started_at) AS last_played_at
-FROM watches
-WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id)
-  AND started_at >= sqlc.arg(window_start) AND started_at < sqlc.arg(window_end);
+FROM watches w
+WHERE w.media_server_id = sqlc.arg(media_server_id) AND w.item_id = sqlc.arg(item_id)
+  AND w.started_at >= sqlc.arg(window_start) AND w.started_at < sqlc.arg(window_end)
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items excluded_item
+              WHERE excluded_item.media_server_id = w.media_server_id
+                AND excluded_item.item_id = w.item_id
+                AND excluded_item.library_id = e.external_id))))
+  );
 
 -- Item pages use fixed filtered and unfiltered plans selected by the adapter.
 -- name: ListCatalogItemsNameAsc :many
@@ -565,8 +615,24 @@ SELECT media_server_id, item_id, library_id, parent_id, item_type, name, series_
 FROM library_items
 WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id);
 
+-- name: GetCatalogItemLibrary :one
+SELECT library_id FROM library_items
+WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id);
+
 -- name: CatalogItemPlaySummary :one
-WITH root AS (
+WITH visible_watches AS (
+    SELECT w.* FROM watches w
+    WHERE NOT EXISTS (
+        SELECT 1 FROM media_server_exclusions e
+        WHERE e.media_server_id = w.media_server_id
+          AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+            OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+                SELECT 1 FROM library_items excluded_item
+                WHERE excluded_item.media_server_id = w.media_server_id
+                  AND excluded_item.item_id = w.item_id
+                  AND excluded_item.library_id = e.external_id))))
+    )
+), root AS (
     SELECT library_items.item_id, library_items.item_type FROM library_items
     WHERE library_items.media_server_id = sqlc.arg(server_key)
       AND library_items.item_id = sqlc.arg(catalog_key)
@@ -584,15 +650,15 @@ WITH root AS (
     WHERE root.item_type = 'Series'
 ), target_watches AS (
     SELECT w.active_seconds, w.media_user_id, w.started_at FROM target_items ti
-    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
+    JOIN visible_watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
     UNION ALL
     SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
-    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
     UNION ALL
     SELECT w.active_seconds, w.media_user_id, w.started_at FROM root
-    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
     WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
 )
@@ -609,7 +675,19 @@ WHERE media_server_id = sqlc.arg(media_server_id) AND archived = FALSE
 GROUP BY item_type ORDER BY item_type LIMIT 100;
 
 -- name: ListCatalogItemHistory :many
-WITH root AS (
+WITH visible_watches AS (
+    SELECT w.* FROM watches w
+    WHERE NOT EXISTS (
+        SELECT 1 FROM media_server_exclusions e
+        WHERE e.media_server_id = w.media_server_id
+          AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+            OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+                SELECT 1 FROM library_items excluded_item
+                WHERE excluded_item.media_server_id = w.media_server_id
+                  AND excluded_item.item_id = w.item_id
+                  AND excluded_item.library_id = e.external_id))))
+    )
+), root AS (
     SELECT library_items.item_id, library_items.item_type FROM library_items
     WHERE library_items.media_server_id = sqlc.arg(server_key)
       AND library_items.item_id = sqlc.arg(catalog_key)
@@ -636,7 +714,7 @@ WITH root AS (
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
            w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM target_items ti
-    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
+    JOIN visible_watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
     UNION ALL
     SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
@@ -649,7 +727,7 @@ WITH root AS (
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
            w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM root
-    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
     UNION ALL
     SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
@@ -662,7 +740,7 @@ WITH root AS (
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
            w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM root
-    JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
+    JOIN visible_watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
     WHERE root.item_type = 'Series' AND w.item_id <> root.item_id
 )
@@ -704,6 +782,12 @@ JOIN library_items li ON li.media_server_id = lig.media_server_id AND li.item_id
 LEFT JOIN watches w ON w.media_server_id = lig.media_server_id AND w.item_id = lig.item_id
   AND (CAST(sqlc.arg(window_enabled) AS INTEGER) = 0
        OR (w.started_at >= sqlc.arg(window_start) AND w.started_at < sqlc.arg(window_end)))
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND e.external_id = li.library_id))
+  )
 WHERE lig.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
   AND li.archived = FALSE
 GROUP BY lig.genre ORDER BY lig.genre LIMIT 1001;

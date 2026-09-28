@@ -254,6 +254,47 @@ available. Those watch responses also include nullable `runtime_ms` so clients
 can calculate progress and remaining time. Successful reads emit no playback audit event;
 authorization denials continue to use the shared security audit stream.
 
+### Activity, timelines, and collection exclusions
+
+An account with `stats.read.all` can list visible watches across every user at
+`GET /api/v1/activity`. Results use newest-first `(started_at, id)` keyset
+pagination. `limit` defaults to 50 and accepts 1 through 100. Pass the returned
+`next_cursor` as `cursor`. The route accepts `media_server_id`,
+`media_user_id`, `library_id`, `item_type`, `client`, `device_id`,
+`play_method`, `source`, `import_source`, `started_after`, `started_before`,
+and `q`. Title search is an ASCII case-insensitive literal substring of
+`item_name` or `series_name`; other scripts match exactly. Search is limited
+to 128 UTF-8 bytes. A catalog assignment can satisfy `library_id` when an
+older watch has no stored library.
+
+`GET /api/v1/media-servers/{id}/users/{media_user_id}/timeline` uses the same
+permission. It groups consecutive watches of the same `item_id` when their
+start times are within `gap_seconds`. The gap defaults to six hours and accepts
+1 second through 7 days. Each result contains the first start, last end, play
+count, summed active seconds, and item identity. A page groups no more than 500
+raw watches. A group that crosses that fetch boundary continues on the next
+page.
+
+An account with `admin.settings` can read or atomically replace a server's
+collection exclusions at `GET` or `PUT
+/api/v1/media-servers/{id}/exclusions`. The `PUT` body contains complete
+`excluded_media_user_ids` and `excluded_library_ids` arrays. Each identifier
+is limited to 128 UTF-8 bytes. The arrays may contain no more than 500 entries
+in total. Replacement does not delete existing watches or catalog rows.
+
+The collector drops sessions for excluded users and for items resolved to an
+excluded library. Every history-import source counts excluded-user and
+excluded-library rows as skipped. Catalog synchronization does not walk an
+excluded library. Per-server settings use a one-minute in-process
+lease-and-refresh cache, which is refreshed immediately after replacement.
+
+Visibility is also enforced on existing data. Playback-now,
+playback-history, watch-position access, every administrator and own-user
+statistics query, catalog library/item/detail/history/recent/genre/stale
+reads, catalog activity rollups, the activity list, and per-user timelines
+exclude matching users and libraries. Changing exclusions rebuilds stored
+catalog rollups and clears the statistics and catalog result caches.
+
 ### Importing history
 
 An account with `admin.settings` can create and monitor import jobs through
@@ -262,6 +303,13 @@ and `POST /api/v1/imports/{id}/cancel`. Only one pending or running job for a
 media server and source is allowed. The worker processes one job at a time per
 Bloom process in batches of 500 and checkpoints each batch with its cursor and
 counters. A stopped process resumes after the last committed batch.
+
+When an imported row has no library identifier, exclusion filtering first
+checks Bloom's catalog and then asks the media server to resolve the item. A
+resolved excluded library is skipped. If both lookups miss, Bloom fails open:
+it imports the history and increments the job's bounded `unresolved_library`
+counter. Resolution results, including misses, are cached only for the current
+500-row batch.
 
 The `playback_reporting` source reads Jellyfin's Playback Reporting plugin by
 ascending database `rowid`. The plugin must be installed on the selected

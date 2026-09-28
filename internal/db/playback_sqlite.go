@@ -21,6 +21,7 @@ type sqlitePlaybackStore struct {
 var (
 	_ core.PlaybackStore        = (*sqlitePlaybackStore)(nil)
 	_ core.PlaybackLibraryStore = (*sqlitePlaybackStore)(nil)
+	_ core.ActivityStore        = (*sqlitePlaybackStore)(nil)
 )
 
 func newSQLitePlaybackStore(pool *sql.DB, resumeWindow time.Duration) *sqlitePlaybackStore {
@@ -310,6 +311,73 @@ func (s *sqlitePlaybackStore) listHistory(
 	return watches, nil
 }
 
+func (s *sqlitePlaybackStore) ListActivity(
+	ctx context.Context, query core.ActivityQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := validateActivityQuery(query); err != nil {
+		return nil, fmt.Errorf("list activity: %w", err)
+	}
+	beforeTime, beforeID := sqliteActivityCursor(query.Before)
+	minimum := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	maximum := time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
+	rows, err := s.q.ListActivityWatches(ctx, sqlite.ListActivityWatchesParams{
+		MediaServerFilter: query.MediaServerID, MediaUserFilter: query.MediaUserID,
+		LibraryFilter: query.LibraryID, ItemTypeFilter: query.ItemType, ClientFilter: query.Client,
+		DeviceFilter: query.DeviceID, PlayMethodFilter: string(query.PlayMethod),
+		SourceFilter: string(query.Source), ImportSourceFilter: string(query.ImportSource),
+		StartedAfterSet:  boolToInt64(query.StartedAfter != nil),
+		StartedAfter:     formatSQLiteTime(activityTime(query.StartedAfter, minimum)),
+		StartedBeforeSet: boolToInt64(query.StartedBefore != nil),
+		StartedBefore:    formatSQLiteTime(activityTime(query.StartedBefore, maximum)),
+		SearchText:       query.Search, BeforeStartedAt: beforeTime,
+		BeforeID: beforeID, PageSize: int64(query.Limit),
+	})
+	if err != nil {
+		return nil, playbackStoreError("list activity", err)
+	}
+	result := make([]core.PlaybackWatch, 0, len(rows))
+	for _, row := range rows {
+		watch, mapErr := sqliteActivityWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map activity watch", mapErr)
+		}
+		result = append(result, watch)
+	}
+	return result, nil
+}
+
+func (s *sqlitePlaybackStore) ListTimelineWatches(
+	ctx context.Context, query core.TimelineWatchQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := validateTimelineWatchQuery(query); err != nil {
+		return nil, fmt.Errorf("list timeline watches: %w", err)
+	}
+	beforeTime, beforeID := sqliteActivityCursor(query.Before)
+	rows, err := s.q.ListTimelineWatches(ctx, sqlite.ListTimelineWatchesParams{
+		MediaServerID: query.MediaServerID, MediaUserID: query.MediaUserID,
+		BeforeStartedAt: beforeTime, BeforeID: beforeID, PageSize: int64(query.Limit),
+	})
+	if err != nil {
+		return nil, playbackStoreError("list timeline watches", err)
+	}
+	result := make([]core.PlaybackWatch, 0, len(rows))
+	for _, row := range rows {
+		watch, mapErr := sqliteTimelineWatch(row)
+		if mapErr != nil {
+			return nil, playbackStoreError("map timeline watch", mapErr)
+		}
+		result = append(result, watch)
+	}
+	return result, nil
+}
+
+func sqliteActivityCursor(cursor *core.ActivityCursor) (string, string) {
+	if cursor == nil {
+		return formatSQLiteTime(time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)), "\uffff"
+	}
+	return formatSQLiteTime(cursor.StartedAt), cursor.ID
+}
+
 func (s *sqlitePlaybackStore) findRecent(
 	ctx context.Context,
 	query core.PlaybackQuery,
@@ -498,6 +566,34 @@ func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, 
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func sqliteActivityWatch(row sqlite.ListActivityWatchesRow) (core.PlaybackWatch, error) {
+	return sqliteStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt,
+		row.EndedAt, row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func sqliteTimelineWatch(row sqlite.ListTimelineWatchesRow) (core.PlaybackWatch, error) {
+	return sqliteStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt,
+		row.EndedAt, row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
 		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,

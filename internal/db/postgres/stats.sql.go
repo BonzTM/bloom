@@ -14,7 +14,17 @@ import (
 const statsBucketRows = `-- name: StatsBucketRows :many
 SELECT w.started_at, w.active_seconds
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
@@ -77,7 +87,17 @@ const statsClients = `-- name: StatsClients :many
 SELECT w.client AS name, COUNT(*) AS plays,
        COALESCE(SUM(w.active_seconds), 0) AS watch_seconds
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
@@ -140,7 +160,17 @@ const statsDevices = `-- name: StatsDevices :many
 SELECT w.device_name AS name, COUNT(*) AS plays,
        COALESCE(SUM(w.active_seconds), 0) AS watch_seconds
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
@@ -212,7 +242,17 @@ SELECT w.media_server_id, w.library_id, MAX(w.library_name) AS library_name,
        )) AS unique_titles,
        MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
@@ -286,7 +326,17 @@ SELECT w.media_server_id, w.item_id AS title_key, MAX(w.item_name) AS title_name
 	   COUNT(DISTINCT w.media_user_id) AS unique_users,
 	   MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND LOWER(w.item_type) = 'movie'
   AND (CAST($3 AS TEXT) = ''
@@ -366,7 +416,17 @@ SELECT w.media_server_id, w.item_id AS title_key, MAX(w.item_name) AS title_name
 	   COUNT(DISTINCT w.media_user_id) AS unique_users,
 	   MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND LOWER(w.item_type) = 'movie'
   AND (CAST($3 AS TEXT) = ''
@@ -447,7 +507,17 @@ SELECT w.media_server_id, w.item_type AS title_key, w.item_type AS title_name,
 	   COUNT(DISTINCT w.media_user_id) AS unique_users,
 	   MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND LOWER(w.item_type) <> 'movie'
   AND w.series_name = ''
@@ -528,7 +598,17 @@ SELECT w.media_server_id, w.item_type AS title_key, w.item_type AS title_name,
 	   COUNT(DISTINCT w.media_user_id) AS unique_users,
 	   MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND LOWER(w.item_type) <> 'movie'
   AND w.series_name = ''
@@ -608,7 +688,17 @@ const statsPlayMethods = `-- name: StatsPlayMethods :many
 SELECT w.play_method AS name, COUNT(*) AS plays,
        COALESCE(SUM(w.active_seconds), 0) AS watch_seconds
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
@@ -673,7 +763,17 @@ SELECT w.media_server_id, w.series_name AS title_key, w.series_name AS title_nam
 	   COUNT(DISTINCT w.media_user_id) AS unique_users,
 	   MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND LOWER(w.item_type) <> 'movie'
   AND w.series_name <> ''
@@ -754,7 +854,17 @@ SELECT w.media_server_id, w.series_name AS title_key, w.series_name AS title_nam
 	   COUNT(DISTINCT w.media_user_id) AS unique_users,
 	   MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND LOWER(w.item_type) <> 'movie'
   AND w.series_name <> ''
@@ -845,7 +955,17 @@ SELECT
         END
     )) AS unique_titles
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))
@@ -905,7 +1025,17 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND w.media_server_id = $3
   AND w.media_user_id = $4
@@ -1049,7 +1179,17 @@ SELECT w.media_server_id, w.media_user_id, MAX(w.username) AS username,
        COUNT(*) AS plays, COALESCE(SUM(w.active_seconds), 0) AS watch_seconds,
        MAX(w.started_at) AS last_watched_at
 FROM watches w
-WHERE w.started_at >= $1
+WHERE NOT EXISTS (
+    SELECT 1 FROM media_server_exclusions e
+    WHERE e.media_server_id = w.media_server_id
+      AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+        OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+            SELECT 1 FROM library_items excluded_item
+            WHERE excluded_item.media_server_id = w.media_server_id
+              AND excluded_item.item_id = w.item_id
+              AND excluded_item.library_id = e.external_id))))
+)
+  AND w.started_at >= $1
   AND w.started_at < $2
   AND (CAST($3 AS TEXT) = ''
        OR w.media_server_id = CAST($3 AS TEXT))

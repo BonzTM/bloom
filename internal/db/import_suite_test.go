@@ -633,12 +633,12 @@ func testImportBatchAndResume(t *testing.T, pool *sql.DB, driver config.Driver, 
 	claimed := claimImport(t, fixture.store, fixture.now, "lease-one")
 	seedCollectedDuplicate(t, pool, driver, fixture.serverID, fixture.now)
 	result := commitImportFixture(t, fixture, claimed)
-	if result.Read != 3 || result.Imported != 1 || result.Duplicate != 2 {
-		t.Fatalf("first counters = %+v, want read 3 imported 1 duplicate 2", result)
+	if result.Read != 3 || result.Imported != 1 || result.Duplicate != 2 || result.UnresolvedLibrary != 1 {
+		t.Fatalf("first counters = %+v, want read 3 imported 1 duplicate 2 unresolved 1", result)
 	}
 	result = commitImportFixture(t, fixture, claimed)
-	if result.Read != 6 || result.Imported != 1 || result.Duplicate != 5 {
-		t.Fatalf("replayed counters = %+v, want read 6 imported 1 duplicate 5", result)
+	if result.Read != 6 || result.Imported != 1 || result.Duplicate != 5 || result.UnresolvedLibrary != 2 {
+		t.Fatalf("replayed counters = %+v, want read 6 imported 1 duplicate 5 unresolved 2", result)
 	}
 	assertImportedWatchShape(t, pool, fixture.serverID)
 	assertImportLeaseResume(t, fixture, claimed)
@@ -684,7 +684,8 @@ func commitImportFixture(t *testing.T, fixture importFixture, job core.ImportJob
 	result, err := fixture.store.CommitImportBatch(t.Context(), core.ImportBatch{
 		JobID: job.ID, LeaseToken: job.LeaseToken, Cursor: "2", Source: job.Source,
 		MediaServerID: fixture.serverID, Records: records, ResumeWindow: 5 * time.Minute,
-		Now: fixture.now.Add(2 * time.Second), LeaseExpiresAt: fixture.now.Add(time.Minute),
+		UnresolvedLibrary: 1,
+		Now:               fixture.now.Add(2 * time.Second), LeaseExpiresAt: fixture.now.Add(time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("CommitImportBatch: %v", err)

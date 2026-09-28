@@ -41,13 +41,14 @@ type WorkerConfig struct {
 
 // WorkerDependencies contains the worker's explicit boundaries.
 type WorkerDependencies struct {
-	Store   core.LibraryCatalogStore
-	Source  Source
-	Clock   core.Clock
-	Metrics Metrics
-	Logger  *slog.Logger
-	Wake    <-chan struct{}
-	Wait    func(context.Context, time.Duration, <-chan struct{}) error
+	Store      core.LibraryCatalogStore
+	Source     Source
+	Clock      core.Clock
+	Metrics    Metrics
+	Logger     *slog.Logger
+	Wake       <-chan struct{}
+	Wait       func(context.Context, time.Duration, <-chan struct{}) error
+	Exclusions core.ExclusionReader
 }
 
 // Worker performs resumable full catalog walks.
@@ -135,6 +136,9 @@ func (w *Worker) walk(ctx context.Context, sync core.LibrarySync) error {
 		var libraries []core.Library
 		libraries, err = w.deps.Source.Libraries(ctx, sync.MediaServerID)
 		if err == nil {
+			libraries, err = w.filterExcludedLibraries(ctx, sync.MediaServerID, libraries)
+		}
+		if err == nil {
 			libraries = orderedLibraries(libraries)
 			err = w.walkLibraries(ctx, &sync, libraries)
 		}
@@ -154,6 +158,25 @@ func (w *Worker) walk(ctx context.Context, sync core.LibrarySync) error {
 	w.deps.Metrics.AddLibraryCatalogArchived(finished.Archived)
 	w.deps.Metrics.ObserveLibraryCatalogSync("completed", time.Since(started).Seconds())
 	return nil
+}
+
+func (w *Worker) filterExcludedLibraries(
+	ctx context.Context, serverID string, libraries []core.Library,
+) ([]core.Library, error) {
+	if w.deps.Exclusions == nil || len(libraries) == 0 {
+		return libraries, nil
+	}
+	exclusions, err := w.deps.Exclusions.GetExclusions(ctx, serverID)
+	if err != nil {
+		return nil, fmt.Errorf("load catalog exclusions: %w", err)
+	}
+	filtered := make([]core.Library, 0, len(libraries))
+	for _, library := range libraries {
+		if !exclusions.ExcludesLibrary(library.ID) {
+			filtered = append(filtered, library)
+		}
+	}
+	return filtered, nil
 }
 
 func (w *Worker) walkLibraries(ctx context.Context, sync *core.LibrarySync, libraries []core.Library) error {

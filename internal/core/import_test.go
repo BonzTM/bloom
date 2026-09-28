@@ -19,6 +19,11 @@ func TestImportJobValidationAndSafeErrors(t *testing.T) {
 	if !job.Valid() {
 		t.Fatal("valid pending import was rejected")
 	}
+	job.UnresolvedLibrary = 1
+	if job.Valid() {
+		t.Fatal("unresolved library count above read count was accepted")
+	}
+	job.UnresolvedLibrary = 0
 	job.Cursor = strings.Repeat("x", MaxImportCursorBytes+1)
 	if job.Valid() {
 		t.Fatal("oversized cursor was accepted")

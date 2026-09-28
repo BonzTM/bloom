@@ -182,7 +182,7 @@ func commitSQLiteImportBatch(
 	rows, err = q.CheckpointImport(ctx, sqlite.CheckpointImportParams{
 		ID: batch.JobID, Token: batch.LeaseToken, Cursor: batch.Cursor,
 		ReadDelta: int64(len(batch.Records)) + batch.Skipped, ImportedDelta: imported,
-		SkippedDelta: batch.Skipped, DuplicateDelta: duplicate,
+		SkippedDelta: batch.Skipped, DuplicateDelta: duplicate, UnresolvedLibraryDelta: batch.UnresolvedLibrary,
 		ExpiresAt: sqliteNullableTime(&batch.LeaseExpiresAt), Now: formatSQLiteTime(batch.Now),
 	})
 	if checkpointErr := importRowsError("checkpoint import", rows, err, core.ErrImportLeaseLost); checkpointErr != nil {
@@ -354,7 +354,8 @@ func sqliteCreateImportParams(job core.ImportJob) sqlite.CreateImportParams {
 	return sqlite.CreateImportParams{
 		ID: job.ID, MediaServerID: job.MediaServerID, Source: string(job.Source), State: string(job.State),
 		Cursor: job.Cursor, ReadCount: job.Read, ImportedCount: job.Imported,
-		SkippedCount: job.Skipped, DuplicateCount: job.Duplicate, LastError: job.LastError,
+		SkippedCount: job.Skipped, DuplicateCount: job.Duplicate, UnresolvedLibraryCount: job.UnresolvedLibrary,
+		LastError:  job.LastError,
 		LeaseToken: job.LeaseToken, LeaseExpiresAt: sqliteNullableTime(job.LeaseExpiresAt), RequestedBy: job.RequestedBy,
 		CreatedAt: formatSQLiteTime(job.CreatedAt), StartedAt: sqliteNullableTime(job.StartedAt),
 		FinishedAt: sqliteNullableTime(job.FinishedAt), UpdatedAt: formatSQLiteTime(job.UpdatedAt),
@@ -385,7 +386,8 @@ func sqliteImport(row sqlite.Import) (core.ImportJob, error) {
 	job := core.ImportJob{
 		ID: row.ID, MediaServerID: row.MediaServerID, Source: core.ImportSource(row.Source), State: core.ImportState(row.State),
 		Cursor: row.Cursor, Read: row.ReadCount, Imported: row.ImportedCount, Skipped: row.SkippedCount,
-		Duplicate: row.DuplicateCount, LastError: row.LastError, LeaseToken: row.LeaseToken,
+		Duplicate: row.DuplicateCount, UnresolvedLibrary: row.UnresolvedLibraryCount,
+		LastError: row.LastError, LeaseToken: row.LeaseToken,
 		LeaseExpiresAt: lease, RequestedBy: row.RequestedBy, CreatedAt: created,
 		StartedAt: started, FinishedAt: finished, UpdatedAt: updated,
 	}
@@ -396,5 +398,8 @@ func sqliteImport(row sqlite.Import) (core.ImportJob, error) {
 }
 
 func importCounters(job core.ImportJob) core.ImportBatchResult {
-	return core.ImportBatchResult{Read: job.Read, Imported: job.Imported, Skipped: job.Skipped, Duplicate: job.Duplicate}
+	return core.ImportBatchResult{
+		Read: job.Read, Imported: job.Imported, Skipped: job.Skipped,
+		Duplicate: job.Duplicate, UnresolvedLibrary: job.UnresolvedLibrary,
+	}
 }

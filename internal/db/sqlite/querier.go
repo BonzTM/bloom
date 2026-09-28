@@ -72,6 +72,7 @@ type Querier interface {
 	DeleteJellyfinUserDataDuplicate(ctx context.Context, arg DeleteJellyfinUserDataDuplicateParams) error
 	DeleteLibraryItemGenres(ctx context.Context, arg DeleteLibraryItemGenresParams) error
 	DeleteMediaServer(ctx context.Context, id string) (int64, error)
+	DeleteMediaServerExclusions(ctx context.Context, mediaServerID string) error
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
 	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
@@ -105,6 +106,7 @@ type Querier interface {
 	GetAdminAccount(ctx context.Context, id string) (GetAdminAccountRow, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
 	GetCatalogItem(ctx context.Context, arg GetCatalogItemParams) (LibraryItem, error)
+	GetCatalogItemLibrary(ctx context.Context, arg GetCatalogItemLibraryParams) (string, error)
 	GetClaimedInviteProvisioningFailure(ctx context.Context, arg GetClaimedInviteProvisioningFailureParams) (GetClaimedInviteProvisioningFailureRow, error)
 	GetDownloadManager(ctx context.Context, id string) (GetDownloadManagerRow, error)
 	GetDownloadManagerByName(ctx context.Context, nameKey string) (GetDownloadManagerByNameRow, error)
@@ -131,6 +133,7 @@ type Querier interface {
 	InsertInviteProvisioningFailureIfAbsent(ctx context.Context, arg InsertInviteProvisioningFailureIfAbsentParams) error
 	InsertInviteRedemption(ctx context.Context, arg InsertInviteRedemptionParams) error
 	InsertLibraryItemGenre(ctx context.Context, arg InsertLibraryItemGenreParams) error
+	InsertMediaServerExclusion(ctx context.Context, arg InsertMediaServerExclusionParams) error
 	InviteHasProvisioningFailure(ctx context.Context, inviteID string) (bool, error)
 	InviteProvisioningFailureDepth(ctx context.Context) (int64, error)
 	InviteProvisioningFailureExists(ctx context.Context, id string) (bool, error)
@@ -139,6 +142,8 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	// SQLite activity query. instr() treats q as a literal substring.
+	ListActivityWatches(ctx context.Context, arg ListActivityWatchesParams) ([]ListActivityWatchesRow, error)
 	ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error)
 	ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error)
 	// SQLite account queries whose parameter syntax is engine-specific.
@@ -176,6 +181,8 @@ type Querier interface {
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
 	ListInviteProvisioningFailures(ctx context.Context, arg ListInviteProvisioningFailuresParams) ([]ListInviteProvisioningFailuresRow, error)
 	ListInvites(ctx context.Context, arg ListInvitesParams) ([]ListInvitesRow, error)
+	// Per-media-server exclusion settings shared by SQLite and PostgreSQL.
+	ListMediaServerExclusions(ctx context.Context, mediaServerID string) ([]MediaServerExclusion, error)
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
 	ListMissingLibraryItemIDs(ctx context.Context, arg ListMissingLibraryItemIDsParams) ([]string, error)
 	ListNotificationChannels(ctx context.Context, arg ListNotificationChannelsParams) ([]ListNotificationChannelsRow, error)
@@ -194,6 +201,9 @@ type Querier interface {
 	ListRolesWithPermissions(ctx context.Context, arg ListRolesWithPermissionsParams) ([]ListRolesWithPermissionsRow, error)
 	ListStaleCatalogItems(ctx context.Context, arg ListStaleCatalogItemsParams) ([]LibraryItem, error)
 	ListSubscribedNotificationChannels(ctx context.Context, arg ListSubscribedNotificationChannelsParams) ([]ListSubscribedNotificationChannelsRow, error)
+	// Per-user timeline query shared by SQLite and PostgreSQL. Activity title
+	// matching is engine-specific so q remains a literal substring.
+	ListTimelineWatches(ctx context.Context, arg ListTimelineWatchesParams) ([]ListTimelineWatchesRow, error)
 	ListUnresolvedWatchItemIDs(ctx context.Context, arg ListUnresolvedWatchItemIDsParams) ([]string, error)
 	ListWatchPositions(ctx context.Context, watchID string) ([]WatchPosition, error)
 	LockAccountRequestQuota(ctx context.Context, accountID string) error

@@ -46,6 +46,8 @@ tags:
     description: Administrative invite management and public redemption.
   - name: playback
     description: Administrator playback activity and history.
+  - name: activity
+    description: Filtered cross-user activity and grouped per-user timelines.
   - name: catalog
     description: Type-agnostic media library catalog synchronization and reads.
   - name: stats
@@ -1334,6 +1336,86 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/activity:
+    get:
+      tags: [activity]
+      operationId: listActivity
+      summary: List visible watches across users in newest-first keyset order.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: media_server_id, in: query, schema: { type: string, format: uuid } }
+        - { name: media_user_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: library_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: item_type, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: client, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: device_id, in: query, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: play_method, in: query, schema: { $ref: "#/components/schemas/PlayMethod" } }
+        - { name: source, in: query, schema: { $ref: "#/components/schemas/PlaybackSource" } }
+        - { name: import_source, in: query, schema: { $ref: "#/components/schemas/ImportSource" } }
+        - { name: started_after, in: query, schema: { type: string, format: date-time } }
+        - { name: started_before, in: query, schema: { type: string, format: date-time } }
+        - { name: q, in: query, description: "ASCII case-insensitive literal substring matched against item and series names; other scripts match exactly.", schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 256 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        "200": { description: Filtered activity page., content: { application/json: { schema: { $ref: "#/components/schemas/ActivityResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/users/{media_user_id}/timeline:
+    get:
+      tags: [activity]
+      operationId: getMediaUserTimeline
+      summary: Group one user's adjacent plays of the same item.
+      description: Each page groups at most 500 watches. A group that crosses that fetch boundary continues on the next page.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+        - { name: media_user_id, in: path, required: true, schema: { type: string, minLength: 1, x-max-bytes: 128 } }
+        - { name: cursor, in: query, schema: { type: string, minLength: 1, maxLength: 256 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: gap_seconds, in: query, schema: { type: integer, minimum: 1, maximum: 604800, default: 21600 } }
+      responses:
+        "200": { description: Grouped timeline page., content: { application/json: { schema: { $ref: "#/components/schemas/TimelineResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/media-servers/{id}/exclusions:
+    get:
+      tags: [media-servers]
+      operationId: getMediaServerExclusions
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      responses:
+        "200": { description: Current exclusion replacement., content: { application/json: { schema: { $ref: "#/components/schemas/MediaServerExclusions" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    put:
+      tags: [media-servers]
+      operationId: replaceMediaServerExclusions
+      summary: Atomically replace all user and library collection exclusions.
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/EntityID" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ReplaceMediaServerExclusions" } } }
+      responses:
+        "200": { description: Replaced exclusions., content: { application/json: { schema: { $ref: "#/components/schemas/MediaServerExclusions" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/metadata/discover/trending:
     get:
       tags: [metadata]
@@ -3637,7 +3719,7 @@ components:
         file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Jellystat JSONL backup whose first line is a table marker, limited to 256 MiB." }
     ImportJob:
       type: object
-      required: [id, media_server_id, source, state, read, imported, skipped, duplicate, last_error, requested_by, created_at, updated_at]
+      required: [id, media_server_id, source, state, read, imported, skipped, duplicate, unresolved_library, last_error, requested_by, created_at, updated_at]
       additionalProperties: false
       properties:
         id: { type: string, format: uuid }
@@ -3648,6 +3730,7 @@ components:
         imported: { type: integer, format: int64, minimum: 0 }
         skipped: { type: integer, format: int64, minimum: 0 }
         duplicate: { type: integer, format: int64, minimum: 0 }
+        unresolved_library: { type: integer, format: int64, minimum: 0, description: Rows imported after both catalog and media-server library resolution missed. }
         last_error: { type: string, x-max-bytes: 512 }
         requested_by: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
@@ -3805,6 +3888,58 @@ components:
           type: array
           maxItems: 512
           items: { $ref: "#/components/schemas/PlaybackPosition" }
+    ActivityResponse:
+      type: object
+      required: [items, limit, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/PlaybackWatch" } }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        next_cursor: { type: string, maxLength: 256 }
+    TimelineEntry:
+      type: object
+      required: [media_server_id, media_user_id, username, item_id, item_name, item_type, series_id, series_name, library_id, library_name, first_started_at, play_count, active_seconds]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        media_user_id: { type: string, minLength: 1, x-max-bytes: 128 }
+        username: { type: string }
+        item_id: { type: string, minLength: 1 }
+        item_name: { type: string }
+        item_type: { type: string }
+        series_id: { type: string, x-max-bytes: 128 }
+        series_name: { type: string }
+        library_id: { type: string, x-max-bytes: 128 }
+        library_name: { type: string, x-max-bytes: 500 }
+        first_started_at: { type: string, format: date-time }
+        last_ended_at: { type: string, format: date-time }
+        play_count: { type: integer, minimum: 1, maximum: 500 }
+        active_seconds: { type: integer, format: int64, minimum: 0 }
+    TimelineResponse:
+      type: object
+      required: [items, limit, gap_seconds, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TimelineEntry" } }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        gap_seconds: { type: integer, format: int64, minimum: 1, maximum: 604800 }
+        next_cursor: { type: string, maxLength: 256 }
+    ReplaceMediaServerExclusions:
+      type: object
+      required: [excluded_media_user_ids, excluded_library_ids]
+      additionalProperties: false
+      properties:
+        excluded_media_user_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
+        excluded_library_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
+      description: The two arrays may contain at most 500 entries in total.
+    MediaServerExclusions:
+      type: object
+      required: [media_server_id, excluded_media_user_ids, excluded_library_ids]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        excluded_media_user_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
+        excluded_library_ids: { type: array, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, x-max-bytes: 128 } }
     StatsTitleKind:
       type: string
       enum: [movie, series, other]

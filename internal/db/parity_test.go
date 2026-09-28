@@ -103,6 +103,9 @@ func assertSQLiteSchema(t *testing.T, pool *sql.DB) {
 	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
 		return sqliteTableColumns(ctx, pool, "library_syncs")
 	}, expectedLibrarySyncColumns)
+	assertColumns(t, pool, func(ctx context.Context, pool *sql.DB) ([]string, error) {
+		return sqliteTableColumns(ctx, pool, "media_server_exclusions")
+	}, expectedExclusionColumns)
 	assertCatalogIndexes(t, pool, sqliteTableIndexes)
 }
 
@@ -122,7 +125,7 @@ var (
 	expectedInviteRedemptionColumns          = []string{"id", "invite_id", "media_server_id", "media_user_id", "redeemed_at", "username"}
 	expectedInviteProvisioningFailureColumns = []string{"account_id", "attempts", "created_at", "id", "invite_id", "last_error", "lease_expires_at", "lease_token", "media_server_id", "media_user_id", "media_user_owned", "next_attempt_at", "reason", "terminal", "updated_at", "username"}
 	expectedWatchColumns                     = []string{"active_seconds", "client", "created_at", "device_id", "device_name", "ended_at", "episode_number", "id", "import_origin_record_id", "import_provenance_guard", "import_record_id", "import_source", "item_id", "item_name", "item_type", "last_position_ms", "last_seen_at", "library_id", "library_name", "media_server_id", "media_user_id", "play_method", "runtime_ms", "season_number", "series_id", "series_name", "server_session_id", "source", "started_at", "state", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "updated_at", "username"}
-	expectedImportColumns                    = []string{"created_at", "cursor", "duplicate_count", "finished_at", "id", "imported_count", "last_error", "lease_expires_at", "lease_token", "media_server_id", "read_count", "requested_by", "skipped_count", "source", "started_at", "state", "updated_at"}
+	expectedImportColumns                    = []string{"created_at", "cursor", "duplicate_count", "finished_at", "id", "imported_count", "last_error", "lease_expires_at", "lease_token", "media_server_id", "read_count", "requested_by", "skipped_count", "source", "started_at", "state", "unresolved_library_count", "updated_at"}
 	expectedImportUploadColumns              = []string{"bytes", "chunk_index", "created_at", "id", "import_id"}
 	expectedWatchSegmentColumns              = []string{"ended_at", "source", "started_at", "watch_id"}
 	expectedWatchPositionColumns             = []string{"is_transition", "observed_at", "paused", "play_method", "position_ms", "source", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "watch_id"}
@@ -130,6 +133,7 @@ var (
 	expectedLibraryItemColumns               = []string{"archived", "community_rating", "date_created", "first_played_at", "first_seen_at", "genres", "index_number", "item_id", "item_type", "last_played_at", "last_seen_at", "library_id", "media_server_id", "name", "parent_id", "plays", "premiere_date", "primary_image_tag", "production_year", "runtime_ms", "season_id", "season_number", "series_id", "series_name", "unique_users", "updated_at", "watch_seconds"}
 	expectedLibraryItemGenreColumns          = []string{"genre", "item_id", "media_server_id"}
 	expectedLibrarySyncColumns               = []string{"archived_count", "cursor", "finished_at", "last_error", "lease_expires_at", "lease_token", "media_server_id", "seen_count", "started_at", "state", "upserted_count"}
+	expectedExclusionColumns                 = []string{"external_id", "kind", "media_server_id"}
 )
 
 var expectedCatalogIndexes = map[string][]string{
@@ -139,8 +143,9 @@ var expectedCatalogIndexes = map[string][]string{
 		"watches_catalog_aggregate_idx", "watches_import_origin_record_idx", "watches_import_record_idx", "watches_key_idx",
 		"watches_server_item_started_idx", "watches_server_library_started_idx",
 		"watches_server_series_started_idx", "watches_server_started_idx", "watches_server_state_idx",
-		"watches_started_idx", "watches_userdata_import_record_idx",
+		"watches_server_user_started_idx", "watches_started_idx", "watches_userdata_import_record_idx",
 	},
+	"media_server_exclusions": {"media_server_exclusions_lookup_idx"},
 	"library_items": {
 		"library_items_archived_idx", "library_items_date_asc_idx", "library_items_date_desc_idx",
 		"library_items_last_played_asc_idx", "library_items_last_played_desc_idx", "library_items_name_asc_idx",

@@ -1,13 +1,13 @@
 -- name: GetImport :one
 SELECT id, media_server_id, state, cursor, read_count, imported_count, skipped_count,
        duplicate_count, last_error, lease_token, lease_expires_at, requested_by,
-       created_at, started_at, finished_at, updated_at, source
+       created_at, started_at, finished_at, updated_at, source, unresolved_library_count
 FROM imports WHERE id = sqlc.arg(id);
 
 -- name: ListImports :many
 SELECT id, media_server_id, state, cursor, read_count, imported_count, skipped_count,
        duplicate_count, last_error, lease_token, lease_expires_at, requested_by,
-       created_at, started_at, finished_at, updated_at, source
+       created_at, started_at, finished_at, updated_at, source, unresolved_library_count
 FROM imports
 WHERE (CAST(sqlc.arg(media_server_id) AS TEXT) = ''
        OR media_server_id = CAST(sqlc.arg(media_server_id) AS TEXT))
@@ -21,7 +21,7 @@ LIMIT sqlc.arg(page_size);
 -- name: SelectClaimableImport :one
 SELECT id, media_server_id, state, cursor, read_count, imported_count, skipped_count,
        duplicate_count, last_error, lease_token, lease_expires_at, requested_by,
-       created_at, started_at, finished_at, updated_at, source
+       created_at, started_at, finished_at, updated_at, source, unresolved_library_count
 FROM imports
 WHERE state = 'pending' OR (state = 'running' AND lease_expires_at <= sqlc.arg(now))
 ORDER BY created_at, id

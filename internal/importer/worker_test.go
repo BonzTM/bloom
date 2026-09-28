@@ -106,7 +106,10 @@ func (s *workerStore) CommitImportBatch(_ context.Context, batch core.ImportBatc
 	s.result.Read += int64(len(batch.Records)) + batch.Skipped
 	s.result.Imported += int64(len(batch.Records))
 	s.result.Skipped += batch.Skipped
+	s.result.UnresolvedLibrary += batch.UnresolvedLibrary
 	s.job.Cursor = batch.Cursor
+	s.job.Read, s.job.Imported, s.job.Skipped = s.result.Read, s.result.Imported, s.result.Skipped
+	s.job.Duplicate, s.job.UnresolvedLibrary = s.result.Duplicate, s.result.UnresolvedLibrary
 	return s.result, nil
 }
 
@@ -459,4 +462,111 @@ func newTestWorker(t *testing.T, store core.ImportStore, reporting PlaybackRepor
 		t.Fatalf("NewWorker: %v", err)
 	}
 	return worker
+}
+
+func TestEveryImportSourceSkipsExcludedRecords(t *testing.T) {
+	for _, source := range []core.ImportSource{
+		core.ImportSourcePlaybackReporting, core.ImportSourceBloomExport,
+		core.ImportSourceJellystat, core.ImportSourceJellyfinUserData,
+	} {
+		t.Run(string(source), func(t *testing.T) {
+			job := pendingWorkerJob(t)
+			job.Source = source
+			store := &workerStore{job: job}
+			worker := newTestWorker(t, store, reportingStub{})
+			worker.deps.Exclusions = importerExclusions{value: core.MediaServerExclusions{
+				MediaServerID: job.MediaServerID, MediaUserIDs: []string{"excluded-user"},
+				LibraryIDs: []string{"excluded-library"},
+			}}
+			worker.deps.Libraries = &importerLibraries{items: map[string]string{"catalog-item": "excluded-library"}}
+			records := []core.ImportedWatch{
+				{MediaUserID: "excluded-user", LibraryID: "library"},
+				{MediaUserID: "user", LibraryID: "excluded-library"},
+				{MediaUserID: "user", ItemID: "catalog-item"},
+				{MediaUserID: "user", LibraryID: "library"},
+			}
+			filtered, skipped, unresolved, err := worker.filterExcluded(t.Context(), job.MediaServerID, records)
+			if err != nil || skipped != 3 || unresolved != 0 || len(filtered) != 1 || filtered[0].MediaUserID != "user" {
+				t.Fatalf("filterExcluded = %+v, skipped %d unresolved %d, %v", filtered, skipped, unresolved, err)
+			}
+		})
+	}
+}
+
+type importerExclusions struct{ value core.MediaServerExclusions }
+
+func (e importerExclusions) GetExclusions(context.Context, string) (core.MediaServerExclusions, error) {
+	return e.value, nil
+}
+
+type importerLibraries struct {
+	items map[string]string
+	calls int
+}
+
+func (r *importerLibraries) ResolveImportLibrary(_ context.Context, _, itemID string) (string, bool, error) {
+	r.calls++
+	libraryID, found := r.items[itemID]
+	return libraryID, found, nil
+}
+
+type importerItems struct {
+	items map[string]core.Library
+	calls int
+}
+
+func (r *importerItems) ResolveLibrary(_ context.Context, _, itemID string) (core.Library, bool, error) {
+	r.calls++
+	library, found := r.items[itemID]
+	return library, found, nil
+}
+
+func TestImportLibraryFallsBackToMediaServerAndCachesBatchResolution(t *testing.T) {
+	job := pendingWorkerJob(t)
+	store := &workerStore{job: job}
+	worker := newTestWorker(t, store, reportingStub{})
+	worker.deps.Exclusions = importerExclusions{value: core.MediaServerExclusions{
+		MediaServerID: job.MediaServerID, LibraryIDs: []string{"excluded-library"},
+	}}
+	catalog := &importerLibraries{items: map[string]string{}}
+	items := &importerItems{items: map[string]core.Library{
+		"blank-library-item": {ID: "excluded-library", Name: "Excluded"},
+	}}
+	worker.deps.Libraries, worker.deps.Items = catalog, items
+	records := []core.ImportedWatch{
+		{MediaUserID: "user", ItemID: "blank-library-item"},
+		{MediaUserID: "user", ItemID: "blank-library-item"},
+	}
+	filtered, skipped, unresolved, err := worker.filterExcluded(t.Context(), job.MediaServerID, records)
+	if err != nil || len(filtered) != 0 || skipped != 2 || unresolved != 0 {
+		t.Fatalf("filterExcluded = %+v, skipped %d unresolved %d, %v", filtered, skipped, unresolved, err)
+	}
+	if catalog.calls != 1 || items.calls != 1 {
+		t.Fatalf("resolver calls = catalog %d media server %d, want 1 each", catalog.calls, items.calls)
+	}
+}
+
+func TestImportLibraryMissFailsOpenAndCountsJob(t *testing.T) {
+	job := pendingWorkerJob(t)
+	record := core.ImportedWatch{
+		RecordID: "1", MediaUserID: "user", ItemID: "unknown-item", ItemName: "Unknown",
+		ItemType: "Movie", PlayMethod: core.PlayMethodDirectPlay,
+		StartedAt: time.Date(2026, 9, 25, 11, 0, 0, 0, time.UTC), Duration: time.Minute,
+	}
+	store := &workerStore{job: job}
+	worker := newTestWorker(t, store, reportingStub{records: []core.ImportedWatch{record}})
+	worker.deps.Exclusions = importerExclusions{value: core.MediaServerExclusions{
+		MediaServerID: job.MediaServerID, LibraryIDs: []string{"excluded-library"},
+	}}
+	catalog := &importerLibraries{items: map[string]string{}}
+	items := &importerItems{items: map[string]core.Library{}}
+	worker.deps.Libraries, worker.deps.Items = catalog, items
+
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if store.finished != core.ImportCompleted || store.result.Imported != 1 ||
+		store.job.UnresolvedLibrary != 1 || catalog.calls != 1 || items.calls != 1 {
+		t.Fatalf("job = %+v, counters %+v, resolver calls %d/%d", store.job, store.result, catalog.calls, items.calls)
+	}
 }
