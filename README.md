@@ -299,7 +299,10 @@ Jellystat stores `ActivityDateInserted` when a record is finalised or last
 merged, not when playback starts. Bloom therefore approximates `started_at` as
 that timestamp minus `PlaybackDuration`; pauses and merge gaps cannot be
 reconstructed. Rows that Jellystat imported from Playback Reporting are kept
-and cross-deduplicated against a later direct Playback Reporting import.
+and cross-deduplicated against a direct Playback Reporting import by the
+separate upstream row ID. Every Jellystat watch keeps its own activity ID as
+`import_record_id`; imported plugin rows also carry the plugin row ID as
+`import_origin_record_id`.
 Unknown users and items are retained with their source IDs as display names.
 Playback Reporting and Jellystat activity durations share a plausible maximum
 of seven days per playback activity; longer rows are skipped.
@@ -331,7 +334,9 @@ Bloom instance to move watch history between SQLite and PostgreSQL. Bloom ZIP
 imports require both `manifest.json` and `summary.json`. The importer verifies
 that the number of watch records read matches the count in `summary.json`. The
 previous JSONL shape remains accepted for compatibility. Re-import is idempotent
-because the original watch ID is the source record ID. A transfer that does not
+because the original watch ID is the source record ID. Each watch line includes
+`import_origin_record_id` when upstream provenance is present; imports also
+accept older watch lines without it. A transfer that does not
 form a complete ZIP archive is truncated and must be retried.
 
 Bloom's collected watch wins when an imported and collected watch have the same
@@ -809,6 +814,14 @@ Migration `00025_jellystat_import_source` widens import provenance on both
 engines for Jellystat backups. Rolling it down removes Jellystat import jobs,
 their staged uploads, and watches imported from Jellystat before restoring the
 previous source constraints, so preserve a database backup before rollback.
+
+Migration `00026_watch_import_origin` adds nullable, 128-byte
+`import_origin_record_id` watch provenance and a partial server/origin index on
+both engines. It backfills the Playback Reporting row ID from legacy Jellystat
+`plugin:` markers without changing `import_record_id`; the old importer did not
+retain the original Jellystat activity ID, so that value cannot be recovered.
+Rolling the migration down removes the origin column and index while preserving
+the watches and their existing record IDs.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

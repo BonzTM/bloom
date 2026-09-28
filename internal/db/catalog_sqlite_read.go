@@ -322,7 +322,7 @@ func sqliteCatalogWatch(row sqlite.ListCatalogItemHistoryRow) (core.PlaybackWatc
 		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
 		row.SeasonNumber, row.EpisodeNumber, row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
-		row.ImportSource, row.ImportRecordID,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec, row.StreamBitrate,
 			row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths, row.StreamAudioChannels,
 			row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),

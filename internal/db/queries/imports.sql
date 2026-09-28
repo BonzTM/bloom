@@ -103,12 +103,21 @@ SELECT EXISTS (
       AND item_id = sqlc.arg(item_id)
 );
 
--- name: FindCrossSourceImportDuplicate :one
+-- name: FindPlaybackReportingImportDuplicate :one
 SELECT EXISTS (
     SELECT 1 FROM watches
     WHERE media_server_id = sqlc.arg(media_server_id)
-      AND import_source = sqlc.arg(import_source)
+      AND import_source = 'playback_reporting'
       AND import_record_id = sqlc.arg(import_record_id)
+);
+
+-- name: FindJellystatImportDuplicate :one
+SELECT EXISTS (
+    SELECT 1 FROM watches
+    WHERE media_server_id = sqlc.arg(media_server_id)
+      AND import_source = 'jellystat'
+      AND (import_origin_record_id = sqlc.arg(import_origin_record_id)
+           OR import_record_id = sqlc.arg(legacy_import_record_id))
 );
 
 -- name: InsertImportedWatch :execrows
@@ -120,7 +129,7 @@ INSERT INTO watches (
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
     stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons,
     state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms, runtime_ms, source,
-    created_at, updated_at, import_source, import_record_id
+    created_at, updated_at, import_source, import_record_id, import_origin_record_id
 ) VALUES (
     sqlc.arg(id), sqlc.arg(media_server_id), sqlc.arg(media_user_id), sqlc.arg(username),
     sqlc.arg(device_id), sqlc.arg(device_name), sqlc.arg(client), '', sqlc.arg(item_id), sqlc.arg(item_name),
@@ -132,6 +141,7 @@ INSERT INTO watches (
     sqlc.narg(stream_is_video_direct), sqlc.narg(stream_is_audio_direct),
     sqlc.narg(stream_transcode_reasons), 'stopped', sqlc.arg(started_at), sqlc.arg(ended_at),
     sqlc.arg(ended_at), sqlc.arg(active_seconds), sqlc.arg(last_position_ms), sqlc.narg(runtime_ms), 'import',
-    sqlc.arg(now), sqlc.arg(now), sqlc.arg(import_source), sqlc.arg(import_record_id)
+    sqlc.arg(now), sqlc.arg(now), sqlc.arg(import_source), sqlc.arg(import_record_id),
+    sqlc.narg(import_origin_record_id)
 )
 ON CONFLICT DO NOTHING;

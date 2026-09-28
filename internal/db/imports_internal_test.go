@@ -29,7 +29,10 @@ func TestPostgresImportLockKeysShareCrossSourceActivityKey(t *testing.T) {
 	}
 	jellystat := core.ImportBatch{
 		MediaServerID: serverID, Source: core.ImportSourceJellystat,
-		Records: []core.ImportedWatch{{RecordID: "plugin:77", MediaUserID: "jellystat-user", ItemID: "jellystat-item"}},
+		Records: []core.ImportedWatch{{
+			RecordID: "jellystat-activity", OriginRecordID: "77",
+			MediaUserID: "jellystat-user", ItemID: "jellystat-item",
+		}},
 	}
 	reportingKeys := postgresImportLockKeys(reporting)
 	jellystatKeys := postgresImportLockKeys(jellystat)

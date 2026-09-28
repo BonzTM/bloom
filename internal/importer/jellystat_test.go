@@ -47,8 +47,30 @@ func TestJellystatReaderMapsFixtureAndCountsEveryLine(t *testing.T) {
 		records[2].PlayMethod != core.PlayMethodUnknown {
 		t.Fatalf("unknown identities = %+v", records[2])
 	}
-	if records[3].RecordID != "plugin:77" || records[3].PlayMethod != core.PlayMethodTranscode {
+	if records[3].RecordID != "77" || records[3].OriginRecordID != "77" ||
+		records[3].PlayMethod != core.PlayMethodTranscode {
 		t.Fatalf("plugin provenance = %+v", records[3])
+	}
+}
+
+func TestJellystatActivityKeepsNativeAndImportedRecordIDs(t *testing.T) {
+	tests := []struct {
+		name, id, origin string
+		imported         bool
+	}{
+		{name: "imported", id: "77", origin: "77", imported: true},
+		{name: "native", id: "native-activity"},
+		{name: "native plugin prefix", id: "plugin:77"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			row := validJellystatActivityRow()
+			row.ID, row.Imported = test.id, test.imported
+			record, err := mapJellystatActivity(row, newJellystatLookups())
+			if err != nil || record.RecordID != test.id || record.OriginRecordID != test.origin {
+				t.Fatalf("mapJellystatActivity = %+v, %v", record, err)
+			}
+		})
 	}
 }
 

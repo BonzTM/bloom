@@ -170,7 +170,9 @@ func postgresStatsWatch(row postgres.StatsUserRecentWatchesRow) (core.PlaybackWa
 		StartedAt: core.NormalizeTime(row.StartedAt), LastSeenAt: core.NormalizeTime(row.LastSeenAt),
 		EndedAt: timeFromNull(row.EndedAt), ActiveTime: time.Duration(row.ActiveSeconds) * time.Second,
 		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond, Runtime: runtime,
-		Source: core.WatchSource(row.Source), CreatedAt: core.NormalizeTime(row.CreatedAt),
+		Source: core.WatchSource(row.Source), ImportSource: core.ImportSource(row.ImportSource.String),
+		ImportRecordID: row.ImportRecordID.String, ImportOriginRecordID: row.ImportOriginRecordID.String,
+		CreatedAt: core.NormalizeTime(row.CreatedAt),
 		UpdatedAt: core.NormalizeTime(row.UpdatedAt),
 	}, nil
 }

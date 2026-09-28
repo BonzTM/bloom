@@ -131,7 +131,8 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
        w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
        w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -198,6 +199,7 @@ type FindRecentPlaybackWatchRow struct {
 	SeriesID                  sql.NullString
 	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
+	ImportOriginRecordID      sql.NullString
 	MediaServerName           string
 }
 
@@ -254,6 +256,7 @@ func (q *Queries) FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPla
 		&i.SeriesID,
 		&i.ImportSource,
 		&i.ImportProvenanceGuard,
+		&i.ImportOriginRecordID,
 		&i.MediaServerName,
 	)
 	return i, err
@@ -279,7 +282,8 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
        w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
        w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state <> 'stopped'
@@ -338,6 +342,7 @@ type ListNowPlayingRow struct {
 	SeriesID                  sql.NullString
 	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
+	ImportOriginRecordID      sql.NullString
 	MediaServerName           string
 }
 
@@ -393,6 +398,7 @@ func (q *Queries) ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) 
 			&i.SeriesID,
 			&i.ImportSource,
 			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -417,7 +423,8 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
        w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
        w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.media_server_id = ?1 AND w.state <> 'stopped'
@@ -468,6 +475,7 @@ type ListOpenPlaybackWatchesRow struct {
 	SeriesID                  sql.NullString
 	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
+	ImportOriginRecordID      sql.NullString
 	MediaServerName           string
 }
 
@@ -523,6 +531,7 @@ func (q *Queries) ListOpenPlaybackWatches(ctx context.Context, mediaServerID str
 			&i.SeriesID,
 			&i.ImportSource,
 			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -547,7 +556,8 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
        w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
        w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -609,6 +619,7 @@ type ListPlaybackHistoryRow struct {
 	SeriesID                  sql.NullString
 	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
+	ImportOriginRecordID      sql.NullString
 	MediaServerName           string
 }
 
@@ -669,6 +680,7 @@ func (q *Queries) ListPlaybackHistory(ctx context.Context, arg ListPlaybackHisto
 			&i.SeriesID,
 			&i.ImportSource,
 			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err
@@ -693,7 +705,8 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
        w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
        w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
 FROM watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.state = 'stopped'
@@ -752,6 +765,7 @@ type ListRecentPlaybackWatchesRow struct {
 	SeriesID                  sql.NullString
 	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
+	ImportOriginRecordID      sql.NullString
 	MediaServerName           string
 }
 
@@ -807,6 +821,7 @@ func (q *Queries) ListRecentPlaybackWatches(ctx context.Context, arg ListRecentP
 			&i.SeriesID,
 			&i.ImportSource,
 			&i.ImportProvenanceGuard,
+			&i.ImportOriginRecordID,
 			&i.MediaServerName,
 		); err != nil {
 			return nil, err

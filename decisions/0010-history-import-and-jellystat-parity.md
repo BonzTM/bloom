@@ -50,9 +50,12 @@ its catalog); see the research notes, gap 2.
    `import_source` (`playback_reporting`, `jellystat`, `jellyfin_userdata`) and
    `import_record_id` (the plugin `rowid`, the Jellystat activity `Id`, or the
    Jellyfin item id for user data), unique per media server and source. Running
-   an import twice changes nothing. A record whose item is unknown to the media
-   server is still imported with the names the source carries; nothing is
-   skipped for lack of a catalog.
+   an import twice changes nothing. A nullable `import_origin_record_id` keeps
+   the upstream Playback Reporting `rowid` when Jellystat marks an activity as
+   imported; cross-source deduplication uses that origin instead of encoding a
+   marker into Jellystat's own activity ID. A record whose item is unknown to
+   the media server is still imported with the names the source carries;
+   nothing is skipped for lack of a catalog.
 
 3. **Imported watches never double-count collected ones.** An imported record
    that overlaps a watch Bloom collected itself (same media server, media user,

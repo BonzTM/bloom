@@ -236,23 +236,45 @@ func (q *Queries) FindCollectedImportDuplicate(ctx context.Context, arg FindColl
 	return exists, err
 }
 
-const findCrossSourceImportDuplicate = `-- name: FindCrossSourceImportDuplicate :one
+const findJellystatImportDuplicate = `-- name: FindJellystatImportDuplicate :one
 SELECT EXISTS (
     SELECT 1 FROM watches
     WHERE media_server_id = $1
-      AND import_source = $2
-      AND import_record_id = $3
+      AND import_source = 'jellystat'
+      AND (import_origin_record_id = $2
+           OR import_record_id = $3)
 )
 `
 
-type FindCrossSourceImportDuplicateParams struct {
+type FindJellystatImportDuplicateParams struct {
+	MediaServerID        string
+	ImportOriginRecordID sql.NullString
+	LegacyImportRecordID sql.NullString
+}
+
+func (q *Queries) FindJellystatImportDuplicate(ctx context.Context, arg FindJellystatImportDuplicateParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, findJellystatImportDuplicate, arg.MediaServerID, arg.ImportOriginRecordID, arg.LegacyImportRecordID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const findPlaybackReportingImportDuplicate = `-- name: FindPlaybackReportingImportDuplicate :one
+SELECT EXISTS (
+    SELECT 1 FROM watches
+    WHERE media_server_id = $1
+      AND import_source = 'playback_reporting'
+      AND import_record_id = $2
+)
+`
+
+type FindPlaybackReportingImportDuplicateParams struct {
 	MediaServerID  string
-	ImportSource   sql.NullString
 	ImportRecordID sql.NullString
 }
 
-func (q *Queries) FindCrossSourceImportDuplicate(ctx context.Context, arg FindCrossSourceImportDuplicateParams) (bool, error) {
-	row := q.db.QueryRowContext(ctx, findCrossSourceImportDuplicate, arg.MediaServerID, arg.ImportSource, arg.ImportRecordID)
+func (q *Queries) FindPlaybackReportingImportDuplicate(ctx context.Context, arg FindPlaybackReportingImportDuplicateParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, findPlaybackReportingImportDuplicate, arg.MediaServerID, arg.ImportRecordID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -357,7 +379,7 @@ INSERT INTO watches (
     stream_width, stream_height, stream_framerate_hundredths, stream_audio_channels,
     stream_is_video_direct, stream_is_audio_direct, stream_transcode_reasons,
     state, started_at, last_seen_at, ended_at, active_seconds, last_position_ms, runtime_ms, source,
-    created_at, updated_at, import_source, import_record_id
+    created_at, updated_at, import_source, import_record_id, import_origin_record_id
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7, '', $8, $9,
@@ -369,7 +391,8 @@ INSERT INTO watches (
     $26, $27,
     $28, 'stopped', $29, $30,
     $30, $31, $32, $33, 'import',
-    $34, $34, $35, $36
+    $34, $34, $35, $36,
+    $37
 )
 ON CONFLICT DO NOTHING
 `
@@ -411,6 +434,7 @@ type InsertImportedWatchParams struct {
 	Now                       time.Time
 	ImportSource              sql.NullString
 	ImportRecordID            sql.NullString
+	ImportOriginRecordID      sql.NullString
 }
 
 func (q *Queries) InsertImportedWatch(ctx context.Context, arg InsertImportedWatchParams) (int64, error) {
@@ -451,6 +475,7 @@ func (q *Queries) InsertImportedWatch(ctx context.Context, arg InsertImportedWat
 		arg.Now,
 		arg.ImportSource,
 		arg.ImportRecordID,
+		arg.ImportOriginRecordID,
 	)
 	if err != nil {
 		return 0, err

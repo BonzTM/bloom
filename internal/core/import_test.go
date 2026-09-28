@@ -61,6 +61,11 @@ func TestImportedWatchRejectsControlsAndOversizedIdentifiers(t *testing.T) {
 		t.Fatal("control character was accepted")
 	}
 	record.ItemName = "Film"
+	record.OriginRecordID = strings.Repeat("x", MaxImportOriginRecordIDBytes+1)
+	if record.Valid() {
+		t.Fatal("oversized origin record id was accepted")
+	}
+	record.OriginRecordID = ""
 	record.RecordID = strings.Repeat("x", MaxImportRecordIDBytes+1)
 	if record.Valid() {
 		t.Fatal("oversized source record id was accepted")

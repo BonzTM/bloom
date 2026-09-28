@@ -432,7 +432,7 @@ func mapJellystatActivity(row jellystatActivityRow, lookups jellystatLookups) (c
 		return core.ImportedWatch{}, core.ErrInvalidArgument
 	}
 	if row.Imported {
-		record.RecordID = "plugin:" + row.ID
+		record.OriginRecordID = row.ID
 	}
 	if !record.Valid() {
 		return core.ImportedWatch{}, core.ErrInvalidArgument

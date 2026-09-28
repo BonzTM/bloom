@@ -202,7 +202,7 @@ func commitSQLiteImportBatch(
 func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		crossDuplicate, err := sqliteCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		crossDuplicate, err := sqliteCrossSourceDuplicate(ctx, q, batch, record)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -282,17 +282,27 @@ func sqliteImportDuplicate(
 }
 
 func sqliteCrossSourceDuplicate(
-	ctx context.Context, q *sqlite.Queries, batch core.ImportBatch, recordID string,
+	ctx context.Context, q *sqlite.Queries, batch core.ImportBatch, record core.ImportedWatch,
 ) (bool, error) {
-	source, alternateID, ok := crossSourceImportRecord(batch.Source, recordID)
-	if !ok {
+	var duplicate bool
+	var err error
+	switch batch.Source {
+	case core.ImportSourceJellystat:
+		if record.OriginRecordID == "" {
+			return false, nil
+		}
+		duplicate, err = q.FindPlaybackReportingImportDuplicate(ctx,
+			sqlite.FindPlaybackReportingImportDuplicateParams{
+				MediaServerID: batch.MediaServerID, ImportRecordID: optionalStreamString(record.OriginRecordID),
+			})
+	case core.ImportSourcePlaybackReporting:
+		duplicate, err = q.FindJellystatImportDuplicate(ctx, sqlite.FindJellystatImportDuplicateParams{
+			MediaServerID: batch.MediaServerID, ImportOriginRecordID: optionalStreamString(record.RecordID),
+			LegacyImportRecordID: optionalStreamString("plugin:" + record.RecordID),
+		})
+	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
 		return false, nil
 	}
-	duplicate, err := q.FindCrossSourceImportDuplicate(ctx, sqlite.FindCrossSourceImportDuplicateParams{
-		MediaServerID:  batch.MediaServerID,
-		ImportSource:   sql.NullString{String: string(source), Valid: true},
-		ImportRecordID: sql.NullString{String: alternateID, Valid: true},
-	})
 	return duplicate, importStoreError("find cross-source import duplicate", err)
 }
 
@@ -319,7 +329,8 @@ func sqliteImportedWatchParams(
 		StreamFramerateHundredths: stream.framerate, StreamAudioChannels: stream.audioChannels,
 		StreamIsVideoDirect: sqliteNullBool(stream.videoDirect), StreamIsAudioDirect: sqliteNullBool(stream.audioDirect),
 		StreamTranscodeReasons: stream.reasons, ImportSource: sql.NullString{String: string(batch.Source), Valid: true},
-		ImportRecordID: sql.NullString{String: record.RecordID, Valid: true},
+		ImportRecordID:       sql.NullString{String: record.RecordID, Valid: true},
+		ImportOriginRecordID: optionalStreamString(record.OriginRecordID),
 	}, nil
 }
 

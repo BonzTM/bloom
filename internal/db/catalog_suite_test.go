@@ -14,7 +14,12 @@ import (
 	"github.com/BonzTM/bloom/internal/db"
 )
 
-const catalogPagingServerID = "82000000-0000-4000-8000-000000000001"
+const (
+	catalogPagingServerID = "82000000-0000-4000-8000-000000000001"
+	catalogPlanServerID   = "87000000-0000-4000-8000-000000000001"
+	catalogPlanSeriesID   = "catalog-plan-series"
+	catalogPlanWatchCount = 5000
+)
 
 func runCatalogEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
@@ -625,28 +630,108 @@ const catalogTargetPlanCTE = `WITH root AS (
 
 func testCatalogDetailHistoryPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
+	seedCatalogPlanFixture(t, pool, driver)
+	analyzeCatalogPlanTables(t, pool, driver)
 	detail := explainCatalogQuery(t, pool, driver, catalogTargetPlanCTE+`SELECT COUNT(*) FROM target_watches`,
-		catalogPagingServerID, "item-b")
+		catalogPlanServerID, catalogPlanSeriesID)
 	assertCatalogWatchSeeks(t, detail, "detail")
 	history := explainCatalogQuery(t, pool, driver, catalogTargetPlanCTE+`SELECT * FROM target_watches
 WHERE started_at<$3 OR (started_at=$3 AND id<$4)
-ORDER BY started_at DESC,id DESC LIMIT 10`, catalogPagingServerID, "item-b",
+ORDER BY started_at DESC,id DESC LIMIT 10`, catalogPlanServerID, catalogPlanSeriesID,
 		time.Date(2026, 9, 27, 23, 0, 0, 0, time.UTC), "z")
 	assertCatalogWatchSeeks(t, history, "history")
 }
 
-// assertCatalogWatchSeeks accepts either watches index that leads with
-// (media_server_id, item_id); the planner picks between them by table size,
-// and the union of the three branches sorts before LIMIT either way.
+func seedCatalogPlanFixture(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	now := time.Date(2026, 9, 27, 18, 0, 0, 0, time.UTC)
+	createCatalogServer(t, pool, driver, catalogPlanServerID, "Catalog Plan", now)
+	t.Cleanup(func() {
+		execTestSQL(t, pool, "DELETE FROM media_servers WHERE id=$1", catalogPlanServerID)
+	})
+	store, err := db.NewLibraryCatalogStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	sync := claimCatalogSync(t, store, catalogPlanServerID, now)
+	sync, err = store.CommitLibrarySyncPage(t.Context(), sync, catalogPlanItems(now), "", now)
+	if err != nil {
+		t.Fatalf("seed catalog plan items: %v", err)
+	}
+	if _, err = store.FinishLibrarySync(t.Context(), sync, now); err != nil {
+		t.Fatalf("finish catalog plan items: %v", err)
+	}
+	seedCatalogPlanWatches(t, pool, driver, now)
+}
+
+func catalogPlanItems(now time.Time) []core.LibraryItem {
+	series := catalogSuiteItem(catalogPlanServerID, catalogPlanSeriesID, "Plan Series", now)
+	series.ItemType = "Series"
+	season := catalogSuiteItem(catalogPlanServerID, "catalog-plan-season", "Plan Season", now)
+	season.ItemType, season.ParentID, season.SeriesID = "Season", series.ItemID, series.ItemID
+	items := make([]core.LibraryItem, 0, 6)
+	items = append(items, series, season)
+	for index := range 4 {
+		episode := catalogSuiteItem(catalogPlanServerID,
+			fmt.Sprintf("catalog-plan-episode-%d", index), fmt.Sprintf("Plan Episode %d", index), now)
+		episode.ItemType, episode.ParentID = "Episode", season.ItemID
+		episode.SeriesID, episode.SeasonID = series.ItemID, season.ItemID
+		items = append(items, episode)
+	}
+	return items
+}
+
+func seedCatalogPlanWatches(t *testing.T, pool *sql.DB, driver config.Driver, now time.Time) {
+	t.Helper()
+	mutations := make([]core.PlaybackMutation, 0, catalogPlanWatchCount)
+	for index := range catalogPlanWatchCount {
+		watch := playbackStoreWatch(t, catalogPlanServerID, now.Add(time.Duration(index)*time.Second))
+		watch.ItemID = fmt.Sprintf("catalog-plan-item-%03d", index%128)
+		watch.SeriesID = fmt.Sprintf("catalog-plan-decoy-series-%02d", index%64)
+		watch.ServerSessionID = fmt.Sprintf("catalog-plan-session-%03d", index)
+		if index < 4 {
+			watch.ItemID = fmt.Sprintf("catalog-plan-episode-%d", index)
+			watch.SeriesID = catalogPlanSeriesID
+		} else if index == 4 {
+			watch.ItemID, watch.SeriesID = catalogPlanSeriesID, catalogPlanSeriesID
+		}
+		mutations = append(mutations, core.PlaybackMutation{Watch: watch})
+	}
+	store := newPlaybackTestStore(t, pool, driver)
+	for start := 0; start < len(mutations); start += core.MaxPlaybackMutations {
+		end := min(start+core.MaxPlaybackMutations, len(mutations))
+		if err := store.SaveWatches(t.Context(), mutations[start:end]); err != nil {
+			t.Fatalf("seed catalog plan watches: %v", err)
+		}
+	}
+}
+
+func analyzeCatalogPlanTables(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	if driver != config.DriverPostgres {
+		return
+	}
+	if _, err := pool.ExecContext(t.Context(), "ANALYZE watches, library_items"); err != nil {
+		t.Fatalf("analyze catalog plan tables: %v", err)
+	}
+}
+
+// assertCatalogWatchSeeks requires every watches access to seek on an index
+// that leads with the item or series id. Either watches index that leads with
+// (media_server_id, item_id) is acceptable, and the series branch may seek by
+// item id through the target set; walking the server's watches through the
+// state index or a sequential scan is not.
 func assertCatalogWatchSeeks(t *testing.T, plan, query string) {
 	t.Helper()
 	itemSeek := strings.Contains(plan, "watches_server_item_started_idx") ||
 		strings.Contains(plan, "watches_catalog_aggregate_idx")
-	if !itemSeek || !strings.Contains(plan, "watches_server_series_started_idx") {
-		t.Errorf("%s plan = %q; want item and series index seeks", query, plan)
+	if !itemSeek {
+		t.Errorf("%s plan = %q; want item index seeks", query, plan)
 	}
-	if strings.Contains(plan, "SCAN w") || strings.Contains(plan, "Seq Scan on watches") {
-		t.Errorf("%s plan scans watches: %q", query, plan)
+	for _, walk := range []string{"SCAN w", "Seq Scan on watches", "watches_server_state_idx"} {
+		if strings.Contains(plan, walk) {
+			t.Errorf("%s plan walks watches (%s): %q", query, walk, plan)
+		}
 	}
 }
 

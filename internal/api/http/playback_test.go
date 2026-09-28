@@ -142,6 +142,17 @@ func TestPlaybackNowPaginatesMoreThanSnapshotLimitAcrossServers(t *testing.T) {
 	}
 }
 
+func TestPlaybackWatchDTOIncludesImportOrigin(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	response := playbackWatchDTO(core.PlaybackWatch{
+		ImportSource: core.ImportSourceJellystat, ImportRecordID: "activity-77",
+		ImportOriginRecordID: "77",
+	}, now)
+	if response.ImportRecordID != "activity-77" || response.ImportOriginRecordID != "77" {
+		t.Fatalf("playback watch provenance = %+v", response)
+	}
+}
+
 func playbackNowWatches(now time.Time, count int) []core.PlaybackWatch {
 	const secondServerID = "44444444-4444-4444-8444-444444444444"
 	watches := make([]core.PlaybackWatch, 0, count)

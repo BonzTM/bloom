@@ -36,7 +36,9 @@ func TestWatchJSONLRoundTripUsesOriginalWatchID(t *testing.T) {
 			Width: 1920, Height: 1080, Framerate: 24, AudioChannels: 2,
 			IsVideoDirect: &direct, IsAudioDirect: &direct, TranscodeReasons: []string{"ContainerBitrateExceedsLimit"},
 		},
-		Runtime: &runtime, Source: core.WatchSourcePoll, ActiveTime: 90 * time.Second, StartedAt: started, EndedAt: &ended,
+		Runtime: &runtime, Source: core.WatchSourceImport, ImportSource: core.ImportSourceJellystat,
+		ImportRecordID: "activity-77", ImportOriginRecordID: "77",
+		ActiveTime: 90 * time.Second, StartedAt: started, EndedAt: &ended,
 	}
 	var output bytes.Buffer
 	if err := EncodeWatchJSONL(&output, watch); err != nil {
@@ -53,7 +55,7 @@ func TestWatchJSONLRoundTripUsesOriginalWatchID(t *testing.T) {
 		record.EpisodeNumber == nil || *record.EpisodeNumber != episode ||
 		record.LastPosition != watch.LastPosition || !reflect.DeepEqual(record.Stream, watch.Stream) ||
 		record.Runtime == nil || *record.Runtime != runtime ||
-		record.EndedAt == nil || !record.EndedAt.Equal(ended) {
+		record.EndedAt == nil || !record.EndedAt.Equal(ended) || record.OriginRecordID != "77" {
 		t.Fatalf("round trip = %+v", record)
 	}
 	var wire bloomExportRecord
@@ -71,6 +73,8 @@ func TestWatchJSONLRejectsSchemaDriftAndControlCharacters(t *testing.T) {
 		strings.Replace(base, `"ended_at":"2026-09-25T12:01:00Z"`, `"ended_at":null`, 1),
 		strings.Replace(base, `"position_ms":0`, `"position_ms":9223372036854775807`, 1),
 		strings.Replace(base, `"runtime_ms":null`, `"runtime_ms":9223372036855`, 1),
+		strings.TrimSuffix(base, "}") + `,"import_origin_record_id":"` +
+			strings.Repeat("x", core.MaxImportOriginRecordIDBytes+1) + `"}`,
 	} {
 		if _, err := DecodeWatchJSONL([]byte(line)); err == nil {
 			t.Errorf("DecodeWatchJSONL accepted %s", line)

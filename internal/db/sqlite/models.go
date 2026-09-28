@@ -394,6 +394,7 @@ type Watch struct {
 	SeriesID                  sql.NullString
 	ImportSource              sql.NullString
 	ImportProvenanceGuard     sql.NullInt64
+	ImportOriginRecordID      sql.NullString
 }
 
 type WatchPosition struct {

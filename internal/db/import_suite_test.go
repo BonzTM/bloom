@@ -53,8 +53,17 @@ func runImportEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("Jellystat backup imports and reruns idempotently", func(t *testing.T) {
 		testDatabaseJellystatImport(t, pool, driver, newImportFixture(t, pool, driver))
 	})
-	t.Run("Playback Reporting deduplicates Jellystat plugin rows", func(t *testing.T) {
-		testPlaybackReportingJellystatCrossDedup(t, newImportFixture(t, pool, driver))
+	t.Run("Jellystat origin deduplicates Playback Reporting", func(t *testing.T) {
+		testJellystatOriginDeduplicatesReporting(t, newImportFixture(t, pool, driver))
+	})
+	t.Run("Playback Reporting deduplicates Jellystat origin", func(t *testing.T) {
+		testReportingDeduplicatesJellystatOrigin(t, newImportFixture(t, pool, driver))
+	})
+	t.Run("Playback Reporting deduplicates legacy Jellystat marker", func(t *testing.T) {
+		testReportingDeduplicatesLegacyJellystatMarker(t, newImportFixture(t, pool, driver))
+	})
+	t.Run("native Jellystat plugin prefix does not deduplicate", func(t *testing.T) {
+		testNativeJellystatPluginPrefixDoesNotDeduplicate(t, newImportFixture(t, pool, driver))
 	})
 	t.Run("cross-source duplicate preserves unrelated Jellyfin user data", func(t *testing.T) {
 		testCrossSourceDuplicatePreservesUserData(t, pool, newImportFixture(t, pool, driver))
@@ -144,25 +153,68 @@ func assertJellystatJobCounters(
 	}
 }
 
-func testPlaybackReportingJellystatCrossDedup(t *testing.T, fixture importFixture) {
+func testJellystatOriginDeduplicatesReporting(t *testing.T, fixture importFixture) {
+	t.Helper()
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	record := importedRecord("77", "cross-source", fixture.now)
+	commitAndFinishImport(t, fixture, reporting, record)
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	record.RecordID, record.OriginRecordID = "activity-77", "77"
+	result := commitSingleImport(t, fixture, jellystat, record)
+	if result.Imported != 0 || result.Duplicate != 1 {
+		t.Fatalf("Jellystat cross-source counters = %+v", result)
+	}
+}
+
+func testReportingDeduplicatesJellystatOrigin(t *testing.T, fixture importFixture) {
 	t.Helper()
 	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
-	record := importedRecord("plugin:77", "cross-source", fixture.now)
-	result := commitSingleImport(t, fixture, jellystat, record)
-	if result.Imported != 1 {
-		t.Fatalf("Jellystat plugin insert = %+v", result)
-	}
-	if err := fixture.store.FinishImport(
-		t.Context(), jellystat.ID, jellystat.LeaseToken, core.ImportCompleted, "", fixture.now,
-	); err != nil {
-		t.Fatalf("finish Jellystat import: %v", err)
-	}
+	record := importedRecord("activity-77", "cross-source", fixture.now)
+	record.OriginRecordID = "77"
+	commitAndFinishImport(t, fixture, jellystat, record)
 	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
-	record.RecordID = "77"
-	result = commitSingleImport(t, fixture, reporting, record)
+	record.RecordID, record.OriginRecordID = "77", ""
+	result := commitSingleImport(t, fixture, reporting, record)
 	if result.Imported != 0 || result.Duplicate != 1 {
 		t.Fatalf("Playback Reporting cross-source counters = %+v", result)
 	}
+}
+
+func testReportingDeduplicatesLegacyJellystatMarker(t *testing.T, fixture importFixture) {
+	t.Helper()
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	record := importedRecord("plugin:88", "legacy-cross-source", fixture.now)
+	commitAndFinishImport(t, fixture, jellystat, record)
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	record.RecordID = "88"
+	result := commitSingleImport(t, fixture, reporting, record)
+	if result.Imported != 0 || result.Duplicate != 1 {
+		t.Fatalf("legacy cross-source counters = %+v", result)
+	}
+}
+
+func testNativeJellystatPluginPrefixDoesNotDeduplicate(t *testing.T, fixture importFixture) {
+	t.Helper()
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	record := importedRecord("99", "reporting-native-prefix", fixture.now)
+	commitAndFinishImport(t, fixture, reporting, record)
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	record.RecordID = "plugin:99"
+	result := commitSingleImport(t, fixture, jellystat, record)
+	if result.Imported != 1 || result.Duplicate != 0 {
+		t.Fatalf("native Jellystat counters = %+v", result)
+	}
+}
+
+func commitAndFinishImport(
+	t *testing.T, fixture importFixture, job core.ImportJob, record core.ImportedWatch,
+) {
+	t.Helper()
+	result := commitSingleImport(t, fixture, job, record)
+	if result.Imported != 1 {
+		t.Fatalf("import counters = %+v", result)
+	}
+	finishImportFixture(t, fixture, job)
 }
 
 func testCrossSourceDuplicatePreservesUserData(
@@ -181,7 +233,8 @@ func testCrossSourceDuplicatePreservesUserData(
 	finishImportFixture(t, fixture, userData)
 
 	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
-	conflict := importedRecord("plugin:77", synthetic.ItemID, fixture.now)
+	conflict := importedRecord("activity-77", synthetic.ItemID, fixture.now)
+	conflict.OriginRecordID = "77"
 	conflict.MediaUserID = synthetic.MediaUserID
 	result := commitSingleImport(t, fixture, jellystat, conflict)
 	if result.Imported != 0 || result.Duplicate != 1 {
@@ -751,7 +804,9 @@ func testBloomExportSnapshot(
 		ItemName: "Episode", ItemType: "Episode", SeriesID: "series-id", SeriesName: "Series",
 		LibraryID: "library", LibraryName: "Shows", SeasonNumber: &season, EpisodeNumber: &episode,
 		PlayMethod: core.PlayMethodDirectStream, State: core.WatchStopped,
-		Source: core.WatchSourcePoll, StartedAt: fixture.now, EndedAt: &ended,
+		Source: core.WatchSourceImport, ImportSource: core.ImportSourceJellystat,
+		ImportRecordID: "activity-77", ImportOriginRecordID: "77",
+		StartedAt: fixture.now, EndedAt: &ended,
 		Runtime: &runtime, ActiveTime: 90 * time.Second, LastPosition: 45 * time.Second,
 		Stream: &core.StreamDetails{
 			Container: "mkv", VideoCodec: "h264", AudioCodec: "aac",
@@ -1025,7 +1080,8 @@ func assertBloomSnapshot(t *testing.T, watch, exported core.PlaybackWatch) {
 		!watch.StartedAt.Equal(exported.StartedAt) || watch.EndedAt == nil ||
 		!watch.EndedAt.Equal(*exported.EndedAt) || !reflect.DeepEqual(watch.Stream, exported.Stream) ||
 		watch.Source != core.WatchSourceImport || watch.ImportSource != core.ImportSourceBloomExport ||
-		watch.ImportRecordID != exported.ID || watch.State != core.WatchStopped {
+		watch.ImportRecordID != exported.ID || watch.ImportOriginRecordID != exported.ImportOriginRecordID ||
+		watch.State != core.WatchStopped {
 		t.Fatalf("Bloom snapshot = %+v, want exported %+v", watch, exported)
 	}
 }

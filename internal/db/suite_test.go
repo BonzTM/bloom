@@ -125,6 +125,9 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("Jellystat source migration preserves rows and foreign keys", func(t *testing.T) {
 		testJellystatSourceMigration(t, pool, driver)
 	})
+	t.Run("import origin migration backfills and rolls down", func(t *testing.T) {
+		testImportOriginMigration(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(context.Background(), pool, driver); err != nil {
@@ -139,6 +142,73 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("Migrate (second up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
+}
+
+func testImportOriginMigration(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare import origin migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 25); err != nil {
+		t.Fatalf("roll back import origin migration: %v", err)
+	}
+	serverID, watchID := seedImportOriginMigrationRow(t, pool, driver)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("apply import origin migration: %v", err)
+	}
+	assertImportOriginBackfill(t, pool, watchID)
+	if err := db.MigrateDownTo(ctx, pool, driver, 25); err != nil {
+		t.Fatalf("roll down import origin migration: %v", err)
+	}
+	assertImportOriginDown(t, pool, watchID)
+	execTestSQL(t, pool, "DELETE FROM media_servers WHERE id = $1", serverID)
+	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean import origin migration fixture: %v", err)
+	}
+}
+
+func seedImportOriginMigrationRow(t *testing.T, pool *sql.DB, driver config.Driver) (string, string) {
+	t.Helper()
+	accountID, serverID, watchID := mustID(t), mustID(t), mustID(t)
+	now := migrationCreatedAt(driver)
+	seedCatalogUpgradeOwner(t, pool, accountID, serverID, now)
+	execTestSQL(t, pool, `INSERT INTO watches
+        (id,media_server_id,media_user_id,username,device_id,device_name,client,server_session_id,
+         item_id,item_name,item_type,series_name,play_method,state,started_at,last_seen_at,ended_at,
+         active_seconds,last_position_ms,source,created_at,updated_at,import_source,import_record_id)
+        VALUES ($1,$2,'user','User','','','','','item','Title','Movie','','unknown','stopped',
+                $3,$3,$3,1,1,'import',$3,$3,'jellystat','plugin:77')`, watchID, serverID, now)
+	return serverID, watchID
+}
+
+func assertImportOriginBackfill(t *testing.T, pool *sql.DB, watchID string) {
+	t.Helper()
+	var recordID, originID string
+	err := pool.QueryRowContext(t.Context(), `SELECT import_record_id, import_origin_record_id
+        FROM watches WHERE id = $1`, watchID).Scan(&recordID, &originID)
+	if err != nil || recordID != "plugin:77" || originID != "77" {
+		t.Fatalf("origin backfill = %q/%q, %v", recordID, originID, err)
+	}
+	if _, err := pool.ExecContext(t.Context(), `UPDATE watches
+        SET import_origin_record_id = $1 WHERE id = $2`, strings.Repeat("x", 129), watchID); err == nil {
+		t.Fatal("migration accepted an origin record id over 128 bytes")
+	}
+}
+
+func assertImportOriginDown(t *testing.T, pool *sql.DB, watchID string) {
+	t.Helper()
+	var recordID string
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT import_record_id FROM watches WHERE id = $1", watchID,
+	).Scan(&recordID); err != nil || recordID != "plugin:77" {
+		t.Fatalf("rolled-down record id = %q, %v", recordID, err)
+	}
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT import_origin_record_id FROM watches WHERE id = $1", watchID,
+	).Scan(new(string)); err == nil {
+		t.Fatal("import_origin_record_id remains after migration down")
+	}
 }
 
 func testLibraryCatalogMigrationUpgrade(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -1793,7 +1863,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 25)
+	assertMigrationVersion(t, pool, 26)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -1914,7 +1984,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 25)
+	assertMigrationVersion(t, pool, 26)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

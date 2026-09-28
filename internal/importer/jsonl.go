@@ -49,34 +49,35 @@ var nestedZipSignatures = [3][4]byte{
 }
 
 type bloomExportRecord struct {
-	ID              string            `json:"id"`
-	MediaServerID   string            `json:"media_server_id"`
-	MediaServerName string            `json:"media_server_name"`
-	MediaUserID     string            `json:"media_user_id"`
-	Username        string            `json:"username"`
-	DeviceID        string            `json:"device_id"`
-	DeviceName      string            `json:"device_name"`
-	Client          string            `json:"client"`
-	ItemID          string            `json:"item_id"`
-	ItemName        string            `json:"item_name"`
-	ItemType        string            `json:"item_type"`
-	SeriesID        string            `json:"series_id"`
-	SeriesName      string            `json:"series_name"`
-	LibraryID       string            `json:"library_id"`
-	LibraryName     string            `json:"library_name"`
-	SeasonNumber    *int32            `json:"season_number"`
-	EpisodeNumber   *int32            `json:"episode_number"`
-	PositionMS      int64             `json:"position_ms"`
-	RuntimeMS       *int64            `json:"runtime_ms"`
-	Paused          bool              `json:"paused"`
-	PlayMethod      core.PlayMethod   `json:"play_method"`
-	Stream          *streamJSONLWire  `json:"stream,omitempty"`
-	Source          core.WatchSource  `json:"source"`
-	ImportSource    core.ImportSource `json:"import_source,omitempty"`
-	ImportRecordID  string            `json:"import_record_id,omitempty"`
-	ActiveSeconds   int64             `json:"active_seconds"`
-	StartedAt       time.Time         `json:"started_at"`
-	EndedAt         *time.Time        `json:"ended_at,omitempty"`
+	ID                   string            `json:"id"`
+	MediaServerID        string            `json:"media_server_id"`
+	MediaServerName      string            `json:"media_server_name"`
+	MediaUserID          string            `json:"media_user_id"`
+	Username             string            `json:"username"`
+	DeviceID             string            `json:"device_id"`
+	DeviceName           string            `json:"device_name"`
+	Client               string            `json:"client"`
+	ItemID               string            `json:"item_id"`
+	ItemName             string            `json:"item_name"`
+	ItemType             string            `json:"item_type"`
+	SeriesID             string            `json:"series_id"`
+	SeriesName           string            `json:"series_name"`
+	LibraryID            string            `json:"library_id"`
+	LibraryName          string            `json:"library_name"`
+	SeasonNumber         *int32            `json:"season_number"`
+	EpisodeNumber        *int32            `json:"episode_number"`
+	PositionMS           int64             `json:"position_ms"`
+	RuntimeMS            *int64            `json:"runtime_ms"`
+	Paused               bool              `json:"paused"`
+	PlayMethod           core.PlayMethod   `json:"play_method"`
+	Stream               *streamJSONLWire  `json:"stream,omitempty"`
+	Source               core.WatchSource  `json:"source"`
+	ImportSource         core.ImportSource `json:"import_source,omitempty"`
+	ImportRecordID       string            `json:"import_record_id,omitempty"`
+	ImportOriginRecordID string            `json:"import_origin_record_id,omitempty"`
+	ActiveSeconds        int64             `json:"active_seconds"`
+	StartedAt            time.Time         `json:"started_at"`
+	EndedAt              *time.Time        `json:"ended_at,omitempty"`
 }
 
 type streamJSONLWire struct {
@@ -120,7 +121,8 @@ func watchWire(watch core.PlaybackWatch) bloomExportRecord {
 		RuntimeMS: runtimeMilliseconds(watch.Runtime),
 		Paused:    watch.State == core.WatchPaused, PlayMethod: watch.PlayMethod, Stream: streamWire(watch.Stream),
 		Source: watch.Source, ImportSource: watch.ImportSource, ImportRecordID: watch.ImportRecordID,
-		ActiveSeconds: int64(watch.ActiveTime / time.Second), StartedAt: watch.StartedAt, EndedAt: watch.EndedAt,
+		ImportOriginRecordID: watch.ImportOriginRecordID,
+		ActiveSeconds:        int64(watch.ActiveTime / time.Second), StartedAt: watch.StartedAt, EndedAt: watch.EndedAt,
 	}
 }
 
@@ -736,7 +738,8 @@ func DecodeWatchJSONL(line []byte) (core.ImportedWatch, error) {
 		return core.ImportedWatch{}, fmt.Errorf("validate JSONL watch: %w", core.ErrInvalidArgument)
 	}
 	record := core.ImportedWatch{
-		RecordID: wire.ID, MediaUserID: wire.MediaUserID, Username: wire.Username,
+		RecordID: wire.ID, OriginRecordID: wire.ImportOriginRecordID,
+		MediaUserID: wire.MediaUserID, Username: wire.Username,
 		DeviceID: wire.DeviceID, DeviceName: wire.DeviceName, Client: wire.Client,
 		ItemID: wire.ItemID, ItemName: wire.ItemName, ItemType: wire.ItemType,
 		SeriesID: wire.SeriesID, SeriesName: wire.SeriesName, LibraryID: wire.LibraryID, LibraryName: wire.LibraryName,
@@ -782,7 +785,8 @@ func validWatchWire(wire bloomExportRecord) bool {
 		return false
 	}
 	provenance := wire.ImportSource.Valid() && validJSONLText(wire.ImportRecordID, core.MaxImportRecordIDBytes, true)
-	return (wire.Source == core.WatchSourceImport) == provenance
+	return (wire.Source == core.WatchSourceImport) == provenance &&
+		validJSONLText(wire.ImportOriginRecordID, core.MaxImportOriginRecordIDBytes, false)
 }
 
 func validJSONLText(value string, maxBytes int, required bool) bool {

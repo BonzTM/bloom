@@ -174,38 +174,39 @@ type PlaybackKey struct {
 
 // PlaybackWatch is Bloom's persisted playback entity.
 type PlaybackWatch struct {
-	ID              string
-	MediaServerID   string
-	MediaServerName string
-	MediaUserID     string
-	Username        string
-	DeviceID        string
-	DeviceName      string
-	Client          string
-	ServerSessionID string
-	ItemID          string
-	ItemName        string
-	ItemType        string
-	SeriesID        string
-	SeriesName      string
-	LibraryID       string
-	LibraryName     string
-	SeasonNumber    *int32
-	EpisodeNumber   *int32
-	PlayMethod      PlayMethod
-	Stream          *StreamDetails
-	State           WatchState
-	StartedAt       time.Time
-	LastSeenAt      time.Time
-	EndedAt         *time.Time
-	ActiveTime      time.Duration
-	LastPosition    time.Duration
-	Runtime         *time.Duration
-	Source          WatchSource
-	ImportSource    ImportSource
-	ImportRecordID  string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                   string
+	MediaServerID        string
+	MediaServerName      string
+	MediaUserID          string
+	Username             string
+	DeviceID             string
+	DeviceName           string
+	Client               string
+	ServerSessionID      string
+	ItemID               string
+	ItemName             string
+	ItemType             string
+	SeriesID             string
+	SeriesName           string
+	LibraryID            string
+	LibraryName          string
+	SeasonNumber         *int32
+	EpisodeNumber        *int32
+	PlayMethod           PlayMethod
+	Stream               *StreamDetails
+	State                WatchState
+	StartedAt            time.Time
+	LastSeenAt           time.Time
+	EndedAt              *time.Time
+	ActiveTime           time.Duration
+	LastPosition         time.Duration
+	Runtime              *time.Duration
+	Source               WatchSource
+	ImportSource         ImportSource
+	ImportRecordID       string
+	ImportOriginRecordID string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // Key returns the persisted identity fields used by the collector.
@@ -846,6 +847,9 @@ func ValidatePlaybackWatch(watch PlaybackWatch) error {
 	}
 	provenance := watch.ImportSource.Valid() && watch.ImportRecordID != "" &&
 		validImportText(watch.ImportRecordID, MaxImportRecordIDBytes)
+	if !validImportText(watch.ImportOriginRecordID, MaxImportOriginRecordIDBytes) {
+		return ErrInvalidArgument
+	}
 	if (watch.Source == WatchSourceImport) != provenance {
 		return ErrInvalidArgument
 	}

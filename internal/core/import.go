@@ -14,6 +14,8 @@ const (
 	MaxImportCursorBytes = 512
 	// MaxImportRecordIDBytes bounds source-owned idempotency keys.
 	MaxImportRecordIDBytes = 256
+	// MaxImportOriginRecordIDBytes bounds upstream source idempotency keys.
+	MaxImportOriginRecordIDBytes = 128
 	// MaxImportErrorBytes bounds operator-visible terminal failure text.
 	MaxImportErrorBytes = 512
 	// MaxImportUploadBytes bounds one Bloom export upload.
@@ -151,23 +153,25 @@ type ImportLease struct {
 
 // ImportedWatch is a source record normalized for atomic persistence.
 type ImportedWatch struct {
-	RecordID, MediaUserID, Username string
-	DeviceID, DeviceName, Client    string
-	ItemID, ItemName, ItemType      string
-	SeriesID, SeriesName            string
-	LibraryID, LibraryName          string
-	SeasonNumber, EpisodeNumber     *int32
-	PlayMethod                      PlayMethod
-	Stream                          *StreamDetails
-	StartedAt                       time.Time
-	EndedAt                         *time.Time
-	Runtime                         *time.Duration
-	Duration, LastPosition          time.Duration
+	RecordID, OriginRecordID     string
+	MediaUserID, Username        string
+	DeviceID, DeviceName, Client string
+	ItemID, ItemName, ItemType   string
+	SeriesID, SeriesName         string
+	LibraryID, LibraryName       string
+	SeasonNumber, EpisodeNumber  *int32
+	PlayMethod                   PlayMethod
+	Stream                       *StreamDetails
+	StartedAt                    time.Time
+	EndedAt                      *time.Time
+	Runtime                      *time.Duration
+	Duration, LastPosition       time.Duration
 }
 
 // Valid reports whether the normalized source record fits the watch schema.
 func (w ImportedWatch) Valid() bool {
 	if !validImportText(w.RecordID, MaxImportRecordIDBytes) || w.RecordID == "" ||
+		!validImportText(w.OriginRecordID, MaxImportOriginRecordIDBytes) ||
 		!validImportIdentity(w.MediaUserID) || !validImportIdentity(w.ItemID) ||
 		!validImportText(w.DeviceID, 256) || !validImportValue(w.Username) ||
 		!validImportValue(w.DeviceName) || !validImportValue(w.Client) ||
