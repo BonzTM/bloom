@@ -59,7 +59,7 @@ func (c *Client) Discover(ctx context.Context, input core.MetadataDiscover) (cor
 	if err != nil {
 		return core.MetadataPage{}, classifyCallError(operation, err)
 	}
-	if err := validateStatus(operation, status); err != nil {
+	if err := validateDiscoveryStatus(operation, status); err != nil {
 		return core.MetadataPage{}, err
 	}
 	return decodeDiscoverPage(response.GetBody(), input)
@@ -155,7 +155,7 @@ func (c *Client) Genres(ctx context.Context, kind core.MediaKind) ([]core.Metada
 	if err != nil {
 		return nil, classifyCallError(operation, err)
 	}
-	if err := validateStatus(operation, status); err != nil {
+	if err := validateDiscoveryStatus(operation, status); err != nil {
 		return nil, err
 	}
 	return decodeGenres(response.GetBody(), operation)
@@ -191,6 +191,13 @@ func responseStatus(response providerResponse) int {
 		return 0
 	}
 	return response.StatusCode()
+}
+
+func validateDiscoveryStatus(operation string, status int) error {
+	if status == http.StatusNotFound {
+		return classifyError(operation, status, core.ErrMetadataUnavailable)
+	}
+	return validateStatus(operation, status)
 }
 
 func malformedDiscover(list core.MetadataDiscoverList, err error) error {

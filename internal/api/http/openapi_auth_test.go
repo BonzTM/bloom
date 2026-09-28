@@ -584,6 +584,9 @@ func TestOpenAPIValidationRejectsEnumAndBounds(t *testing.T) {
 	}{
 		{schema: errorSchema, value: map[string]any{"code": "invented", "message": "bad", "request_id": "request-1"}},
 		{schema: errorSchema, value: map[string]any{"code": codeMediaServerFailure, "message": "bad", "reason": "invented", "request_id": "request-1"}},
+		{schema: errorSchema, value: map[string]any{"code": codeMediaServerFailure, "message": "bad", "reason": reasonUnavailable, "request_id": "request-1"}},
+		{schema: errorSchema, value: map[string]any{"code": codeDownloadManagerFailure, "message": "bad", "reason": reasonUnavailable, "request_id": "request-1"}},
+		{schema: errorSchema, value: map[string]any{"code": codeInternal, "message": "bad", "reason": reasonUnavailable, "request_id": "request-1"}},
 		{schema: "#/components/schemas/LoginRequest", value: map[string]any{"username": strings.Repeat("x", core.MaxSubmittedUsernameCharacters+1), "password": "secret"}},
 	}
 	for _, testCase := range tests {
@@ -598,6 +601,8 @@ func TestErrorResponseContractAcceptsOptionalFailureReason(t *testing.T) {
 	document := loadOpenAPI(t)
 	fixtures := []map[string]any{
 		{"code": codeInternal, "message": "Internal Server Error", "request_id": "request-1"},
+		{"code": codeMediaServerFailure, "message": "Bad Gateway", "request_id": "request-2"},
+		{"code": codeDownloadManagerFailure, "message": "Bad Gateway", "request_id": "request-3"},
 		{"code": codeMediaServerFailure, "message": "Bad Gateway", "request_id": "request-2", "reason": "unreachable"},
 		{"code": codeMediaServerFailure, "message": "Bad Gateway", "request_id": "request-3", "reason": "unauthorized"},
 		{"code": codeDownloadManagerFailure, "message": "Bad Gateway", "request_id": "request-4", "reason": "not_found"},

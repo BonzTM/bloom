@@ -423,7 +423,7 @@ func classifyError(operation string, status int, err error) error {
 func classifyCallError(operation string, err error) error {
 	if responseErr, ok := errors.AsType[*responseReceivedError](err); ok {
 		classification := core.ErrMetadataMalformed
-		if retryableStatus(responseErr.status) {
+		if unavailableStatus(responseErr.status) {
 			classification = core.ErrMetadataUnavailable
 		}
 		return classifyError(operation, responseErr.status, errors.Join(classification, err))
@@ -475,6 +475,11 @@ func retryAfter(response *http.Response) time.Duration {
 }
 
 func retryableStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
+func unavailableStatus(status int) bool {
 	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError && status <= 599
 }
 
