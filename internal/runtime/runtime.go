@@ -170,6 +170,7 @@ type serviceWiring struct {
 	localIdentities    core.LocalIdentityStore
 	authorizer         core.Authorizer
 	roles              core.RoleReader
+	accountAdmin       core.AccountAdminReader
 	sessions           *scs.SessionManager
 	mediaServers       *mediaserver.Service
 	metadata           *metadata.Service
@@ -197,7 +198,7 @@ func wireServiceDependencies(
 	ctx context.Context, pool *sql.DB, cfg config.Config, auditSink io.Writer, logger *slog.Logger, metrics *telemetry.PromMetrics,
 	deps Dependencies, ownership *startupOwnership,
 ) (serviceWiring, error) {
-	accounts, identities, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, deps.Clock)
+	accounts, identities, accountAdmin, authorizer, roles, sessions, err := authDependencies(pool, cfg, metrics, logger, deps.Clock)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -232,7 +233,8 @@ func wireServiceDependencies(
 		return serviceWiring{}, err
 	}
 	wiring := serviceWiring{
-		accounts: accounts, localIdentities: identities, authorizer: authorizer, roles: roles,
+		accounts: accounts, localIdentities: identities, accountAdmin: accountAdmin,
+		authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, accountMediaUsers: accountMediaUsers,
 		metadata: metadataService, requests: requestService, downloadManagers: downloadManagers,
 		fulfilment: fulfilmentManager, notifications: notifications, notificationWorker: notificationWorker,
@@ -492,6 +494,7 @@ func assembleHTTPServer(
 		Web:                    web.Handler(dist, logger),
 		Identity:               core.NewLocalIdentityProvider(wiring.localIdentities),
 		Accounts:               wiring.accounts,
+		AccountAdmin:           wiring.accountAdmin,
 		Authorizer:             wiring.authorizer,
 		Roles:                  wiring.roles,
 		MediaServerReader:      wiring.mediaServers,
@@ -891,20 +894,24 @@ func authDependencies(
 	metrics db.SessionCleanupMetrics,
 	logger *slog.Logger,
 	clock core.Clock,
-) (core.AccountStore, core.LocalIdentityStore, core.Authorizer, core.RoleReader, *scs.SessionManager, error) {
+) (core.AccountStore, core.LocalIdentityStore, core.AccountAdminReader, core.Authorizer, core.RoleReader, *scs.SessionManager, error) {
 	accounts, localIdentities, err := db.NewAccountStores(pool, cfg.Database.Driver)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("build account stores: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("build account stores: %w", err)
+	}
+	accountAdmin, err := db.NewAccountAdminReader(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("build account administration reader: %w", err)
 	}
 	authorizer, roles, err := db.NewAuthorizationStores(pool, cfg.Database.Driver)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("build authorization stores: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("build authorization stores: %w", err)
 	}
 	sessionStore, err := db.NewSessionStore(pool, cfg.Database.Driver, metrics, logger, clock)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("build session store: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("build session store: %w", err)
 	}
-	return accounts, localIdentities, authorizer, roles, configureSessions(cfg.Auth, sessionStore), nil
+	return accounts, localIdentities, accountAdmin, authorizer, roles, configureSessions(cfg.Auth, sessionStore), nil
 }
 
 func warnTrustedProxyMode(logger *slog.Logger, cfg config.AuthConfig) {

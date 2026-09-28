@@ -171,6 +171,7 @@ type Server struct {
 	trustedProxyCIDRs      []netip.Prefix
 	authorizer             core.Authorizer
 	roles                  core.RoleReader
+	accountAdmin           core.AccountAdminReader
 	mediaServerReader      mediaServerReader
 	mediaServerManager     mediaServerManager
 	downloadManagerReader  downloadManagerReader
@@ -224,6 +225,8 @@ type Deps struct {
 	Authorizer core.Authorizer
 	// Roles reads account role names and the administrative role list.
 	Roles core.RoleReader
+	// AccountAdmin supplies secret-free administrative account reads.
+	AccountAdmin core.AccountAdminReader
 	// MediaServerReader supplies registered-server reads.
 	MediaServerReader mediaServerReader
 	// MediaServerManager supplies registered-server changes and probes.
@@ -379,6 +382,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		trustedProxyCIDRs:      deps.Auth.TrustedProxyCIDRs,
 		authorizer:             deps.Authorizer,
 		roles:                  deps.Roles,
+		accountAdmin:           deps.AccountAdmin,
 		mediaServerReader:      deps.MediaServerReader,
 		mediaServerManager:     deps.MediaServerManager,
 		downloadManagerReader:  deps.DownloadManagerReader,

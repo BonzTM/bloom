@@ -44,6 +44,8 @@ const (
 	statsUsersSchema        = "#/components/schemas/StatsUsersResponse"
 	statsLibrariesSchema    = "#/components/schemas/StatsLibrariesResponse"
 	statsUserSchema         = "#/components/schemas/StatsUserResponse"
+	adminAccountSchema      = "#/components/schemas/AdminAccount"
+	adminAccountsSchema     = "#/components/schemas/AdminAccountsResponse"
 )
 
 var contractHeaderNames = [...]string{"Allow", "Cache-Control", "Location", "Retry-After", "Set-Cookie", "Vary", "X-Request-ID"}
@@ -509,6 +511,8 @@ func assertResponseSchema(
 		playbackNowSchema, playbackHistorySchema, playbackPositionsSchema, statsOverviewSchema,
 		statsDailySchema, statsPatternsSchema, statsTitlesSchema,
 		statsUsersSchema, statsLibrariesSchema, statsUserSchema:
+		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
+	case adminAccountSchema, adminAccountsSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)
 	case accountMediaUserSchema, accountMediaUsersSchema:
 		assertJSONMatchesSchema(t, document, recorder.Body.Bytes(), schema)

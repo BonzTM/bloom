@@ -11,6 +11,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- Administrator account list and detail API routes with username search,
+  keyset pagination, derived sign-in methods, role-assignment sources, linked
+  media users, and secret-free responses on SQLite and PostgreSQL.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

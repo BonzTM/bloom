@@ -65,6 +65,9 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runMetadataProviderEngineTests(t, pool, driver)
 	runRequestEngineTests(t, pool, driver, store)
 	runNotificationEngineTests(t, pool, driver, store)
+	t.Run("administrative account reads", func(t *testing.T) {
+		testAccountAdminReads(t, pool, driver, store, adminStore)
+	})
 }
 
 func testOIDCFlowClaim(t *testing.T, pool *sql.DB, sessions scs.CtxStore, clock *testutil.FakeClock) {
