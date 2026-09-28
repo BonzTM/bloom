@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -57,6 +58,30 @@ func TestPlaybackReportingSkipsBadDurationAndAdvances(t *testing.T) {
 		return jsonResponse(http.StatusOK, `{"colums":["rowid","DateCreated","UserId","ItemId","ItemType","ItemName","PlaybackMethod","ClientName","DeviceName","PlayDuration"],"results":[[42,"2026-09-20 12:34:56","user","item","Movie","Title","DirectPlay","Web","TV","bad"],[43,"2026-09-20 12:35:56","user","item","Movie","Title","DirectPlay","Web","TV",1]],"message":""}`), nil
 	}))
 	assertPlaybackReportingProgress(t, client)
+}
+
+func TestPlaybackReportingPlaybackDurationBound(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration int64
+		wantErr  bool
+	}{
+		{"accepted boundary", core.MaxImportPlaybackSeconds, false},
+		{"just over boundary", core.MaxImportPlaybackSeconds + 1, true},
+		{"multi-year", 3 * 365 * 24 * 60 * 60, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			row := []any{
+				json.Number("42"), "2026-09-20 12:34:56", "user", "item", "Movie",
+				"Title", "DirectPlay", "Web", "TV", json.Number(strconv.FormatInt(test.duration, 10)),
+			}
+			_, err := playbackReportingRow(row, 42)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("playbackReportingRow duration %d = %v, want error %t", test.duration, err, test.wantErr)
+			}
+		})
+	}
 }
 
 func TestPlaybackReportingSkipsMalformedTextAndAdvances(t *testing.T) {

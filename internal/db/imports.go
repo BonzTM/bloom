@@ -14,6 +14,45 @@ import (
 
 const maxImportPageSize = 501
 
+func crossSourceImportRecord(
+	source core.ImportSource, recordID string,
+) (core.ImportSource, string, bool) {
+	activityID, ok := crossSourceActivityID(source, recordID)
+	if !ok {
+		return "", "", false
+	}
+	switch source {
+	case core.ImportSourcePlaybackReporting:
+		return core.ImportSourceJellystat, "plugin:" + activityID, true
+	case core.ImportSourceJellystat:
+		return core.ImportSourcePlaybackReporting, activityID, true
+	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
+		return "", "", false
+	}
+	return "", "", false
+}
+
+func crossSourceActivityID(source core.ImportSource, recordID string) (string, bool) {
+	switch source {
+	case core.ImportSourcePlaybackReporting:
+		return recordID, recordID != ""
+	case core.ImportSourceJellystat:
+		value, ok := strings.CutPrefix(recordID, "plugin:")
+		return value, ok && value != ""
+	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
+		return "", false
+	}
+	return "", false
+}
+
+func crossSourceActivityLockKey(serverID string, source core.ImportSource, recordID string) (string, bool) {
+	activityID, ok := crossSourceActivityID(source, recordID)
+	if !ok {
+		return "", false
+	}
+	return "cross-source:" + watchDedupKey(serverID, activityID, ""), true
+}
+
 // NewImportStore returns the import persistence seam for the configured engine.
 func NewImportStore(pool *sql.DB, driver config.Driver) (core.ImportStore, error) {
 	switch driver {

@@ -67,7 +67,8 @@ func NewWorker(config WorkerConfig, deps WorkerDependencies) (*Worker, error) {
 		config: config, deps: deps,
 		sources: sourceFactory{
 			reporting: deps.Reporting, userData: deps.UserData, staging: deps.Staging,
-			storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
+			store: deps.Store, clock: deps.Clock,
+			leaseDuration: config.LeaseDuration, storeTimeout: config.StoreTimeout, openWatch: openWatchUpload,
 		},
 	}, nil
 }
@@ -127,8 +128,14 @@ func (w *Worker) process(ctx context.Context, job core.ImportJob) (result error)
 	for {
 		records, cursor, skipped, readErr := reader.ReadImportBatch(ctx, job)
 		if readErr != nil {
+			if errors.Is(readErr, core.ErrImportLeaseLost) {
+				return w.handleLeaseLoss(ctx, job)
+			}
 			if errors.Is(readErr, core.ErrImportStore) {
 				return fmt.Errorf("read import batch: %w", readErr)
+			}
+			if ctx.Err() != nil {
+				return cleanWorkerShutdown()
 			}
 			return w.fail(ctx, job, readErr)
 		}

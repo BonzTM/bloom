@@ -115,6 +115,14 @@ SELECT EXISTS (
       AND item_id = sqlc.arg(item_id)
 );
 
+-- name: FindCrossSourceImportDuplicate :one
+SELECT EXISTS (
+    SELECT 1 FROM watches
+    WHERE media_server_id = sqlc.arg(media_server_id)
+      AND import_source = sqlc.arg(import_source)
+      AND import_record_id = sqlc.arg(import_record_id)
+);
+
 -- name: InsertImportedWatch :execrows
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,

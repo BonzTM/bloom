@@ -163,6 +163,11 @@ contracts) gets an entry here.
   last played, genre charts, and what nobody has played in 90 days, and an
   item page with artwork, facts, play summary, and who watched it. A
   "Sync now" button asks for a fresh walk of a server's libraries.
+- Jellystat `.jsonl` backup imports through the existing resumable import job
+  pipeline, including bounded two-pass lookup resolution, movie and episode
+  mapping, unknown-item retention, idempotent reruns, and Playback Reporting
+  cross-source deduplication. SQLite and PostgreSQL migration
+  `00025_jellystat_import_source` adds the new provenance value.
 - The requests page becomes Discover: rows of posters for what is trending
   this week, popular movies and series, upcoming movies, and series on the
   air, each tile carrying your own request state and loading more on demand,

@@ -1689,7 +1689,7 @@ paths:
     post:
       tags: [imports]
       operationId: createImport
-      summary: Create a Playback Reporting, Jellyfin user-data, Bloom JSONL, or Bloom ZIP import job.
+      summary: Create a Playback Reporting, Jellyfin user-data, Jellystat JSONL, Bloom JSONL, or Bloom ZIP import job.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -1697,7 +1697,10 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CreatePlaybackReportingImportRequest" }
           multipart/form-data:
-            schema: { $ref: "#/components/schemas/CreateBloomExportImportRequest" }
+            schema:
+              oneOf:
+                - { $ref: "#/components/schemas/CreateBloomExportImportRequest" }
+                - { $ref: "#/components/schemas/CreateJellystatImportRequest" }
             encoding:
               file:
                 contentType: application/x-ndjson, application/zip, application/octet-stream
@@ -3533,7 +3536,7 @@ components:
       enum: [poll, websocket, webhook, import]
     ImportSource:
       type: string
-      enum: [playback_reporting, bloom_export, jellyfin_userdata]
+      enum: [playback_reporting, jellystat, bloom_export, jellyfin_userdata]
     ImportState:
       type: string
       enum: [pending, running, completed, failed, cancelled]
@@ -3552,6 +3555,14 @@ components:
         media_server_id: { type: string, format: uuid }
         source: { type: string, const: bloom_export }
         file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom watch export as JSONL or ZIP, detected by content and limited to 256 MiB." }
+    CreateJellystatImportRequest:
+      type: object
+      required: [media_server_id, source, file]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        source: { type: string, const: jellystat }
+        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Jellystat JSONL backup whose first line is a table marker, limited to 256 MiB." }
     ImportJob:
       type: object
       required: [id, media_server_id, source, state, read, imported, skipped, duplicate, last_error, requested_by, created_at, updated_at]

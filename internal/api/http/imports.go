@@ -97,7 +97,7 @@ func (s *Server) handleCreateImport(w http.ResponseWriter, r *http.Request) {
 		case "application/json":
 			job, err = s.createReportingImport(w, r, account.ID)
 		case "multipart/form-data":
-			job, err = s.createBloomImport(w, r, account.ID)
+			job, err = s.createUploadedImport(w, r, account.ID)
 		default:
 			err = errUnsupportedMediaType
 		}
@@ -147,7 +147,7 @@ func (s *Server) createReportingImport(
 	}
 }
 
-func (s *Server) createBloomImport(
+func (s *Server) createUploadedImport(
 	w http.ResponseWriter, r *http.Request, accountID string,
 ) (job core.ImportJob, result error) {
 	if err := s.setImportDeadlines(w); err != nil {
@@ -172,13 +172,17 @@ func (s *Server) createBloomImport(
 	if err != nil {
 		return job, err
 	}
-	if fields.source != string(core.ImportSourceBloomExport) {
-		return job, invalidImportField("source", "must be bloom_export")
-	}
 	if !core.ValidID(fields.serverID) {
 		return job, invalidImportField("media_server_id", "must be a valid UUID")
 	}
-	job, result = s.imports.CreateBloomExport(r.Context(), fields.serverID, accountID, fields.stagingID)
+	switch core.ImportSource(fields.source) {
+	case core.ImportSourceBloomExport:
+		job, result = s.imports.CreateBloomExport(r.Context(), fields.serverID, accountID, fields.stagingID)
+	case core.ImportSourceJellystat:
+		job, result = s.imports.CreateJellystat(r.Context(), fields.serverID, accountID, fields.stagingID)
+	default:
+		return job, invalidImportField("source", "must be bloom_export or jellystat")
+	}
 	return job, result
 }
 

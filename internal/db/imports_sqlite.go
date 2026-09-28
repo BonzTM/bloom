@@ -202,8 +202,16 @@ func commitSQLiteImportBatch(
 func insertSQLiteImportRecords(ctx context.Context, q *sqlite.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		if err := supersedeSQLiteUserData(ctx, q, batch, record); err != nil {
-			return 0, 0, importStoreError("supersede Jellyfin user-data watch", err)
+		crossDuplicate, err := sqliteCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if crossDuplicate {
+			duplicate++
+			continue
+		}
+		if supersedeErr := supersedeSQLiteUserData(ctx, q, batch, record); supersedeErr != nil {
+			return 0, 0, importStoreError("supersede Jellyfin user-data watch", supersedeErr)
 		}
 		dupe, err := sqliteImportDuplicate(ctx, q, batch, record)
 		if err != nil {
@@ -271,6 +279,21 @@ func sqliteImportDuplicate(
 		StartAfter:  formatSQLiteTime(record.StartedAt.Add(-batch.ResumeWindow)),
 		StartBefore: formatSQLiteTime(record.StartedAt.Add(batch.ResumeWindow)),
 	})
+}
+
+func sqliteCrossSourceDuplicate(
+	ctx context.Context, q *sqlite.Queries, batch core.ImportBatch, recordID string,
+) (bool, error) {
+	source, alternateID, ok := crossSourceImportRecord(batch.Source, recordID)
+	if !ok {
+		return false, nil
+	}
+	duplicate, err := q.FindCrossSourceImportDuplicate(ctx, sqlite.FindCrossSourceImportDuplicateParams{
+		MediaServerID:  batch.MediaServerID,
+		ImportSource:   sql.NullString{String: string(source), Valid: true},
+		ImportRecordID: sql.NullString{String: alternateID, Valid: true},
+	})
+	return duplicate, importStoreError("find cross-source import duplicate", err)
 }
 
 func sqliteImportedWatchParams(

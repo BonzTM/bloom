@@ -15,10 +15,12 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/BonzTM/bloom/internal/config"
+	"github.com/BonzTM/bloom/internal/core"
 	"github.com/BonzTM/bloom/internal/db"
 )
 
@@ -48,7 +50,65 @@ func TestPostgresEngineSuite(t *testing.T) {
 	}
 
 	runEngineSuite(t, pool, config.DriverPostgres)
+	t.Run("concurrent cross-source activity deduplication", func(t *testing.T) {
+		testConcurrentPostgresCrossSourceDeduplication(
+			t, pool, newImportFixture(t, pool, config.DriverPostgres),
+		)
+	})
 	assertPostgresSchema(t, pool)
+}
+
+func testConcurrentPostgresCrossSourceDeduplication(
+	t *testing.T, pool *sql.DB, fixture importFixture,
+) {
+	t.Helper()
+	reporting := createClaimedImport(t, fixture, core.ImportSourcePlaybackReporting, "0")
+	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
+	reportingRecord := importedRecord("77", "reporting-item", fixture.now)
+	reportingRecord.MediaUserID = "reporting-user"
+	jellystatRecord := importedRecord("plugin:77", "jellystat-item", fixture.now)
+	jellystatRecord.MediaUserID = "jellystat-user"
+
+	start := make(chan struct{})
+	results := make(chan core.ImportBatchResult, 2)
+	errorsFound := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, candidate := range []struct {
+		job    core.ImportJob
+		record core.ImportedWatch
+	}{{reporting, reportingRecord}, {jellystat, jellystatRecord}} {
+		go func() {
+			ready.Done()
+			<-start
+			result, err := fixture.store.CommitImportBatch(
+				t.Context(), singleImportBatch(fixture, candidate.job, candidate.record),
+			)
+			results <- result
+			errorsFound <- err
+		}()
+	}
+	ready.Wait()
+	close(start)
+	var imported, duplicate int64
+	for range 2 {
+		if err := <-errorsFound; err != nil {
+			t.Fatalf("concurrent cross-source commit: %v", err)
+		}
+		result := <-results
+		imported += result.Imported
+		duplicate += result.Duplicate
+	}
+	if imported != 1 || duplicate != 1 {
+		t.Fatalf("concurrent counters = imported %d duplicate %d", imported, duplicate)
+	}
+	var watches int
+	err := pool.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM watches
+        WHERE media_server_id = $1 AND import_source IN ('playback_reporting', 'jellystat')
+          AND import_record_id IN ('77', 'plugin:77')`, fixture.serverID).Scan(&watches)
+	if err != nil || watches != 1 {
+		t.Fatalf("cross-source watches = %d, %v", watches, err)
+	}
 }
 
 func assertPostgresSchema(t *testing.T, pool *sql.DB) {

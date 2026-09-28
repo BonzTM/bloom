@@ -67,6 +67,14 @@ func (f *fakeImportManager) CreateBloomExport(_ context.Context, _, requested, s
 	return f.job, f.err
 }
 
+func (f *fakeImportManager) CreateJellystat(_ context.Context, _, requested, stagingID string) (core.ImportJob, error) {
+	f.requested = requested
+	if stagingID != f.stagingID {
+		return core.ImportJob{}, core.ErrInvalidArgument
+	}
+	return f.job, f.err
+}
+
 func (f *fakeImportManager) DiscardBloomExport(_ context.Context, stagingID string) error {
 	f.discarded = stagingID
 	return nil
@@ -125,6 +133,49 @@ func TestCreateBloomExportAcceptsZipPartWithoutUsingFilename(t *testing.T) {
 	server.handleCreateImport(recorder, request)
 	if recorder.Code != http.StatusCreated || manager.upload != payload {
 		t.Fatalf("ZIP multipart import = %d upload %q: %s", recorder.Code, manager.upload, recorder.Body.String())
+	}
+}
+
+func TestCreateJellystatImportMatchesMultipartContract(t *testing.T) {
+	server, manager, _ := importHandlerServer(t)
+	manager.job.Source = core.ImportSourceJellystat
+	body, contentType := bloomMultipartForSource(
+		t, `{"type":"table","table":"jf_libraries"}`+"\n", "jellystat", "backup.jsonl",
+	)
+	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	recorder := httptest.NewRecorder()
+	server.handleCreateImport(recorder, request)
+	if recorder.Code != http.StatusCreated || manager.requested != testRequestAccountID {
+		t.Fatalf("Jellystat import = %d requested %q: %s", recorder.Code, manager.requested, recorder.Body.String())
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ImportJob")
+	schema := loadOpenAPI(t).validator.Components.Schemas["CreateJellystatImportRequest"].Value
+	if err := schema.VisitJSON(map[string]any{
+		"media_server_id": importTestServerID, "source": "jellystat", "file": "backup",
+	}); err != nil {
+		t.Fatalf("Jellystat multipart contract: %v", err)
+	}
+}
+
+func TestCreateJellystatRejectsInvalidBackupAsDocumented422(t *testing.T) {
+	server, manager, _ := importHandlerServer(t)
+	manager.err = &core.InvalidArgumentError{
+		Field: "file", Code: "invalid", Message: "must be a Jellystat JSONL backup",
+	}
+	body, contentType := bloomMultipartForSource(t, `{"id":"watch"}`+"\n", "jellystat", "backup.jsonl")
+	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	recorder := httptest.NewRecorder()
+	server.handleCreateImport(recorder, request)
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid Jellystat import = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	operation := loadOpenAPI(t).validator.Paths.Find("/api/v1/imports").Post
+	if operation.Responses.Value("422") == nil {
+		t.Fatal("create import does not document 422")
 	}
 }
 
@@ -803,6 +854,29 @@ func bloomMultipartWithExtraAndType(
 		if err := writer.WriteField(extraName, "duplicate"); err != nil {
 			t.Fatalf("write extra part: %v", err)
 		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+	return body.Bytes(), writer.FormDataContentType()
+}
+
+func bloomMultipartForSource(t *testing.T, payload, source, filename string) ([]byte, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("media_server_id", importTestServerID); err != nil {
+		t.Fatalf("write media_server_id: %v", err)
+	}
+	if err := writer.WriteField("source", source); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("create file part: %v", err)
+	}
+	if _, err := io.WriteString(part, payload); err != nil {
+		t.Fatalf("write file: %v", err)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close multipart: %v", err)
