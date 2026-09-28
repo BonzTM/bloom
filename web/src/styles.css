@@ -1621,3 +1621,44 @@ table time {
 .template-fields > p {
   margin-top: var(--space-2);
 }
+
+/* Accounts: the search row, the facts list on one account, and plain lists
+   inside table cells. */
+.search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2, 0.5rem);
+  margin-block-end: var(--space-4, 1rem);
+}
+
+.search-bar label {
+  display: block;
+  inline-size: 100%;
+}
+
+.search-bar input {
+  flex: 1 1 16rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-3, 0.75rem);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

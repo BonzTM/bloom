@@ -96,6 +96,14 @@ export default function AdminRoute(): ReactNode {
               <p>See what is playing now and what finished recently.</p>
             </li>
           </PermissionGate>
+          <PermissionGate anyOf={[permissions.usersManage]}>
+            <li className="card">
+              <h2>
+                <Link to="/admin/accounts">Accounts</Link>
+              </h2>
+              <p>Who has an account, their roles, and their media users.</p>
+            </li>
+          </PermissionGate>
           <PermissionGate anyOf={[permissions.adminRoles]}>
             <li className="card">
               <h2>

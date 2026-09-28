@@ -190,6 +190,12 @@ const ADMIN_LINKS: readonly AdminLink[] = [
     anyOf: [permissions.usersInvite],
   },
   {
+    to: "/admin/accounts",
+    label: "Accounts",
+    icon: "users",
+    anyOf: [permissions.usersManage],
+  },
+  {
     to: "/admin/roles",
     label: "Roles",
     icon: "users",

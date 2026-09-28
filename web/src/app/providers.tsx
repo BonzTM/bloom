@@ -1,6 +1,8 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { RouterProvider, type RouterProviderProps } from "react-router-dom";
+import type { AccountsApi } from "../features/accounts/api/accounts-api.js";
+import { AccountsApiContext } from "../features/accounts/accounts-context.js";
 import type { AuthApi } from "../features/auth/api/auth-api.js";
 import { AuthApiContext } from "../features/auth/auth-context.js";
 import type { CatalogApi } from "../features/catalog/api/catalog-api.js";
@@ -33,6 +35,7 @@ type AppProvidersProps = Readonly<{
   notificationsApi: NotificationsApi;
   importsApi: ImportsApi;
   catalogApi: CatalogApi;
+  accountsApi: AccountsApi;
   queryClient: QueryClient;
   router: RouterProviderProps["router"];
 }>;
@@ -48,6 +51,7 @@ export function AppProviders({
   notificationsApi,
   importsApi,
   catalogApi,
+  accountsApi,
   queryClient,
   router,
 }: AppProvidersProps): ReactNode {
@@ -63,7 +67,9 @@ export function AppProviders({
                     <NotificationsApiContext value={notificationsApi}>
                       <ImportsApiContext value={importsApi}>
                         <CatalogApiContext value={catalogApi}>
-                          <RouterProvider router={router} />
+                          <AccountsApiContext value={accountsApi}>
+                            <RouterProvider router={router} />
+                          </AccountsApiContext>
                         </CatalogApiContext>
                       </ImportsApiContext>
                     </NotificationsApiContext>
