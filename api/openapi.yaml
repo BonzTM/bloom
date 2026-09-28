@@ -611,8 +611,8 @@ paths:
         - name: q
           in: query
           required: false
-          description: Case-insensitive username substring, normalized against the canonical username comparison key.
-          schema: { type: string, x-max-bytes: 128 }
+          description: Case-insensitive username substring, normalized against the canonical username comparison key. Control characters are rejected.
+          schema: { type: string, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]*$' }
       responses:
         "200":
           description: At most 100 accounts ordered by canonical username key and account id.

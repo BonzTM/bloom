@@ -16,7 +16,7 @@ func TestAccountSearchKeyNormalizesUsernameSubstring(t *testing.T) {
 
 func TestAccountSearchKeyBoundsInputBytes(t *testing.T) {
 	t.Parallel()
-	for _, value := range []string{strings.Repeat("a", MaxAccountSearchBytes+1), string([]byte{0xff})} {
+	for _, value := range []string{strings.Repeat("a", MaxAccountSearchBytes+1), string([]byte{0xff}), "\x00", "a\tb", "\u0085"} {
 		if _, err := AccountSearchKey(value); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("AccountSearchKey(%q) = %v, want ErrInvalidArgument", value, err)
 		}

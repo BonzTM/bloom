@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/text/secure/precis"
@@ -104,7 +105,8 @@ type AccountAdminReader interface {
 
 // AccountSearchKey normalizes a bounded username substring for username_key matching.
 func AccountSearchKey(value string) (string, error) {
-	if len(value) > MaxAccountSearchBytes || !utf8.ValidString(value) {
+	if len(value) > MaxAccountSearchBytes || !utf8.ValidString(value) ||
+		strings.ContainsFunc(value, unicode.IsControl) {
 		return "", ErrInvalidArgument
 	}
 	return normalizeAccountSearchKey(value)

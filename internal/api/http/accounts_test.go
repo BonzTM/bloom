@@ -238,6 +238,12 @@ func TestAccountsLimitAndSearchValidation(t *testing.T) {
 		{name: "duplicate cursor", query: "?cursor=a&cursor=b", field: "cursor"},
 		{name: "empty cursor", query: "?cursor=", field: "cursor"},
 		{name: "malformed cursor JSON", query: "?cursor=" + malformedJSONCursor, field: "cursor"},
+		{name: "control character search", query: "?q=%00", field: "q"},
+		{name: "cursor with unknown field", query: "?cursor=" + encodedCursorJSON(`{"q":"","username_key":"alice","id":"11111111-1111-4111-8111-111111111111","extra":1}`), field: "cursor"},
+		{name: "cursor with trailing JSON", query: "?cursor=" + encodedCursorJSON(`{"q":"","username_key":"alice","id":"11111111-1111-4111-8111-111111111111"}{}`), field: "cursor"},
+		{name: "cursor with invalid id", query: "?cursor=" + encodedCursorJSON(`{"q":"","username_key":"alice","id":"not-an-id"}`), field: "cursor"},
+		{name: "cursor with missing id", query: "?cursor=" + encodedCursorJSON(`{"q":"","username_key":"alice"}`), field: "cursor"},
+		{name: "cursor with noncanonical username key", query: "?cursor=" + encodedCursorJSON(`{"q":"","username_key":"Alice","id":"11111111-1111-4111-8111-111111111111"}`), field: "cursor"},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -271,6 +277,10 @@ func TestAccountsAcceptsExactSearchAndCursorBounds(t *testing.T) {
 			t.Fatalf("exact cursor boundary = %d, calls %d: %s", recorder.Code, h.accountAdmin.listCalls, recorder.Body.String())
 		}
 	})
+}
+
+func encodedCursorJSON(payload string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
 
 func exactSizedAccountCursor(t *testing.T) string {
