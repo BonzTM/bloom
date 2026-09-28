@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -194,19 +196,23 @@ func writeTestResponse(t *testing.T, w http.ResponseWriter, body string) {
 
 func TestClientClassifiesProviderFailures(t *testing.T) {
 	tests := []struct {
-		name   string
-		status int
-		body   string
-		want   error
+		name      string
+		status    int
+		body      string
+		want      error
+		wantCalls int32
 	}{
-		{name: "bad key", status: http.StatusUnauthorized, body: `{}`, want: core.ErrMetadataUnauthorized},
-		{name: "missing", status: http.StatusNotFound, body: `{}`, want: core.ErrNotFound},
-		{name: "server", status: http.StatusInternalServerError, body: `{}`, want: core.ErrMetadataUnavailable},
-		{name: "malformed", status: http.StatusOK, body: `{`, want: core.ErrMetadataMalformed},
+		{name: "bad key", status: http.StatusUnauthorized, body: `{}`, want: core.ErrMetadataUnauthorized, wantCalls: 1},
+		{name: "missing", status: http.StatusNotFound, body: `{}`, want: core.ErrNotFound, wantCalls: 1},
+		{name: "server", status: http.StatusInternalServerError, body: `{}`, want: core.ErrMetadataUnavailable, wantCalls: maxAttempts},
+		{name: "unexpected client status", status: http.StatusForbidden, body: `{}`, want: core.ErrMetadataMalformed, wantCalls: 1},
+		{name: "malformed", status: http.StatusOK, body: `{`, want: core.ErrMetadataMalformed, wantCalls: 1},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
+			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
 				w.WriteHeader(testCase.status)
 				writeTestResponse(t, w, testCase.body)
 			}))
@@ -215,38 +221,311 @@ func TestClientClassifiesProviderFailures(t *testing.T) {
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("Movie error = %v, want %v", err, testCase.want)
 			}
+			if calls.Load() != testCase.wantCalls {
+				t.Fatalf("provider calls = %d, want %d", calls.Load(), testCase.wantCalls)
+			}
 		})
 	}
 }
 
+func TestClientClassifiesStalledResponseBodyByReceivedStatus(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{name: "success status", status: http.StatusOK, want: core.ErrMetadataMalformed},
+		{name: "rate limited", status: http.StatusTooManyRequests, want: core.ErrMetadataUnavailable},
+		{name: "server failure", status: http.StatusServiceUnavailable, want: core.ErrMetadataUnavailable},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: testCase.status,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       &stalledResponseBody{ctx: request.Context()},
+					Request:    request,
+				}, nil
+			})
+			clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+			client, err := New(testReadAccessToken, Dependencies{
+				BaseURL: "https://tmdb.test", Clock: clock, HTTPClient: &http.Client{Transport: transport},
+				AttemptTimeout: 20 * time.Millisecond, OperationTimeout: 40 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			_, err = client.Movie(t.Context(), "11")
+			if !errors.Is(err, testCase.want) || errors.Is(err, core.ErrMetadataUnreachable) {
+				t.Fatalf("Movie error = %v, want only %v", err, testCase.want)
+			}
+			assertResponseReceivedStatus(t, err, testCase.status)
+		})
+	}
+}
+
+func TestClientBoundsUnreachableOperation(t *testing.T) {
+	if metadataOperationTimeout != 6*time.Second {
+		t.Fatalf("operation timeout = %s, want 6s", metadataOperationTimeout)
+	}
+	if attemptTimeout != 5*time.Second {
+		t.Fatalf("attempt timeout = %s, want 5s", attemptTimeout)
+	}
+	defaultClient := newTestClient(t, "https://tmdb.test", nil)
+	if defaultClient.http.Timeout != metadataOperationTimeout {
+		t.Fatalf("HTTP client timeout = %s, want %s", defaultClient.http.Timeout, metadataOperationTimeout)
+	}
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+	client, err := New(testReadAccessToken, Dependencies{
+		BaseURL: "https://tmdb.test", Clock: clock, HTTPClient: &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.operationTimeout = 50 * time.Millisecond
+	started := time.Now()
+	_, err = client.Search(t.Context(), core.MetadataSearch{Query: "title"})
+	if !errors.Is(err, core.ErrMetadataUnreachable) {
+		t.Fatalf("Search error = %v, want %v", err, core.ErrMetadataUnreachable)
+	}
+	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+		t.Fatalf("unreachable provider elapsed = %s, want under 500ms", elapsed)
+	}
+}
+
+func TestRetryTransportStopsWhenAnotherAttemptCannotFit(t *testing.T) {
+	var calls atomic.Int32
+	next := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, &net.DNSError{Err: "blocked", Name: "tmdb.test"}
+	})
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+	transport := &retryTransport{
+		next: next, metrics: nopMetrics{}, clock: clock, wait: waitContext,
+		randomInt64N: func(int64) int64 { return 0 }, limiter: newTokenBucket(clock, ratePerSecond, rateBurst),
+		attemptTimeout: attemptTimeout,
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), attemptTimeout-time.Second)
+	defer cancel()
+	request := httptest.NewRequest(http.MethodGet, "https://tmdb.test/3/search/multi", nil).WithContext(ctx)
+	_, err := transport.RoundTrip(request)
+	dnsErr, ok := errors.AsType[*net.DNSError](err)
+	if !ok || dnsErr == nil {
+		t.Fatalf("RoundTrip error = %v, want DNS error", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("attempts = %d, want 1", calls.Load())
+	}
+	fullCtx, fullCancel := context.WithTimeout(t.Context(), metadataOperationTimeout)
+	defer fullCancel()
+	if !retryFits(fullCtx, 0, attemptTimeout) {
+		t.Fatal("retry did not fit inside a fresh operation budget")
+	}
+}
+
+func TestRetryTransportBoundsEachAttemptUntilBodyClose(t *testing.T) {
+	var attemptDone <-chan struct{}
+	next := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		deadline, ok := request.Context().Deadline()
+		if !ok || time.Until(deadline) > attemptTimeout || time.Until(deadline) < attemptTimeout-time.Second {
+			t.Errorf("attempt deadline = %v, want about %s", deadline, attemptTimeout)
+		}
+		attemptDone = request.Context().Done()
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody, Request: request,
+		}, nil
+	})
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+	transport := &retryTransport{
+		next: next, metrics: nopMetrics{}, clock: clock, wait: waitContext,
+		randomInt64N: func(int64) int64 { return 0 }, limiter: newTokenBucket(clock, ratePerSecond, rateBurst),
+		attemptTimeout: attemptTimeout,
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://tmdb.test/3/search/multi", nil)
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	select {
+	case <-attemptDone:
+		t.Fatal("attempt context ended before response body close")
+	default:
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("close response body: %v", err)
+	}
+	select {
+	case <-attemptDone:
+	default:
+		t.Fatal("attempt context remained active after response body close")
+	}
+}
+
+func TestClientOperationBudgetClosesRetriedAndStalledAttempts(t *testing.T) {
+	const (
+		operationBudget = 200 * time.Millisecond
+		attemptBudget   = 40 * time.Millisecond
+	)
+	base := &budgetTestTransport{}
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC))
+	client, err := New(testReadAccessToken, Dependencies{
+		BaseURL: "https://tmdb.test", BaseTransport: base, Clock: clock,
+		Wait: func(context.Context, time.Duration) error { return nil }, RandomInt64N: func(int64) int64 { return 0 },
+		AttemptTimeout: attemptBudget, OperationTimeout: operationBudget,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	started := time.Now()
+	_, err = client.Movie(t.Context(), "11")
+	if elapsed := time.Since(started); elapsed >= operationBudget {
+		t.Fatalf("Movie elapsed = %s, want under %s", elapsed, operationBudget)
+	}
+	if !errors.Is(err, core.ErrMetadataMalformed) {
+		t.Fatalf("Movie error = %v, want %v", err, core.ErrMetadataMalformed)
+	}
+	if got := base.calls.Load(); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+	if got := base.activeBodies.Load(); got != 0 {
+		t.Fatalf("active response bodies = %d, want 0", got)
+	}
+	if got := base.closedBodies.Load(); got != 2 {
+		t.Fatalf("closed response bodies = %d, want 2", got)
+	}
+	if got := base.unauthenticated.Load(); got != 0 {
+		t.Fatalf("unauthenticated attempts = %d, want 0", got)
+	}
+	for index, attemptContext := range base.attemptContexts() {
+		if attemptContext.Err() == nil {
+			t.Errorf("attempt %d context remains active", index+1)
+		}
+	}
+}
+
+type budgetTestTransport struct {
+	mu              sync.Mutex
+	contexts        []context.Context
+	calls           atomic.Int32
+	activeBodies    atomic.Int32
+	closedBodies    atomic.Int32
+	unauthenticated atomic.Int32
+}
+
+func (t *budgetTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	call := t.calls.Add(1)
+	t.recordContext(request.Context())
+	if request.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+		t.unauthenticated.Add(1)
+	}
+	status := http.StatusServiceUnavailable
+	body := io.NopCloser(strings.NewReader(`{}`))
+	if call == 2 {
+		status = http.StatusOK
+		body = &stalledResponseBody{ctx: request.Context()}
+	}
+	t.activeBodies.Add(1)
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: &observedCloseBody{
+			ReadCloser: body,
+			onClose: func() {
+				t.activeBodies.Add(-1)
+				t.closedBodies.Add(1)
+			},
+		},
+		Request: request,
+	}, nil
+}
+
+func (t *budgetTestTransport) recordContext(ctx context.Context) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.contexts = append(t.contexts, ctx)
+}
+
+func (t *budgetTestTransport) attemptContexts() []context.Context {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]context.Context(nil), t.contexts...)
+}
+
+type observedCloseBody struct {
+	io.ReadCloser
+	once    sync.Once
+	onClose func()
+}
+
+func (b *observedCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(b.onClose)
+	return err
+}
+
+type stalledResponseBody struct {
+	ctx context.Context
+}
+
+func (b *stalledResponseBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (*stalledResponseBody) Close() error {
+	return nil
+}
+
 func TestClientRejectsCrossOriginRedirectWithoutLeakingKey(t *testing.T) {
 	var destinationCalls atomic.Int32
-	destination := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		destinationCalls.Add(1)
-		if r.Header.Get("Authorization") != "" {
-			t.Errorf("cross-origin Authorization = %q", r.Header.Get("Authorization"))
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "tmdb.test" {
+			destinationCalls.Add(1)
+			if request.Header.Get("Authorization") != "" {
+				t.Errorf("cross-origin Authorization = %q", request.Header.Get("Authorization"))
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody, Request: request}, nil
 		}
-	}))
-	defer destination.Close()
-	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
-			t.Errorf("source Authorization = %q", r.Header.Get("Authorization"))
+		if request.Header.Get("Authorization") != "Bearer "+testReadAccessToken {
+			t.Errorf("source Authorization = %q", request.Header.Get("Authorization"))
 		}
-		http.Redirect(w, r, destination.URL, http.StatusFound)
-	}))
-	defer source.Close()
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"https://redirect.test/target"}},
+			Body:       http.NoBody,
+			Request:    request,
+		}, nil
+	})
 	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
-	client, err := New(testReadAccessToken, Dependencies{BaseURL: source.URL, Clock: clock})
+	client, err := New(testReadAccessToken, Dependencies{
+		BaseURL: "https://tmdb.test", BaseTransport: transport, Clock: clock,
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(client.CloseIdleConnections)
 	_, err = client.Movie(t.Context(), "11")
-	if err == nil || strings.Contains(err.Error(), testReadAccessToken) {
-		t.Fatalf("redirect error = %v", err)
+	if !errors.Is(err, core.ErrMetadataMalformed) || errors.Is(err, core.ErrMetadataUnreachable) {
+		t.Fatalf("redirect error = %v, want only %v", err, core.ErrMetadataMalformed)
+	}
+	assertResponseReceivedStatus(t, err, http.StatusFound)
+	if strings.Contains(err.Error(), testReadAccessToken) {
+		t.Fatalf("redirect error exposed credential: %v", err)
 	}
 	if destinationCalls.Load() != 0 {
 		t.Fatalf("redirect destination calls = %d, want 0", destinationCalls.Load())
+	}
+}
+
+func assertResponseReceivedStatus(t *testing.T, err error, want int) {
+	t.Helper()
+	responseErr, ok := errors.AsType[*responseReceivedError](err)
+	if !ok || responseErr.status != want {
+		t.Fatalf("response error = %v, want received status %d", err, want)
 	}
 }
 
@@ -320,6 +599,8 @@ func TestClientRetries429UsingRetryAfter(t *testing.T) {
 		waited += delay
 		return nil
 	})
+	client.operationTimeout = 8 * time.Second
+	client.http.Timeout = 8 * time.Second
 	if _, err := client.Movie(t.Context(), "11"); err != nil {
 		t.Fatalf("Movie: %v", err)
 	}

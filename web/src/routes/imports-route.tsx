@@ -114,12 +114,12 @@ function ImportsPage({
       <section aria-labelledby="export-heading" className="card">
         <h2 id="export-heading">Export</h2>
         <p>
-          Download watches as JSON Lines to move history to another Bloom, or to
-          keep a copy. One download holds the newest 10,000 watches; the API
-          continues from there with a cursor.
+          Download everything Bloom has recorded as one zip, straight from the
+          database: every watch and every import job. Upload it to another Bloom
+          to move history, or keep it as a copy.
         </p>
-        <a href={exportWatchesPath(undefined)} download="bloom-watches.jsonl">
-          Download watches
+        <a href={exportWatchesPath(undefined)} download>
+          Download export
         </a>
       </section>
     </>

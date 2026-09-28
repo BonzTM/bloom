@@ -18,9 +18,9 @@ const (
 	MaxImportErrorBytes = 512
 	// MaxImportUploadBytes bounds one Bloom export upload.
 	MaxImportUploadBytes = 256 << 20
-	// MaxImportPlaybackSeconds bounds one imported watch to the signed 32-bit
-	// duration range supported by Playback Reporting and Jellystat imports.
-	MaxImportPlaybackSeconds = int64(1<<31 - 1)
+	// MaxImportPlaybackSeconds is the plausible bound for one playback activity
+	// across the Playback Reporting and Jellystat importers.
+	MaxImportPlaybackSeconds = int64(604_800)
 	// ImportUploadChunkBytes is the fixed database chunk size.
 	ImportUploadChunkBytes = 1 << 20
 	// MaxImportUploadWriteChunks bounds one upload transaction.

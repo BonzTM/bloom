@@ -13,12 +13,13 @@ import (
 )
 
 type retryTransport struct {
-	next         http.RoundTripper
-	metrics      Metrics
-	clock        core.Clock
-	wait         func(context.Context, time.Duration) error
-	randomInt64N func(int64) int64
-	limiter      *tokenBucket
+	next           http.RoundTripper
+	metrics        Metrics
+	clock          core.Clock
+	wait           func(context.Context, time.Duration) error
+	randomInt64N   func(int64) int64
+	limiter        *tokenBucket
+	attemptTimeout time.Duration
 }
 
 func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -27,7 +28,7 @@ func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error
 		if err := t.limiter.Wait(request.Context(), t.wait); err != nil {
 			return nil, err
 		}
-		response, err := t.next.RoundTrip(request)
+		response, err := t.roundTripAttempt(request)
 		if !shouldRetry(response, err, attempt) {
 			if response != nil {
 				response.Body = http.MaxBytesReader(nil, response.Body, maxResponseBytes)
@@ -35,6 +36,12 @@ func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error
 			return response, err
 		}
 		delay := t.retryDelay(response, attempt)
+		if !retryFits(request.Context(), delay, t.attemptTimeout) {
+			if response != nil {
+				response.Body = http.MaxBytesReader(nil, response.Body, maxResponseBytes)
+			}
+			return response, err
+		}
 		drainAndClose(response)
 		t.metrics.ObserveMetadataRetry("tmdb", operation, "retry")
 		if err := t.wait(request.Context(), delay); err != nil {
@@ -42,6 +49,43 @@ func (t *retryTransport) RoundTrip(request *http.Request) (*http.Response, error
 		}
 	}
 	return nil, fmt.Errorf("tmdb retry loop exhausted: %w", core.ErrMetadataUnavailable)
+}
+
+func (t *retryTransport) roundTripAttempt(request *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(request.Context(), t.attemptTimeout)
+	response, err := t.next.RoundTrip(request.Clone(ctx))
+	if err != nil {
+		cancel()
+		return response, err
+	}
+	if response == nil {
+		cancel()
+		return nil, errors.New("tmdb transport returned no response")
+	}
+	if response.Body == nil {
+		response.Body = http.NoBody
+	}
+	response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
+	return response, nil
+}
+
+type cancelBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
+}
+
+func retryFits(ctx context.Context, delay, timeout time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Until(deadline) >= delay+timeout
 }
 
 func shouldRetry(response *http.Response, err error, attempt int) bool {

@@ -205,6 +205,7 @@ func TestJellystatActivityFallsBackToRawIDs(t *testing.T) {
 }
 
 func TestJellystatActivityDurationAndTimestampBounds(t *testing.T) {
+	ended := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name      string
 		duration  int64
@@ -212,8 +213,13 @@ func TestJellystatActivityDurationAndTimestampBounds(t *testing.T) {
 		wantStart time.Time
 		wantError bool
 	}{
-		{"negative", -1, time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC), time.Time{}, true},
-		{"extreme", core.MaxImportPlaybackSeconds + 1, time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC), time.Time{}, true},
+		{"negative", -1, ended, time.Time{}, true},
+		{
+			"accepted boundary", core.MaxImportPlaybackSeconds, ended,
+			ended.Add(-time.Duration(core.MaxImportPlaybackSeconds) * time.Second), false,
+		},
+		{"just over boundary", core.MaxImportPlaybackSeconds + 1, ended, time.Time{}, true},
+		{"multi-year", 3 * 365 * 24 * 60 * 60, ended, time.Time{}, true},
 		{"before supported range", 2, time.Date(1, 1, 1, 0, 0, 1, 0, time.UTC), time.Time{}, true},
 		{"timezone offset", 90, time.Date(2026, 9, 27, 12, 1, 30, 0, time.FixedZone("EDT", -4*60*60)), time.Date(2026, 9, 27, 16, 0, 0, 0, time.UTC), false},
 	}
@@ -233,10 +239,44 @@ func TestJellystatActivityDurationAndTimestampBounds(t *testing.T) {
 	}
 }
 
-func TestJellystatActivityStrictlyRejectsUnknownFields(t *testing.T) {
-	line := []byte(`{"type":"row","table":"jf_playback_activity","data":{"Id":"id","unknown":true}}`)
-	if record, ok := decodeJellystatActivity(line, jellystatLookups{}); ok {
-		t.Fatalf("unknown activity field produced %+v", record)
+func TestJellystatActivityRejectsDurationBeyondResolvedRuntime(t *testing.T) {
+	runtime := 30 * time.Minute
+	lookups := newJellystatLookups()
+	lookups.episodes["episode-id"] = jellystatEpisode{Runtime: &runtime}
+	row := validJellystatActivityRow()
+	limit := 3*runtime + time.Hour
+	row.PlaybackDuration.Value = int64(limit / time.Second)
+	if _, err := mapJellystatActivity(row, lookups); err != nil {
+		t.Fatalf("mapJellystatActivity rejected runtime-relative boundary: %v", err)
+	}
+	row.PlaybackDuration.Value = int64((limit + time.Second) / time.Second)
+	if _, err := mapJellystatActivity(row, lookups); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("mapJellystatActivity accepted duration beyond runtime allowance: %v", err)
+	}
+}
+
+func TestJellystatActivityIgnoresUnknownEnvelopeFields(t *testing.T) {
+	line := []byte(`{"type":"row","table":"jf_playback_activity","future_envelope":true,"data":{"Id":"id","UserId":"user","EpisodeId":"episode","PlaybackDuration":90,"ActivityDateInserted":"2026-09-27T12:01:30Z"}}`)
+	if record, ok := decodeJellystatActivity(line, newJellystatLookups()); !ok || record.RecordID != "id" {
+		t.Fatalf("activity with additive envelope field = %+v, %t", record, ok)
+	}
+}
+
+func TestJellystatActivityIgnoresUnknownRowFields(t *testing.T) {
+	line := []byte(`{"type":"row","table":"jf_playback_activity","data":{"Id":"id","UserId":"user","EpisodeId":"episode","PlaybackDuration":90,"ActivityDateInserted":"2026-09-27T12:01:30Z","future_row":true}}`)
+	if record, ok := decodeJellystatActivity(line, newJellystatLookups()); !ok || record.RecordID != "id" {
+		t.Fatalf("activity with additive row field = %+v, %t", record, ok)
+	}
+}
+
+func TestJellystatDecodeRejectsInvalidKnownFieldAndTrailingValue(t *testing.T) {
+	invalidKnown := []byte(`{"type":"row","table":"jf_playback_activity","data":{"PlaybackDuration":{}}}`)
+	if _, ok := decodeJellystatActivity(invalidKnown, newJellystatLookups()); ok {
+		t.Fatal("activity with invalid known field was accepted")
+	}
+	trailing := []byte(`{"type":"table","table":"jf_playback_activity"} {}`)
+	if _, err := decodeJellystatLine(trailing); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("decodeJellystatLine trailing value = %v, want invalid argument", err)
 	}
 }
 

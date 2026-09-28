@@ -2485,7 +2485,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     MetadataProviderFailure:
-      description: Opaque upstream metadata-provider failure. Retryable failures may include Retry-After.
+      description: Opaque upstream metadata-provider failure with an unreachable, unauthorized, or malformed reason. Retryable failures may include Retry-After.
       headers:
         Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
         Set-Cookie: { $ref: "#/components/headers/SetCookie" }
@@ -2496,7 +2496,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     MetadataNotConfigured:
-      description: TMDB is not configured or is temporarily unavailable. The error code distinguishes the cause.
+      description: TMDB is not configured (`metadata_not_configured`, no reason) or is temporarily unavailable (`metadata_provider_failure`, reason `unavailable`).
       headers: *AuthenticatedHeaders
       content: *AuthenticatedErrorContent
     DownloadManagerFailure:
@@ -4083,13 +4083,16 @@ components:
         reason:
           type: string
           description: |
-            Present only for `media_server_failure` and `download_manager_failure`.
-            `unreachable` covers connection failures, timeouts, DNS failures,
-            refused destinations, and retryable upstream statuses;
+            Present only for `media_server_failure`, `download_manager_failure`,
+            and `metadata_provider_failure`. For metadata failures, `unreachable`
+            covers connection failures, timeouts, and DNS failures before any
+            response; `unavailable` covers an upstream 429 or 5xx after retries.
+            For other upstream failures, `unreachable` also covers refused
+            destinations and retryable upstream statuses.
             `unauthorized` covers an upstream 401 or 403; `not_found` covers an
             upstream 404; `malformed` covers anything else, including unexpected
             statuses, redirects, and responses that do not fit the upstream's contract.
-          enum: [unreachable, unauthorized, not_found, malformed]
+          enum: [unreachable, unauthorized, not_found, malformed, unavailable]
         fields:
           type: array
           description: Per-field validation failures. Present only when `code` is `validation_failed`.

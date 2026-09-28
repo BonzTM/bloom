@@ -163,6 +163,58 @@ func TestWorkerPersistsSafePluginMissingFailure(t *testing.T) {
 	}
 }
 
+func TestWorkerHandlesLeaseLossDuringJellystatLookup(t *testing.T) {
+	start := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceJellystat
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	clock := testutil.NewFakeClock(start)
+	worker.deps.Clock, worker.sources.clock = clock, clock
+	stageJellystatWorkerFixture(t, worker, &store, start)
+	store.readChunkHook = func(int64) { clock.Advance(worker.config.LeaseDuration) }
+
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce after lookup lease loss: %v", err)
+	}
+	if store.finished != "" || store.job.State != core.ImportRunning {
+		t.Fatalf("lease-lost lookup finished job as %q from state %q", store.finished, store.job.State)
+	}
+}
+
+func TestWorkerStopsCleanlyWhenJellystatLookupIsCancelled(t *testing.T) {
+	start := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceJellystat
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	stageJellystatWorkerFixture(t, worker, &store, start)
+	ctx, cancel := context.WithCancel(t.Context())
+	store.readChunkHook = func(int64) { cancel() }
+
+	if err := worker.runOnce(ctx); err != nil {
+		t.Fatalf("runOnce after lookup cancellation: %v", err)
+	}
+	if store.finished != "" || store.job.State != core.ImportRunning {
+		t.Fatalf("cancelled lookup finished job as %q from state %q", store.finished, store.job.State)
+	}
+}
+
+func stageJellystatWorkerFixture(t *testing.T, worker *Worker, store *workerStore, now time.Time) {
+	t.Helper()
+	id, err := worker.deps.Staging.stage(
+		t.Context(), strings.NewReader(jellystatMultiChunkLookupFixture()), staticClock{now},
+	)
+	if err != nil {
+		t.Fatalf("stage Jellystat worker fixture: %v", err)
+	}
+	store.uploadStore().linkUpload(id)
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode Jellystat worker cursor: %v", err)
+	}
+}
+
 func TestWorkerCompletionRemovesBloomUpload(t *testing.T) {
 	job := pendingWorkerJob(t)
 	job.Source = core.ImportSourceBloomExport

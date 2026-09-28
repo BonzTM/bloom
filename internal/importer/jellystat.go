@@ -428,6 +428,9 @@ func mapJellystatActivity(row jellystatActivityRow, lookups jellystatLookups) (c
 		Duration: duration, StartedAt: started, EndedAt: &ended,
 	}
 	mapJellystatItem(&record, row, lookups)
+	if !plausibleJellystatDuration(duration, record.Runtime) {
+		return core.ImportedWatch{}, core.ErrInvalidArgument
+	}
 	if row.Imported {
 		record.RecordID = "plugin:" + row.ID
 	}
@@ -435,6 +438,17 @@ func mapJellystatActivity(row jellystatActivityRow, lookups jellystatLookups) (c
 		return core.ImportedWatch{}, core.ErrInvalidArgument
 	}
 	return record, nil
+}
+
+func plausibleJellystatDuration(duration time.Duration, runtime *time.Duration) bool {
+	if runtime == nil || *runtime <= 0 {
+		return true
+	}
+	maximumRuntime := (time.Duration(math.MaxInt64) - time.Hour) / 3
+	if *runtime > maximumRuntime {
+		return true
+	}
+	return duration <= 3*(*runtime)+time.Hour
 }
 
 func validJellystatActivityNames(row jellystatActivityRow) bool {
@@ -525,7 +539,7 @@ func decodeJellystatLine(line []byte) (jellystatLine, error) {
 		return jellystatLine{}, core.ErrInvalidArgument
 	}
 	var value jellystatLine
-	if err := decodeStrictJSON(line, &value); err != nil || value.Type == "" || value.Table == "" {
+	if err := decodeSingleJSON(line, &value); err != nil || value.Type == "" || value.Table == "" {
 		return jellystatLine{}, core.ErrInvalidArgument
 	}
 	return value, nil
@@ -535,7 +549,7 @@ func decodeJellystatData(data []byte, destination any) error {
 	if len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		return core.ErrInvalidArgument
 	}
-	return decodeStrictJSON(data, destination)
+	return decodeSingleJSON(data, destination)
 }
 
 func decodedJellystatLine(line []byte) (jellystatLine, bool) {
@@ -547,9 +561,8 @@ func decodedJellystatData(data []byte, destination any) bool {
 	return decodeJellystatData(data, destination) == nil
 }
 
-func decodeStrictJSON(data []byte, destination any) error {
+func decodeSingleJSON(data []byte, destination any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
 		return err
 	}

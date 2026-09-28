@@ -39,6 +39,8 @@ contracts) gets an entry here.
 - Discover and search say why TMDB could not be used when the API reports a
   reason (unreachable, rejected token, unusable answer, not answering) and
   say so when Bloom itself took too long to answer.
+- The Imports page offers the export as one zip download and accepts that
+  zip, or an older JSON Lines export, for a Bloom export import.
 - Title pages open with a hero: the backdrop behind the poster, name, and
   overview, with the request form below. Discover shows the search form only
   with results; searching starts from the top bar.
@@ -432,6 +434,9 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- TMDB operations now have a six-second total deadline across retries. Metadata
+  failures include an actionable `reason`, and repeated provider warnings are
+  limited to once per minute for each reason.
 - Playback startup now remains available when the initial media-server listing
   fails, reports the failure once, and retries during the bounded refresh loop.
 - SQLite database startup now supplies the foreign-key pragma when the
