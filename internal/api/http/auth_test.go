@@ -256,6 +256,7 @@ type authHarness struct {
 	logs              *strings.Builder
 	sessionStore      *controllableSessionStore
 	authorization     *authAuthorization
+	accountAdmin      *fakeAccountAdminReader
 	mediaServers      *fakeMediaServerService
 	downloadManagers  *fakeDownloadManagerService
 	invites           *fakeInviteService
@@ -413,6 +414,7 @@ func newAuthHarnessConfigured(
 		identity = core.NewLocalIdentityProvider(store)
 	}
 	authorization := newAuthAuthorization()
+	accountAdmin := newFakeAccountAdminReader()
 	mediaServers := newFakeMediaServerService()
 	downloadManagers := newFakeDownloadManagerService()
 	invites := newFakeInviteService(clock.Now())
@@ -426,7 +428,7 @@ func newAuthHarnessConfigured(
 		Logger: slog.New(slog.NewJSONHandler(logs, nil)), Metrics: metrics,
 		Readiness: telemetry.NewReadiness(true), Pinger: &fakePinger{},
 		Web: web, Identity: identity, Accounts: store,
-		Authorizer: authorization, Roles: authorization,
+		Authorizer: authorization, Roles: authorization, AccountAdmin: accountAdmin,
 		MediaServerReader: mediaServers, MediaServerManager: mediaServers,
 		DownloadManagerReader: downloadManagers, DownloadManagerManager: downloadManagers,
 		InviteReader: invites, InviteManager: invites, PlaybackReader: playback, Imports: imports, StatsReader: stats,
@@ -436,7 +438,8 @@ func newAuthHarnessConfigured(
 	return authHarness{
 		server: srv, h: srv.Handler(), store: store, sessions: sessions, audit: audit,
 		metrics: metrics, clock: clock, logs: logs, sessionStore: sessionStore,
-		authorization: authorization, mediaServers: mediaServers, downloadManagers: downloadManagers,
+		authorization: authorization, accountAdmin: accountAdmin,
+		mediaServers: mediaServers, downloadManagers: downloadManagers,
 		invites: invites, playback: playback, imports: imports, stats: stats, accountMediaUsers: accountMediaUsers,
 	}
 }

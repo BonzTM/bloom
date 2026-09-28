@@ -34,6 +34,8 @@ tags:
     description: Local login and server-side browser sessions.
   - name: roles
     description: Permission-based role information.
+  - name: accounts
+    description: Administrative account reads without credential material.
   - name: media-servers
     description: Registered media-server connections. Credentials are write-only.
   - name: download-managers
@@ -587,6 +589,76 @@ paths:
           $ref: "#/components/responses/AuthInternalError"
         "405":
           $ref: "#/components/responses/AuthMethodNotAllowedGet"
+  /api/v1/accounts:
+    get:
+      tags: [accounts]
+      operationId: listAccounts
+      summary: List accounts for administration.
+      description: Requires `users.manage`. Password hashes and OIDC identity fields are never returned.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Requested account count. Defaults to 50 and must be from 1 through 100.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor returned as `next_cursor` by the previous page. It is bound to `q`.
+          schema: { type: string, minLength: 1, maxLength: 2048 }
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive username substring, normalized against the canonical username comparison key. Control characters are rejected.
+          schema: { type: string, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]*$' }
+      responses:
+        "200":
+          description: At most 100 accounts ordered by canonical username key and account id.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAccountsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/accounts/{id}:
+    get:
+      tags: [accounts]
+      operationId: getAccount
+      summary: Return one account for administration.
+      description: Requires `users.manage`. Password hashes and OIDC identity fields are never returned.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One secret-free administrative account view.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
+            X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAccount" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
   /api/v1/media-servers:
     post:
       tags: [media-servers]
@@ -3971,6 +4043,56 @@ components:
           maxLength: 64
           pattern: "^[\\p{L}\\p{Nd}](?:[\\p{L}\\p{Nd}._-]*[\\p{L}\\p{Nd}])?$"
           description: Canonical PRECIS UsernameCaseMapped display username.
+    AccountRoleAssignment:
+      type: object
+      required: [name, source]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, x-max-bytes: 64 }
+        source: { type: string, enum: [manual, oidc] }
+    AccountLinkedMediaUser:
+      type: object
+      required: [media_server_id, media_server_name, media_user_id, username, suppressed]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        media_server_name: { type: string, minLength: 1, x-max-bytes: 100 }
+        media_user_id: { type: string, minLength: 1, x-max-bytes: 128, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+        username: { type: string, minLength: 1, x-max-bytes: 64, pattern: '^[^\x00-\x1F\x7F-\x9F]+$' }
+        suppressed: { type: boolean }
+    AdminAccount:
+      type: object
+      required: [id, username, created_at, sign_in_method, roles, media_users, is_self]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: "^[\\p{L}\\p{Nd}](?:[\\p{L}\\p{Nd}._-]*[\\p{L}\\p{Nd}])?$"
+          description: Canonical PRECIS UsernameCaseMapped display username.
+        created_at: { type: string, format: date-time }
+        sign_in_method: { type: string, enum: [local, oidc, both] }
+        roles:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AccountRoleAssignment" }
+        media_users:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AccountLinkedMediaUser" }
+        is_self: { type: boolean }
+    AdminAccountsResponse:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AdminAccount" }
+        next_cursor: { type: string, maxLength: 2048 }
     CurrentAccountResponse:
       type: object
       required: [account, roles, permissions]

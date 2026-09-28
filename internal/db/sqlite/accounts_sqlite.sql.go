@@ -7,10 +7,214 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 )
 
-const usernamesByAccountIDs = `-- name: UsernamesByAccountIDs :many
+const getAdminAccount = `-- name: GetAdminAccount :one
+SELECT a.id, a.username, a.username_key, a.created_at,
+       CASE WHEN a.password_hash IS NULL THEN 0 ELSE 1 END AS has_local,
+       EXISTS (SELECT 1 FROM account_identities AS ai WHERE ai.account_id = a.id AND ai.provider = 'oidc') AS has_oidc
+FROM accounts AS a
+WHERE a.id = ?1
+`
 
+type GetAdminAccountRow struct {
+	ID          string
+	Username    string
+	UsernameKey string
+	CreatedAt   string
+	HasLocal    int64
+	HasOidc     bool
+}
+
+func (q *Queries) GetAdminAccount(ctx context.Context, id string) (GetAdminAccountRow, error) {
+	row := q.db.QueryRowContext(ctx, getAdminAccount, id)
+	var i GetAdminAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.UsernameKey,
+		&i.CreatedAt,
+		&i.HasLocal,
+		&i.HasOidc,
+	)
+	return i, err
+}
+
+const listAdminAccountMediaUsers = `-- name: ListAdminAccountMediaUsers :many
+SELECT amu.account_id, amu.media_server_id, ms.name AS media_server_name,
+       amu.media_user_id, amu.username, amu.source, amu.created_at, amu.updated_at, amu.suppressed_at
+FROM account_media_users AS amu
+JOIN media_servers AS ms ON ms.id = amu.media_server_id
+WHERE amu.account_id IN (
+    SELECT value FROM json_each(CAST(?1 AS TEXT))
+)
+ORDER BY amu.account_id, ms.name_key, amu.media_server_id
+LIMIT ?2
+`
+
+type ListAdminAccountMediaUsersParams struct {
+	AccountIdsJson string
+	RowLimit       int64
+}
+
+type ListAdminAccountMediaUsersRow struct {
+	AccountID       string
+	MediaServerID   string
+	MediaServerName string
+	MediaUserID     string
+	Username        string
+	Source          string
+	CreatedAt       string
+	UpdatedAt       string
+	SuppressedAt    sql.NullString
+}
+
+func (q *Queries) ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccountMediaUsers, arg.AccountIdsJson, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAdminAccountMediaUsersRow{}
+	for rows.Next() {
+		var i ListAdminAccountMediaUsersRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.MediaServerID,
+			&i.MediaServerName,
+			&i.MediaUserID,
+			&i.Username,
+			&i.Source,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SuppressedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAdminAccountRoles = `-- name: ListAdminAccountRoles :many
+SELECT ar.account_id, r.name, ar.source
+FROM account_roles AS ar
+JOIN roles AS r ON r.id = ar.role_id
+WHERE ar.account_id IN (
+    SELECT value FROM json_each(CAST(?1 AS TEXT))
+)
+ORDER BY ar.account_id, r.name, ar.source
+LIMIT ?2
+`
+
+type ListAdminAccountRolesParams struct {
+	AccountIdsJson string
+	RowLimit       int64
+}
+
+type ListAdminAccountRolesRow struct {
+	AccountID string
+	Name      string
+	Source    string
+}
+
+func (q *Queries) ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccountRoles, arg.AccountIdsJson, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAdminAccountRolesRow{}
+	for rows.Next() {
+		var i ListAdminAccountRolesRow
+		if err := rows.Scan(&i.AccountID, &i.Name, &i.Source); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAdminAccounts = `-- name: ListAdminAccounts :many
+
+SELECT a.id, a.username, a.username_key, a.created_at,
+       CASE WHEN a.password_hash IS NULL THEN 0 ELSE 1 END AS has_local,
+       EXISTS (SELECT 1 FROM account_identities AS ai WHERE ai.account_id = a.id AND ai.provider = 'oidc') AS has_oidc
+FROM accounts AS a
+WHERE (CAST(?1 AS TEXT) = ''
+       OR instr(a.username_key, CAST(?1 AS TEXT)) > 0)
+  AND (a.username_key > ?2
+       OR (a.username_key = ?2 AND a.id > ?3))
+ORDER BY a.username_key, a.id
+LIMIT ?4
+`
+
+type ListAdminAccountsParams struct {
+	SearchKey        string
+	AfterUsernameKey string
+	AfterID          string
+	PageSize         int64
+}
+
+type ListAdminAccountsRow struct {
+	ID          string
+	Username    string
+	UsernameKey string
+	CreatedAt   string
+	HasLocal    int64
+	HasOidc     bool
+}
+
+// SQLite account queries whose parameter syntax is engine-specific.
+func (q *Queries) ListAdminAccounts(ctx context.Context, arg ListAdminAccountsParams) ([]ListAdminAccountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdminAccounts,
+		arg.SearchKey,
+		arg.AfterUsernameKey,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAdminAccountsRow{}
+	for rows.Next() {
+		var i ListAdminAccountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.UsernameKey,
+			&i.CreatedAt,
+			&i.HasLocal,
+			&i.HasOidc,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usernamesByAccountIDs = `-- name: UsernamesByAccountIDs :many
 SELECT id, username
 FROM accounts
 WHERE id IN (
@@ -24,7 +228,6 @@ type UsernamesByAccountIDsRow struct {
 	Username string
 }
 
-// SQLite account queries whose parameter syntax is engine-specific.
 func (q *Queries) UsernamesByAccountIDs(ctx context.Context, accountIdsJson string) ([]UsernamesByAccountIDsRow, error) {
 	rows, err := q.db.QueryContext(ctx, usernamesByAccountIDs, accountIdsJson)
 	if err != nil {

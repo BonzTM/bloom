@@ -102,6 +102,7 @@ type Querier interface {
 	GetAccountIdentity(ctx context.Context, arg GetAccountIdentityParams) (GetAccountIdentityRow, error)
 	GetAccountMediaUser(ctx context.Context, arg GetAccountMediaUserParams) (GetAccountMediaUserRow, error)
 	GetAccountRequestQuota(ctx context.Context, accountID string) (AccountRequestQuota, error)
+	GetAdminAccount(ctx context.Context, id string) (GetAdminAccountRow, error)
 	GetAuthorizationSnapshot(ctx context.Context, accountID string) ([]GetAuthorizationSnapshotRow, error)
 	GetCatalogItem(ctx context.Context, arg GetCatalogItemParams) (LibraryItem, error)
 	GetClaimedInviteProvisioningFailure(ctx context.Context, arg GetClaimedInviteProvisioningFailureParams) (GetClaimedInviteProvisioningFailureRow, error)
@@ -138,6 +139,10 @@ type Querier interface {
 	// Authorization queries are shared by SQLite and PostgreSQL. Effective
 	// permissions are computed from current database state for every request.
 	ListAccountPermissions(ctx context.Context, accountID string) ([]string, error)
+	ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error)
+	ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error)
+	// SQLite account queries whose parameter syntax is engine-specific.
+	ListAdminAccounts(ctx context.Context, arg ListAdminAccountsParams) ([]ListAdminAccountsRow, error)
 	ListCatalogGenreRows(ctx context.Context, arg ListCatalogGenreRowsParams) ([]ListCatalogGenreRowsRow, error)
 	ListCatalogImportItems(ctx context.Context, arg ListCatalogImportItemsParams) ([]ListCatalogImportItemsRow, error)
 	ListCatalogItemHistory(ctx context.Context, arg ListCatalogItemHistoryParams) ([]ListCatalogItemHistoryRow, error)
@@ -252,7 +257,6 @@ type Querier interface {
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
 	UpsertRoleRequestQuota(ctx context.Context, arg UpsertRoleRequestQuotaParams) error
 	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error
-	// SQLite account queries whose parameter syntax is engine-specific.
 	UsernamesByAccountIDs(ctx context.Context, accountIdsJson string) ([]UsernamesByAccountIDsRow, error)
 }
 

@@ -244,6 +244,8 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true},
 		{method: http.MethodGet, path: "/api/v1/roles", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/accounts", access: routePermission, permission: core.PermissionUsersManage, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/accounts/{id}", access: routePermission, permission: core.PermissionUsersManage, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},

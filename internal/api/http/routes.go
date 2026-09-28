@@ -46,6 +46,8 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true, handler: (*Server).handleLogout},
 	{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true, handler: (*Server).handleMe},
 	{method: http.MethodGet, path: "/api/v1/roles", access: routePermission, permission: core.PermissionAdminRoles, authRequired: true, handler: (*Server).handleRoles},
+	{method: http.MethodGet, path: "/api/v1/accounts", access: routePermission, permission: core.PermissionUsersManage, authRequired: true, handler: (*Server).handleAccounts},
+	{method: http.MethodGet, path: "/api/v1/accounts/{id}", access: routePermission, permission: core.PermissionUsersManage, authRequired: true, handler: (*Server).handleAccount},
 	{method: http.MethodPost, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateMediaServer},
 	{method: http.MethodGet, path: "/api/v1/media-servers", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListMediaServers},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetMediaServer},
@@ -187,6 +189,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			return err
 		}
 		if route.authRequired && s.loginLimiter == nil {
+			continue
+		}
+		if (route.path == "/api/v1/accounts" || route.path == "/api/v1/accounts/{id}") && s.accountAdmin == nil {
 			continue
 		}
 		if route.oidc && (s.oidcProvider == nil || s.oidcAccounts == nil || s.oidcFlows == nil || !s.oidcConfig.Enabled) {
