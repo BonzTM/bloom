@@ -14,39 +14,22 @@ import (
 
 const maxImportPageSize = 501
 
-func crossSourceImportRecord(
-	source core.ImportSource, recordID string,
-) (core.ImportSource, string, bool) {
-	activityID, ok := crossSourceActivityID(source, recordID)
-	if !ok {
-		return "", "", false
-	}
+func crossSourceActivityID(source core.ImportSource, record core.ImportedWatch) (string, bool) {
 	switch source {
 	case core.ImportSourcePlaybackReporting:
-		return core.ImportSourceJellystat, "plugin:" + activityID, true
+		return record.RecordID, record.RecordID != ""
 	case core.ImportSourceJellystat:
-		return core.ImportSourcePlaybackReporting, activityID, true
-	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
-		return "", "", false
-	}
-	return "", "", false
-}
-
-func crossSourceActivityID(source core.ImportSource, recordID string) (string, bool) {
-	switch source {
-	case core.ImportSourcePlaybackReporting:
-		return recordID, recordID != ""
-	case core.ImportSourceJellystat:
-		value, ok := strings.CutPrefix(recordID, "plugin:")
-		return value, ok && value != ""
+		return record.OriginRecordID, record.OriginRecordID != ""
 	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
 		return "", false
 	}
 	return "", false
 }
 
-func crossSourceActivityLockKey(serverID string, source core.ImportSource, recordID string) (string, bool) {
-	activityID, ok := crossSourceActivityID(source, recordID)
+func crossSourceActivityLockKey(
+	serverID string, source core.ImportSource, record core.ImportedWatch,
+) (string, bool) {
+	activityID, ok := crossSourceActivityID(source, record)
 	if !ok {
 		return "", false
 	}

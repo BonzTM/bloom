@@ -221,7 +221,7 @@ func postgresImportLockKeys(batch core.ImportBatch) []string {
 	keys := make([]string, 0, 2*len(batch.Records))
 	for _, record := range batch.Records {
 		keys = append(keys, watchDedupKey(batch.MediaServerID, record.MediaUserID, record.ItemID))
-		if key, ok := crossSourceActivityLockKey(batch.MediaServerID, batch.Source, record.RecordID); ok {
+		if key, ok := crossSourceActivityLockKey(batch.MediaServerID, batch.Source, record); ok {
 			keys = append(keys, key)
 		}
 	}
@@ -232,7 +232,7 @@ func postgresImportLockKeys(batch core.ImportBatch) []string {
 func insertPostgresImportRecords(ctx context.Context, q *postgres.Queries, batch core.ImportBatch) (int64, int64, error) {
 	var imported, duplicate int64
 	for _, record := range batch.Records {
-		crossDuplicate, err := postgresCrossSourceDuplicate(ctx, q, batch, record.RecordID)
+		crossDuplicate, err := postgresCrossSourceDuplicate(ctx, q, batch, record)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -311,17 +311,26 @@ func postgresImportDuplicate(
 }
 
 func postgresCrossSourceDuplicate(
-	ctx context.Context, q *postgres.Queries, batch core.ImportBatch, recordID string,
+	ctx context.Context, q *postgres.Queries, batch core.ImportBatch, record core.ImportedWatch,
 ) (bool, error) {
-	source, alternateID, ok := crossSourceImportRecord(batch.Source, recordID)
-	if !ok {
+	var duplicate bool
+	var err error
+	switch batch.Source {
+	case core.ImportSourceJellystat:
+		if record.OriginRecordID == "" {
+			return false, nil
+		}
+		duplicate, err = q.FindPlaybackReportingImportDuplicate(ctx,
+			postgres.FindPlaybackReportingImportDuplicateParams{
+				MediaServerID: batch.MediaServerID, ImportRecordID: optionalStreamString(record.OriginRecordID),
+			})
+	case core.ImportSourcePlaybackReporting:
+		duplicate, err = q.FindJellystatImportDuplicate(ctx, postgres.FindJellystatImportDuplicateParams{
+			MediaServerID: batch.MediaServerID, ImportOriginRecordID: optionalStreamString(record.RecordID),
+		})
+	case core.ImportSourceBloomExport, core.ImportSourceJellyfinUserData:
 		return false, nil
 	}
-	duplicate, err := q.FindCrossSourceImportDuplicate(ctx, postgres.FindCrossSourceImportDuplicateParams{
-		MediaServerID:  batch.MediaServerID,
-		ImportSource:   sql.NullString{String: string(source), Valid: true},
-		ImportRecordID: sql.NullString{String: alternateID, Valid: true},
-	})
 	return duplicate, importStoreError("find cross-source import duplicate", err)
 }
 
@@ -348,8 +357,9 @@ func postgresImportedWatchParams(
 		StreamFramerateHundredths: postgresNullInt32(stream.framerate),
 		StreamAudioChannels:       postgresNullInt32(stream.audioChannels), StreamIsVideoDirect: stream.videoDirect,
 		StreamIsAudioDirect: stream.audioDirect, StreamTranscodeReasons: stream.reasons,
-		ImportSource:   sql.NullString{String: string(batch.Source), Valid: true},
-		ImportRecordID: sql.NullString{String: record.RecordID, Valid: true},
+		ImportSource:         sql.NullString{String: string(batch.Source), Valid: true},
+		ImportRecordID:       sql.NullString{String: record.RecordID, Valid: true},
+		ImportOriginRecordID: optionalStreamString(record.OriginRecordID),
 	}, nil
 }
 

@@ -37,6 +37,12 @@ contracts) gets an entry here.
   mapping, unknown-item retention, idempotent reruns, and Playback Reporting
   cross-source deduplication. SQLite and PostgreSQL migration
   `00025_jellystat_import_source` adds the new provenance value.
+- SQLite/PostgreSQL migration `00026_watch_import_origin` adds bounded upstream
+  import provenance and its partial lookup index. It backfills the Playback
+  Reporting row ID encoded in existing Jellystat `plugin:` markers when the
+  encoded ID is at most 128 bytes. Longer suffixes retain a null origin ID.
+  The migration cannot recover those rows' original Jellystat activity IDs,
+  so their `import_record_id` values remain unchanged.
 - The requests page becomes Discover: rows of posters for what is trending
   this week, popular movies and series, upcoming movies, and series on the
   air, each tile carrying your own request state and loading more on demand,
@@ -311,6 +317,11 @@ contracts) gets an entry here.
 ### Changed
 
 - Database reads use explicit column projections so additive schema changes remain compatible with older binaries during rolling deployments (#93).
+- Jellystat imports now keep each activity's own ID in `import_record_id` and
+  store an imported Playback Reporting row ID separately in
+  `import_origin_record_id`. Cross-source deduplication and concurrent
+  PostgreSQL import locking use the separate origin ID, so a native Jellystat
+  activity ID beginning with `plugin:` is no longer rewritten.
 - A watch's details page reads as a timeline (started, paused, resumed,
   seeked, delivery changes, last seen) instead of every polled sample; the
   raw samples sit behind a disclosure.

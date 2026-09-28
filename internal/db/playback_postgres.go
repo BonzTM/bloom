@@ -404,7 +404,7 @@ func postgresStoredWatch(
 	activeSeconds, positionMS int64, runtimeMS sql.NullInt64,
 	source string,
 	created, updated time.Time,
-	importSource, importRecordID sql.NullString,
+	importSource, importRecordID, importOriginRecordID sql.NullString,
 	stream storedStreamDetails,
 ) (core.PlaybackWatch, error) {
 	details, err := stream.domain()
@@ -428,6 +428,7 @@ func postgresStoredWatch(
 		runtime: runtime,
 		source:  core.WatchSource(source), createdAt: core.NormalizeTime(created), updatedAt: core.NormalizeTime(updated),
 		importSource: core.ImportSource(importSource.String), importRecordID: importRecordID.String,
+		importOriginRecordID: importOriginRecordID.String,
 	}.domain(), nil
 }
 
@@ -439,7 +440,7 @@ func postgresOpenWatch(row postgres.ListOpenPlaybackWatchesRow) (core.PlaybackWa
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
-		row.ImportSource, row.ImportRecordID,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -454,7 +455,7 @@ func postgresNowWatch(row postgres.ListNowPlayingRow) (core.PlaybackWatch, error
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
-		row.ImportSource, row.ImportRecordID,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -469,7 +470,7 @@ func postgresHistoryWatch(row postgres.ListPlaybackHistoryRow) (core.PlaybackWat
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
-		row.ImportSource, row.ImportRecordID,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -484,7 +485,7 @@ func postgresRecentWatch(row postgres.FindRecentPlaybackWatchRow) (core.Playback
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
-		row.ImportSource, row.ImportRecordID,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
@@ -499,7 +500,7 @@ func postgresRecentServerWatch(row postgres.ListRecentPlaybackWatchesRow) (core.
 		row.SeasonNumber, row.EpisodeNumber,
 		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
 		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
-		row.ImportSource, row.ImportRecordID,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
 		postgresStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
 			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
 			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),

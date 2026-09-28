@@ -229,6 +229,8 @@ func sqliteStatsWatch(row sqlite.StatsUserRecentWatchesRow) (core.PlaybackWatch,
 		StartedAt: started, LastSeenAt: lastSeen, EndedAt: ended,
 		ActiveTime:   time.Duration(row.ActiveSeconds) * time.Second,
 		LastPosition: time.Duration(row.LastPositionMs) * time.Millisecond, Runtime: runtime,
-		Source: core.WatchSource(row.Source), CreatedAt: created, UpdatedAt: updated,
+		Source: core.WatchSource(row.Source), ImportSource: core.ImportSource(row.ImportSource.String),
+		ImportRecordID: row.ImportRecordID.String, ImportOriginRecordID: row.ImportOriginRecordID.String,
+		CreatedAt: created, UpdatedAt: updated,
 	}, nil
 }

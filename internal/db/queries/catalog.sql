@@ -634,7 +634,7 @@ WITH root AS (
            w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
            w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-           w.series_id, w.import_source, w.import_provenance_guard
+           w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM target_items ti
     JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = ti.item_id
     WHERE ti.root_type <> 'Series'
@@ -647,7 +647,7 @@ WITH root AS (
            w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
            w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-           w.series_id, w.import_source, w.import_provenance_guard
+           w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM root
     JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.item_id = root.item_id
     WHERE root.item_type = 'Series'
@@ -660,7 +660,7 @@ WITH root AS (
            w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
            w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
            w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-           w.series_id, w.import_source, w.import_provenance_guard
+           w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id
     FROM root
     JOIN watches w ON w.media_server_id = sqlc.arg(server_key) AND w.series_id = root.item_id
     JOIN target_items ti ON ti.item_id = w.item_id AND ti.root_type = 'Series'
@@ -674,7 +674,8 @@ SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.devi
        w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
        w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
        w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
-       w.series_id, w.import_source, w.import_provenance_guard, ms.name AS media_server_name
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
 FROM target_watches w
 JOIN media_servers ms ON ms.id = w.media_server_id
 WHERE w.started_at < sqlc.arg(after_started_at)

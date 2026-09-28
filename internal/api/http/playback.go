@@ -19,34 +19,35 @@ const (
 )
 
 type playbackWatchResponse struct {
-	ID              string                 `json:"id"`
-	MediaServerID   string                 `json:"media_server_id"`
-	MediaServerName string                 `json:"media_server_name"`
-	MediaUserID     string                 `json:"media_user_id"`
-	Username        string                 `json:"username"`
-	DeviceID        string                 `json:"device_id"`
-	DeviceName      string                 `json:"device_name"`
-	Client          string                 `json:"client"`
-	ItemID          string                 `json:"item_id"`
-	ItemName        string                 `json:"item_name"`
-	ItemType        string                 `json:"item_type"`
-	SeriesID        string                 `json:"series_id"`
-	SeriesName      string                 `json:"series_name"`
-	LibraryID       string                 `json:"library_id"`
-	LibraryName     string                 `json:"library_name"`
-	SeasonNumber    *int32                 `json:"season_number"`
-	EpisodeNumber   *int32                 `json:"episode_number"`
-	PositionMS      int64                  `json:"position_ms"`
-	RuntimeMS       *int64                 `json:"runtime_ms"`
-	Paused          bool                   `json:"paused"`
-	PlayMethod      core.PlayMethod        `json:"play_method"`
-	Stream          *streamDetailsResponse `json:"stream,omitempty"`
-	Source          core.WatchSource       `json:"source"`
-	ImportSource    core.ImportSource      `json:"import_source,omitempty"`
-	ImportRecordID  string                 `json:"import_record_id,omitempty"`
-	ActiveSeconds   int64                  `json:"active_seconds"`
-	StartedAt       time.Time              `json:"started_at"`
-	EndedAt         *time.Time             `json:"ended_at,omitempty"`
+	ID                   string                 `json:"id"`
+	MediaServerID        string                 `json:"media_server_id"`
+	MediaServerName      string                 `json:"media_server_name"`
+	MediaUserID          string                 `json:"media_user_id"`
+	Username             string                 `json:"username"`
+	DeviceID             string                 `json:"device_id"`
+	DeviceName           string                 `json:"device_name"`
+	Client               string                 `json:"client"`
+	ItemID               string                 `json:"item_id"`
+	ItemName             string                 `json:"item_name"`
+	ItemType             string                 `json:"item_type"`
+	SeriesID             string                 `json:"series_id"`
+	SeriesName           string                 `json:"series_name"`
+	LibraryID            string                 `json:"library_id"`
+	LibraryName          string                 `json:"library_name"`
+	SeasonNumber         *int32                 `json:"season_number"`
+	EpisodeNumber        *int32                 `json:"episode_number"`
+	PositionMS           int64                  `json:"position_ms"`
+	RuntimeMS            *int64                 `json:"runtime_ms"`
+	Paused               bool                   `json:"paused"`
+	PlayMethod           core.PlayMethod        `json:"play_method"`
+	Stream               *streamDetailsResponse `json:"stream,omitempty"`
+	Source               core.WatchSource       `json:"source"`
+	ImportSource         core.ImportSource      `json:"import_source,omitempty"`
+	ImportRecordID       string                 `json:"import_record_id,omitempty"`
+	ImportOriginRecordID string                 `json:"import_origin_record_id,omitempty"`
+	ActiveSeconds        int64                  `json:"active_seconds"`
+	StartedAt            time.Time              `json:"started_at"`
+	EndedAt              *time.Time             `json:"ended_at,omitempty"`
 }
 
 type streamDetailsResponse struct {
@@ -251,9 +252,10 @@ func playbackWatchDTO(watch core.PlaybackWatch, now time.Time) playbackWatchResp
 		RuntimeMS:  durationMilliseconds(watch.Runtime),
 		PlayMethod: watch.PlayMethod, Source: watch.Source,
 		ImportSource: watch.ImportSource, ImportRecordID: watch.ImportRecordID,
-		Stream:        streamDetailsDTO(watch.Stream),
-		ActiveSeconds: int64(watch.ActiveTimeAt(now) / time.Second),
-		StartedAt:     watch.StartedAt, EndedAt: watch.EndedAt,
+		ImportOriginRecordID: watch.ImportOriginRecordID,
+		Stream:               streamDetailsDTO(watch.Stream),
+		ActiveSeconds:        int64(watch.ActiveTimeAt(now) / time.Second),
+		StartedAt:            watch.StartedAt, EndedAt: watch.EndedAt,
 	}
 }
 

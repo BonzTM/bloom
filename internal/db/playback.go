@@ -46,7 +46,7 @@ type storedPlaybackWatch struct {
 	runtime                                                   *time.Duration
 	source                                                    core.WatchSource
 	importSource                                              core.ImportSource
-	importRecordID                                            string
+	importRecordID, importOriginRecordID                      string
 	createdAt, updatedAt                                      time.Time
 }
 
@@ -66,7 +66,8 @@ func (row storedPlaybackWatch) domain() core.PlaybackWatch {
 		LastPosition: time.Duration(row.lastPositionMS) * time.Millisecond,
 		Runtime:      row.runtime,
 		Source:       row.source, ImportSource: row.importSource, ImportRecordID: row.importRecordID,
-		CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
+		ImportOriginRecordID: row.importOriginRecordID,
+		CreatedAt:            row.createdAt, UpdatedAt: row.updatedAt,
 	}
 }
 

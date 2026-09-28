@@ -66,7 +66,8 @@ func testConcurrentPostgresCrossSourceDeduplication(
 	jellystat := createClaimedImport(t, fixture, core.ImportSourceJellystat, `{"id":"upload","offset":0}`)
 	reportingRecord := importedRecord("77", "reporting-item", fixture.now)
 	reportingRecord.MediaUserID = "reporting-user"
-	jellystatRecord := importedRecord("plugin:77", "jellystat-item", fixture.now)
+	jellystatRecord := importedRecord("jellystat-activity", "jellystat-item", fixture.now)
+	jellystatRecord.OriginRecordID = "77"
 	jellystatRecord.MediaUserID = "jellystat-user"
 
 	start := make(chan struct{})
@@ -104,8 +105,8 @@ func testConcurrentPostgresCrossSourceDeduplication(
 	}
 	var watches int
 	err := pool.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM watches
-        WHERE media_server_id = $1 AND import_source IN ('playback_reporting', 'jellystat')
-          AND import_record_id IN ('77', 'plugin:77')`, fixture.serverID).Scan(&watches)
+		WHERE media_server_id = $1 AND import_source IN ('playback_reporting', 'jellystat')
+		  AND (import_record_id = '77' OR import_origin_record_id = '77')`, fixture.serverID).Scan(&watches)
 	if err != nil || watches != 1 {
 		t.Fatalf("cross-source watches = %d, %v", watches, err)
 	}

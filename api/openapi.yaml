@@ -3661,6 +3661,7 @@ components:
         source: { $ref: "#/components/schemas/PlaybackSource" }
         import_source: { $ref: "#/components/schemas/ImportSource" }
         import_record_id: { type: string, minLength: 1, x-max-bytes: 256 }
+        import_origin_record_id: { type: string, minLength: 1, x-max-bytes: 128 }
         active_seconds: { type: integer, format: int64, minimum: 0 }
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
@@ -3674,7 +3675,7 @@ components:
     WatchExportRecord:
       allOf:
         - $ref: "#/components/schemas/PlaybackHistoryWatch"
-      description: The JSON object written on each export line; imported records also carry `import_source` and `import_record_id`.
+      description: The JSON object written on each export line; imported records also carry `import_source`, `import_record_id`, and `import_origin_record_id` when present.
     WatchExportManifest:
       type: object
       required: [format_version, bloom_version, exported_at]
