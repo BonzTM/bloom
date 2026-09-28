@@ -282,11 +282,13 @@ collection exclusions at `GET` or `PUT
 is limited to 128 UTF-8 bytes. The arrays may contain no more than 500 entries
 in total. Replacement does not delete existing watches or catalog rows.
 
-The collector drops sessions for excluded users and for items resolved to an
-excluded library. Every history-import source counts excluded-user and
-excluded-library rows as skipped. Catalog synchronization does not walk an
-excluded library. Per-server settings use a one-minute in-process
-lease-and-refresh cache, which is refreshed immediately after replacement.
+The collector drops sessions for excluded users, items resolved to an excluded
+library, and items whose library cannot be resolved while the server has at
+least one excluded library. Every history-import source counts excluded-user,
+excluded-library, and policy-relevant unresolved-library rows as skipped.
+Catalog synchronization does not walk an excluded library. Per-server settings
+use a one-minute in-process lease-and-refresh cache, which is refreshed
+immediately after replacement.
 
 Visibility is also enforced on existing data. Playback-now,
 playback-history, watch-position access, every administrator and own-user
@@ -306,9 +308,12 @@ counters. A stopped process resumes after the last committed batch.
 
 When an imported row has no library identifier, exclusion filtering first
 checks Bloom's catalog and then asks the media server to resolve the item. A
-resolved excluded library is skipped. If both lookups miss, Bloom fails open:
-it imports the history and increments the job's bounded `unresolved_library`
-counter. Resolution results, including misses, are cached only for the current
+resolved excluded library is skipped. If both lookups miss while the server has
+at least one excluded library, Bloom fails closed: it skips the row and
+increments the job's bounded `unresolved_library` counter once. The counter
+means "rows skipped because their library could not be resolved while libraries
+are excluded." With no excluded libraries, unresolved rows are imported as
+before. Resolution results, including misses, are cached only for the current
 500-row batch.
 
 The `playback_reporting` source reads Jellyfin's Playback Reporting plugin by

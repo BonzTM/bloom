@@ -30,6 +30,7 @@ sql:
       - internal/db/queries/activity.sql
       - internal/db/queries/activity_sqlite.sql
       - internal/db/queries/exclusions.sql
+      - internal/db/queries/exclusions_sqlite.sql
       - internal/db/queries/imports.sql
       - internal/db/queries/imports_sqlite.sql
       - internal/db/queries/catalog.sql
@@ -65,6 +66,7 @@ sql:
       - internal/db/queries/activity.sql
       - internal/db/queries/activity_postgres.sql
       - internal/db/queries/exclusions.sql
+      - internal/db/queries/exclusions_postgres.sql
       - internal/db/queries/imports.sql
       - internal/db/queries/imports_postgres.sql
       - internal/db/queries/catalog.sql

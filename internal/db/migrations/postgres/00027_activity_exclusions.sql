@@ -19,6 +19,22 @@ CREATE INDEX watches_server_user_started_idx
 -- +goose Down
 -- +goose StatementBegin
 DROP INDEX watches_server_user_started_idx;
+UPDATE library_items
+SET plays = (SELECT COUNT(*) FROM watches w
+             WHERE w.media_server_id = library_items.media_server_id
+               AND w.item_id = library_items.item_id),
+    watch_seconds = COALESCE((SELECT SUM(w.active_seconds) FROM watches w
+             WHERE w.media_server_id = library_items.media_server_id
+               AND w.item_id = library_items.item_id), 0),
+    unique_users = (SELECT COUNT(DISTINCT w.media_user_id) FROM watches w
+             WHERE w.media_server_id = library_items.media_server_id
+               AND w.item_id = library_items.item_id),
+    first_played_at = (SELECT MIN(w.started_at) FROM watches w
+             WHERE w.media_server_id = library_items.media_server_id
+               AND w.item_id = library_items.item_id),
+    last_played_at = (SELECT MAX(w.started_at) FROM watches w
+             WHERE w.media_server_id = library_items.media_server_id
+               AND w.item_id = library_items.item_id);
 DROP TABLE media_server_exclusions;
 ALTER TABLE imports DROP COLUMN unresolved_library_count;
 -- +goose StatementEnd

@@ -202,7 +202,9 @@ func (w *Worker) filterExcluded(
 			continue
 		}
 		if !resolution.found && record.LibraryID == "" && len(exclusions.LibraryIDs) > 0 {
+			skipped++
 			unresolved++
+			continue
 		}
 		if resolution.found && record.LibraryID == "" {
 			record.LibraryID, record.LibraryName = resolution.library.ID, resolution.library.Name

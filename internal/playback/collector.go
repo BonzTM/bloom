@@ -255,12 +255,15 @@ func (c *Collector) filterExcludedSessions(
 		if exclusions.ExcludesUser(session.MediaUserID) {
 			continue
 		}
-		if canResolve && len(exclusions.LibraryIDs) > 0 {
+		if len(exclusions.LibraryIDs) > 0 {
+			if !canResolve {
+				continue
+			}
 			library, found, resolveErr := resolver.ResolveLibrary(ctx, session.ItemID)
 			if resolveErr != nil {
 				return nil, fmt.Errorf("resolve playback exclusion library: %w", resolveErr)
 			}
-			if found && exclusions.ExcludesLibrary(library.ID) {
+			if !found || exclusions.ExcludesLibrary(library.ID) {
 				continue
 			}
 		}

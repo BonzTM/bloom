@@ -61,6 +61,48 @@ func (exclusionServerFake) Get(context.Context, string) (core.MediaServerConnect
 	return core.MediaServerConnection{Server: core.MediaServer{ID: exclusionServerID}}, nil
 }
 
+type concurrentExclusionStore struct {
+	mu           sync.Mutex
+	value        core.MediaServerExclusions
+	firstStored  chan struct{}
+	releaseFirst chan struct{}
+	calls        int
+}
+
+func (s *concurrentExclusionStore) GetExclusions(
+	context.Context, string,
+) (core.MediaServerExclusions, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.value.Clone(), nil
+}
+
+func (s *concurrentExclusionStore) ReplaceExclusions(
+	ctx context.Context, value core.MediaServerExclusions,
+) error {
+	s.mu.Lock()
+	s.calls++
+	call := s.calls
+	s.value = value.Clone()
+	s.mu.Unlock()
+	if call == 1 {
+		close(s.firstStored)
+		select {
+		case <-s.releaseFirst:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (s *concurrentExclusionStore) current() core.MediaServerExclusions {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.value.Clone()
+}
+
 func TestServiceCachesLookupsForLease(t *testing.T) {
 	store := &exclusionStoreFake{value: core.MediaServerExclusions{
 		MediaServerID: exclusionServerID, MediaUserIDs: []string{"user"},
@@ -111,6 +153,47 @@ func TestReplaceRefreshesCacheAndInvalidatesReaders(t *testing.T) {
 	gets, _ := store.counts()
 	if gets != 0 {
 		t.Fatalf("cached replacement gets = %d, want 0", gets)
+	}
+}
+
+func TestConcurrentPUTKeepsCacheEqualToDatabase(t *testing.T) {
+	store := &concurrentExclusionStore{
+		value:       core.MediaServerExclusions{MediaServerID: exclusionServerID},
+		firstStored: make(chan struct{}), releaseFirst: make(chan struct{}),
+	}
+	service, err := NewService(store, exclusionServerFake{}, testutil.NewFakeClock(time.Now()), time.Minute)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	first := core.MediaServerExclusions{MediaServerID: exclusionServerID, LibraryIDs: []string{"first"}}
+	second := core.MediaServerExclusions{MediaServerID: exclusionServerID, LibraryIDs: []string{"second"}}
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		_, replaceErr := service.Replace(t.Context(), first)
+		firstDone <- replaceErr
+	}()
+	<-store.firstStored
+	operation := service.operations.get(exclusionServerID)
+	if operation.TryLock() {
+		operation.Unlock()
+		t.Fatal("first replacement did not hold the per-server operation lock")
+	}
+	go func() {
+		_, replaceErr := service.Replace(t.Context(), second)
+		secondDone <- replaceErr
+	}()
+	close(store.releaseFirst)
+	if err = <-firstDone; err != nil {
+		t.Fatalf("first Replace: %v", err)
+	}
+	if err = <-secondDone; err != nil {
+		t.Fatalf("second Replace: %v", err)
+	}
+	cached, err := service.GetExclusions(t.Context(), exclusionServerID)
+	durable := store.current()
+	if err != nil || !cached.ExcludesLibrary("second") || !durable.ExcludesLibrary("second") ||
+		cached.ExcludesLibrary("first") || durable.ExcludesLibrary("first") {
+		t.Fatalf("cache = %+v, store = %+v, %v", cached, durable, err)
 	}
 }
 

@@ -187,6 +187,17 @@ func TestReplaceExclusionsBoundsAndAudit(t *testing.T) {
 	}
 }
 
+func TestReplaceExclusionsRejectsUnsupportedContentType(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/media-servers/00000000-0000-4000-8000-000000000001/exclusions"
+	body := `{"excluded_media_user_ids":[],"excluded_library_ids":[]}`
+	recorder := h.requestWithContentType(t, http.MethodPut, path, body, cookie, "text/plain")
+	if recorder.Code != http.StatusUnsupportedMediaType || h.exclusions.replaceCalls != 0 {
+		t.Fatalf("response = %d, replace calls %d: %s", recorder.Code, h.exclusions.replaceCalls, recorder.Body.String())
+	}
+}
+
 func TestReplaceExclusionsStopsAtCombinedLimit(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))

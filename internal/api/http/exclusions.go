@@ -38,6 +38,11 @@ func (s *Server) handlePutExclusions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !loginContentTypeSupported(r.Header.Get("Content-Type")) {
+		s.auditExclusions(r, serverID, telemetry.AuditFailure, "invalid_input")
+		writeError(w, r, s.logger, errUnsupportedMediaType)
+		return
+	}
 	request, err := httputil.DecodeJSON[exclusionsRequest](w, r, s.maxBodyBytes)
 	if err != nil {
 		s.auditExclusions(r, serverID, telemetry.AuditFailure, "invalid_input")

@@ -21,8 +21,13 @@ func TestImportJobValidationAndSafeErrors(t *testing.T) {
 	}
 	job.UnresolvedLibrary = 1
 	if job.Valid() {
-		t.Fatal("unresolved library count above read count was accepted")
+		t.Fatal("unresolved library count above skipped count was accepted")
 	}
+	job.Read, job.Skipped = 1, 1
+	if !job.Valid() {
+		t.Fatal("unresolved library count within skipped count was rejected")
+	}
+	job.Read, job.Skipped = 0, 0
 	job.UnresolvedLibrary = 0
 	job.Cursor = strings.Repeat("x", MaxImportCursorBytes+1)
 	if job.Valid() {

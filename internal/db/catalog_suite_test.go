@@ -19,6 +19,7 @@ const (
 	catalogPagingServerID = "82000000-0000-4000-8000-000000000001"
 	catalogPlanServerID   = "87000000-0000-4000-8000-000000000001"
 	catalogPlanSeriesID   = "catalog-plan-series"
+	catalogPlanUserID     = "catalog-plan-user-000"
 	catalogPlanWatchCount = 5000
 )
 
@@ -738,6 +739,7 @@ func seedCatalogPlanWatches(t *testing.T, pool *sql.DB, driver config.Driver, no
 	mutations := make([]core.PlaybackMutation, 0, catalogPlanWatchCount)
 	for index := range catalogPlanWatchCount {
 		watch := playbackStoreWatch(t, catalogPlanServerID, now.Add(time.Duration(index)*time.Second))
+		watch.MediaUserID = fmt.Sprintf("catalog-plan-user-%03d", index%256)
 		watch.ItemID = fmt.Sprintf("catalog-plan-item-%03d", index%128)
 		watch.SeriesID = fmt.Sprintf("catalog-plan-decoy-series-%02d", index%64)
 		watch.ServerSessionID = fmt.Sprintf("catalog-plan-session-%03d", index)
@@ -760,11 +762,10 @@ func seedCatalogPlanWatches(t *testing.T, pool *sql.DB, driver config.Driver, no
 
 func analyzeCatalogPlanTables(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
-	if driver != config.DriverPostgres {
-		return
-	}
-	if _, err := pool.ExecContext(t.Context(), "ANALYZE watches, library_items"); err != nil {
-		t.Fatalf("analyze catalog plan tables: %v", err)
+	for _, statement := range []string{"ANALYZE watches", "ANALYZE library_items"} {
+		if _, err := pool.ExecContext(t.Context(), statement); err != nil {
+			t.Fatalf("analyze catalog plan tables for %s: %v", driver, err)
+		}
 	}
 }
 
@@ -871,15 +872,7 @@ func explainCatalogQuery(t *testing.T, pool *sql.DB, driver config.Driver, query
 
 func explainPostgresCatalogQuery(t *testing.T, pool *sql.DB, query string, args ...any) string {
 	t.Helper()
-	conn, err := pool.Conn(t.Context())
-	if err != nil {
-		t.Fatalf("catalog EXPLAIN connection: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-	if _, err = conn.ExecContext(t.Context(), "SET enable_seqscan=off"); err != nil {
-		t.Fatalf("disable sequential scan: %v", err)
-	}
-	rows, err := conn.QueryContext(t.Context(), "EXPLAIN "+query, args...)
+	rows, err := pool.QueryContext(t.Context(), "EXPLAIN "+query, args...)
 	if err != nil {
 		t.Fatalf("EXPLAIN: %v", err)
 	}

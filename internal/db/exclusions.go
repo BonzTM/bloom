@@ -134,6 +134,12 @@ func (s *postgresExclusionStore) ReplaceExclusions(
 		}
 	}()
 	queries := s.q.WithTx(tx)
+	if _, err := queries.LockMediaServerForExclusionReplace(ctx, value.MediaServerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return core.ErrNotFound
+		}
+		return fmt.Errorf("lock media server for exclusion replacement: %w", err)
+	}
 	if err := queries.DeleteMediaServerExclusions(ctx, value.MediaServerID); err != nil {
 		return fmt.Errorf("delete media server exclusions: %w", err)
 	}

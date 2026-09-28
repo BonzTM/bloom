@@ -132,6 +132,9 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("import origin migration backfills and rolls down", func(t *testing.T) {
 		testImportOriginMigration(t, pool, driver)
 	})
+	t.Run("activity exclusions migration restores rollups on rollback", func(t *testing.T) {
+		testActivityExclusionsMigration(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(context.Background(), pool, driver); err != nil {
@@ -146,6 +149,68 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("Migrate (second up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
+}
+
+func testActivityExclusionsMigration(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare activity exclusions migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 26); err != nil {
+		t.Fatalf("roll back activity exclusions migration: %v", err)
+	}
+	accountID, serverID := mustID(t), mustID(t)
+	now := migrationCreatedAt(driver)
+	seedCatalogUpgradeOwner(t, pool, accountID, serverID, now)
+	seedCatalogUpgradeWatches(t, pool, serverID, now)
+	execTestSQL(t, pool, `INSERT INTO library_items
+	    (media_server_id,item_id,library_id,item_type,name,genres,first_seen_at,last_seen_at,updated_at)
+	    VALUES ($1,'collected-item','excluded-library','Movie','Collected','[]',$2,$2,$2)`, serverID, now)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("apply activity exclusions migration: %v", err)
+	}
+	store, err := db.NewExclusionStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewExclusionStore: %v", err)
+	}
+	if err = store.ReplaceExclusions(ctx, core.MediaServerExclusions{
+		MediaServerID: serverID, LibraryIDs: []string{"excluded-library"},
+	}); err != nil {
+		t.Fatalf("seed exclusion: %v", err)
+	}
+	assertMigrationRollup(t, pool, serverID, 0, 0, 0)
+	if err = db.MigrateDownTo(ctx, pool, driver, 26); err != nil {
+		t.Fatalf("roll down activity exclusions migration: %v", err)
+	}
+	assertMigrationRollup(t, pool, serverID, 1, 42, 1)
+	if err = db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("re-apply activity exclusions migration: %v", err)
+	}
+	assertMigrationRollup(t, pool, serverID, 1, 42, 1)
+	execTestSQL(t, pool, "DELETE FROM media_servers WHERE id=$1", serverID)
+	if err = db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean activity exclusions migration fixture: %v", err)
+	}
+}
+
+func assertMigrationRollup(
+	t *testing.T, pool *sql.DB, serverID string, plays, seconds, users int64,
+) {
+	t.Helper()
+	var gotPlays, gotSeconds, gotUsers, firstSet, lastSet int64
+	err := pool.QueryRowContext(t.Context(), `SELECT plays,watch_seconds,unique_users,
+	    CASE WHEN first_played_at IS NULL THEN 0 ELSE 1 END,
+	    CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END
+	    FROM library_items WHERE media_server_id=$1 AND item_id='collected-item'`, serverID).
+		Scan(&gotPlays, &gotSeconds, &gotUsers, &firstSet, &lastSet)
+	wantTimeSet := min(plays, int64(1))
+	if err != nil || gotPlays != plays || gotSeconds != seconds || gotUsers != users ||
+		firstSet != wantTimeSet || lastSet != wantTimeSet {
+		t.Fatalf("migration rollup = %d/%d/%d time=%d/%d, %v; want %d/%d/%d time=%d/%d",
+			gotPlays, gotSeconds, gotUsers, firstSet, lastSet, err,
+			plays, seconds, users, wantTimeSet, wantTimeSet)
+	}
 }
 
 func testImportOriginMigration(t *testing.T, pool *sql.DB, driver config.Driver) {

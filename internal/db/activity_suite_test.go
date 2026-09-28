@@ -124,14 +124,34 @@ func testActivityPlans(t *testing.T, pool *sql.DB, driver config.Driver) {
 			assertActivityPlan(t, plan, testCase.index, testCase.name)
 		})
 	}
+	timeline, err := db.TimelineStatement(driver)
+	if err != nil {
+		t.Fatalf("TimelineStatement: %v", err)
+	}
+	before := any(time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC))
+	if driver == config.DriverSQLite {
+		before = "9999-12-31T23:59:59.999999Z"
+	}
+	plan := explainCatalogQuery(t, pool, driver, timeline,
+		catalogPlanServerID, catalogPlanUserID, before, "z", 50)
+	assertTimelinePlan(t, plan)
 }
 
 func assertActivityPlan(t *testing.T, plan, index, shape string) {
 	t.Helper()
 	if !strings.Contains(plan, index) || strings.Contains(plan, "TEMP B-TREE") ||
-		strings.Contains(plan, "Sort") || strings.Contains(plan, "Seq Scan") ||
+		strings.Contains(plan, "Sort") || strings.Contains(plan, "Seq Scan on watches") ||
 		(strings.Contains(plan, "SCAN w") && !strings.Contains(plan, "SCAN w USING INDEX")) {
 		t.Fatalf("%s activity plan = %q; want %s without sort or sequential scan", shape, plan, index)
+	}
+}
+
+func assertTimelinePlan(t *testing.T, plan string) {
+	t.Helper()
+	if !strings.Contains(plan, "watches_server_user_started_idx") || strings.Contains(plan, "TEMP B-TREE") ||
+		strings.Contains(plan, "Sort") || strings.Contains(plan, "Seq Scan on watches") ||
+		(strings.Contains(plan, "SCAN w") && !strings.Contains(plan, "SCAN w USING INDEX")) {
+		t.Fatalf("timeline plan = %q; want watches_server_user_started_idx without a watch sort or scan", plan)
 	}
 }
 

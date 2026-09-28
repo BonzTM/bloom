@@ -19,3 +19,15 @@ func ActivityStatement(driver config.Driver) (string, error) {
 		return "", fmt.Errorf("activity statement: unsupported database driver %q", driver)
 	}
 }
+
+// TimelineStatement returns the engine-specific production timeline statement.
+func TimelineStatement(driver config.Driver) (string, error) {
+	switch driver {
+	case config.DriverSQLite:
+		return sqlite.ListTimelineWatchesStatement(), nil
+	case config.DriverPostgres:
+		return postgres.ListTimelineWatchesStatement(), nil
+	default:
+		return "", fmt.Errorf("timeline statement: unsupported database driver %q", driver)
+	}
+}

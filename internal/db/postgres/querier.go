@@ -213,6 +213,8 @@ type Querier interface {
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (Invite, error)
 	LockInviteByID(ctx context.Context, id string) (LockInviteByIDRow, error)
 	LockInviteProvisioningFailureForClaim(ctx context.Context, dueAt time.Time) (string, error)
+	// PostgreSQL exclusion replacement locking.
+	LockMediaServerForExclusionReplace(ctx context.Context, id string) (string, error)
 	// PostgreSQL notification row locks. Each lock is followed by a second
 	// statement in the same Read Committed transaction that re-checks eligibility.
 	LockNotificationChannelForClaim(ctx context.Context, dueAt time.Time) (string, error)

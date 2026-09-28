@@ -546,7 +546,7 @@ func TestImportLibraryFallsBackToMediaServerAndCachesBatchResolution(t *testing.
 	}
 }
 
-func TestImportLibraryMissFailsOpenAndCountsJob(t *testing.T) {
+func TestImportLibraryMissFailsClosedAndCountsSkippedRow(t *testing.T) {
 	job := pendingWorkerJob(t)
 	record := core.ImportedWatch{
 		RecordID: "1", MediaUserID: "user", ItemID: "unknown-item", ItemName: "Unknown",
@@ -565,8 +565,26 @@ func TestImportLibraryMissFailsOpenAndCountsJob(t *testing.T) {
 	if err := worker.runOnce(t.Context()); err != nil {
 		t.Fatalf("runOnce: %v", err)
 	}
-	if store.finished != core.ImportCompleted || store.result.Imported != 1 ||
+	if store.finished != core.ImportCompleted || store.result.Imported != 0 || store.result.Skipped != 1 ||
 		store.job.UnresolvedLibrary != 1 || catalog.calls != 1 || items.calls != 1 {
 		t.Fatalf("job = %+v, counters %+v, resolver calls %d/%d", store.job, store.result, catalog.calls, items.calls)
+	}
+}
+
+func TestImportLibraryMissIsKeptWhenNoLibrariesAreExcluded(t *testing.T) {
+	job := pendingWorkerJob(t)
+	worker := newTestWorker(t, &workerStore{job: job}, reportingStub{})
+	worker.deps.Exclusions = importerExclusions{value: core.MediaServerExclusions{MediaServerID: job.MediaServerID}}
+	catalog := &importerLibraries{items: map[string]string{}}
+	items := &importerItems{items: map[string]core.Library{}}
+	worker.deps.Libraries, worker.deps.Items = catalog, items
+	records := []core.ImportedWatch{{MediaUserID: "user", ItemID: "unknown-item"}}
+
+	filtered, skipped, unresolved, err := worker.filterExcluded(t.Context(), job.MediaServerID, records)
+	if err != nil || len(filtered) != 1 || skipped != 0 || unresolved != 0 {
+		t.Fatalf("filterExcluded = %+v, skipped %d unresolved %d, %v", filtered, skipped, unresolved, err)
+	}
+	if catalog.calls != 0 || items.calls != 0 {
+		t.Fatalf("resolver calls = catalog %d media server %d, want none", catalog.calls, items.calls)
 	}
 }

@@ -81,7 +81,8 @@ SET cursor = sqlc.arg(cursor), read_count = read_count + sqlc.arg(read_delta),
     imported_count = imported_count + sqlc.arg(imported_delta),
     skipped_count = skipped_count + sqlc.arg(skipped_delta),
     duplicate_count = duplicate_count + sqlc.arg(duplicate_delta),
-    unresolved_library_count = unresolved_library_count + sqlc.arg(unresolved_library_delta),
+    unresolved_library_count = unresolved_library_count + CASE
+        WHEN cursor = sqlc.arg(cursor) THEN 0 ELSE sqlc.arg(unresolved_library_delta) END,
     lease_expires_at = sqlc.arg(expires_at), updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id) AND state = 'running' AND lease_token = sqlc.arg(token);
 

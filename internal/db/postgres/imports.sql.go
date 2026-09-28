@@ -37,7 +37,8 @@ SET cursor = $1, read_count = read_count + $2,
     imported_count = imported_count + $3,
     skipped_count = skipped_count + $4,
     duplicate_count = duplicate_count + $5,
-    unresolved_library_count = unresolved_library_count + $6,
+    unresolved_library_count = unresolved_library_count + CASE
+        WHEN cursor = $1 THEN 0 ELSE $6 END,
     lease_expires_at = $7, updated_at = $8
 WHERE id = $9 AND state = 'running' AND lease_token = $10
 `

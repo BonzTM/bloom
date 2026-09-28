@@ -10,7 +10,11 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-const defaultRefreshLease = time.Minute
+const (
+	defaultRefreshLease        = time.Minute
+	serverMutexCapacity        = 256
+	serverMutexOverflowStripes = 64
+)
 
 type serverReader interface {
 	Get(context.Context, string) (core.MediaServerConnection, error)
@@ -19,6 +23,42 @@ type serverReader interface {
 type cacheEntry struct {
 	value     core.MediaServerExclusions
 	expiresAt time.Time
+}
+
+type serverMutexMap struct {
+	mu       sync.Mutex
+	indices  map[string]int
+	next     int
+	locks    [serverMutexCapacity]sync.Mutex
+	overflow [serverMutexOverflowStripes]sync.Mutex
+}
+
+func newServerMutexMap() *serverMutexMap {
+	return &serverMutexMap{indices: make(map[string]int, serverMutexCapacity)}
+}
+
+func (m *serverMutexMap) get(serverID string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index, ok := m.indices[serverID]; ok {
+		return &m.locks[index]
+	}
+	if m.next < len(m.locks) {
+		index := m.next
+		m.next++
+		m.indices[serverID] = index
+		return &m.locks[index]
+	}
+	return &m.overflow[serverMutexIndex(serverID)]
+}
+
+func serverMutexIndex(serverID string) int {
+	const offset64, prime64 = uint64(14695981039346656037), uint64(1099511628211)
+	hash := offset64
+	for index := range len(serverID) {
+		hash = (hash ^ uint64(serverID[index])) * prime64
+	}
+	return int(hash % serverMutexOverflowStripes)
 }
 
 // Service provides full replacements and lease-bounded cached lookups.
@@ -31,6 +71,7 @@ type Service struct {
 	entries      map[string]cacheEntry
 	generation   map[string]uint64
 	invalidators []func(string)
+	operations   *serverMutexMap
 }
 
 // NewService validates and constructs an exclusion service.
@@ -46,6 +87,7 @@ func NewService(
 	return &Service{
 		store: store, servers: servers, clock: clock, lease: lease,
 		entries: make(map[string]cacheEntry), generation: make(map[string]uint64),
+		operations: newServerMutexMap(),
 	}, nil
 }
 
@@ -84,6 +126,9 @@ func (s *Service) Replace(
 	if _, err := s.servers.Get(ctx, value.MediaServerID); err != nil {
 		return core.MediaServerExclusions{}, err
 	}
+	operation := s.operations.get(value.MediaServerID)
+	operation.Lock()
+	defer operation.Unlock()
 	if err := s.store.ReplaceExclusions(ctx, value); err != nil {
 		return core.MediaServerExclusions{}, err
 	}

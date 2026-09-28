@@ -3730,7 +3730,7 @@ components:
         imported: { type: integer, format: int64, minimum: 0 }
         skipped: { type: integer, format: int64, minimum: 0 }
         duplicate: { type: integer, format: int64, minimum: 0 }
-        unresolved_library: { type: integer, format: int64, minimum: 0, description: Rows imported after both catalog and media-server library resolution missed. }
+        unresolved_library: { type: integer, format: int64, minimum: 0, description: Rows skipped because both catalog and media-server library resolution missed while the server had at least one excluded library. }
         last_error: { type: string, x-max-bytes: 512 }
         requested_by: { type: string, format: uuid }
         created_at: { type: string, format: date-time }

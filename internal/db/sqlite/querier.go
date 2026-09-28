@@ -210,6 +210,8 @@ type Querier interface {
 	LockInviteByCodeHash(ctx context.Context, codeHash []byte) (Invite, error)
 	LockInviteByID(ctx context.Context, id string) (LockInviteByIDRow, error)
 	LockInviteProvisioningFailureForClaim(ctx context.Context, dueAt string) (string, error)
+	// SQLite exclusion replacement transaction parity.
+	LockMediaServerForExclusionReplace(ctx context.Context, id string) (string, error)
 	// SQLite notification candidate selection. BEGIN IMMEDIATE already serializes
 	// the write transaction; these names match the PostgreSQL row-lock queries.
 	LockNotificationChannelForClaim(ctx context.Context, dueAt string) (string, error)
