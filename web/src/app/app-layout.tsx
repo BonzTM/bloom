@@ -148,6 +148,12 @@ const ADMIN_LINKS: readonly AdminLink[] = [
     anyOf: [permissions.statsReadAll],
   },
   {
+    to: "/admin/activity",
+    label: "Activity",
+    icon: "clock",
+    anyOf: [permissions.statsReadAll],
+  },
+  {
     to: "/admin/libraries",
     label: "Libraries",
     icon: "library",

@@ -142,3 +142,53 @@ export const mediaServerIdSchema = z.uuid();
 function utf8Length(value: string): number {
   return new TextEncoder().encode(value).length;
 }
+
+// ---- collection exclusions (admin.settings): the media users and libraries
+// Bloom leaves out of collection, imports, statistics, and catalog reads.
+
+const MAX_EXCLUSION_ENTRIES = 500;
+const MAX_EXCLUSION_ID_BYTES = 128;
+
+const exclusionId = z
+  .string()
+  .min(1)
+  .refine((value) => !/\p{Cc}/u.test(value))
+  .refine(
+    (value) => new TextEncoder().encode(value).length <= MAX_EXCLUSION_ID_BYTES,
+  );
+
+const unique = (values: readonly string[]): boolean =>
+  new Set(values).size === values.length;
+
+const exclusionList = z
+  .array(exclusionId)
+  .max(MAX_EXCLUSION_ENTRIES)
+  .refine(unique, { message: "duplicate exclusion" });
+
+export const mediaServerExclusionsSchema = z.object({
+  media_server_id: z.uuid(),
+  excluded_media_user_ids: exclusionList,
+  excluded_library_ids: exclusionList,
+});
+
+export type MediaServerExclusions = z.output<
+  typeof mediaServerExclusionsSchema
+>;
+
+// The two lists together may hold at most 500 entries.
+export const replaceExclusionsRequestSchema = z
+  .strictObject({
+    excluded_media_user_ids: exclusionList,
+    excluded_library_ids: exclusionList,
+  })
+  .refine(
+    (value) =>
+      value.excluded_media_user_ids.length +
+        value.excluded_library_ids.length <=
+      MAX_EXCLUSION_ENTRIES,
+    { message: "at most 500 exclusions in total" },
+  );
+
+export type ReplaceExclusionsInput = z.input<
+  typeof replaceExclusionsRequestSchema
+>;

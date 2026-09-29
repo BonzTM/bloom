@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
@@ -8,6 +9,7 @@ import type {
   MediaServersPage,
   RegisteredMediaServer,
   RegisterMediaServerInput,
+  ReplaceExclusionsInput,
 } from "../api/media-servers-schemas.js";
 import { useMediaServersApi } from "../media-servers-context.js";
 
@@ -17,6 +19,8 @@ import { useMediaServersApi } from "../media-servers-context.js";
 export const mediaServersKeys = {
   all: ["media-servers"] as const,
   list: (accountId: string) => ["media-servers", "list", accountId] as const,
+  exclusions: (accountId: string, serverId: string) =>
+    ["media-servers", "exclusions", accountId, serverId] as const,
 };
 
 const firstPage: string | undefined = undefined;
@@ -111,4 +115,37 @@ function invalidateList(
 
 function nextCursor(lastPage: MediaServersPage): string | undefined {
   return lastPage.next_cursor === "" ? undefined : lastPage.next_cursor;
+}
+
+export function useExclusions(accountId: string, serverId: string) {
+  const api = useMediaServersApi();
+  return useQuery({
+    queryKey: mediaServersKeys.exclusions(accountId, serverId),
+    queryFn: ({ signal }) => api.exclusions(serverId, signal),
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+// Replacing the lists changes what every statistics read returns, so the
+// stored answer is written straight into the cache and the playback and
+// statistics families are dropped.
+export function useReplaceExclusions(accountId: string, serverId: string) {
+  const api = useMediaServersApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ReplaceExclusionsInput) =>
+      api.replaceExclusions(serverId, input),
+    onSuccess: async (stored) => {
+      queryClient.setQueryData(
+        mediaServersKeys.exclusions(accountId, serverId),
+        stored,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["playback"] }),
+        queryClient.invalidateQueries({ queryKey: ["stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["catalog"] }),
+      ]);
+    },
+  });
 }

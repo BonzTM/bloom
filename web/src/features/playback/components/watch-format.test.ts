@@ -19,7 +19,10 @@ const base: Watch = {
   item_id: "i-1",
   item_name: "Pilot",
   item_type: "Episode",
+  series_id: "s-fringe",
   series_name: "Fringe",
+  library_id: "lib-shows",
+  library_name: "Shows",
   season_number: 1,
   episode_number: 1,
   position_ms: 754_000,
@@ -28,6 +31,7 @@ const base: Watch = {
   play_method: "direct_play",
   active_seconds: 754,
   started_at: "2026-09-24T19:00:00Z",
+  source: "poll",
 };
 
 it("titles an episode with its series and numbering", () => {
