@@ -429,18 +429,7 @@ main {
   padding: 0.125rem 0;
 }
 
-.global-search option {
-  background: var(--bg-elevated);
-  color: var(--text);
-}
-
-@media (prefers-color-scheme: light) {
-  select {
-    color-scheme: light;
-  }
-}
-
-input::placeholder {
+.global-search input::placeholder {
   color: var(--text-faint);
 }
 
@@ -837,6 +826,18 @@ select {
   background-position: right 0.6rem center;
   background-repeat: no-repeat;
   padding-right: 2.2rem;
+}
+
+/* Firefox draws the popup list from the page's option styles. */
+option {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: light) {
+  select {
+    color-scheme: light;
+  }
 }
 
 input::placeholder {
