@@ -8,6 +8,7 @@ import {
   mockAccount,
   mockSession,
   oidcProvider,
+  setMockPermissions,
   setMockProviders,
   signInMockSession,
 } from "../mocks/handlers.js";
@@ -36,6 +37,60 @@ it("renders the home page with the server version from the API", async () => {
     screen.getByRole("heading", { name: "Requests", level: 2 }),
   ).toBeVisible();
   expect(document.title).toBe("Home | Bloom");
+});
+
+it("shows the dashboard to a signed-in administrator", async () => {
+  signInMockSession();
+  renderApp();
+
+  expect(
+    await screen.findByRole("heading", { name: "Playing now", level: 2 }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "Trending this week", level: 2 }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "My requests", level: 2 }),
+  ).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "alice" })).toBeVisible();
+  // The mock trending row lists Heat more than once.
+  const trending = await screen.findAllByRole("link", {
+    name: "Heat (1995) Movie",
+  });
+  expect(trending[0]).toHaveAttribute("href", "/requests/movies/949");
+  expect(
+    await screen.findByRole("link", { name: "Inception (2010)" }),
+  ).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open playback" })).toHaveAttribute(
+    "href",
+    "/admin/playback",
+  );
+  expect(
+    screen.queryByRole("heading", { name: "Users & invites", level: 2 }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows a viewer only the panels their permissions allow", async () => {
+  setMockPermissions(["stats.read.own"]);
+  signInMockSession();
+  renderApp();
+
+  expect(
+    await screen.findByRole("heading", { name: "Bloom", level: 1 }),
+  ).toBeVisible();
+  await screen.findByText(/Version 0\.1\.0-dev/);
+  expect(
+    screen.queryByRole("heading", { name: "Playing now", level: 2 }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Trending this week", level: 2 }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "My requests", level: 2 }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: "Open playback" }),
+  ).not.toBeInTheDocument();
 });
 
 it("navigates to the lazy about route and updates the page title", async () => {

@@ -1,5 +1,5 @@
 import { expect, it } from "@jest/globals";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import {
@@ -222,21 +222,24 @@ it.each([
     const { queryClient } = renderApp();
     await screen.findByText(visibleText);
 
+    // The home page's own panels retry their own requests; the session
+    // controls live in the top bar.
+    const bar = within(screen.getByRole("banner"));
     mode = "failing";
     await queryClient.refetchQueries({ queryKey: authKeys.session() });
-    await screen.findByRole("button", { name: "Retry" });
+    await bar.findByRole("button", { name: "Retry" });
 
     mode = "held";
-    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await user.click(bar.getByRole("button", { name: "Retry" }));
 
     expect(
-      await screen.findByRole("button", { name: "Retrying…" }),
+      await bar.findByRole("button", { name: "Retrying…" }),
     ).toBeDisabled();
-    expect(screen.getByText("Checking sign-in again.")).toHaveRole("status");
+    expect(bar.getByText("Checking sign-in again.")).toHaveRole("status");
     expect(screen.getByText(visibleText)).toBeVisible();
     gate.open();
     await waitFor(() => {
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(bar.queryByRole("alert")).not.toBeInTheDocument();
     });
   },
 );

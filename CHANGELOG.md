@@ -11,6 +11,16 @@ contracts) gets an entry here.
 
 ### Changed
 
+- The web app's look: layered translucent panels over a lit background
+  instead of bordered boxes, a gradient accent on the active navigation item
+  and primary buttons, larger type, full-width pages, posters that lift on
+  hover, cleaner tables and forms, and a branded sign-in page. Every page
+  keeps its structure, names, and keyboard behaviour; motion follows the
+  system's reduced-motion setting.
+- The signed-in home page is a dashboard: what is playing now, what is
+  trending this week, the account's own requests, and links into each area
+  the account may use. Signed out, it still introduces the three areas.
+- The administration index shows each section as a tile with an icon.
 - Browser sessions now last 30 days and end after 7 days without a request,
   up from 24 hours and 30 minutes. Sessions are database rows, so they
   survive restarts either way; `BLOOM_SESSION_LIFETIME` and
