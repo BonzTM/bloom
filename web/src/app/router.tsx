@@ -29,6 +29,8 @@ const LazyWatchRoute = lazy(() => import("../routes/watch-route.js"));
 const LazyStatisticsRoute = lazy(() => import("../routes/statistics-route.js"));
 const LazyMyStatsRoute = lazy(() => import("../routes/my-stats-route.js"));
 const LazyUserStatsRoute = lazy(() => import("../routes/user-stats-route.js"));
+const LazyActivityRoute = lazy(() => import("../routes/activity-route.js"));
+const LazyExclusionsRoute = lazy(() => import("../routes/exclusions-route.js"));
 const LazyRequestsAdminRoute = lazy(
   () => import("../routes/requests-admin-route.js"),
 );
@@ -229,6 +231,26 @@ const routes: RouteObject[] = [
               <RequirePermission anyOf={[permissions.statsReadAll]}>
                 <LazyPage loading="Loading statistics…">
                   <LazyStatisticsRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "activity",
+            element: (
+              <RequirePermission anyOf={[permissions.statsReadAll]}>
+                <LazyPage loading="Loading activity…">
+                  <LazyActivityRoute />
+                </LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "media-servers/:serverId/exclusions",
+            element: (
+              <RequirePermission anyOf={[permissions.adminSettings]}>
+                <LazyPage loading="Loading exclusions…">
+                  <LazyExclusionsRoute />
                 </LazyPage>
               </RequirePermission>
             ),

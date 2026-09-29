@@ -1,6 +1,7 @@
 # Bloom — Product Requirements (Intake)
 
-Status: draft, captured 2026-09-21 from the owner's stated intent. This file is the
+Status: the original intake, captured 2026-09-21 from the owner's stated intent
+and kept as a record; the README and the ADRs describe the shipped system. This file is the
 "WHAT". The "HOW" comes from the coding handbook (`$HOME/git/coding-handbook`,
 `golang/AGENTS.md` and `typescript/AGENTS.md`). Research that backs each area lives
 in [research/](research/).
@@ -52,7 +53,7 @@ Answers to the three bootstrap questions (owner, 2026-09-21):
 > OIDC is pretty important feature to me, so we will build the app with support
 > for sure.
 
-The owner accepted ADRs 0001 through 0006 on 2026-09-22.
+The owner accepted ADRs 0001 through 0007 on 2026-09-22 and 0008 through 0010 afterwards; see [Decisions recorded](#decisions-recorded).
 
 ## Functional areas
 
@@ -142,7 +143,7 @@ test-doubles rule. Detail per seam: [research/media-server-apis.md](research/med
 - Bloom **does not replace Jellyfin** or any media server. It manages and observes
   them through their APIs.
 
-## Decisions recorded (0001-0006 accepted 2026-09-22; 0007 accepted 2026-09-22)
+## Decisions recorded
 
 | ADR | Decision |
 |---|---|
@@ -153,6 +154,9 @@ test-doubles rule. Detail per seam: [research/media-server-apis.md](research/med
 | [0005](../decisions/0005-playback-collection-strategy.md) | Sessions poller as baseline, push sources layered on top |
 | [0006](../decisions/0006-auth-and-authorization-model.md) | Pluggable identity providers, server-side sessions, permission RBAC |
 | [0007](../decisions/0007-data-migrations-in-go.md) | Schema stays in per-engine SQL; Go-only data transformations run as goose Go migrations |
+| [0008](../decisions/0008-requests-and-metadata.md) | Requests through pluggable metadata providers, request profiles, and download managers |
+| [0009](../decisions/0009-notifications.md) | Notifications through pluggable channels fed by domain events |
+| [0010](../decisions/0010-history-import-and-jellystat-parity.md) | Import playback history and close the remaining Jellystat gaps |
 
 ## Research digest: what the evidence says v1 must get right
 

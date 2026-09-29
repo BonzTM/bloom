@@ -9,7 +9,33 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
+### Changed
+
+- The web app's look: layered translucent panels over a lit background
+  instead of bordered boxes, a gradient accent on the active navigation item
+  and primary buttons, larger type, full-width pages, posters that lift on
+  hover, cleaner tables and forms, and a branded sign-in page. Every page
+  keeps its structure, names, and keyboard behaviour; motion follows the
+  system's reduced-motion setting.
+- The signed-in home page is a dashboard: what is playing now, what is
+  trending this week, the account's own requests, and links into each area
+  the account may use. Signed out, it still introduces the three areas.
+- The administration index shows each section as a tile with an icon.
+- Browser sessions now last 30 days and end after 7 days without a request,
+  up from 24 hours and 30 minutes. Sessions are database rows, so they
+  survive restarts either way; `BLOOM_SESSION_LIFETIME` and
+  `BLOOM_SESSION_IDLE_TIMEOUT` still override the defaults.
+
 ### Added
+
+- An Activity page for administrators with `stats.read.all`: every watch
+  across servers and people, newest first, filtered by title, server,
+  delivery, source, and day, with each person linked to their statistics.
+- A timeline on each person's statistics page that folds repeat plays of a
+  title within a chosen gap into one sitting.
+- An Exclusions page per media server, reached from the media servers table,
+  where an administrator with `admin.settings` chooses the people and
+  libraries Bloom leaves out.
 
 - An Accounts page for administrators with `users.manage`: every account
   searchable by username, with its roles and where each came from, how it
@@ -27,8 +53,7 @@ contracts) gets an entry here.
   deleting existing rows.
 - SQLite/PostgreSQL migration `00027_activity_exclusions` adds the exclusion
   settings table, the per-user timeline keyset index, and the import job's
-  unresolved-library counter. Migration number `00026` remains reserved for
-  watch import-origin provenance.
+  unresolved-library counter.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

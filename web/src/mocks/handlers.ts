@@ -12,6 +12,7 @@ import {
   registerMediaServerRequestSchema,
   type MediaServer,
   type RegisterMediaServerRequest,
+  replaceExclusionsRequestSchema,
 } from "../features/media-servers/api/media-servers-schemas.js";
 import {
   acceptInviteRequestSchema,
@@ -25,6 +26,7 @@ import type {
   PlaybackPosition,
   StreamDetails,
   Watch,
+  TimelineEntry,
 } from "../features/playback/api/playback-schemas.js";
 import {
   registerDownloadManagerRequestSchema,
@@ -174,6 +176,7 @@ export function resetMockSession(): void {
   signedIn = false;
   granted = allPermissions;
   providers = [localProvider];
+  resetMockExclusions();
 }
 
 export function setMockPermissions(next: readonly KnownPermission[]): void {
@@ -811,7 +814,11 @@ function watch(patch: Partial<Watch> & Pick<Watch, "id">): Watch {
     item_id: "i-1",
     item_name: "Pilot",
     item_type: "Episode",
+    series_id: "s-fringe",
     series_name: "Fringe",
+    library_id: "lib-shows",
+    library_name: "Shows",
+    source: "poll",
     season_number: 1,
     episode_number: 1,
     position_ms: 754_000,
@@ -961,6 +968,122 @@ function playbackDenial() {
     return envelope(403, "forbidden", "missing permission stats.read.all");
   }
   return undefined;
+}
+
+// A page over a fixed list. The server's cursor encodes the last row's sort
+// keys; the mock's is an offset, like every other mock page here, which is
+// equivalent over a fixed list.
+function keysetPage(url: URL, items: readonly unknown[], extra: object = {}) {
+  const rawLimit = url.searchParams.get("limit");
+  const limit = rawLimit === null ? 50 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return envelope(422, "validation_failed", "invalid limit");
+  }
+  const cursor = url.searchParams.get("cursor");
+  const offset = cursor === null ? 0 : Number(cursor.replace("offset:", ""));
+  if (!Number.isInteger(offset) || offset < 0) {
+    return envelope(422, "validation_failed", "invalid cursor");
+  }
+  const next = offset + limit;
+  return HttpResponse.json({
+    items: items.slice(offset, next),
+    limit,
+    next_cursor: next < items.length ? `offset:${String(next)}` : "",
+    ...extra,
+  });
+}
+
+// Activity: open and finished watches together, filtered the way the
+// server filters them; the mock answers only the filters the page sends.
+function playbackActivity(url: URL) {
+  const params = url.searchParams;
+  const serverId = params.get("media_server_id");
+  if (serverId !== null && !z.uuid().safeParse(serverId).success) {
+    return envelope(422, "validation_failed", "invalid media_server_id");
+  }
+  const q = params.get("q")?.toLowerCase();
+  const method = params.get("play_method");
+  const source = params.get("source");
+  const after = params.get("started_after");
+  const before = params.get("started_before");
+  const items = [...mockNowPlaying, ...mockPlaybackHistory]
+    .filter(
+      (w) =>
+        (serverId === null || w.media_server_id === serverId) &&
+        (q === undefined ||
+          w.item_name.toLowerCase().includes(q) ||
+          w.series_name.toLowerCase().includes(q)) &&
+        (method === null || w.play_method === method) &&
+        (source === null || w.source === source) &&
+        (after === null || w.started_at >= after) &&
+        (before === null || w.started_at < before),
+    )
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+  return keysetPage(url, items);
+}
+
+// Timeline: one person's history folded by item; the gap is echoed back.
+function playbackTimeline(url: URL, serverId: string, userId: string) {
+  const gap = Number(url.searchParams.get("gap_seconds") ?? "21600");
+  if (!Number.isInteger(gap) || gap < 1 || gap > 604_800) {
+    return envelope(422, "validation_failed", "invalid gap_seconds");
+  }
+  // Open and finished watches together, newest first; consecutive plays of
+  // the same item closer than the gap fold into one sitting, as the server
+  // folds them.
+  const own = [...mockNowPlaying, ...mockPlaybackHistory]
+    .filter((w) => w.media_server_id === serverId && w.media_user_id === userId)
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+  const items: TimelineEntry[] = [];
+  for (const w of own) {
+    // The server folds on consecutive start times, newest first.
+    const last = items.at(-1);
+    if (
+      last?.item_id === w.item_id &&
+      Date.parse(last.first_started_at) - Date.parse(w.started_at) <= gap * 1000
+    ) {
+      last.first_started_at = w.started_at;
+      last.play_count += 1;
+      last.active_seconds += w.active_seconds;
+      continue;
+    }
+    items.push({
+      media_server_id: w.media_server_id,
+      media_user_id: w.media_user_id,
+      username: w.username,
+      item_id: w.item_id,
+      item_name: w.item_name,
+      item_type: w.item_type,
+      series_id: w.series_id,
+      series_name: w.series_name,
+      library_id: w.library_id,
+      library_name: w.library_name,
+      first_started_at: w.started_at,
+      ...(w.ended_at === undefined ? {} : { last_ended_at: w.ended_at }),
+      play_count: 1,
+      active_seconds: w.active_seconds,
+    });
+  }
+  return keysetPage(url, items, { gap_seconds: gap });
+}
+
+// Exclusions: one working copy per server, empty until saved.
+let exclusionsByServer = new Map<
+  string,
+  { excluded_media_user_ids: string[]; excluded_library_ids: string[] }
+>();
+
+export function resetMockExclusions(): void {
+  exclusionsByServer = new Map();
+}
+
+function exclusionsFor(serverId: string) {
+  return (
+    exclusionsByServer.get(serverId) ?? {
+      excluded_media_user_ids: [],
+      excluded_library_ids: [],
+    }
+  );
 }
 
 function playbackHistory(url: URL) {
@@ -3120,7 +3243,8 @@ const catalogHandlers = [
   http.get(
     "*/api/v1/media-servers/:id/libraries",
     jsonApi(({ params }) => {
-      const denied = catalogDenial();
+      // The server guards this route with admin.settings.
+      const denied = mediaServerDenial();
       if (denied !== undefined) {
         return denied;
       }
@@ -3466,6 +3590,66 @@ export const handlers = [
     jsonApi(
       () => playbackDenial() ?? HttpResponse.json({ items: mockNowPlaying }),
     ),
+  ),
+  http.get(
+    "*/api/v1/activity",
+    jsonApi(
+      ({ request }) =>
+        playbackDenial() ?? playbackActivity(new URL(request.url)),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/users/:userId/timeline",
+    jsonApi(
+      ({ request, params }) =>
+        playbackDenial() ??
+        playbackTimeline(
+          new URL(request.url),
+          String(params.id),
+          decodeURIComponent(String(params.userId)),
+        ),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/exclusions",
+    jsonApi(({ params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const serverId = String(params.id);
+      if (!mediaServers.some((server) => server.id === serverId)) {
+        return envelope(404, "not_found", "media server not found");
+      }
+      return HttpResponse.json({
+        media_server_id: serverId,
+        ...exclusionsFor(serverId),
+      });
+    }),
+  ),
+  http.put(
+    "*/api/v1/media-servers/:id/exclusions",
+    jsonApi(async ({ request, params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (!sendsJson(request)) {
+        return envelope(415, "unsupported_media_type", "expected JSON");
+      }
+      const serverId = String(params.id);
+      if (!mediaServers.some((server) => server.id === serverId)) {
+        return envelope(404, "not_found", "media server not found");
+      }
+      const body = replaceExclusionsRequestSchema.safeParse(
+        await request.json(),
+      );
+      if (!body.success) {
+        return envelope(422, "validation_failed", "invalid exclusions");
+      }
+      exclusionsByServer.set(serverId, body.data);
+      return HttpResponse.json({ media_server_id: serverId, ...body.data });
+    }),
   ),
   http.get(
     "*/api/v1/playback/history",

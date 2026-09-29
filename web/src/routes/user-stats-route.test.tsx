@@ -29,6 +29,24 @@ it("shows one person's totals, charts, and latest watches", async () => {
   ).toHaveAttribute("href", "/admin/statistics");
 });
 
+it("folds one person's plays into a timeline with a chosen gap", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp(ALICE);
+  const sittings = await screen.findByRole("list", {
+    name: "Sittings, newest first",
+  });
+  expect(within(sittings).getAllByRole("listitem").length).toBeGreaterThan(0);
+  expect(within(sittings).getAllByText(/plays?/)[0]).toBeVisible();
+  await user.selectOptions(
+    screen.getByLabelText("Fold plays closer than"),
+    "86400",
+  );
+  expect(
+    await screen.findByRole("list", { name: "Sittings, newest first" }),
+  ).toBeVisible();
+});
+
 it("reaches a person from the statistics page", async () => {
   const user = userEvent.setup();
   signInMockSession();

@@ -38,7 +38,7 @@ Follow the handbook's `foundations/git-workflow.md`:
 - Trunk-based: branch off `main`, keep the branch short-lived, delete it after merge. `main` is protected.
 - Branch names use `feature/`, `fix/`, `chore/`, or `bug/` prefixes.
 - Keep PRs small and single-purpose (guideline: under ~400 lines of human-authored diff). Split refactors from behavior changes.
-- Write the PR title as a [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) subject (`type(scope): description`, imperative mood) because we **squash-merge** and that title becomes the commit on `main`.
+- Write the PR title as a [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) subject (`type(scope): description`, imperative mood) because the repository **squash-merges** and that title becomes the commit on `main`.
 - Put the WHY in the commit/PR body. Link the issue or ADR for architectural changes.
 - Commits and PRs are attributed to the author only; no tool trailers.
 - A PR merges only after CI `make verify` and the `integration` job are green.

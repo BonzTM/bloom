@@ -7,7 +7,8 @@ which versions get fixes and how to report a problem privately.
 ## Supported Versions
 
 Bloom is pre-release. Until the first tagged release, only the latest commit on
-`main` receives security fixes. Once releases begin, this table will list them.
+`main` receives security fixes. The table lists each tagged release and whether
+it is supported.
 
 | Version | Supported |
 |---|---|
@@ -36,8 +37,9 @@ Include what you can of the following. Partial reports are still welcome.
 - **Triage:** a severity assessment within 7 business days, with updates at
   least weekly until it is resolved.
 - **Coordinated disclosure:** please keep the report private until a fix ships
-  or 90 days have passed, whichever comes first. We will agree a disclosure date
-  with you and publish a GitHub Security Advisory when the fix is released.
+  or 90 days have passed, whichever comes first. The maintainer agrees a
+  disclosure date with you and publishes a GitHub Security Advisory when the fix
+  is released.
 - **Credit:** with your consent, reporters are credited in the advisory and the
   release notes. There is no paid bounty program.
 
