@@ -8,25 +8,32 @@ import {
 import {
   watchIdSchema,
   type PlaybackPosition,
+  type Watch,
 } from "../features/playback/api/playback-schemas.js";
+import { ItemImage } from "../features/playback/components/item-image.js";
 import {
+  formatActiveTime,
   formatPosition,
+  itemTitle,
   playMethodLabel,
   streamSummary,
   transcodeReasonsLabel,
+  whereLabel,
 } from "../features/playback/components/watch-format.js";
 import { watchTimeline } from "../features/playback/components/watch-timeline.js";
-import { useWatchPositions } from "../features/playback/hooks/playback-queries.js";
+import {
+  useKnownWatch,
+  useWatchPositions,
+} from "../features/playback/hooks/playback-queries.js";
 import { accessDenial, ApiError } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
 import { NotFoundRoute } from "./not-found-route.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
 
-// One watch's sample series: how far it had got, whether it was paused, and
-// what was being delivered at each moment, so a mid-play change from direct
-// play to a transcode is visible as two rows.
+// One watch: what was watched, by whom, how it was delivered, and what
+// happened along the way. The watch itself comes from the list the person
+// arrived from; the sample series is read on its own.
 export default function WatchRoute(): ReactNode {
-  usePageTitle(pageTitle("Watch"));
   const { id = "" } = useParams();
   const session = useSession();
   const accountId = session.data?.account.id;
@@ -43,7 +50,9 @@ function WatchPage({
   accountId,
   id,
 }: Readonly<{ accountId: string; id: string }>): ReactNode {
+  const watch = useKnownWatch(accountId, id);
   const positions = useWatchPositions(accountId, id);
+  usePageTitle(pageTitle(watch === undefined ? "Watch" : itemTitle(watch)));
   const denial = accessDenial(positions.error);
   useSessionRecheck(denial !== undefined, positions.errorUpdatedAt);
   if (denial === "forbidden") {
@@ -57,48 +66,120 @@ function WatchPage({
       <p>
         <Link to="/admin/playback">Back to playback</Link>
       </p>
-      <h1>Watch</h1>
-      <p className="page-intro">
-        What happened during this watch: when it started, paused, resumed,
-        seeked, or changed how it was delivered. The raw samples Bloom polled
-        are below for anyone who needs them.
-      </p>
-      {positions.status === "pending" ? (
-        <AsyncStatus>Loading the watch…</AsyncStatus>
-      ) : positions.status === "error" ? (
-        denial === "unauthenticated" ? (
-          <AsyncStatus kind="alert">
-            The watch could not be loaded because your sign-in could not be
-            confirmed.
-          </AsyncStatus>
-        ) : (
-          <>
-            <AsyncStatus kind="alert">
-              The watch could not be loaded.
-            </AsyncStatus>
-            <button
-              type="button"
-              onClick={() => {
-                void positions.refetch();
-              }}
-            >
-              Retry
-            </button>
-          </>
-        )
+      {watch === undefined ? (
+        <h1>Watch</h1>
       ) : (
-        <>
-          <Timeline items={positions.data.items} />
-          <details className="samples-details">
-            <summary>
-              All samples ({String(positions.data.items.length)})
-            </summary>
-            <SeriesTable items={positions.data.items} />
-          </details>
-        </>
+        <WatchHero watch={watch} latest={positions.data?.items[0]} />
       )}
+      <section aria-labelledby="watch-timeline-heading" className="card">
+        <h2 id="watch-timeline-heading">What happened</h2>
+        <p className="section-intro">
+          When it started, paused, resumed, seeked, or changed how it was
+          delivered.
+        </p>
+        {positions.status === "pending" ? (
+          <AsyncStatus>Loading the watch…</AsyncStatus>
+        ) : positions.status === "error" ? (
+          denial === "unauthenticated" ? (
+            <AsyncStatus kind="alert">
+              The watch could not be loaded because your sign-in could not be
+              confirmed.
+            </AsyncStatus>
+          ) : (
+            <>
+              <AsyncStatus kind="alert">
+                The watch could not be loaded.
+              </AsyncStatus>
+              <button
+                type="button"
+                onClick={() => {
+                  void positions.refetch();
+                }}
+              >
+                Retry
+              </button>
+            </>
+          )
+        ) : (
+          <Timeline items={positions.data.items} />
+        )}
+      </section>
     </>
   );
+}
+
+// The watch as a card: artwork, title, who and where, and the numbers that
+// matter. The latest sample carries the stream in play right now.
+function WatchHero({
+  watch,
+  latest,
+}: Readonly<{
+  watch: Watch;
+  latest: PlaybackPosition | undefined;
+}>): ReactNode {
+  const stream = streamSummary(latest?.stream ?? watch.stream);
+  const reasons = transcodeReasonsLabel(latest?.stream ?? watch.stream);
+  const episode = watch.item_type === "Episode";
+  const facts: readonly (readonly [string, string])[] = [
+    ["Watched", formatActiveTime(watch.active_seconds)],
+    ["Position", positionLabel(watch)],
+    ["Delivery", playMethodLabel(latest?.play_method ?? watch.play_method)],
+    ["Stream", stream === "" ? "Unknown" : stream],
+    ["Where", whereLabel(watch)],
+    ["Server", watch.media_server_name],
+  ];
+  return (
+    <header className={episode ? "watch-hero watch-hero-wide" : "watch-hero"}>
+      <div className="watch-hero-art">
+        <ItemImage
+          mediaServerId={watch.media_server_id}
+          itemId={watch.item_id}
+          title={watch.series_name === "" ? watch.item_name : watch.series_name}
+          shape={episode ? "wide" : "poster"}
+        />
+      </div>
+      <div className="watch-hero-body">
+        <p className="watch-hero-person">
+          <span className="avatar avatar-small" aria-hidden="true">
+            {(watch.username || watch.media_user_id).slice(0, 1).toUpperCase()}
+          </span>
+          {watch.username || watch.media_user_id}
+        </p>
+        <h1>{itemTitle(watch)}</h1>
+        <p className="watch-hero-when">
+          {watch.ended_at === undefined ? (
+            <span className="badge badge-success">Playing</span>
+          ) : (
+            <span className="badge badge-neutral">Finished</span>
+          )}{" "}
+          started{" "}
+          <time dateTime={watch.started_at}>
+            {watch.started_at.slice(0, 16).replace("T", " ")}
+          </time>
+          {watch.library_name === "" ? "" : ` · ${watch.library_name}`}
+        </p>
+        <dl className="facts watch-facts">
+          {facts.map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {reasons === "" ? null : (
+          <p className="row-detail">Transcoding because: {reasons}</p>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function positionLabel(watch: Watch): string {
+  const position = formatPosition(watch.position_ms);
+  if (watch.runtime_ms === null || watch.runtime_ms <= 0) {
+    return position;
+  }
+  return `${position} of ${formatPosition(watch.runtime_ms)}`;
 }
 
 // The readable version of the sample series: one row per moment that
@@ -126,51 +207,5 @@ function Timeline({
         </li>
       ))}
     </ol>
-  );
-}
-
-function SeriesTable({
-  items,
-}: Readonly<{ items: readonly PlaybackPosition[] }>): ReactNode {
-  if (items.length === 0) {
-    return <p>No samples have been recorded for this watch.</p>;
-  }
-  return (
-    <div
-      className="table-scroll"
-      role="region"
-      aria-label="Watch samples table"
-      tabIndex={0}
-    >
-      <table className="playback-table">
-        <caption>Samples, newest first</caption>
-        <thead>
-          <tr>
-            <th scope="col">Observed</th>
-            <th scope="col">Position</th>
-            <th scope="col">State</th>
-            <th scope="col">Method</th>
-            <th scope="col">Stream</th>
-            <th scope="col">Transcode reasons</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((sample) => (
-            <tr key={sample.observed_at}>
-              <th scope="row">
-                <time dateTime={sample.observed_at}>
-                  {sample.observed_at.slice(0, 19).replace("T", " ")}
-                </time>
-              </th>
-              <td>{formatPosition(sample.position_ms)}</td>
-              <td>{sample.paused ? "Paused" : "Playing"}</td>
-              <td>{playMethodLabel(sample.play_method)}</td>
-              <td>{streamSummary(sample.stream)}</td>
-              <td>{transcodeReasonsLabel(sample.stream)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }

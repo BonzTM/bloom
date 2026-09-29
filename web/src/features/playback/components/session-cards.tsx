@@ -7,14 +7,14 @@ import {
   formatPosition,
   itemTitle,
   playMethodLabel,
-  streamSummary,
   watchPath,
   whereLabel,
 } from "./watch-format.js";
 
-// One card per active session: artwork, who, what, where, how far along.
-// Each card is an article named by the person, so the list reads as
-// "alice, bob" and each card's details follow.
+// One card per active session: artwork, who, what, how far along, and one
+// line of where and how. Each card is an article named by the person, so
+// the list reads as "alice, bob" and each card's details follow. The stream
+// details live on the watch's own page.
 export function SessionCards({
   watches,
   label,
@@ -33,37 +33,48 @@ export function SessionCards({
 function SessionCard({ watch }: Readonly<{ watch: Watch }>): ReactNode {
   const id = useId();
   const title = itemTitle(watch);
-  const stream = streamSummary(watch.stream);
+  const person = watch.username || watch.media_user_id;
+  const episode = watch.item_type === "Episode";
   return (
-    <article className="session-card" aria-labelledby={id}>
-      <ItemImage
-        mediaServerId={watch.media_server_id}
-        itemId={watch.item_id}
-        title={watch.series_name === "" ? watch.item_name : watch.series_name}
-        shape={watch.item_type === "Episode" ? "wide" : "poster"}
-      />
+    <article
+      className={episode ? "session-card session-card-wide" : "session-card"}
+      aria-labelledby={id}
+    >
+      <Link
+        to={watchPath(watch.id)}
+        className="session-card-art"
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        <ItemImage
+          mediaServerId={watch.media_server_id}
+          itemId={watch.item_id}
+          title={watch.series_name === "" ? watch.item_name : watch.series_name}
+          shape={episode ? "wide" : "poster"}
+        />
+      </Link>
       <div className="session-card-body">
         <h3 id={id} className="session-card-user">
-          {watch.username || watch.media_user_id}
+          <span className="avatar avatar-small" aria-hidden="true">
+            {person.slice(0, 1).toUpperCase()}
+          </span>
+          {person}
         </h3>
         <p className="session-card-title">
-          {title}
-          {watch.item_type === "" ? null : (
-            <span className="item-type"> {watch.item_type}</span>
-          )}
-        </p>
-        <p className="session-card-meta">
-          {whereLabel(watch)} · {watch.media_server_name}
+          <Link to={watchPath(watch.id)}>{title}</Link>
         </p>
         <Progress watch={watch} />
         <p className="session-card-meta">
+          {whereLabel(watch)} · {watch.media_server_name} ·{" "}
           {playMethodLabel(watch.play_method)} · watched{" "}
           {formatActiveTime(watch.active_seconds)}
-          {stream === "" ? null : ` · ${stream}`}
         </p>
         <Link to={watchPath(watch.id)} className="session-card-link">
           Details
-          <span className="visually-hidden"> of {title}</span>
+          <span className="visually-hidden">
+            {" "}
+            of {title} by {person}
+          </span>
         </Link>
       </div>
     </article>
@@ -75,13 +86,16 @@ function SessionCard({ watch }: Readonly<{ watch: Watch }>): ReactNode {
 function Progress({ watch }: Readonly<{ watch: Watch }>): ReactNode {
   const position = formatPosition(watch.position_ms);
   const paused = watch.paused ? (
-    <span className="badge badge-neutral"> paused</span>
-  ) : null;
+    <span className="badge badge-neutral">Paused</span>
+  ) : (
+    <span className="badge badge-success">Playing</span>
+  );
   if (watch.runtime_ms === null || watch.runtime_ms <= 0) {
     return (
       <p className="session-card-position">
-        <time>{position}</time>
-        {paused}
+        <span>
+          <time>{position}</time> {paused}
+        </span>
       </p>
     );
   }
@@ -96,8 +110,7 @@ function Progress({ watch }: Readonly<{ watch: Watch }>): ReactNode {
         aria-valuetext={`${position} of ${runtime}`}
       />
       <span>
-        <time>{position}</time> of <time>{runtime}</time>
-        {paused}
+        <time>{position}</time> of <time>{runtime}</time> {paused}
       </span>
     </p>
   );
