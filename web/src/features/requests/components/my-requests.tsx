@@ -17,10 +17,16 @@ import { titlePath } from "./title-grid.js";
 type MyRequestsProps = Readonly<{
   query: ReturnType<typeof useRequests>;
   accountId: string;
+  // Title pages need requests.create; without it the rows carry no links.
+  linkTitles?: boolean;
 }>;
 
 // The signed-in account's own requests, newest first, as a list of cards.
-export function MyRequests({ query, accountId }: MyRequestsProps): ReactNode {
+export function MyRequests({
+  query,
+  accountId,
+  linkTitles = true,
+}: MyRequestsProps): ReactNode {
   if (query.status === "pending") {
     return <AsyncStatus>Loading your requests…</AsyncStatus>;
   }
@@ -47,6 +53,7 @@ export function MyRequests({ query, accountId }: MyRequestsProps): ReactNode {
               key={request.id}
               request={request}
               accountId={accountId}
+              linkTitle={linkTitles}
             />
           ))}
         </ul>
@@ -65,20 +72,36 @@ export function MyRequests({ query, accountId }: MyRequestsProps): ReactNode {
 function RequestCard({
   request,
   accountId,
-}: Readonly<{ request: MediaRequest; accountId: string }>): ReactNode {
+  linkTitle,
+}: Readonly<{
+  request: MediaRequest;
+  accountId: string;
+  linkTitle: boolean;
+}>): ReactNode {
   const seasons = seasonsLabel(request);
+  const poster = (
+    <Poster
+      posterPath={request.poster_path}
+      title={request.title}
+      size="w342"
+    />
+  );
   return (
     <li className="request-card">
-      <Link to={titlePath(request)} className="request-card-poster">
-        <Poster
-          posterPath={request.poster_path}
-          title={request.title}
-          size="w342"
-        />
-      </Link>
+      {linkTitle ? (
+        <Link to={titlePath(request)} className="request-card-poster">
+          {poster}
+        </Link>
+      ) : (
+        <span className="request-card-poster">{poster}</span>
+      )}
       <div className="request-card-body">
         <h3>
-          <Link to={titlePath(request)}>{titleWithYear(request)}</Link>
+          {linkTitle ? (
+            <Link to={titlePath(request)}>{titleWithYear(request)}</Link>
+          ) : (
+            titleWithYear(request)
+          )}
         </h3>
         {seasons === "" ? null : <p className="row-detail">{seasons}</p>}
         <p>
