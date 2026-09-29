@@ -6,9 +6,13 @@ import {
   useSession,
   useSessionRecheck,
 } from "../features/auth/hooks/auth-queries.js";
-import type { KnownPermission } from "../features/auth/api/auth-schemas.js";
+import type {
+  KnownPermission,
+  Permission,
+} from "../features/auth/api/auth-schemas.js";
 import {
   ADMIN_PERMISSIONS,
+  hasPermission,
   permissions,
   REQUESTS_PERMISSIONS,
 } from "../features/auth/permissions.js";
@@ -37,7 +41,11 @@ export function HomeRoute(): ReactNode {
       {accountId === undefined ? (
         <Landing />
       ) : (
-        <Dashboard key={accountId} accountId={accountId} />
+        <Dashboard
+          key={accountId}
+          accountId={accountId}
+          granted={session.data?.permissions ?? []}
+        />
       )}
       <VersionBadge />
     </>
@@ -115,7 +123,13 @@ function AreaCard({ area }: Readonly<{ area: Area }>): ReactNode {
   );
 }
 
-function Dashboard({ accountId }: Readonly<{ accountId: string }>): ReactNode {
+function Dashboard({
+  accountId,
+  granted,
+}: Readonly<{
+  accountId: string;
+  granted: readonly Permission[];
+}>): ReactNode {
   return (
     <div className="dashboard">
       <p className="page-intro">
@@ -129,7 +143,10 @@ function Dashboard({ accountId }: Readonly<{ accountId: string }>): ReactNode {
         <TrendingPanel accountId={accountId} />
       </PermissionGate>
       <PermissionGate anyOf={[permissions.requestsReadOwn]}>
-        <MyRequestsPanel accountId={accountId} />
+        <MyRequestsPanel
+          accountId={accountId}
+          canRequest={hasPermission(granted, permissions.requestsCreate)}
+        />
       </PermissionGate>
       <PermissionGate anyOf={[...ADMIN_PERMISSIONS, ...REQUESTS_PERMISSIONS]}>
         <QuickLinks />
@@ -182,7 +199,8 @@ function TrendingPanel({
 
 function MyRequestsPanel({
   accountId,
-}: Readonly<{ accountId: string }>): ReactNode {
+  canRequest,
+}: Readonly<{ accountId: string; canRequest: boolean }>): ReactNode {
   const query = useRequests(accountId, { requesterId: accountId });
   useSessionRecheck(
     accessDenial(query.error) !== undefined,
@@ -192,9 +210,9 @@ function MyRequestsPanel({
     <section aria-labelledby="home-requests-heading" className="card">
       <div className="section-head">
         <h2 id="home-requests-heading">My requests</h2>
-        <Link to="/requests">Request a title</Link>
+        {canRequest ? <Link to="/requests">Request a title</Link> : null}
       </div>
-      <MyRequests query={query} accountId={accountId} />
+      <MyRequests query={query} accountId={accountId} linkTitles={canRequest} />
     </section>
   );
 }

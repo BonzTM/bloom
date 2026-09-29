@@ -214,14 +214,13 @@ p {
 a {
   color: var(--link);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.18em;
-  transition: text-decoration-color var(--motion) ease;
+  transition: text-decoration-thickness var(--motion) ease;
 }
 
 a:hover {
-  text-decoration-color: currentColor;
+  text-decoration-thickness: 2px;
 }
 
 code {
@@ -399,7 +398,7 @@ main {
 .global-search {
   align-items: center;
   background: var(--surface-strong);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-pill);
   color: var(--text-muted);
   display: flex;
@@ -778,7 +777,7 @@ textarea {
 
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237b8394' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
   background-position: right 0.6rem center;
   background-repeat: no-repeat;
   padding-right: 2.2rem;

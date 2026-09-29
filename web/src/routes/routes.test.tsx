@@ -84,6 +84,16 @@ it("shows requests but not trending to an account that cannot request", async ()
   expect(
     screen.queryByRole("heading", { name: "Playing now", level: 2 }),
   ).not.toBeInTheDocument();
+  // Title pages need requests.create, so nothing here leads to one.
+  expect(
+    await screen.findByRole("heading", { name: "Inception (2010)", level: 3 }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "Inception (2010)" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: "Request a title" }),
+  ).not.toBeInTheDocument();
 });
 
 it("shows a viewer only the panels their permissions allow", async () => {

@@ -117,7 +117,11 @@ function DiscoverPage({
       {canReadOwn ? (
         <section aria-labelledby="my-requests-heading" className="card">
           <h2 id="my-requests-heading">My requests</h2>
-          <MyRequests query={mine} accountId={accountId} />
+          <MyRequests
+            query={mine}
+            accountId={accountId}
+            linkTitles={canSearch}
+          />
         </section>
       ) : null}
     </>
