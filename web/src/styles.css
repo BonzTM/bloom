@@ -1106,7 +1106,7 @@ button:disabled {
 .timeline-event {
   display: grid;
   gap: var(--space-1) var(--space-3);
-  grid-template-columns: 5rem 1fr;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
   position: relative;
 }
 
@@ -1125,6 +1125,7 @@ button:disabled {
 .timeline-time {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .timeline-detail {
