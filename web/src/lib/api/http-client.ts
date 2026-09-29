@@ -9,7 +9,14 @@ type RequestOptions = Readonly<{
   body?: unknown;
   headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
+  // A request that makes the server talk to another system (a registration
+  // probe, a channel test) may take longer than the default.
+  timeoutMs?: number;
 }>;
+
+// Long enough for a registration probe: the server makes a handful of calls
+// to the instance, each bounded on its side, before it answers.
+export const PROBE_TIMEOUT_MS = 60_000;
 
 export class ApiClient {
   readonly #baseUrl: URL;
@@ -66,7 +73,9 @@ export class ApiClient {
   }
 
   async #request(path: string, options: RequestOptions): Promise<Response> {
-    const timeoutSignal = AbortSignal.timeout(this.#timeoutMs);
+    const timeoutSignal = AbortSignal.timeout(
+      options.timeoutMs ?? this.#timeoutMs,
+    );
     const signal = combineSignals(options.signal, timeoutSignal);
     try {
       const requestInit: RequestInit = {

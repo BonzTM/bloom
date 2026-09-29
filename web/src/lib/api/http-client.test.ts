@@ -150,6 +150,27 @@ it("aborts a request that exceeds the client timeout", async () => {
   }
 });
 
+it("lets one request wait longer than the client default", async () => {
+  let release = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.use(
+    http.get("*/slow", async () => {
+      await held;
+      return HttpResponse.json({});
+    }),
+  );
+  const impatientClient = new ApiClient(new URL("http://localhost/"), 5);
+  const patient = impatientClient.requestJson("slow", z.object({}), {
+    timeoutMs: 5_000,
+  });
+  // Past the client default, the request is still waiting.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  release();
+  await expect(patient).resolves.toEqual({});
+});
+
 it("fails a request that no MSW handler covers", async () => {
   // MSW reports the unhandled request through console.error before failing it.
   jest.spyOn(console, "error").mockImplementation(() => undefined);

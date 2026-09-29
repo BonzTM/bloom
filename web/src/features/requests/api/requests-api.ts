@@ -1,4 +1,7 @@
-import type { ApiClient } from "../../../lib/api/http-client.js";
+import {
+  PROBE_TIMEOUT_MS,
+  type ApiClient,
+} from "../../../lib/api/http-client.js";
 import {
   downloadManagerOptionsSchema,
   downloadManagersCursorSchema,
@@ -133,6 +136,7 @@ export class RequestsApi {
       {
         method: "POST",
         body: registerDownloadManagerRequestSchema.parse(input),
+        timeoutMs: PROBE_TIMEOUT_MS,
       },
     );
   }
@@ -276,6 +280,7 @@ export class RequestsApi {
   setKey(input: MetadataKeyRequest): Promise<MetadataKeyPresence> {
     return this.#client.requestJson(KEY_PATH, metadataKeyPresenceSchema, {
       method: "PUT",
+      timeoutMs: PROBE_TIMEOUT_MS,
       body: metadataKeyRequestSchema.parse(input),
     });
   }

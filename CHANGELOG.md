@@ -39,6 +39,12 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Registering a media server or a download manager, testing a channel, or
+  storing the TMDB token no longer fails in the browser after ten seconds
+  while the server finishes the probe and stores the result anyway; these
+  requests wait up to a minute, a wait that still runs out is reported as
+  an unknown outcome, and the list is refreshed either way.
+
 - Registering a download manager through an address that a proxy or
   sign-on page fronts no longer reports a rejected API key; the probe
   recognises the HTML answer and says the address is not the instance.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@jest/globals";
-import { mapHttpError } from "../../../lib/api/errors.js";
+import { ApiError, mapHttpError } from "../../../lib/api/errors.js";
 import { describeRegisterError } from "./media-server-errors.js";
 
 function probeFailure(reason?: string) {
@@ -35,4 +35,10 @@ describe("describeRegisterError", () => {
       "The server could not be checked. Nothing was saved.",
     );
   });
+});
+
+it("reports a probe that outlives the browser's wait as an unknown outcome", () => {
+  expect(
+    describeRegisterError(new ApiError("aborted", "The request was cancelled")),
+  ).toMatch(/outcome is unknown/);
 });
