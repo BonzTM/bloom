@@ -115,18 +115,7 @@ CREATE TABLE title_availability_subscriptions (
 CREATE INDEX title_availability_subscriptions_title_idx
     ON title_availability_subscriptions (provider, provider_id, account_id);
 
-INSERT INTO role_permissions (role_id, permission) VALUES
-    ('00000000-0000-4000-8000-000000000001', 'notifications.manage.own'),
-    ('00000000-0000-4000-8000-000000000002', 'notifications.manage.own')
-ON CONFLICT DO NOTHING;
-INSERT INTO role_permissions (role_id, permission)
-SELECT role_id, 'notifications.manage.own'
-FROM role_permissions
-WHERE permission = 'requests.read.own'
-ON CONFLICT DO NOTHING;
-
 -- +goose Down
-DELETE FROM role_permissions WHERE permission = 'notifications.manage.own';
 DROP TABLE title_availability_subscriptions;
 DROP TABLE playback_notification_emissions;
 DROP TABLE account_notification_preferences;

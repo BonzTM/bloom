@@ -82,8 +82,9 @@ contracts) gets an entry here.
   `/api/v1/titles/{provider}/{provider_id}/subscription`, bounded to 500 per
   account and guarded by `notifications.manage.own`. Fulfilment now addresses
   the requester and deduplicated followers, and title detail responses expose
-  the caller's `subscribed` state. Migration 00028 grants the new permission to
-  `owner`, `member`, and every existing role that has `requests.read.own`.
+  the caller's `subscribed` state. This release derives the new permission for
+  every role that has `requests.read.own`; the stored grant ships one release
+  later with the `recipient_account_id` `NOT NULL` contract migration.
 - Durable `playback.session_started` notifications for newly collected
   watches, committed with the watch and deduplicated by a retained watch-ID
   emission marker across restarts and notification retention.
@@ -93,7 +94,8 @@ contracts) gets an entry here.
   markers. This release is the expand step: `recipient_account_id` remains
   nullable, with separate partial unique indexes for legacy unaddressed rows
   and addressed rows. One release later, the contract step must make the column
-  `NOT NULL` and drop the legacy partial index after older binaries are gone.
+  `NOT NULL`, drop the legacy partial index, and store the derived
+  `notifications.manage.own` grants after older binaries are gone.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

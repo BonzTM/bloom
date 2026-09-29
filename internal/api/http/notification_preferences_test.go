@@ -202,9 +202,6 @@ func preferenceContractValue(values []notificationPreferenceResponse) []any {
 func TestNotificationRoutingRoutesRequireOwnManagementPermission(t *testing.T) {
 	harness := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
-	harness.authorization.mu.Lock()
-	harness.authorization.permissions[notificationPreferenceAccountID] = nil
-	harness.authorization.mu.Unlock()
 	paths := map[string]bool{
 		"/api/v1/me/notification-preferences":                  true,
 		"/api/v1/titles/{provider}/{provider_id}/subscription": true,
@@ -216,6 +213,9 @@ func TestNotificationRoutingRoutesRequireOwnManagementPermission(t *testing.T) {
 		}
 		checked++
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			route.handler = func(_ *Server, w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}
 			handler, err := harness.server.routeHandler(route)
 			if err != nil {
 				t.Fatalf("routeHandler: %v", err)
@@ -225,6 +225,21 @@ func TestNotificationRoutingRoutesRequireOwnManagementPermission(t *testing.T) {
 			if missing.Code != http.StatusUnauthorized {
 				t.Errorf("%s missing session status = %d, want 401", route.method, missing.Code)
 			}
+			harness.authorization.mu.Lock()
+			harness.authorization.permissions[notificationPreferenceAccountID] = []core.Permission{
+				core.PermissionRequestsReadOwn,
+			}
+			harness.authorization.mu.Unlock()
+			allowedRequest := httptest.NewRequest(route.method, "https://bloom.test/api/v1/titles/tmdb/1/subscription", nil)
+			allowedRequest.AddCookie(cookie)
+			allowed := httptest.NewRecorder()
+			handler.ServeHTTP(allowed, allowedRequest)
+			if allowed.Code != http.StatusNoContent {
+				t.Errorf("%s requests.read.own status = %d, want 204", route.method, allowed.Code)
+			}
+			harness.authorization.mu.Lock()
+			harness.authorization.permissions[notificationPreferenceAccountID] = nil
+			harness.authorization.mu.Unlock()
 			request := httptest.NewRequest(route.method, "https://bloom.test/api/v1/titles/tmdb/1/subscription", nil)
 			request.AddCookie(cookie)
 			forbidden := httptest.NewRecorder()

@@ -114,15 +114,17 @@ cacheable catalog is available from `GET /api/v1/auth/permissions`.
 | `stats.read.all` | stats | Read all statistics. |
 | `admin.settings` | admin | Manage application settings. |
 | `admin.roles` | admin | Read and manage roles. |
-| `notifications.manage.own` | notifications | Manage the account's notification preferences and title subscriptions. |
+| `notifications.manage.own` | notifications | Manage the account's notification preferences and title subscriptions. Granted implicitly to every role with `requests.read.own` until the next release stores it. |
 
 The built-in `owner` role has every permission and cannot be edited or deleted.
-The built-in `member` role has `notifications.manage.own`,
-`requests.read.own`, `requests.create`, and `stats.read.own`. The role can
-manage its notification routing, read its own request and statistics data, and
-create requests. Accounts may hold multiple roles; their effective permission
-set is the union of those roles. Bloom reads that set from the database for
-each authenticated request. It does not cache authorization decisions.
+The built-in `member` role stores `requests.read.own`, `requests.create`, and
+`stats.read.own`; `requests.read.own` implicitly confers
+`notifications.manage.own` in this release. The role can manage its
+notification routing, read its own request and statistics data, and create
+requests. Accounts may hold multiple roles; their effective permission set is
+the union of those roles plus derived permissions. Bloom reads that set from
+the database for each authenticated request. It does not cache authorization
+decisions.
 
 `users.invite` grants invite administration and the least-privilege
 `GET /api/v1/invites/servers` selector. It does not grant media-server settings
@@ -928,6 +930,9 @@ partial legacy key preserves `(event_id, channel_id)` uniqueness for unaddressed
 rows, while addressed rows use the per-recipient key. The contract migration
 that makes `recipient_account_id` `NOT NULL` and drops the legacy partial index
 must ship one release later, after no older binary can write unaddressed rows.
+That contract migration also stores the `notifications.manage.own` grant for
+every role with `requests.read.own`; migration 00028 leaves those grant rows
+unstored so binaries from the preceding release can still load every role.
 Rolling migration 00028 down removes playback events and markers, keeps the
 lowest recipient account ID for each older event/channel delivery, and restores
 the pre-00028 event constraints.

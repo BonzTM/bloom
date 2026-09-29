@@ -32,6 +32,7 @@ export const knownPermissions = [
   "stats.read.all",
   "admin.settings",
   "admin.roles",
+  "notifications.manage.own",
 ] as const;
 
 export type KnownPermission = (typeof knownPermissions)[number];

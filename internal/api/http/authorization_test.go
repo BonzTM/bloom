@@ -177,6 +177,28 @@ func TestMeReturnsRolesAndEffectivePermissions(t *testing.T) {
 	}
 }
 
+func TestMeReportsDerivedNotificationPermission(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	accountID := "11111111-1111-4111-8111-111111111111"
+	h.authorization.mu.Lock()
+	h.authorization.permissions[accountID] = []core.Permission{core.PermissionRequestsReadOwn}
+	h.authorization.roleNames[accountID] = []string{"reader"}
+	h.authorization.mu.Unlock()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	recorder := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("me = %d %s", recorder.Code, recorder.Body.String())
+	}
+	var response currentAccountResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	want := []core.Permission{core.PermissionNotificationsManageOwn, core.PermissionRequestsReadOwn}
+	if !slices.Equal(response.Permissions, want) {
+		t.Fatalf("me permissions = %v, want %v", response.Permissions, want)
+	}
+}
+
 func TestMeReturnsOneCoherentAuthorizationState(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	accountID := "11111111-1111-4111-8111-111111111111"

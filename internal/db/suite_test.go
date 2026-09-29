@@ -175,7 +175,7 @@ func testNotificationPreferencesMigration(t *testing.T, pool *sql.DB, driver con
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("apply notification preferences migration: %v", err)
 	}
-	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, true)
+	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, false)
 	legacyDeliveryID := seedLegacyNotificationOutbox(t, pool, driver, eventID, channelID, at.Add(2*time.Second))
 	assertLegacyNotificationDelivery(t, pool, driver, channelID, legacyDeliveryID)
 	secondDeliveryID := mustID(t)
@@ -192,7 +192,7 @@ func testNotificationPreferencesMigration(t *testing.T, pool *sql.DB, driver con
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("re-apply notification preferences migration: %v", err)
 	}
-	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, true)
+	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, false)
 	assertRetainedNotificationDelivery(t, pool, eventID, channelID, wantID)
 	execTestSQL(t, pool, "DELETE FROM notification_events WHERE id=$1", eventID)
 	execTestSQL(t, pool, "DELETE FROM notification_channels WHERE id=$1", channelID)
@@ -1639,10 +1639,43 @@ func runAuthorizationEngineTests(
 	t.Run("built-in role authorization", func(t *testing.T) {
 		testBuiltInRoleAuthorization(t, store, adminStore, authorizer, roles)
 	})
+	t.Run("stored notification permission remains accepted", func(t *testing.T) {
+		testStoredNotificationPermission(t, pool, driver, store, authorizer)
+	})
 	t.Run("role foreign keys and cascades", func(t *testing.T) {
 		testRoleForeignKeysAndCascades(t, pool, driver, store)
 	})
 	t.Run("foreign key schema contract", func(t *testing.T) { testForeignKeySchema(t, pool, driver) })
+}
+
+func testStoredNotificationPermission(
+	t *testing.T,
+	pool *sql.DB,
+	driver config.Driver,
+	accounts core.AccountStore,
+	authorizer core.Authorizer,
+) {
+	t.Helper()
+	account := core.Account{
+		ID: mustID(t), Username: "stored-notification-" + mustID(t), CreatedAt: authorizationFixtureTime(),
+	}
+	if err := accounts.CreateAccount(t.Context(), account); err != nil {
+		t.Fatalf("create stored-permission account: %v", err)
+	}
+	roleID := mustID(t)
+	roleName := "stored-notification-" + roleID
+	execTestSQL(t, pool, `INSERT INTO roles (id,name,description,built_in,created_at)
+        VALUES ($1,$2,'Forward-compatible notification role',FALSE,$3)`,
+		roleID, roleName, migrationTimestamp(driver, account.CreatedAt))
+	execTestSQL(t, pool, "INSERT INTO role_permissions (role_id,permission) VALUES ($1,$2)",
+		roleID, string(core.PermissionNotificationsManageOwn))
+	execTestSQL(t, pool, "INSERT INTO account_roles (account_id,role_id,source) VALUES ($1,$2,'manual')",
+		account.ID, roleID)
+	want := []core.Permission{core.PermissionNotificationsManageOwn}
+	assertAccountPermissions(t, authorizer, account.ID, want)
+	assertAuthorizationSnapshot(t, authorizer, account.ID, []string{roleName}, want)
+	execTestSQL(t, pool, "DELETE FROM accounts WHERE id=$1", account.ID)
+	execTestSQL(t, pool, "DELETE FROM roles WHERE id=$1", roleID)
 }
 
 func newAuthorizationTestStores(
@@ -1702,7 +1735,7 @@ func testRoleMigrationNotice(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("already-applied migration logged notice: %q", logs.String())
 	}
 	assertSeedCount(t, pool, "roles", 2)
-	assertSeedCount(t, pool, "role_permissions", 15)
+	assertSeedCount(t, pool, "role_permissions", 13)
 	if _, err := pool.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", account.ID); err != nil {
 		t.Fatalf("delete legacy role-less account: %v", err)
 	}

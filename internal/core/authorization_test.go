@@ -92,3 +92,36 @@ func TestCatalogPermissionRejectsUnpublishedValues(t *testing.T) {
 		t.Fatal("NewCatalogPermission accepted an unpublished value")
 	}
 }
+
+func TestDerivedPermissionsAddsNotificationManagement(t *testing.T) {
+	t.Parallel()
+	stored := []core.Permission{
+		core.PermissionStatsReadOwn,
+		core.PermissionRequestsReadOwn,
+		core.PermissionRequestsReadOwn,
+	}
+	got := core.DerivedPermissions(stored)
+	want := []core.Permission{
+		core.PermissionNotificationsManageOwn,
+		core.PermissionRequestsReadOwn,
+		core.PermissionStatsReadOwn,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("DerivedPermissions() = %v, want %v", got, want)
+	}
+	if !slices.Equal(stored, []core.Permission{
+		core.PermissionStatsReadOwn,
+		core.PermissionRequestsReadOwn,
+		core.PermissionRequestsReadOwn,
+	}) {
+		t.Fatalf("DerivedPermissions mutated input: %v", stored)
+	}
+}
+
+func TestDerivedPermissionsRequiresRequestsReadOwn(t *testing.T) {
+	t.Parallel()
+	got := core.DerivedPermissions([]core.Permission{core.PermissionRequestsCreate})
+	if !slices.Equal(got, []core.Permission{core.PermissionRequestsCreate}) {
+		t.Fatalf("DerivedPermissions() = %v, want requests.create only", got)
+	}
+}
