@@ -73,12 +73,76 @@ func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("now playing paginates across large multi-server set", func(t *testing.T) {
 		testNowPlayingPagination(t, pool, driver)
 	})
+	t.Run("single watch reads open and finished watches and hides exclusions", func(t *testing.T) {
+		testPlaybackWatchRead(t, pool, driver)
+	})
 	t.Run("library backfill is bounded and fill only", func(t *testing.T) {
 		testPlaybackLibraryBackfill(t, pool, driver)
 	})
 	t.Run("library backfill keyset reaches later resolvable items", func(t *testing.T) {
 		testPlaybackLibraryBackfillKeyset(t, pool, driver)
 	})
+}
+
+func testPlaybackWatchRead(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Watch read")
+	store := newPlaybackTestStore(t, pool, driver)
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 23, 0, 0, 0, time.UTC))
+	open := playbackStoreWatch(t, server.ID, now)
+	finished := playbackStoreWatch(t, server.ID, now.Add(-time.Hour))
+	finished.MediaUserID = "finished-user"
+	finished.DeviceID = "finished-device"
+	finished.ItemID = "finished-item"
+	finished.LibraryID = "finished-library"
+	finished.LibraryName = "Finished Library"
+	finished.State = core.WatchStopped
+	finished.EndedAt = new(finished.LastSeenAt)
+	if err := store.SaveWatches(t.Context(), playbackMutations(open, finished)); err != nil {
+		t.Fatalf("SaveWatches: %v", err)
+	}
+	assertPlaybackWatchRead(t, store, open.ID, core.WatchPlaying)
+	assertPlaybackWatchRead(t, store, finished.ID, core.WatchStopped)
+	if _, err := store.GetWatch(t.Context(), mustID(t)); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetWatch(unknown) = %v, want ErrNotFound", err)
+	}
+	assertPlaybackWatchesExcluded(t, pool, driver, store, server.ID, open, finished)
+}
+
+func assertPlaybackWatchesExcluded(
+	t *testing.T, pool *sql.DB, driver config.Driver, store core.PlaybackStore, serverID string,
+	open, finished core.PlaybackWatch,
+) {
+	t.Helper()
+	exclusions, err := db.NewExclusionStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewExclusionStore: %v", err)
+	}
+	if err := exclusions.ReplaceExclusions(t.Context(), core.MediaServerExclusions{
+		MediaServerID: serverID,
+		MediaUserIDs:  []string{open.MediaUserID},
+		LibraryIDs:    []string{finished.LibraryID},
+	}); err != nil {
+		t.Fatalf("ReplaceExclusions: %v", err)
+	}
+	for _, watchID := range []string{open.ID, finished.ID} {
+		if _, err := store.GetWatch(t.Context(), watchID); !errors.Is(err, core.ErrNotFound) {
+			t.Errorf("GetWatch(excluded %s) = %v, want ErrNotFound", watchID, err)
+		}
+	}
+}
+
+func assertPlaybackWatchRead(
+	t *testing.T, store core.PlaybackStore, watchID string, state core.WatchState,
+) {
+	t.Helper()
+	watch, err := store.GetWatch(t.Context(), watchID)
+	if err != nil {
+		t.Fatalf("GetWatch(%s): %v", watchID, err)
+	}
+	if watch.ID != watchID || watch.State != state || watch.MediaServerName == "" || watch.Stream == nil {
+		t.Fatalf("GetWatch(%s) = %+v", watchID, watch)
+	}
 }
 
 func testPlaybackFramerateRoundTrip(t *testing.T, pool *sql.DB, driver config.Driver) {

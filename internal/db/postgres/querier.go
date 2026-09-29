@@ -123,6 +123,7 @@ type Querier interface {
 	GetMetadataProvider(ctx context.Context, kind string) (MetadataProvider, error)
 	GetNotificationChannel(ctx context.Context, id string) (GetNotificationChannelRow, error)
 	GetNotificationSubscriptions(ctx context.Context, channelID string) ([]string, error)
+	GetPlaybackWatch(ctx context.Context, id string) (GetPlaybackWatchRow, error)
 	GetPlaybackWatchID(ctx context.Context, id string) (string, error)
 	GetRequest(ctx context.Context, id string) (Request, error)
 	GetRequestProfile(ctx context.Context, id string) (RequestProfile, error)

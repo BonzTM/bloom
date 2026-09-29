@@ -1795,6 +1795,23 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
+  /api/v1/playback/watches/{id}:
+    get:
+      tags: [playback]
+      operationId: getPlaybackWatch
+      summary: Return one visible open or finished watch.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { $ref: "#/components/parameters/EntityID" }
+      responses:
+        "200": { $ref: "#/components/responses/PlaybackWatchReturned" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/AuthMethodNotAllowedGet" }
   /api/v1/playback/watches/{id}/positions:
     get:
       tags: [playback]
@@ -2506,6 +2523,16 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/PlaybackHistoryResponse" }
+    PlaybackWatchReturned:
+      description: One visible open or finished watch. Unknown and excluded watches return not found.
+      headers:
+        Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+        Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+        Vary: { $ref: "#/components/headers/VaryCookie" }
+        X-Request-ID: { $ref: "#/components/headers/XRequestID" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlaybackWatch" }
     PlaybackPositionsListed:
       description: At most 512 samples for one watch, ordered newest first.
       headers:

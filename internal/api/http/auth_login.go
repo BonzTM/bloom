@@ -336,7 +336,8 @@ func routeResource(r *http.Request) string {
 		return auditResourceInvites
 	case "/api/v1/invite/{code}", "/api/v1/invite/{code}/accept":
 		return auditResourceInvitePublic
-	case "/api/v1/playback/now", "/api/v1/playback/history", "/api/v1/playback/watches/{id}/positions":
+	case "/api/v1/playback/now", "/api/v1/playback/history", "/api/v1/playback/watches/{id}",
+		"/api/v1/playback/watches/{id}/positions":
 		return auditResourcePlayback
 	case "/api/v1/activity", "/api/v1/media-servers/{id}/users/{media_user_id}/timeline":
 		return auditResourceActivity

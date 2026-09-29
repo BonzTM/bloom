@@ -249,7 +249,9 @@ import activity from before collection started as described below.
 
 An authenticated account with `stats.read.all` can use cursor-paged
 `GET /api/v1/playback/now` and `GET /api/v1/playback/history`. The history route accepts an optional
-`media_server_id` filter. `GET /api/v1/playback/watches/{id}/positions`
+`media_server_id` filter. `GET /api/v1/playback/watches/{id}` returns one visible
+open or finished watch; unknown watches and watches hidden by user or library
+exclusions return `404 not_found`. `GET /api/v1/playback/watches/{id}/positions`
 returns that watch's retained samples, up to 512, in newest-first order. Watch list and
 per-user statistics detail responses include the latest stream details when
 available. Those watch responses also include nullable `runtime_ms` so clients

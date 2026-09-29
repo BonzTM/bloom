@@ -24,7 +24,23 @@ type fakePlaybackReader struct {
 	err             error
 	errorsByCall    []error
 	queries         []core.PlaybackQuery
+	watchID         string
 	positionWatchID string
+}
+
+func (f *fakePlaybackReader) GetWatch(
+	_ context.Context, watchID string,
+) (core.PlaybackWatch, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.watchID = watchID
+	if f.err != nil {
+		return core.PlaybackWatch{}, f.err
+	}
+	if len(f.watches) == 0 || f.watches[0].ID != watchID {
+		return core.PlaybackWatch{}, core.ErrNotFound
+	}
+	return f.watches[0], nil
 }
 
 func (f *fakePlaybackReader) ListWatchPositions(
@@ -207,6 +223,67 @@ func TestPlaybackHistoryPaginatesAndFilters(t *testing.T) {
 	}
 }
 
+func TestPlaybackWatchReturnsOpenWatch(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	now := h.clock.Now()
+	h.playback.watches = []core.PlaybackWatch{playbackHTTPWatch(now, core.WatchPlaying)}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222"
+	recorder := h.request(t, http.MethodGet, path, "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET open playback watch = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response playbackWatchResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode open playback watch: %v", err)
+	}
+	if response.ID != h.playback.watchID || response.EndedAt != nil || response.ActiveSeconds != 15 {
+		t.Fatalf("open playback watch response = %+v, requested id = %q", response, h.playback.watchID)
+	}
+}
+
+func TestPlaybackWatchReturnsFinishedWatch(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.playback.watches = []core.PlaybackWatch{playbackHTTPWatch(h.clock.Now(), core.WatchStopped)}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	path := "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222"
+	recorder := h.request(t, http.MethodGet, path, "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET finished playback watch = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response playbackWatchResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode finished playback watch: %v", err)
+	}
+	if response.ID != h.playback.watchID || response.EndedAt == nil || response.ActiveSeconds != 10 {
+		t.Fatalf("finished playback watch response = %+v, requested id = %q", response, h.playback.watchID)
+	}
+}
+
+func TestPlaybackWatchReturnsNotFoundForUnknownOrExcludedWatch(t *testing.T) {
+	for _, name := range []string{"unknown", "excluded"} {
+		t.Run(name, func(t *testing.T) {
+			h := newAuthHarness(t, nil)
+			h.playback.err = core.ErrNotFound
+			cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+			path := "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222"
+			recorder := h.request(t, http.MethodGet, path, "", cookie)
+			if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"not_found"`) {
+				t.Fatalf("GET %s playback watch = %d: %s", name, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestPlaybackWatchRejectsMalformedID(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	recorder := h.request(t, http.MethodGet, "/api/v1/playback/watches/bad", "", cookie)
+	if recorder.Code != http.StatusUnprocessableEntity || h.playback.watchID != "" {
+		t.Fatalf("GET malformed playback watch = %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestPlaybackPositionsReturnsNewestBoundedSeries(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	now := h.clock.Now()
@@ -250,6 +327,7 @@ func TestPlaybackRoutesRequireStatsPermission(t *testing.T) {
 	document := loadOpenAPI(t)
 	for _, path := range []string{
 		"/api/v1/playback/now", "/api/v1/playback/history",
+		"/api/v1/playback/watches/22222222-2222-4222-8222-222222222222",
 		"/api/v1/playback/watches/22222222-2222-4222-8222-222222222222/positions",
 	} {
 		t.Run(path+" missing session", func(t *testing.T) {
@@ -288,16 +366,19 @@ func TestPlaybackOpenAPIContract(t *testing.T) {
 			statuses: []int{200, 401, 403, 422, 500, 405},
 		},
 		{
+			path:     "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222",
+			schema:   playbackWatchSchema,
+			statuses: []int{200, 401, 403, 404, 422, 500, 405},
+		},
+		{
 			path:     "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222/positions",
 			schema:   playbackPositionsSchema,
 			statuses: []int{200, 401, 403, 404, 422, 500, 405},
 		},
 	}
 	for _, testCase := range tests {
-		operationPath := testCase.path
-		if strings.Contains(operationPath, "/positions") {
-			operationPath = "/api/v1/playback/watches/{id}/positions"
-		}
+		operationPath := strings.Replace(testCase.path,
+			"22222222-2222-4222-8222-222222222222", "{id}", 1)
 		observed := make(map[int]authContractCase)
 		for _, status := range testCase.statuses {
 			h := newAuthHarness(t, nil)
@@ -390,9 +471,12 @@ func playbackContractRequest(
 		h.authorization.permissions[h.store.accounts["alice"].ID] = nil
 		h.authorization.mu.Unlock()
 	case http.StatusUnprocessableEntity:
-		if strings.Contains(path, "/positions") {
+		switch {
+		case strings.HasSuffix(path, "/positions"):
 			path = "/api/v1/playback/watches/bad/positions"
-		} else {
+		case strings.Contains(path, "/watches/"):
+			path = "/api/v1/playback/watches/bad"
+		default:
 			path += "?cursor=***"
 		}
 	case http.StatusNotFound:
