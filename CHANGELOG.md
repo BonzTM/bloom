@@ -34,8 +34,7 @@ contracts) gets an entry here.
   deleting existing rows.
 - SQLite/PostgreSQL migration `00027_activity_exclusions` adds the exclusion
   settings table, the per-user timeline keyset index, and the import job's
-  unresolved-library counter. Migration number `00026` remains reserved for
-  watch import-origin provenance.
+  unresolved-library counter.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

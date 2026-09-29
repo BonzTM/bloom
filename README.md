@@ -1,7 +1,7 @@
 # bloom
 
 Bloom is a single, self-hosted, container-first web service that replaces the
-cluster of companion apps a Jellyfin operator runs today: invites and user
+cluster of companion apps a Jellyfin operator otherwise runs: invites and user
 management (Wizarr), per-user playback statistics (Jellystat), and media
 discovery and requests (Seerr). One binary, one API, one UI. It manages and
 observes a media server through its API; it does not replace Jellyfin.
@@ -119,7 +119,7 @@ its sorted effective permissions. `GET /api/v1/roles` requires `admin.roles`
 and returns roles with their permissions using cursor pagination. The default
 page size is 50 roles and the enforced maximum is 100. A missing session gets
 `401 unauthorized`; a signed-in account without the required permission gets
-`403 forbidden`. This slice does not expose role-editing endpoints.
+`403 forbidden`. Roles are read-only over the API; there are no role-editing endpoints.
 
 Browser sessions and logout revocations are stored in the configured database,
 so they persist across process and container restarts. Persist the database and
@@ -720,9 +720,9 @@ key identifier in each encrypted envelope, so starting with a different value
 reports a wrong-key failure instead of treating every credential as corrupt.
 
 If the key is lost or changed, restore the original key. If it cannot be
-restored, delete and re-register every media server with its API key. A
-supported credential re-encryption command is planned but is not included in
-this release. Do not attempt rotation by changing the environment value alone.
+restored, delete and re-register every media server with its API key. There
+is no credential re-encryption command. Do not attempt rotation by changing
+the environment value alone.
 
 ## Configuration
 
@@ -761,7 +761,7 @@ this table.
 | `BLOOM_LOGIN_MAX_CONCURRENT` | int | no | `4` | no | Maximum concurrent Argon2id password verifications. Excess attempts fail fast with `503`. Valid range: 1-64. |
 | `BLOOM_TRUSTED_PROXY_CIDRS` | comma-separated CIDRs | no | — | no | Trust `X-Forwarded-For` only when the direct peer is in this allowlist. Empty disables forwarded addresses. |
 | `BLOOM_OIDC_ENABLED` | bool | no | `false` | no | Enable one generic OpenID Connect provider. Discovery runs at startup and startup fails if it cannot complete. |
-| `BLOOM_OIDC_DISPLAY_NAME` | string | OIDC: yes | `OpenID Connect` | no | Sign-in method label returned by `GET /api/v1/auth/providers`. |
+| `BLOOM_OIDC_DISPLAY_NAME` | string | no | `OpenID Connect` | no | Sign-in method label returned by `GET /api/v1/auth/providers`. 1-80 bytes. |
 | `BLOOM_OIDC_ISSUER_URL` | URL | OIDC: yes | — | no | Canonical OIDC issuer without a query or fragment, limited to 2,048 bytes. HTTPS is required except loopback HTTP with the development flag. |
 | `BLOOM_OIDC_CLIENT_ID` | string | OIDC: yes | — | no | OAuth client identifier, limited to 512 valid UTF-8 bytes with no control characters. |
 | `BLOOM_OIDC_CLIENT_SECRET` | string | OIDC: yes | — | **yes** | Environment-only OAuth client secret, limited to 4,096 valid UTF-8 bytes with no control characters. It is wrapped in `config.Secret`, never rendered or logged, and never accepted as a flag. Rotate it with a rolling restart. |
