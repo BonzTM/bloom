@@ -238,7 +238,7 @@ Working pattern (Jellyseerr): enumerate each library with
 `/Items?SortBy=SortName&SortOrder=Ascending&IncludeItemTypes=Series,Movie,Others&Recursive=true&StartIndex=0&ParentId=${id}&collapseBoxSetItems=false` and `fields: 'ProviderIds,MediaSources,Width,Height,IsHD,DateCreated'`, then index `ProviderIds.Tmdb / Imdb / Tvdb` locally.
 Source: <https://github.com/Fallenbagel/jellyseerr/blob/develop/server/api/jellyfin.ts>
 
-Bloom coverage: ADR 0010 slice three and migration `00024_library_catalog`
+Bloom coverage: ADR 0010's library catalog and migration `00024_library_catalog`
 address the library-coverage gap with a bounded, resumable `/Items` walk that
 retains every Jellyfin item type and archives missing rows only after a complete
 successful walk.
