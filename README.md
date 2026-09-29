@@ -751,8 +751,8 @@ this table.
 | `BLOOM_BOOTSTRAP_USERNAME` | string | no | `admin` | no | Username for automatic first-administrator bootstrap. Uses the normal username policy. |
 | `BLOOM_BOOTSTRAP_PASSWORD` | string | startup: optional; create-admin: conditional | — | **yes** | Enables automatic first-administrator bootstrap when set. The recovery command reads it non-interactively; when unset, that command requires a terminal prompt. Remove it after the first account exists. |
 | `BLOOM_SESSION_COOKIE_SECURE` | bool | no | `true` | no | Set the `Secure` session-cookie flag. Disable only for plaintext local development. |
-| `BLOOM_SESSION_LIFETIME` | duration | no | `24h` | no | Absolute lifetime of a browser session. |
-| `BLOOM_SESSION_IDLE_TIMEOUT` | duration | no | `30m` | no | Invalidate a browser session after this period of inactivity. Must not exceed the lifetime. |
+| `BLOOM_SESSION_LIFETIME` | duration | no | `720h` | no | Absolute lifetime of a browser session (30 days). Every session ends when it reaches this age, active or not. |
+| `BLOOM_SESSION_IDLE_TIMEOUT` | duration | no | `168h` | no | End a browser session after this period without a request (7 days). Each request extends it. Must not exceed the lifetime. |
 | `BLOOM_LOGIN_RATE_REFILL_INTERVAL` | duration | no | `1m` | no | Per-IP and per-username login buckets, and the per-IP and per-code buckets on the public invite routes, regain one attempt per interval. |
 | `BLOOM_LOGIN_RATE_BURST` | int | no | `5` | no | Maximum immediately available attempts in each login bucket and each public invite bucket. |
 | `BLOOM_LOGIN_RATE_MAX_KEYS` | int | no | `10000` | no | Bound on rate-limit entries held in memory, for the login buckets and separately for the public invite buckets. Valid range: 2-100000. |
