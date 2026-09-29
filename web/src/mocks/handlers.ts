@@ -1036,11 +1036,11 @@ function playbackTimeline(url: URL, serverId: string, userId: string) {
     .sort((a, b) => b.started_at.localeCompare(a.started_at));
   const items: TimelineEntry[] = [];
   for (const w of own) {
+    // The server folds on consecutive start times, newest first.
     const last = items.at(-1);
-    const thisEnd = Date.parse(w.ended_at ?? w.started_at);
     if (
       last?.item_id === w.item_id &&
-      Date.parse(last.first_started_at) - thisEnd <= gap * 1000
+      Date.parse(last.first_started_at) - Date.parse(w.started_at) <= gap * 1000
     ) {
       last.first_started_at = w.started_at;
       last.play_count += 1;
