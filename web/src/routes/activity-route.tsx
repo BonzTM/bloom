@@ -195,6 +195,19 @@ function text(value: FormDataEntryValue | null): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// Reads the submitted fields into a draft; days become instants here.
+function readDraft(form: HTMLFormElement): FormFilter {
+  const data = new FormData(form);
+  return {
+    mediaServerId: text(data.get("server")),
+    q: text(data.get("q")),
+    playMethod: text(data.get("method")),
+    source: text(data.get("source")),
+    startedAfter: dayOrEmpty(text(data.get("after")), false),
+    startedBefore: dayOrEmpty(text(data.get("before")), true),
+  };
+}
+
 function FilterForm({
   filter,
   servers,
@@ -208,15 +221,7 @@ function FilterForm({
   const [problem, setProblem] = useState("");
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const draft: FormFilter = {
-      mediaServerId: text(data.get("server")),
-      q: text(data.get("q")),
-      playMethod: text(data.get("method")),
-      source: text(data.get("source")),
-      startedAfter: dayOrEmpty(text(data.get("after")), false),
-      startedBefore: dayOrEmpty(text(data.get("before")), true),
-    };
+    const draft = readDraft(event.currentTarget);
     const found = describeProblem(draft);
     setProblem(found);
     if (found === "") {
@@ -241,69 +246,42 @@ function FilterForm({
           defaultValue={filter.q ?? ""}
         />
       </div>
-      <div>
-        <label htmlFor={`${id}-server`}>Server</label>
-        <select
-          id={`${id}-server`}
-          name="server"
-          defaultValue={filter.mediaServerId ?? ""}
-        >
-          <option value="">All servers</option>
-          {servers.map((server) => (
-            <option key={server.id} value={server.id}>
-              {server.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label htmlFor={`${id}-method`}>Delivery</label>
-        <select
-          id={`${id}-method`}
-          name="method"
-          defaultValue={filter.playMethod ?? ""}
-        >
-          <option value="">Any</option>
-          {playMethodSchema.options.map((option) => (
-            <option key={option} value={option}>
-              {playMethodLabel(option)}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label htmlFor={`${id}-source`}>Source</label>
-        <select
-          id={`${id}-source`}
-          name="source"
-          defaultValue={filter.source ?? ""}
-        >
-          <option value="">Any</option>
-          {playbackSourceSchema.options.map((option) => (
-            <option key={option} value={option}>
-              {sourceLabel(option)}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label htmlFor={`${id}-after`}>From day</label>
-        <input
-          id={`${id}-after`}
-          name="after"
-          type="date"
-          defaultValue={instantToDay(filter.startedAfter, false)}
-        />
-      </div>
-      <div>
-        <label htmlFor={`${id}-before`}>To day</label>
-        <input
-          id={`${id}-before`}
-          name="before"
-          type="date"
-          defaultValue={instantToDay(filter.startedBefore, true)}
-        />
-      </div>
+      <ChoiceSelect
+        id={`${id}-server`}
+        name="server"
+        label="Server"
+        any="All servers"
+        value={filter.mediaServerId}
+        options={servers.map((server) => [server.id, server.name])}
+      />
+      <ChoiceSelect
+        id={`${id}-method`}
+        name="method"
+        label="Delivery"
+        any="Any"
+        value={filter.playMethod}
+        options={playMethodSchema.options.map((o) => [o, playMethodLabel(o)])}
+      />
+      <ChoiceSelect
+        id={`${id}-source`}
+        name="source"
+        label="Source"
+        any="Any"
+        value={filter.source}
+        options={playbackSourceSchema.options.map((o) => [o, sourceLabel(o)])}
+      />
+      <DayField
+        id={`${id}-after`}
+        name="after"
+        label="From day"
+        value={instantToDay(filter.startedAfter, false)}
+      />
+      <DayField
+        id={`${id}-before`}
+        name="before"
+        label="To day"
+        value={instantToDay(filter.startedBefore, true)}
+      />
       <div className="form-actions">
         <button type="submit" className="btn-primary">
           Apply filters
@@ -313,6 +291,55 @@ function FilterForm({
         {problem}
       </p>
     </form>
+  );
+}
+
+function ChoiceSelect({
+  id,
+  name,
+  label,
+  any,
+  value,
+  options,
+}: Readonly<{
+  id: string;
+  name: string;
+  label: string;
+  any: string;
+  value: string | undefined;
+  options: readonly (readonly [string, string])[];
+}>): ReactNode {
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <select id={id} name={name} defaultValue={value ?? ""}>
+        <option value="">{any}</option>
+        {options.map(([option, text]) => (
+          <option key={option} value={option}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function DayField({
+  id,
+  name,
+  label,
+  value,
+}: Readonly<{
+  id: string;
+  name: string;
+  label: string;
+  value: string;
+}>): ReactNode {
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <input id={id} name={name} type="date" defaultValue={value} />
+    </div>
   );
 }
 

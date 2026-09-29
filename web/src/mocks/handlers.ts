@@ -970,8 +970,9 @@ function playbackDenial() {
   return undefined;
 }
 
-// A keyset page over a fixed list: the cursor is an offset, the limit is
-// echoed back the way the server does it.
+// A page over a fixed list. The server's cursor encodes the last row's sort
+// keys; the mock's is an offset, like every other mock page here, which is
+// equivalent over a fixed list.
 function keysetPage(url: URL, items: readonly unknown[], extra: object = {}) {
   const rawLimit = url.searchParams.get("limit");
   const limit = rawLimit === null ? 50 : Number(rawLimit);
@@ -1027,37 +1028,42 @@ function playbackTimeline(url: URL, serverId: string, userId: string) {
   if (!Number.isInteger(gap) || gap < 1 || gap > 604_800) {
     return envelope(422, "validation_failed", "invalid gap_seconds");
   }
-  const own = mockPlaybackHistory.filter(
-    (w) => w.media_server_id === serverId && w.media_user_id === userId,
-  );
-  const byItem = new Map<string, TimelineEntry>();
+  // Open and finished watches together, newest first; consecutive plays of
+  // the same item closer than the gap fold into one sitting, as the server
+  // folds them.
+  const own = [...mockNowPlaying, ...mockPlaybackHistory]
+    .filter((w) => w.media_server_id === serverId && w.media_user_id === userId)
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+  const items: TimelineEntry[] = [];
   for (const w of own) {
-    const entry = byItem.get(w.item_id);
-    if (entry === undefined) {
-      byItem.set(w.item_id, {
-        media_server_id: w.media_server_id,
-        media_user_id: w.media_user_id,
-        username: w.username,
-        item_id: w.item_id,
-        item_name: w.item_name,
-        item_type: w.item_type,
-        series_id: w.series_id,
-        series_name: w.series_name,
-        library_id: w.library_id,
-        library_name: w.library_name,
-        first_started_at: w.started_at,
-        last_ended_at: w.ended_at,
-        play_count: 1,
-        active_seconds: w.active_seconds,
-      });
-    } else {
-      entry.play_count += 1;
-      entry.active_seconds += w.active_seconds;
+    const last = items.at(-1);
+    const thisEnd = Date.parse(w.ended_at ?? w.started_at);
+    if (
+      last?.item_id === w.item_id &&
+      Date.parse(last.first_started_at) - thisEnd <= gap * 1000
+    ) {
+      last.first_started_at = w.started_at;
+      last.play_count += 1;
+      last.active_seconds += w.active_seconds;
+      continue;
     }
+    items.push({
+      media_server_id: w.media_server_id,
+      media_user_id: w.media_user_id,
+      username: w.username,
+      item_id: w.item_id,
+      item_name: w.item_name,
+      item_type: w.item_type,
+      series_id: w.series_id,
+      series_name: w.series_name,
+      library_id: w.library_id,
+      library_name: w.library_name,
+      first_started_at: w.started_at,
+      ...(w.ended_at === undefined ? {} : { last_ended_at: w.ended_at }),
+      play_count: 1,
+      active_seconds: w.active_seconds,
+    });
   }
-  const items = [...byItem.values()].sort((a, b) =>
-    b.first_started_at.localeCompare(a.first_started_at),
-  );
   return keysetPage(url, items, { gap_seconds: gap });
 }
 
