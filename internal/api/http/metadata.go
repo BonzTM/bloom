@@ -26,6 +26,11 @@ type metadataSearchResponse struct {
 	Items []metadataTitleResponse `json:"items"`
 }
 
+type metadataTitleDetailResponse struct {
+	metadataTitleResponse
+	Subscribed bool `json:"subscribed"`
+}
+
 type metadataSeasonResponse struct {
 	Number       int        `json:"number"`
 	Name         string     `json:"name"`
@@ -35,7 +40,8 @@ type metadataSeasonResponse struct {
 
 type metadataSeriesResponse struct {
 	metadataTitleResponse
-	Seasons []metadataSeasonResponse `json:"seasons"`
+	Subscribed bool                     `json:"subscribed"`
+	Seasons    []metadataSeasonResponse `json:"seasons"`
 }
 
 type (
@@ -82,7 +88,14 @@ func (s *Server) handleMetadataMovie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, s.logger, err)
 		return
 	}
-	writeJSON(w, r, s.logger, http.StatusOK, metadataTitleDTO(title))
+	subscribed, err := s.titleSubscribed(r, title.Provider, title.ProviderID)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	writeJSON(w, r, s.logger, http.StatusOK, metadataTitleDetailResponse{
+		metadataTitleResponse: metadataTitleDTO(title), Subscribed: subscribed,
+	})
 }
 
 func (s *Server) handleMetadataSeries(w http.ResponseWriter, r *http.Request) {
@@ -105,11 +118,32 @@ func (s *Server) handleMetadataSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, s.logger, err)
 		return
 	}
-	response := metadataSeriesResponse{metadataTitleResponse: metadataTitleDTO(series.MetadataTitle), Seasons: make([]metadataSeasonResponse, 0, len(series.Seasons))}
+	subscribed, err := s.titleSubscribed(r, series.Provider, series.ProviderID)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	response := metadataSeriesResponse{
+		metadataTitleResponse: metadataTitleDTO(series.MetadataTitle), Subscribed: subscribed,
+		Seasons: make([]metadataSeasonResponse, 0, len(series.Seasons)),
+	}
 	for _, season := range series.Seasons {
 		response.Seasons = append(response.Seasons, metadataSeasonResponse{Number: season.Number, Name: season.Name, EpisodeCount: season.EpisodeCount, AirDate: season.AirDate})
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, response)
+}
+
+func (s *Server) titleSubscribed(
+	r *http.Request, provider core.MetadataProviderKind, providerID string,
+) (bool, error) {
+	if s.notificationRouting == nil {
+		return false, nil
+	}
+	account, ok := accountFrom(r.Context())
+	if !ok {
+		return false, errAuthenticationRequired
+	}
+	return s.notificationRouting.TitleSubscribed(r.Context(), account.ID, provider, providerID)
 }
 
 func (s *Server) handleMetadataKeyPresence(w http.ResponseWriter, r *http.Request) {

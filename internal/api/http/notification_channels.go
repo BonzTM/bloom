@@ -92,7 +92,8 @@ type notificationChannelsResponse struct {
 type notificationDeliveryResponse struct {
 	ID            string                  `json:"id"`
 	EventType     core.RequestEventType   `json:"event_type"`
-	RequestID     string                  `json:"request_id"`
+	RequestID     string                  `json:"request_id,omitempty"`
+	WatchID       string                  `json:"watch_id,omitempty"`
 	Status        core.NotificationStatus `json:"status"`
 	Attempts      int                     `json:"attempts"`
 	LastError     string                  `json:"last_error"`
@@ -353,7 +354,7 @@ func notificationChannelDTO(value core.NotificationRegistration) notificationCha
 
 func notificationDeliveryDTO(value core.NotificationDelivery) notificationDeliveryResponse {
 	return notificationDeliveryResponse{
-		ID: value.ID, EventType: value.EventType, RequestID: value.Payload.RequestID,
+		ID: value.ID, EventType: value.EventType, RequestID: value.Payload.RequestID, WatchID: value.Payload.WatchID,
 		Status: value.Status, Attempts: value.Attempts, LastError: value.LastError,
 		NextAttemptAt: value.NextAttemptAt, SentAt: value.SentAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}

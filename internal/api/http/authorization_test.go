@@ -154,6 +154,7 @@ func TestPermissionCatalogHandlerIsPublicStableAndCacheable(t *testing.T) {
 		{ID: "stats.read.all", Module: "stats"},
 		{ID: "admin.settings", Module: "admin"},
 		{ID: "admin.roles", Module: "admin"},
+		{ID: "notifications.manage.own", Module: "notifications"},
 	}
 	if !slices.Equal(response.Permissions, want) {
 		t.Fatalf("permissions = %v, want %v", response.Permissions, want)
@@ -173,6 +174,28 @@ func TestMeReturnsRolesAndEffectivePermissions(t *testing.T) {
 	}
 	if !slices.Equal(response.Roles, []string{"owner"}) || !slices.IsSorted(response.Permissions) {
 		t.Fatalf("me response = %+v", response)
+	}
+}
+
+func TestMeReportsDerivedNotificationPermission(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	accountID := "11111111-1111-4111-8111-111111111111"
+	h.authorization.mu.Lock()
+	h.authorization.permissions[accountID] = []core.Permission{core.PermissionRequestsReadOwn}
+	h.authorization.roleNames[accountID] = []string{"reader"}
+	h.authorization.mu.Unlock()
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	recorder := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("me = %d %s", recorder.Code, recorder.Body.String())
+	}
+	var response currentAccountResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	want := []core.Permission{core.PermissionNotificationsManageOwn, core.PermissionRequestsReadOwn}
+	if !slices.Equal(response.Permissions, want) {
+		t.Fatalf("me permissions = %v, want %v", response.Permissions, want)
 	}
 }
 

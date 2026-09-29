@@ -167,33 +167,34 @@ func runService(
 }
 
 type serviceWiring struct {
-	accounts           core.AccountStore
-	localIdentities    core.LocalIdentityStore
-	authorizer         core.Authorizer
-	roles              core.RoleReader
-	accountAdmin       core.AccountAdminReader
-	sessions           *scs.SessionManager
-	mediaServers       *mediaserver.Service
-	metadata           *metadata.Service
-	requests           *requestapp.Service
-	downloadManagers   *downloadmanager.Service
-	fulfilment         *fulfilment.Manager
-	notifications      *notifyapp.Service
-	notificationWorker *notifyapp.Worker
-	inviteReconciler   *inviteapp.Reconciler
-	invites            *inviteapp.Service
-	imports            *importapp.Service
-	importWorker       *importapp.Worker
-	catalog            *catalogapp.Service
-	catalogWorker      *catalogapp.Worker
-	playbackStore      runtimePlaybackStore
-	playbackManager    *playback.Manager
-	stats              *statsapp.Service
-	accountMediaUsers  *accountmedia.Service
-	exclusions         *exclusionapp.Service
-	oidcProvider       oidcLifecycle
-	oidcAccounts       core.OIDCAccountStore
-	oidcFlows          core.OIDCFlowStore
+	accounts            core.AccountStore
+	localIdentities     core.LocalIdentityStore
+	authorizer          core.Authorizer
+	roles               core.RoleReader
+	accountAdmin        core.AccountAdminReader
+	sessions            *scs.SessionManager
+	mediaServers        *mediaserver.Service
+	metadata            *metadata.Service
+	requests            *requestapp.Service
+	downloadManagers    *downloadmanager.Service
+	fulfilment          *fulfilment.Manager
+	notifications       *notifyapp.Service
+	notificationRouting *notifyapp.RoutingService
+	notificationWorker  *notifyapp.Worker
+	inviteReconciler    *inviteapp.Reconciler
+	invites             *inviteapp.Service
+	imports             *importapp.Service
+	importWorker        *importapp.Worker
+	catalog             *catalogapp.Service
+	catalogWorker       *catalogapp.Worker
+	playbackStore       runtimePlaybackStore
+	playbackManager     *playback.Manager
+	stats               *statsapp.Service
+	accountMediaUsers   *accountmedia.Service
+	exclusions          *exclusionapp.Service
+	oidcProvider        oidcLifecycle
+	oidcAccounts        core.OIDCAccountStore
+	oidcFlows           core.OIDCFlowStore
 }
 
 type runtimePlaybackStore interface {
@@ -228,7 +229,7 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	notifications, notificationWorker, err := notificationDependencies(
+	notifications, notificationRouting, notificationWorker, err := notificationDependencies(
 		pool, cfg, accounts, events, deps.Clock, metrics, logger,
 	)
 	if err != nil {
@@ -244,8 +245,9 @@ func wireServiceDependencies(
 		authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, accountMediaUsers: accountMediaUsers,
 		metadata: metadataService, requests: requestService, downloadManagers: downloadManagers,
-		fulfilment: fulfilmentManager, notifications: notifications, notificationWorker: notificationWorker,
-		invites: invites, inviteReconciler: inviteReconciler,
+		fulfilment: fulfilmentManager, notifications: notifications, notificationRouting: notificationRouting,
+		notificationWorker: notificationWorker,
+		invites:            invites, inviteReconciler: inviteReconciler,
 	}
 	return wirePlaybackAndIdentity(ctx, pool, cfg, logger, metrics, deps, ownership, wiring)
 }
@@ -552,6 +554,7 @@ func assembleHTTPServer(
 		NotificationReader:     wiring.notifications,
 		NotificationManager:    wiring.notifications,
 		NotificationTester:     wiring.notifications,
+		NotificationRouting:    wiring.notificationRouting,
 		Sessions:               wiring.sessions,
 		Audit:                  audit,
 		AuditCorrelationKey:    cfg.SecretKey.Bytes(),
@@ -625,18 +628,26 @@ func requestDependencies(
 func notificationDependencies(
 	pool *sql.DB, cfg config.Config, accounts core.AccountStore, events *requestapp.EventBus,
 	clock core.Clock, metrics *telemetry.PromMetrics, logger *slog.Logger,
-) (*notifyapp.Service, *notifyapp.Worker, error) {
+) (*notifyapp.Service, *notifyapp.RoutingService, *notifyapp.Worker, error) {
 	reader, writer, eventStore, deliveryStore, deliveryReader, maintenance, err := db.NewNotificationStores(pool, cfg.Database.Driver)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build notification stores: %w", err)
+		return nil, nil, nil, fmt.Errorf("build notification stores: %w", err)
+	}
+	preferenceStore, titleStore, err := db.NewNotificationRoutingStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build notification routing stores: %w", err)
 	}
 	cipher, err := secrets.New(cfg.SecretKey.Bytes())
 	if err != nil {
-		return nil, nil, fmt.Errorf("build notification credential cipher: %w", err)
+		return nil, nil, nil, fmt.Errorf("build notification credential cipher: %w", err)
 	}
 	service, err := notifyapp.NewService(reader, writer, deliveryReader, cipher, notifyapp.NewRegistry(), clock)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build notification service: %w", err)
+		return nil, nil, nil, fmt.Errorf("build notification service: %w", err)
+	}
+	routing, err := notifyapp.NewRoutingService(preferenceStore, titleStore, clock)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build notification routing service: %w", err)
 	}
 	interval, retention := cfg.Notifications.WorkerInterval, cfg.Notifications.Retention
 	if interval == 0 {
@@ -650,10 +661,10 @@ func notificationDependencies(
 		Channels: service, Accounts: accounts, Clock: clock, Metrics: metrics, Logger: logger,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("build notification worker: %w", err)
+		return nil, nil, nil, fmt.Errorf("build notification worker: %w", err)
 	}
 	events.Subscribe(worker.Wake)
-	return service, worker, nil
+	return service, routing, worker, nil
 }
 
 type requestStores struct {

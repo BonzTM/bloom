@@ -267,6 +267,20 @@ func validatePlaybackMutations(mutations []core.PlaybackMutation) error {
 	return nil
 }
 
+func playbackSessionStartedEvent(watch core.PlaybackWatch) (core.PlaybackSessionStartedEvent, string, error) {
+	event := core.PlaybackSessionStartedEvent{
+		WatchID: watch.ID, MediaServerID: watch.MediaServerID, MediaUserID: watch.MediaUserID,
+		MediaUsername: watch.Username, ItemID: watch.ItemID, ItemName: watch.ItemName,
+		ItemType: watch.ItemType, Client: watch.Client, DeviceID: watch.DeviceID,
+		DeviceName: watch.DeviceName, At: core.NormalizeTime(watch.StartedAt),
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil || len(encoded) > core.MaxNotificationPayloadBytes {
+		return core.PlaybackSessionStartedEvent{}, "", core.ErrInvalidArgument
+	}
+	return event, string(encoded), nil
+}
+
 func playbackStoreError(operation string, err error) error {
 	return fmt.Errorf("%s: %w", operation, errors.Join(core.ErrPlaybackStore, err))
 }

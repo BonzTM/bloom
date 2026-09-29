@@ -34,7 +34,28 @@ var (
 	_ core.NotificationDeliveryStore    = (*notifications)(nil)
 	_ core.NotificationDeliveryReader   = (*notifications)(nil)
 	_ core.NotificationMaintenanceStore = (*notifications)(nil)
+	_ core.NotificationPreferenceStore  = (*notifications)(nil)
+	_ core.TitleSubscriptionStore       = (*notifications)(nil)
 )
+
+// NewNotificationRoutingStore returns account preference and title-subscription persistence.
+func NewNotificationRoutingStore(pool *sql.DB, driver config.Driver) (
+	core.NotificationPreferenceStore, core.TitleSubscriptionStore, error,
+) {
+	if pool == nil {
+		return nil, nil, core.ErrInvalidArgument
+	}
+	store := &notifications{pool: pool, driver: driver}
+	switch driver {
+	case config.DriverSQLite:
+		store.sqlite = sqlite.New(pool)
+	case config.DriverPostgres:
+		store.postgres = postgres.New(pool)
+	default:
+		return nil, nil, fmt.Errorf("unsupported database driver %q", driver)
+	}
+	return store, store, nil
+}
 
 // NewNotificationStores returns the notification persistence boundaries.
 func NewNotificationStores(pool *sql.DB, driver config.Driver) (
@@ -319,24 +340,33 @@ func (s *notifications) GetUnfannedNotificationEvent(ctx context.Context) (core.
 			return core.NotificationEvent{}, err
 		}
 		return notificationEvent(row.ID, row.EventType, row.RequestID, row.RequesterID, row.ActorID,
-			row.MediaKind, row.Title, row.RequestStatus, row.Reason, occurred), nil
+			row.MediaKind, row.Title, row.RequestStatus, row.Reason, row.SourcePayloadJson, occurred)
 	}
 	row, err := s.postgres.GetUnfannedNotificationEvent(ctx)
 	if err != nil {
 		return core.NotificationEvent{}, mapNotFound("get notification event", err)
 	}
 	return notificationEvent(row.ID, row.EventType, row.RequestID, row.RequesterID, row.ActorID,
-		row.MediaKind, row.Title, row.RequestStatus, row.Reason, core.NormalizeTime(row.OccurredAt)), nil
+		row.MediaKind, row.Title, row.RequestStatus, row.Reason, row.SourcePayloadJson, core.NormalizeTime(row.OccurredAt))
 }
 
 func notificationEvent(
-	id, eventType, requestID, requesterID, actorID, kind, title, status, reason string, at time.Time,
-) core.NotificationEvent {
-	return core.NotificationEvent{ID: id, Event: core.RequestEvent{
+	id, eventType, requestID, requesterID, actorID, kind, title, status, reason, sourcePayload string, at time.Time,
+) (core.NotificationEvent, error) {
+	result := core.NotificationEvent{ID: id, Event: core.RequestEvent{
 		Type: core.RequestEventType(eventType), RequestID: requestID, RequesterID: requesterID,
 		ActorID: actorID, Kind: core.MediaKind(kind), Title: title,
 		Status: core.RequestStatus(status), Reason: reason, At: at,
 	}}
+	if result.Event.Type != core.NotificationEventPlaybackSessionStarted {
+		return result, nil
+	}
+	var playback core.PlaybackSessionStartedEvent
+	if err := json.Unmarshal([]byte(sourcePayload), &playback); err != nil {
+		return core.NotificationEvent{}, fmt.Errorf("decode playback notification event: %w", err)
+	}
+	result.Playback = &playback
+	return result, nil
 }
 
 func (s *notifications) FanOutNotificationEvent(
@@ -387,24 +417,28 @@ func (s *notifications) enqueueForSubscribers(
 ) (int, error) {
 	if s.sqlite != nil {
 		queries := sqlite.New(tx)
-		rows, err := queries.ListSubscribedNotificationChannels(ctx, sqlite.ListSubscribedNotificationChannelsParams{Enabled: 1, EventType: string(event)})
+		rows, err := queries.ListAddressedNotificationChannels(ctx, sqlite.ListAddressedNotificationChannelsParams{
+			EventType: string(event), EventID: eventID,
+		})
 		if err != nil {
 			return 0, fmt.Errorf("list notification subscribers: %w", err)
 		}
 		for _, row := range rows {
-			if err := createSQLiteOutbox(ctx, queries, eventID, row.ID, row.Kind, string(event), payload, at); err != nil {
+			if err := createSQLiteOutbox(ctx, queries, eventID, row.ID, row.AccountID, row.Kind, string(event), payload, at); err != nil {
 				return 0, err
 			}
 		}
 		return len(rows), nil
 	}
 	queries := postgres.New(tx)
-	rows, err := queries.ListSubscribedNotificationChannels(ctx, postgres.ListSubscribedNotificationChannelsParams{Enabled: true, EventType: string(event)})
+	rows, err := queries.ListAddressedNotificationChannels(ctx, postgres.ListAddressedNotificationChannelsParams{
+		EventType: string(event), EventID: eventID,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("list notification subscribers: %w", err)
 	}
 	for _, row := range rows {
-		if err := createPostgresOutbox(ctx, queries, eventID, row.ID, row.Kind, string(event), payload, at); err != nil {
+		if err := createPostgresOutbox(ctx, queries, eventID, row.ID, row.AccountID, row.Kind, string(event), payload, at); err != nil {
 			return 0, err
 		}
 	}
@@ -412,7 +446,7 @@ func (s *notifications) enqueueForSubscribers(
 }
 
 func createSQLiteOutbox(
-	ctx context.Context, queries *sqlite.Queries, eventID, channelID, kind, event, payload string, at time.Time,
+	ctx context.Context, queries *sqlite.Queries, eventID, channelID, recipientID, kind, event, payload string, at time.Time,
 ) error {
 	id, err := core.NewID()
 	if err != nil {
@@ -420,7 +454,9 @@ func createSQLiteOutbox(
 	}
 	stamp := formatSQLiteTime(at)
 	if err := queries.CreateNotificationOutbox(ctx, sqlite.CreateNotificationOutboxParams{
-		ID: id, EventID: eventID, ChannelID: channelID, ChannelKind: kind, EventType: event, PayloadJson: payload,
+		ID: id, EventID: eventID, ChannelID: channelID,
+		RecipientAccountID: sql.NullString{String: recipientID, Valid: true},
+		ChannelKind:        kind, EventType: event, PayloadJson: payload,
 		NextAttemptAt: stamp, CreatedAt: stamp, UpdatedAt: stamp,
 	}); err != nil {
 		return fmt.Errorf("create notification delivery: %w", err)
@@ -429,14 +465,16 @@ func createSQLiteOutbox(
 }
 
 func createPostgresOutbox(
-	ctx context.Context, queries *postgres.Queries, eventID, channelID, kind, event, payload string, at time.Time,
+	ctx context.Context, queries *postgres.Queries, eventID, channelID, recipientID, kind, event, payload string, at time.Time,
 ) error {
 	id, err := core.NewID()
 	if err != nil {
 		return fmt.Errorf("create notification delivery id: %w", err)
 	}
 	if err := queries.CreateNotificationOutbox(ctx, postgres.CreateNotificationOutboxParams{
-		ID: id, EventID: eventID, ChannelID: channelID, ChannelKind: kind, EventType: event, PayloadJson: payload,
+		ID: id, EventID: eventID, ChannelID: channelID,
+		RecipientAccountID: sql.NullString{String: recipientID, Valid: true},
+		ChannelKind:        kind, EventType: event, PayloadJson: payload,
 		NextAttemptAt: at, CreatedAt: at, UpdatedAt: at,
 	}); err != nil {
 		return fmt.Errorf("create notification delivery: %w", err)
@@ -525,7 +563,14 @@ func (s *notifications) claimPostgresNotificationDelivery(
 			return mapNotFound("claim notification delivery", claimErr)
 		}
 		var mapErr error
-		delivery, mapErr = mapPostgresDelivery(row)
+		delivery, mapErr = mapPostgresDelivery(postgres.NotificationOutbox{
+			ID: row.ID, EventID: row.EventID, ChannelID: row.ChannelID,
+			ChannelKind: row.ChannelKind, EventType: row.EventType, PayloadJson: row.PayloadJson,
+			Status: row.Status, Attempts: row.Attempts, NextAttemptAt: row.NextAttemptAt,
+			LeaseToken: row.LeaseToken, LeaseExpiresAt: row.LeaseExpiresAt, LastError: row.LastError,
+			SentAt: row.SentAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+			RecipientAccountID: row.RecipientAccountID,
+		})
 		return mapErr
 	})
 	return delivery, err
@@ -613,7 +658,14 @@ func (s *notifications) ListNotificationDeliveries(
 	}
 	result := make([]core.NotificationDelivery, 0, len(rows))
 	for _, row := range rows {
-		value, mapErr := mapPostgresDelivery(row)
+		value, mapErr := mapPostgresDelivery(postgres.NotificationOutbox{
+			ID: row.ID, EventID: row.EventID, ChannelID: row.ChannelID,
+			ChannelKind: row.ChannelKind, EventType: row.EventType, PayloadJson: row.PayloadJson,
+			Status: row.Status, Attempts: row.Attempts, NextAttemptAt: row.NextAttemptAt,
+			LeaseToken: row.LeaseToken, LeaseExpiresAt: row.LeaseExpiresAt, LastError: row.LastError,
+			SentAt: row.SentAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+			RecipientAccountID: row.RecipientAccountID,
+		})
 		if mapErr != nil {
 			return nil, mapErr
 		}
@@ -627,6 +679,215 @@ func (s *notifications) NotificationOutboxDepth(ctx context.Context) (int64, err
 		return s.sqlite.NotificationOutboxDepth(ctx)
 	}
 	return s.postgres.NotificationOutboxDepth(ctx)
+}
+
+func (s *notifications) ListNotificationPreferences(
+	ctx context.Context, accountID string,
+) ([]core.NotificationPreference, error) {
+	if !core.ValidID(accountID) {
+		return nil, core.ErrInvalidArgument
+	}
+	if s.sqlite != nil {
+		rows, err := s.sqlite.ListNotificationPreferences(ctx, accountID)
+		if err != nil {
+			return nil, fmt.Errorf("list notification preferences: %w", err)
+		}
+		result := make([]core.NotificationPreference, 0, len(rows))
+		for _, row := range rows {
+			result = append(result, core.NotificationPreference{
+				EventType: core.RequestEventType(row.EventType), Enabled: row.Enabled != 0,
+			})
+		}
+		return result, nil
+	}
+	rows, err := s.postgres.ListNotificationPreferences(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("list notification preferences: %w", err)
+	}
+	result := make([]core.NotificationPreference, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, core.NotificationPreference{
+			EventType: core.RequestEventType(row.EventType), Enabled: row.Enabled,
+		})
+	}
+	return result, nil
+}
+
+func (s *notifications) ReplaceNotificationPreferences(
+	ctx context.Context, accountID string, values []core.NotificationPreference,
+) error {
+	if !core.ValidID(accountID) || core.ValidateNotificationPreferences(values) != nil {
+		return core.ErrInvalidArgument
+	}
+	if s.sqlite != nil {
+		return withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+			return replaceSQLitePreferences(ctx, sqlite.New(conn), accountID, values)
+		})
+	}
+	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		return replacePostgresPreferences(ctx, postgres.New(tx), accountID, values)
+	})
+}
+
+func replaceSQLitePreferences(
+	ctx context.Context, q *sqlite.Queries, accountID string, values []core.NotificationPreference,
+) error {
+	if _, err := q.LockNotificationPreferenceAccount(ctx, accountID); err != nil {
+		return mapNotFound("lock notification preference account", err)
+	}
+	if err := q.DeleteNotificationPreferences(ctx, accountID); err != nil {
+		return fmt.Errorf("delete notification preferences: %w", err)
+	}
+	for _, value := range values {
+		err := q.AddNotificationPreference(ctx, sqlite.AddNotificationPreferenceParams{
+			AccountID: accountID, EventType: string(value.EventType), Enabled: boolToInt64(value.Enabled),
+		})
+		if err != nil {
+			return fmt.Errorf("add notification preference: %w", err)
+		}
+	}
+	return nil
+}
+
+func replacePostgresPreferences(
+	ctx context.Context, q *postgres.Queries, accountID string, values []core.NotificationPreference,
+) error {
+	if _, err := q.LockNotificationPreferenceAccount(ctx, accountID); err != nil {
+		return mapNotFound("lock notification preference account", err)
+	}
+	if err := q.DeleteNotificationPreferences(ctx, accountID); err != nil {
+		return fmt.Errorf("delete notification preferences: %w", err)
+	}
+	for _, value := range values {
+		err := q.AddNotificationPreference(ctx, postgres.AddNotificationPreferenceParams{
+			AccountID: accountID, EventType: string(value.EventType), Enabled: value.Enabled,
+		})
+		if err != nil {
+			return fmt.Errorf("add notification preference: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *notifications) SubscribeTitle(ctx context.Context, value core.TitleSubscription) error {
+	if !core.ValidID(value.AccountID) || !value.Provider.Valid() ||
+		core.ValidateProviderID(value.ProviderID) != nil || value.CreatedAt.IsZero() {
+		return core.ErrInvalidArgument
+	}
+	if s.sqlite != nil {
+		return withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
+			return subscribeSQLiteTitle(ctx, sqlite.New(conn), value)
+		})
+	}
+	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
+		return subscribePostgresTitle(ctx, postgres.New(tx), value)
+	})
+}
+
+func subscribeSQLiteTitle(ctx context.Context, q *sqlite.Queries, value core.TitleSubscription) error {
+	if _, err := q.LockNotificationPreferenceAccount(ctx, value.AccountID); err != nil {
+		return mapNotFound("lock title subscription account", err)
+	}
+	exists, err := q.TitleSubscriptionExists(ctx, sqlite.TitleSubscriptionExistsParams{
+		AccountID: value.AccountID, Provider: string(value.Provider), ProviderID: value.ProviderID,
+	})
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	count, err := q.CountTitleSubscriptions(ctx, value.AccountID)
+	if err != nil {
+		return fmt.Errorf("count title subscriptions: %w", err)
+	}
+	if count >= core.MaxTitleSubscriptions {
+		return core.ErrTitleSubscriptionLimit
+	}
+	if err := q.CreateTitleSubscription(ctx, sqlite.CreateTitleSubscriptionParams{
+		AccountID: value.AccountID, Provider: string(value.Provider), ProviderID: value.ProviderID,
+		CreatedAt: formatSQLiteTime(value.CreatedAt),
+	}); err != nil {
+		return fmt.Errorf("create title subscription: %w", err)
+	}
+	return nil
+}
+
+func subscribePostgresTitle(ctx context.Context, q *postgres.Queries, value core.TitleSubscription) error {
+	if _, err := q.LockNotificationPreferenceAccount(ctx, value.AccountID); err != nil {
+		return mapNotFound("lock title subscription account", err)
+	}
+	exists, err := q.TitleSubscriptionExists(ctx, postgres.TitleSubscriptionExistsParams{
+		AccountID: value.AccountID, Provider: string(value.Provider), ProviderID: value.ProviderID,
+	})
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	count, err := q.CountTitleSubscriptions(ctx, value.AccountID)
+	if err != nil {
+		return fmt.Errorf("count title subscriptions: %w", err)
+	}
+	if count >= core.MaxTitleSubscriptions {
+		return core.ErrTitleSubscriptionLimit
+	}
+	if err := q.CreateTitleSubscription(ctx, postgres.CreateTitleSubscriptionParams{
+		AccountID: value.AccountID, Provider: string(value.Provider), ProviderID: value.ProviderID,
+		CreatedAt: core.NormalizeTime(value.CreatedAt),
+	}); err != nil {
+		return fmt.Errorf("create title subscription: %w", err)
+	}
+	return nil
+}
+
+func (s *notifications) UnsubscribeTitle(
+	ctx context.Context, accountID string, provider core.MetadataProviderKind, providerID string,
+) error {
+	if !core.ValidID(accountID) || !provider.Valid() || core.ValidateProviderID(providerID) != nil {
+		return core.ErrInvalidArgument
+	}
+	if s.sqlite != nil {
+		err := s.sqlite.DeleteTitleSubscription(ctx, sqlite.DeleteTitleSubscriptionParams{
+			AccountID: accountID, Provider: string(provider), ProviderID: providerID,
+		})
+		if err != nil {
+			return fmt.Errorf("delete title subscription: %w", err)
+		}
+		return nil
+	}
+	err := s.postgres.DeleteTitleSubscription(ctx, postgres.DeleteTitleSubscriptionParams{
+		AccountID: accountID, Provider: string(provider), ProviderID: providerID,
+	})
+	if err != nil {
+		return fmt.Errorf("delete title subscription: %w", err)
+	}
+	return nil
+}
+
+func (s *notifications) TitleSubscribed(
+	ctx context.Context, accountID string, provider core.MetadataProviderKind, providerID string,
+) (bool, error) {
+	if !core.ValidID(accountID) || !provider.Valid() || core.ValidateProviderID(providerID) != nil {
+		return false, core.ErrInvalidArgument
+	}
+	if s.sqlite != nil {
+		exists, err := s.sqlite.TitleSubscriptionExists(ctx, sqlite.TitleSubscriptionExistsParams{
+			AccountID: accountID, Provider: string(provider), ProviderID: providerID,
+		})
+		if err != nil {
+			return false, fmt.Errorf("get title subscription: %w", err)
+		}
+		return exists, nil
+	}
+	exists, err := s.postgres.TitleSubscriptionExists(ctx, postgres.TitleSubscriptionExistsParams{
+		AccountID: accountID, Provider: string(provider), ProviderID: providerID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("get title subscription: %w", err)
+	}
+	return exists, nil
 }
 
 func (s *notifications) RecordNotificationChannelResult(
@@ -881,7 +1142,7 @@ func mapSQLiteDelivery(row sqlite.NotificationOutbox) (core.NotificationDelivery
 	if err != nil {
 		return core.NotificationDelivery{}, err
 	}
-	return decodeDelivery(row.ID, row.ChannelID, row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
+	return decodeDelivery(row.ID, row.ChannelID, recipientAccountID(row.RecipientAccountID), row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
 		int(row.Attempts), next, row.LeaseToken, lease, row.LastError, sent, created, updated)
 }
 
@@ -895,13 +1156,20 @@ func mapPostgresDelivery(row postgres.NotificationOutbox) (core.NotificationDeli
 		value := core.NormalizeTime(row.SentAt.Time)
 		sent = &value
 	}
-	return decodeDelivery(row.ID, row.ChannelID, row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
+	return decodeDelivery(row.ID, row.ChannelID, recipientAccountID(row.RecipientAccountID), row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
 		int(row.Attempts), core.NormalizeTime(row.NextAttemptAt), row.LeaseToken, lease, row.LastError, sent,
 		core.NormalizeTime(row.CreatedAt), core.NormalizeTime(row.UpdatedAt))
 }
 
+func recipientAccountID(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
 func decodeDelivery(
-	id, channelID, kind, event, payloadJSON, status string, attempts int, next time.Time,
+	id, channelID, recipientID, kind, event, payloadJSON, status string, attempts int, next time.Time,
 	leaseToken string, lease *time.Time, lastError string, sent *time.Time, created, updated time.Time,
 ) (core.NotificationDelivery, error) {
 	var payload core.NotificationPayload
@@ -909,7 +1177,8 @@ func decodeDelivery(
 		return core.NotificationDelivery{}, fmt.Errorf("decode notification payload: %w", err)
 	}
 	return core.NotificationDelivery{
-		ID: id, ChannelID: channelID, ChannelKind: core.NotificationKind(kind), EventType: core.RequestEventType(event),
+		ID: id, ChannelID: channelID, RecipientID: recipientID,
+		ChannelKind: core.NotificationKind(kind), EventType: core.RequestEventType(event),
 		Payload: payload, Status: core.NotificationStatus(status), Attempts: attempts, NextAttemptAt: next,
 		LeaseToken: leaseToken, LeaseExpiresAt: lease, LastError: lastError, SentAt: sent,
 		CreatedAt: created, UpdatedAt: updated,

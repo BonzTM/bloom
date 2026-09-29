@@ -706,18 +706,19 @@ func importedRecord(recordID, itemID string, started time.Time) core.ImportedWat
 
 func assertImportedWatchShape(t *testing.T, pool *sql.DB, serverID string) {
 	t.Helper()
-	var source, importSource, recordID, state string
+	var id, source, importSource, recordID, state string
 	var segments, positions int
-	err := pool.QueryRowContext(t.Context(), `SELECT source, import_source, import_record_id, state,
+	err := pool.QueryRowContext(t.Context(), `SELECT id, source, import_source, import_record_id, state,
         (SELECT COUNT(*) FROM watch_segments WHERE watch_id = watches.id),
         (SELECT COUNT(*) FROM watch_positions WHERE watch_id = watches.id)
         FROM watches WHERE media_server_id = $1 AND import_record_id = 'source-inserted'`, serverID).
-		Scan(&source, &importSource, &recordID, &state, &segments, &positions)
+		Scan(&id, &source, &importSource, &recordID, &state, &segments, &positions)
 	if err != nil || source != "import" || importSource != "playback_reporting" ||
 		recordID != "source-inserted" || state != "stopped" || segments != 0 || positions != 0 {
 		t.Fatalf("imported watch = %q %q %q %q segments=%d positions=%d, %v",
 			source, importSource, recordID, state, segments, positions, err)
 	}
+	assertNoPlaybackNotificationEvent(t, pool, id, 0)
 }
 
 func assertImportLeaseResume(t *testing.T, fixture importFixture, job core.ImportJob) {

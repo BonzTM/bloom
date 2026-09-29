@@ -20,12 +20,16 @@ const (
 	MaxNotificationPayloadBytes  = 32 * 1024
 	MaxNotificationTemplateBytes = 4096
 	MaxNotificationRecipients    = 32
+	MaxTitleSubscriptions        = 500
 	MaxNotificationAttempts      = 8
 	MaxNotificationErrorBytes    = 512
 )
 
 // ErrNotificationChannelFailure identifies an opaque adapter failure at the HTTP boundary.
 var ErrNotificationChannelFailure = errors.New("notification channel failure")
+
+// ErrTitleSubscriptionLimit reports the per-account 500-title bound.
+var ErrTitleSubscriptionLimit = errors.New("title subscription limit exceeded")
 
 // ErrDuplicateNotificationRecipient identifies a repeated case-insensitive mailbox.
 var ErrDuplicateNotificationRecipient = errors.New("duplicate notification recipient")
@@ -114,6 +118,31 @@ type NotificationPayload struct {
 	Reason            string           `json:"reason,omitempty"`
 	OccurredAt        time.Time        `json:"occurred_at"`
 	Test              bool             `json:"test"`
+	WatchID           string           `json:"watch_id,omitempty"`
+	MediaServerID     string           `json:"media_server_id,omitempty"`
+	MediaUserID       string           `json:"media_user_id,omitempty"`
+	MediaUsername     string           `json:"media_username,omitempty"`
+	ItemID            string           `json:"item_id,omitempty"`
+	ItemName          string           `json:"item_name,omitempty"`
+	ItemType          string           `json:"item_type,omitempty"`
+	Client            string           `json:"client,omitempty"`
+	DeviceID          string           `json:"device_id,omitempty"`
+	DeviceName        string           `json:"device_name,omitempty"`
+}
+
+// PlaybackSessionStartedEvent is the bounded durable source event for one new watch.
+type PlaybackSessionStartedEvent struct {
+	WatchID       string    `json:"watch_id"`
+	MediaServerID string    `json:"media_server_id"`
+	MediaUserID   string    `json:"media_user_id"`
+	MediaUsername string    `json:"media_username"`
+	ItemID        string    `json:"item_id"`
+	ItemName      string    `json:"item_name"`
+	ItemType      string    `json:"item_type"`
+	Client        string    `json:"client"`
+	DeviceID      string    `json:"device_id"`
+	DeviceName    string    `json:"device_name"`
+	At            time.Time `json:"occurred_at"`
 }
 
 // RenderedNotification contains channel-ready text and structured data.
@@ -172,6 +201,7 @@ type NotificationDelivery struct {
 	ID             string
 	ChannelID      string
 	ChannelKind    NotificationKind
+	RecipientID    string
 	EventType      RequestEventType
 	Payload        NotificationPayload
 	Status         NotificationStatus
@@ -187,8 +217,26 @@ type NotificationDelivery struct {
 
 // NotificationEvent is one committed request lifecycle event awaiting fan-out.
 type NotificationEvent struct {
-	ID    string
-	Event RequestEvent
+	ID       string
+	Event    RequestEvent
+	Playback *PlaybackSessionStartedEvent
+}
+
+// Type returns the stable event kind for either source.
+func (e NotificationEvent) Type() RequestEventType { return e.Event.Type }
+
+// NotificationPreference enables or disables one event kind for an account.
+type NotificationPreference struct {
+	EventType RequestEventType
+	Enabled   bool
+}
+
+// TitleSubscription identifies an account following one provider title.
+type TitleSubscription struct {
+	AccountID  string
+	Provider   MetadataProviderKind
+	ProviderID string
+	CreatedAt  time.Time
 }
 
 // NotificationDeliveryCursor is a stable recent-delivery boundary.
@@ -220,6 +268,19 @@ type NotificationChannelWriter interface {
 type NotificationEventStore interface {
 	GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error)
 	FanOutNotificationEvent(ctx context.Context, eventID string, payload NotificationPayload, at time.Time) (int, error)
+}
+
+// NotificationPreferenceStore persists account event-kind choices.
+type NotificationPreferenceStore interface {
+	ListNotificationPreferences(ctx context.Context, accountID string) ([]NotificationPreference, error)
+	ReplaceNotificationPreferences(ctx context.Context, accountID string, values []NotificationPreference) error
+}
+
+// TitleSubscriptionStore owns bounded, idempotent title follows.
+type TitleSubscriptionStore interface {
+	SubscribeTitle(ctx context.Context, value TitleSubscription) error
+	UnsubscribeTitle(ctx context.Context, accountID string, provider MetadataProviderKind, providerID string) error
+	TitleSubscribed(ctx context.Context, accountID string, provider MetadataProviderKind, providerID string) (bool, error)
 }
 
 // NotificationDeliveryStore owns lease-based delivery state transitions.
@@ -261,7 +322,7 @@ func ValidateNotificationRegistration(value NotificationRegistration) error {
 
 // ValidateNotificationSubscriptions checks a nonempty unique closed event set.
 func ValidateNotificationSubscriptions(values []RequestEventType) error {
-	if len(values) == 0 || len(values) > 6 {
+	if len(values) == 0 || len(values) > 7 {
 		return ErrInvalidArgument
 	}
 	seen := make(map[RequestEventType]struct{}, len(values))
@@ -338,8 +399,13 @@ func ValidateNotificationPayload(value NotificationPayload) error {
 	if value.DeliveryID != "" && !ValidID(value.DeliveryID) {
 		return ErrInvalidArgument
 	}
-	if !value.EventType.Valid() || !ValidID(value.RequestID) || !value.Kind.Valid() ||
-		!value.Status.Valid() || value.OccurredAt.IsZero() {
+	if !value.EventType.Valid() || value.OccurredAt.IsZero() {
+		return ErrInvalidArgument
+	}
+	if value.EventType == NotificationEventPlaybackSessionStarted {
+		return validatePlaybackNotificationPayload(value)
+	}
+	if !ValidID(value.RequestID) || !value.Kind.Valid() || !value.Status.Valid() {
 		return ErrInvalidArgument
 	}
 	fields := []string{value.Title, value.RequesterUsername, value.ActorUsername, value.Reason}
@@ -349,6 +415,49 @@ func ValidateNotificationPayload(value NotificationPayload) error {
 		}
 	}
 	return nil
+}
+
+func validatePlaybackNotificationPayload(value NotificationPayload) error {
+	if !ValidID(value.WatchID) || !ValidID(value.MediaServerID) || value.MediaUserID == "" || value.ItemID == "" {
+		return ErrInvalidArgument
+	}
+	fields := []string{
+		value.MediaUserID, value.MediaUsername, value.ItemID, value.ItemName,
+		value.ItemType, value.Client, value.DeviceID, value.DeviceName,
+	}
+	for _, field := range fields {
+		if len(field) > MaxNotificationTemplateBytes || !utf8.ValidString(field) {
+			return ErrInvalidArgument
+		}
+	}
+	return nil
+}
+
+// ValidateNotificationPreferences checks a complete, unique event preference set.
+func ValidateNotificationPreferences(values []NotificationPreference) error {
+	if len(values) != len(NotificationEventTypes()) {
+		return ErrInvalidArgument
+	}
+	seenEvents := make(map[RequestEventType]struct{}, len(values))
+	for _, value := range values {
+		if !value.EventType.Valid() {
+			return ErrInvalidArgument
+		}
+		if _, exists := seenEvents[value.EventType]; exists {
+			return ErrInvalidArgument
+		}
+		seenEvents[value.EventType] = struct{}{}
+	}
+	return nil
+}
+
+// NotificationEventTypes returns the stable contract order.
+func NotificationEventTypes() []RequestEventType {
+	return []RequestEventType{
+		RequestEventCreated, RequestEventApproved, RequestEventDeclined,
+		RequestEventDispatched, RequestEventAvailable, RequestEventFailed,
+		NotificationEventPlaybackSessionStarted,
+	}
 }
 
 // ValidateNotificationLease checks a future expiring lease.

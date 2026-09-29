@@ -40,6 +40,12 @@ type AccountMediaUser struct {
 	SuppressedAt  sql.NullTime
 }
 
+type AccountNotificationPreference struct {
+	AccountID string
+	EventType string
+	Enabled   bool
+}
+
 type AccountRequestQuota struct {
 	AccountID           string
 	MovieLimit          int32
@@ -247,37 +253,49 @@ type NotificationChannelSubscription struct {
 }
 
 type NotificationEvent struct {
-	ID            string
-	EventType     string
-	RequestID     string
-	RequesterID   string
-	ActorID       string
-	MediaKind     string
-	Title         string
-	RequestStatus string
-	Reason        string
-	EventSequence int32
-	OccurredAt    time.Time
-	FannedAt      sql.NullTime
-	CreatedAt     time.Time
+	ID                string
+	EventType         string
+	RequestID         string
+	RequesterID       string
+	ActorID           string
+	MediaKind         string
+	Title             string
+	RequestStatus     string
+	Reason            string
+	EventSequence     int32
+	OccurredAt        time.Time
+	FannedAt          sql.NullTime
+	CreatedAt         time.Time
+	SourcePayloadJson string
+}
+
+type NotificationEventRecipient struct {
+	EventID   string
+	AccountID string
 }
 
 type NotificationOutbox struct {
-	ID             string
-	EventID        string
-	ChannelID      string
-	ChannelKind    string
-	EventType      string
-	PayloadJson    string
-	Status         string
-	Attempts       int32
-	NextAttemptAt  time.Time
-	LeaseToken     string
-	LeaseExpiresAt sql.NullTime
-	LastError      string
-	SentAt         sql.NullTime
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                 string
+	EventID            string
+	ChannelID          string
+	ChannelKind        string
+	EventType          string
+	PayloadJson        string
+	Status             string
+	Attempts           int32
+	NextAttemptAt      time.Time
+	LeaseToken         string
+	LeaseExpiresAt     sql.NullTime
+	LastError          string
+	SentAt             sql.NullTime
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	RecipientAccountID sql.NullString
+}
+
+type PlaybackNotificationEmission struct {
+	WatchID   string
+	EmittedAt time.Time
 }
 
 type Request struct {
@@ -357,6 +375,13 @@ type Session struct {
 	Token  string
 	Data   []byte
 	Expiry time.Time
+}
+
+type TitleAvailabilitySubscription struct {
+	AccountID  string
+	Provider   string
+	ProviderID string
+	CreatedAt  time.Time
 }
 
 type Watch struct {

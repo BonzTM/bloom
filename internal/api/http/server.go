@@ -153,6 +153,14 @@ type notificationTester interface {
 	Test(context.Context, string) error
 }
 
+type notificationRouting interface {
+	Preferences(context.Context, string) ([]core.NotificationPreference, error)
+	UpdatePreferences(context.Context, string, []core.NotificationPreference) ([]core.NotificationPreference, error)
+	SubscribeTitle(context.Context, string, core.MetadataProviderKind, string) error
+	UnsubscribeTitle(context.Context, string, core.MetadataProviderKind, string) error
+	TitleSubscribed(context.Context, string, core.MetadataProviderKind, string) (bool, error)
+}
+
 // Server owns the HTTP listener, mux, and middleware wiring. It holds the
 // dependencies the handlers need and the readiness flag the shutdown sequence
 // flips. It never stores a request context.
@@ -206,6 +214,7 @@ type Server struct {
 	notificationReader     notificationReader
 	notificationManager    notificationManager
 	notificationTester     notificationTester
+	notificationRouting    notificationRouting
 	clock                  core.Clock
 	oidcProvider           core.OIDCProvider
 	oidcAccounts           core.OIDCAccountStore
@@ -280,6 +289,8 @@ type Deps struct {
 	NotificationManager notificationManager
 	// NotificationTester sends explicit administrator test messages.
 	NotificationTester notificationTester
+	// NotificationRouting supplies account preferences and title subscriptions.
+	NotificationRouting notificationRouting
 	// Sessions holds server-side session state.
 	Sessions *scs.SessionManager
 	// Audit receives security events on the dedicated audit stream.
@@ -421,6 +432,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		notificationReader:     deps.NotificationReader,
 		notificationManager:    deps.NotificationManager,
 		notificationTester:     deps.NotificationTester,
+		notificationRouting:    deps.NotificationRouting,
 		mediaOperationTimeout:  derivedAuthOperationTimeout(cfg.WriteTimeout),
 		clock:                  deps.Clock,
 		oidcProvider:           deps.OIDC,
@@ -614,7 +626,8 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/download-managers", "/api/v1/download-managers/{id}", "/api/v1/download-managers/{id}/options":
 		return auditResourceDownloadManagers
 	case "/api/v1/notification-channels", "/api/v1/notification-channels/{id}",
-		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries":
+		"/api/v1/notification-channels/{id}/test", "/api/v1/notification-channels/{id}/deliveries",
+		"/api/v1/me/notification-preferences":
 		return auditResourceNotifications
 	case "/api/v1/invites", "/api/v1/invites/{id}", "/api/v1/invites/servers",
 		"/api/v1/invites/provisioning-failures", "/api/v1/invites/provisioning-failures/{id}":
@@ -628,7 +641,8 @@ func csrfAuditResource(path string) string {
 	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
 		return auditResourceRequestProfiles
 	case "/api/v1/requests", "/api/v1/requests/{id}", "/api/v1/requests/{id}/progress",
-		"/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline":
+		"/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline",
+		"/api/v1/titles/{provider}/{provider_id}/subscription":
 		return auditResourceRequests
 	case "/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota":
 		return auditResourceRequestQuotas

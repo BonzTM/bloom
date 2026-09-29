@@ -10,6 +10,55 @@ import (
 	"database/sql"
 )
 
+const listAddressedNotificationChannels = `-- name: ListAddressedNotificationChannels :many
+SELECT channel.id, channel.kind, recipient.account_id
+FROM notification_event_recipients AS recipient
+JOIN notification_channel_subscriptions AS subscription
+  ON subscription.event_type = ?1
+JOIN notification_channels AS channel ON channel.id = subscription.channel_id
+LEFT JOIN account_notification_preferences AS preference
+  ON preference.account_id = recipient.account_id
+ AND preference.event_type = subscription.event_type
+WHERE recipient.event_id = ?2
+  AND channel.enabled = 1 AND channel.deleted_at IS NULL
+  AND (preference.enabled = 1 OR preference.account_id IS NULL)
+ORDER BY recipient.account_id, channel.id
+`
+
+type ListAddressedNotificationChannelsParams struct {
+	EventType string
+	EventID   string
+}
+
+type ListAddressedNotificationChannelsRow struct {
+	ID        string
+	Kind      string
+	AccountID string
+}
+
+func (q *Queries) ListAddressedNotificationChannels(ctx context.Context, arg ListAddressedNotificationChannelsParams) ([]ListAddressedNotificationChannelsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAddressedNotificationChannels, arg.EventType, arg.EventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAddressedNotificationChannelsRow{}
+	for rows.Next() {
+		var i ListAddressedNotificationChannelsRow
+		if err := rows.Scan(&i.ID, &i.Kind, &i.AccountID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockNotificationChannelForClaim = `-- name: LockNotificationChannelForClaim :one
 
 SELECT channel.id
@@ -27,6 +76,17 @@ LIMIT 1
 // the write transaction; these names match the PostgreSQL row-lock queries.
 func (q *Queries) LockNotificationChannelForClaim(ctx context.Context, dueAt string) (string, error) {
 	row := q.db.QueryRowContext(ctx, lockNotificationChannelForClaim, dueAt)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockNotificationPreferenceAccount = `-- name: LockNotificationPreferenceAccount :one
+SELECT id FROM accounts WHERE id = ?1
+`
+
+func (q *Queries) LockNotificationPreferenceAccount(ctx context.Context, accountID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockNotificationPreferenceAccount, accountID)
 	var id string
 	err := row.Scan(&id)
 	return id, err

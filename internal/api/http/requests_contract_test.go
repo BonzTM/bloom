@@ -182,7 +182,8 @@ func TestRequestStateChangingRoutesHaveCSRFAuditResources(t *testing.T) {
 func TestRequestSliceResponseSchemasAcceptWireFixtures(t *testing.T) {
 	document := loadOpenAPI(t)
 	fixtures := map[string]string{
-		"#/components/schemas/MetadataSeries":           `{"kind":"series","provider":"tmdb","provider_id":"12","title":"Show","year":2026,"overview":"Plot","poster_path":"/show.jpg","backdrop_path":"/show-wide.jpg","seasons":[{"number":1,"name":"Season 1","episode_count":8,"air_date":"2026-01-02T00:00:00Z"}]}`,
+		"#/components/schemas/MetadataTitleDetail":      `{"kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"overview":"Plot","poster_path":"/film.jpg","backdrop_path":"/film-wide.jpg","subscribed":true}`,
+		"#/components/schemas/MetadataSeries":           `{"kind":"series","provider":"tmdb","provider_id":"12","title":"Show","year":2026,"overview":"Plot","poster_path":"/show.jpg","backdrop_path":"/show-wide.jpg","subscribed":false,"seasons":[{"number":1,"name":"Season 1","episode_count":8,"air_date":"2026-01-02T00:00:00Z"}]}`,
 		"#/components/schemas/MetadataDiscoverResponse": `{"items":[{"kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,"overview":"Plot","poster_path":"/film.jpg","backdrop_path":"/film-wide.jpg","request_state":"pending"}],"next_cursor":"Mg"}`,
 		"#/components/schemas/MetadataGenresResponse":   `{"items":[{"id":28,"name":"Action"}]}`,
 		"#/components/schemas/RequestProfile":           `{"id":"33333333-3333-4333-8333-333333333333","name":"Default","kinds":["movie"],"download_manager_kind":"radarr","download_manager_instance":"main","quality_profile":"Any","root_folder":"/media","tags":[],"created_at":"2026-09-23T12:00:00Z","updated_at":"2026-09-23T12:00:00Z"}`,

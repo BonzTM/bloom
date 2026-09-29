@@ -117,6 +117,10 @@ func (s *postgresPlaybackStore) savePostgresMutation(
 	if err != nil {
 		return playbackStoreError("encode playback watch", err)
 	}
+	existed, err := queries.PlaybackWatchExists(ctx, mutation.Watch.ID)
+	if err != nil {
+		return playbackStoreError("check playback watch", err)
+	}
 	if err := queries.UpsertPlaybackWatch(ctx, params); err != nil {
 		return playbackStoreError("upsert playback watch", err)
 	}
@@ -145,7 +149,51 @@ func (s *postgresPlaybackStore) savePostgresMutation(
 			return playbackStoreError("create playback segment", err)
 		}
 	}
-	return savePostgresPosition(ctx, queries, mutation.Position)
+	if err := savePostgresPosition(ctx, queries, mutation.Position); err != nil {
+		return err
+	}
+	return createPostgresPlaybackNotification(ctx, queries, mutation.Watch, !existed)
+}
+
+func createPostgresPlaybackNotification(
+	ctx context.Context, queries *postgres.Queries, watch core.PlaybackWatch, inserted bool,
+) error {
+	if !inserted || watch.Source == core.WatchSourceImport {
+		return nil
+	}
+	event, payload, err := playbackSessionStartedEvent(watch)
+	if err != nil {
+		return err
+	}
+	rows, err := queries.CreatePlaybackNotificationEmission(ctx, postgres.CreatePlaybackNotificationEmissionParams{
+		WatchID: event.WatchID, EmittedAt: event.At,
+	})
+	if err != nil {
+		return playbackStoreError("insert playback notification marker", err)
+	}
+	if rows == 0 {
+		return nil
+	}
+	id, err := core.NewID()
+	if err != nil {
+		return fmt.Errorf("create playback notification id: %w", err)
+	}
+	rows, err = queries.CreatePlaybackNotificationEvent(ctx, postgres.CreatePlaybackNotificationEventParams{
+		ID: id, WatchID: event.WatchID, Title: event.ItemName, SourcePayloadJson: payload,
+		OccurredAt: event.At, CreatedAt: event.At,
+	})
+	if err != nil {
+		return playbackStoreError("insert playback notification", err)
+	}
+	if rows == 0 {
+		return nil
+	}
+	if err := queries.AddPlaybackNotificationRecipients(ctx, postgres.AddPlaybackNotificationRecipientsParams{
+		EventID: id, MediaServerID: event.MediaServerID, MediaUserID: event.MediaUserID,
+	}); err != nil {
+		return playbackStoreError("address playback notification", err)
+	}
+	return nil
 }
 
 func lockPostgresCollectedKeys(

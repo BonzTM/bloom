@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/BonzTM/bloom/internal/config"
 	"github.com/BonzTM/bloom/internal/core"
@@ -61,8 +60,7 @@ func permissionsFromStrings(values []string) ([]core.Permission, error) {
 		}
 		permissions = append(permissions, permission)
 	}
-	slices.Sort(permissions)
-	return slices.Compact(permissions), nil
+	return core.DerivedPermissions(permissions), nil
 }
 
 type authorizationRow struct {
@@ -115,6 +113,7 @@ func appendRolePermission(roles []core.Role, row roleRow, createdAt func(any) (c
 			return nil, fmt.Errorf("role %q has unknown permission %q", row.name, permission)
 		}
 		roles[len(roles)-1].Permissions = append(roles[len(roles)-1].Permissions, permission)
+		roles[len(roles)-1].Permissions = core.DerivedPermissions(roles[len(roles)-1].Permissions)
 	}
 	return roles, nil
 }

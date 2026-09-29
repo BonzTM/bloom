@@ -165,7 +165,7 @@ func (a *authAuthorization) Permissions(_ context.Context, accountID string) ([]
 	if a.permissionsErr != nil {
 		return nil, a.permissionsErr
 	}
-	permissions := slices.Clone(a.permissions[accountID])
+	permissions := core.DerivedPermissions(a.permissions[accountID])
 	if a.advanceAfterPermissions {
 		a.permissions[accountID] = []core.Permission{core.PermissionRequestsCreate}
 		a.roleNames[accountID] = []string{"member"}
@@ -187,7 +187,8 @@ func (a *authAuthorization) Snapshot(ctx context.Context, accountID string) (cor
 		return core.AuthorizationSnapshot{}, a.snapshotErr
 	}
 	return core.AuthorizationSnapshot{
-		RoleNames: slices.Clone(a.roleNames[accountID]), Permissions: slices.Clone(a.permissions[accountID]),
+		RoleNames:   slices.Clone(a.roleNames[accountID]),
+		Permissions: core.DerivedPermissions(a.permissions[accountID]),
 	}, nil
 }
 

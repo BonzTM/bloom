@@ -50,6 +50,7 @@ const (
 	codeDownloadManagerNotFound = "download_manager_not_found"
 	codeDownloadManagerInUse    = "download_manager_in_use"
 	codeNotificationFailure     = "notification_channel_failure"
+	codeTitleSubscriptionLimit  = "title_subscription_limit_exceeded"
 	codeMediaUserNotLinked      = "media_user_not_linked"
 	codeInviteFailureLeased     = "invite_provisioning_failure_leased"
 	codeImportInProgress        = "import_in_progress"
@@ -75,6 +76,8 @@ func errorClass(err error) (status int, code string) {
 		return status, code
 	}
 	switch {
+	case errors.Is(err, core.ErrTitleSubscriptionLimit):
+		return http.StatusUnprocessableEntity, codeTitleSubscriptionLimit
 	case errors.Is(err, core.ErrQuotaExceeded):
 		return http.StatusUnprocessableEntity, codeQuotaExceeded
 	case errors.Is(err, core.ErrProfileInUse):

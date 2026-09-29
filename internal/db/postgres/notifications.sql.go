@@ -11,6 +11,58 @@ import (
 	"time"
 )
 
+const addAvailabilityNotificationRecipients = `-- name: AddAvailabilityNotificationRecipients :exec
+INSERT INTO notification_event_recipients (event_id, account_id)
+SELECT $1, subscription.account_id
+FROM title_availability_subscriptions AS subscription
+WHERE subscription.provider = $2
+  AND subscription.provider_id = $3
+ON CONFLICT DO NOTHING
+`
+
+type AddAvailabilityNotificationRecipientsParams struct {
+	EventID    string
+	Provider   string
+	ProviderID string
+}
+
+func (q *Queries) AddAvailabilityNotificationRecipients(ctx context.Context, arg AddAvailabilityNotificationRecipientsParams) error {
+	_, err := q.db.ExecContext(ctx, addAvailabilityNotificationRecipients, arg.EventID, arg.Provider, arg.ProviderID)
+	return err
+}
+
+const addNotificationEventRecipient = `-- name: AddNotificationEventRecipient :exec
+INSERT INTO notification_event_recipients (event_id, account_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type AddNotificationEventRecipientParams struct {
+	EventID   string
+	AccountID string
+}
+
+func (q *Queries) AddNotificationEventRecipient(ctx context.Context, arg AddNotificationEventRecipientParams) error {
+	_, err := q.db.ExecContext(ctx, addNotificationEventRecipient, arg.EventID, arg.AccountID)
+	return err
+}
+
+const addNotificationPreference = `-- name: AddNotificationPreference :exec
+INSERT INTO account_notification_preferences (account_id, event_type, enabled)
+VALUES ($1, $2, $3)
+`
+
+type AddNotificationPreferenceParams struct {
+	AccountID string
+	EventType string
+	Enabled   bool
+}
+
+func (q *Queries) AddNotificationPreference(ctx context.Context, arg AddNotificationPreferenceParams) error {
+	_, err := q.db.ExecContext(ctx, addNotificationPreference, arg.AccountID, arg.EventType, arg.Enabled)
+	return err
+}
+
 const addNotificationSubscription = `-- name: AddNotificationSubscription :exec
 INSERT INTO notification_channel_subscriptions (channel_id, event_type)
 VALUES ($1, $2)
@@ -23,6 +75,27 @@ type AddNotificationSubscriptionParams struct {
 
 func (q *Queries) AddNotificationSubscription(ctx context.Context, arg AddNotificationSubscriptionParams) error {
 	_, err := q.db.ExecContext(ctx, addNotificationSubscription, arg.ChannelID, arg.EventType)
+	return err
+}
+
+const addPlaybackNotificationRecipients = `-- name: AddPlaybackNotificationRecipients :exec
+INSERT INTO notification_event_recipients (event_id, account_id)
+SELECT $1, link.account_id
+FROM account_media_users AS link
+WHERE link.media_server_id = $2
+  AND link.media_user_id = $3
+  AND link.suppressed_at IS NULL
+ON CONFLICT DO NOTHING
+`
+
+type AddPlaybackNotificationRecipientsParams struct {
+	EventID       string
+	MediaServerID string
+	MediaUserID   string
+}
+
+func (q *Queries) AddPlaybackNotificationRecipients(ctx context.Context, arg AddPlaybackNotificationRecipientsParams) error {
+	_, err := q.db.ExecContext(ctx, addPlaybackNotificationRecipients, arg.EventID, arg.MediaServerID, arg.MediaUserID)
 	return err
 }
 
@@ -48,7 +121,7 @@ AND EXISTS (
 	SELECT 1 FROM notification_channels AS channel
 	WHERE channel.id = $4 AND channel.enabled = TRUE AND channel.deleted_at IS NULL
 )
-RETURNING id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
+RETURNING id, event_id, channel_id, recipient_account_id, channel_kind, event_type, payload_json, status, attempts,
           next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at
 `
 
@@ -60,7 +133,26 @@ type ClaimNotificationOutboxParams struct {
 	DueAt          time.Time
 }
 
-func (q *Queries) ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (NotificationOutbox, error) {
+type ClaimNotificationOutboxRow struct {
+	ID                 string
+	EventID            string
+	ChannelID          string
+	RecipientAccountID sql.NullString
+	ChannelKind        string
+	EventType          string
+	PayloadJson        string
+	Status             string
+	Attempts           int32
+	NextAttemptAt      time.Time
+	LeaseToken         string
+	LeaseExpiresAt     sql.NullTime
+	LastError          string
+	SentAt             sql.NullTime
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (ClaimNotificationOutboxRow, error) {
 	row := q.db.QueryRowContext(ctx, claimNotificationOutbox,
 		arg.LeaseToken,
 		arg.LeaseExpiresAt,
@@ -68,11 +160,12 @@ func (q *Queries) ClaimNotificationOutbox(ctx context.Context, arg ClaimNotifica
 		arg.ChannelID,
 		arg.DueAt,
 	)
-	var i NotificationOutbox
+	var i ClaimNotificationOutboxRow
 	err := row.Scan(
 		&i.ID,
 		&i.EventID,
 		&i.ChannelID,
+		&i.RecipientAccountID,
 		&i.ChannelKind,
 		&i.EventType,
 		&i.PayloadJson,
@@ -107,6 +200,17 @@ func (q *Queries) CompleteNotificationOutbox(ctx context.Context, arg CompleteNo
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const countTitleSubscriptions = `-- name: CountTitleSubscriptions :one
+SELECT COUNT(*) FROM title_availability_subscriptions WHERE account_id = $1
+`
+
+func (q *Queries) CountTitleSubscriptions(ctx context.Context, accountID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTitleSubscriptions, accountID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createNotificationChannel = `-- name: CreateNotificationChannel :exec
@@ -160,11 +264,11 @@ func (q *Queries) CreateNotificationChannel(ctx context.Context, arg CreateNotif
 const createNotificationEvent = `-- name: CreateNotificationEvent :exec
 INSERT INTO notification_events (
     id, event_type, request_id, requester_id, actor_id, media_kind, title,
-    request_status, reason, event_sequence, occurred_at, fanned_at, created_at
+    request_status, reason, source_payload_json, event_sequence, occurred_at, fanned_at, created_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7, $8,
-    $9, $10, $11, NULL, $12
+    $9, '{}', $10, $11, NULL, $12
 )
 `
 
@@ -203,25 +307,26 @@ func (q *Queries) CreateNotificationEvent(ctx context.Context, arg CreateNotific
 
 const createNotificationOutbox = `-- name: CreateNotificationOutbox :exec
 INSERT INTO notification_outbox (
-    id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
+    id, event_id, channel_id, recipient_account_id, channel_kind, event_type, payload_json, status, attempts,
     next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, 'pending', 0, $7, '', NULL, '', NULL,
-    $8, $9
+    $1, $2, $3, $4, $5, $6,
+    $7, 'pending', 0, $8, '', NULL, '', NULL,
+    $9, $10
 )
 `
 
 type CreateNotificationOutboxParams struct {
-	ID            string
-	EventID       string
-	ChannelID     string
-	ChannelKind   string
-	EventType     string
-	PayloadJson   string
-	NextAttemptAt time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                 string
+	EventID            string
+	ChannelID          string
+	RecipientAccountID sql.NullString
+	ChannelKind        string
+	EventType          string
+	PayloadJson        string
+	NextAttemptAt      time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 func (q *Queries) CreateNotificationOutbox(ctx context.Context, arg CreateNotificationOutboxParams) error {
@@ -229,12 +334,91 @@ func (q *Queries) CreateNotificationOutbox(ctx context.Context, arg CreateNotifi
 		arg.ID,
 		arg.EventID,
 		arg.ChannelID,
+		arg.RecipientAccountID,
 		arg.ChannelKind,
 		arg.EventType,
 		arg.PayloadJson,
 		arg.NextAttemptAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+	)
+	return err
+}
+
+const createPlaybackNotificationEmission = `-- name: CreatePlaybackNotificationEmission :execrows
+INSERT INTO playback_notification_emissions (watch_id, emitted_at)
+VALUES ($1, $2)
+ON CONFLICT (watch_id) DO NOTHING
+`
+
+type CreatePlaybackNotificationEmissionParams struct {
+	WatchID   string
+	EmittedAt time.Time
+}
+
+func (q *Queries) CreatePlaybackNotificationEmission(ctx context.Context, arg CreatePlaybackNotificationEmissionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, createPlaybackNotificationEmission, arg.WatchID, arg.EmittedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const createPlaybackNotificationEvent = `-- name: CreatePlaybackNotificationEvent :execrows
+INSERT INTO notification_events (
+    id, event_type, request_id, requester_id, actor_id, media_kind, title,
+    request_status, reason, source_payload_json, event_sequence, occurred_at, fanned_at, created_at
+) VALUES (
+    $1, 'playback.session_started', $2,
+    '00000000-0000-4000-8000-000000000000', 'system', 'movie', $3,
+    'available', '', $4, 0, $5, NULL, $6
+)
+ON CONFLICT (event_type, request_id) WHERE event_type = 'playback.session_started' DO NOTHING
+`
+
+type CreatePlaybackNotificationEventParams struct {
+	ID                string
+	WatchID           string
+	Title             string
+	SourcePayloadJson string
+	OccurredAt        time.Time
+	CreatedAt         time.Time
+}
+
+func (q *Queries) CreatePlaybackNotificationEvent(ctx context.Context, arg CreatePlaybackNotificationEventParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, createPlaybackNotificationEvent,
+		arg.ID,
+		arg.WatchID,
+		arg.Title,
+		arg.SourcePayloadJson,
+		arg.OccurredAt,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const createTitleSubscription = `-- name: CreateTitleSubscription :exec
+INSERT INTO title_availability_subscriptions (account_id, provider, provider_id, created_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+type CreateTitleSubscriptionParams struct {
+	AccountID  string
+	Provider   string
+	ProviderID string
+	CreatedAt  time.Time
+}
+
+func (q *Queries) CreateTitleSubscription(ctx context.Context, arg CreateTitleSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, createTitleSubscription,
+		arg.AccountID,
+		arg.Provider,
+		arg.ProviderID,
+		arg.CreatedAt,
 	)
 	return err
 }
@@ -258,12 +442,37 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, arg DeleteNotif
 	return result.RowsAffected()
 }
 
+const deleteNotificationPreferences = `-- name: DeleteNotificationPreferences :exec
+DELETE FROM account_notification_preferences WHERE account_id = $1
+`
+
+func (q *Queries) DeleteNotificationPreferences(ctx context.Context, accountID string) error {
+	_, err := q.db.ExecContext(ctx, deleteNotificationPreferences, accountID)
+	return err
+}
+
 const deleteNotificationSubscriptions = `-- name: DeleteNotificationSubscriptions :exec
 DELETE FROM notification_channel_subscriptions WHERE channel_id = $1
 `
 
 func (q *Queries) DeleteNotificationSubscriptions(ctx context.Context, channelID string) error {
 	_, err := q.db.ExecContext(ctx, deleteNotificationSubscriptions, channelID)
+	return err
+}
+
+const deleteTitleSubscription = `-- name: DeleteTitleSubscription :exec
+DELETE FROM title_availability_subscriptions
+WHERE account_id = $1 AND provider = $2 AND provider_id = $3
+`
+
+type DeleteTitleSubscriptionParams struct {
+	AccountID  string
+	Provider   string
+	ProviderID string
+}
+
+func (q *Queries) DeleteTitleSubscription(ctx context.Context, arg DeleteTitleSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, deleteTitleSubscription, arg.AccountID, arg.Provider, arg.ProviderID)
 	return err
 }
 
@@ -396,15 +605,32 @@ func (q *Queries) GetNotificationSubscriptions(ctx context.Context, channelID st
 
 const getUnfannedNotificationEvent = `-- name: GetUnfannedNotificationEvent :one
 SELECT id, event_type, request_id, requester_id, actor_id, media_kind, title,
-       request_status, reason, event_sequence, occurred_at, fanned_at, created_at
+       request_status, reason, source_payload_json, event_sequence, occurred_at, fanned_at, created_at
 FROM notification_events
 WHERE fanned_at IS NULL
 ORDER BY created_at, event_sequence, id LIMIT 1
 `
 
-func (q *Queries) GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error) {
+type GetUnfannedNotificationEventRow struct {
+	ID                string
+	EventType         string
+	RequestID         string
+	RequesterID       string
+	ActorID           string
+	MediaKind         string
+	Title             string
+	RequestStatus     string
+	Reason            string
+	SourcePayloadJson string
+	EventSequence     int32
+	OccurredAt        time.Time
+	FannedAt          sql.NullTime
+	CreatedAt         time.Time
+}
+
+func (q *Queries) GetUnfannedNotificationEvent(ctx context.Context) (GetUnfannedNotificationEventRow, error) {
 	row := q.db.QueryRowContext(ctx, getUnfannedNotificationEvent)
-	var i NotificationEvent
+	var i GetUnfannedNotificationEventRow
 	err := row.Scan(
 		&i.ID,
 		&i.EventType,
@@ -415,6 +641,7 @@ func (q *Queries) GetUnfannedNotificationEvent(ctx context.Context) (Notificatio
 		&i.Title,
 		&i.RequestStatus,
 		&i.Reason,
+		&i.SourcePayloadJson,
 		&i.EventSequence,
 		&i.OccurredAt,
 		&i.FannedAt,
@@ -484,7 +711,7 @@ func (q *Queries) ListNotificationChannels(ctx context.Context, arg ListNotifica
 }
 
 const listNotificationDeliveries = `-- name: ListNotificationDeliveries :many
-SELECT id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
+SELECT id, event_id, channel_id, recipient_account_id, channel_kind, event_type, payload_json, status, attempts,
        next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at
 FROM notification_outbox
 WHERE channel_id = $1
@@ -500,7 +727,26 @@ type ListNotificationDeliveriesParams struct {
 	PageSize       int32
 }
 
-func (q *Queries) ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]NotificationOutbox, error) {
+type ListNotificationDeliveriesRow struct {
+	ID                 string
+	EventID            string
+	ChannelID          string
+	RecipientAccountID sql.NullString
+	ChannelKind        string
+	EventType          string
+	PayloadJson        string
+	Status             string
+	Attempts           int32
+	NextAttemptAt      time.Time
+	LeaseToken         string
+	LeaseExpiresAt     sql.NullTime
+	LastError          string
+	SentAt             sql.NullTime
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]ListNotificationDeliveriesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listNotificationDeliveries,
 		arg.ChannelID,
 		arg.AfterCreatedAt,
@@ -511,13 +757,14 @@ func (q *Queries) ListNotificationDeliveries(ctx context.Context, arg ListNotifi
 		return nil, err
 	}
 	defer rows.Close()
-	items := []NotificationOutbox{}
+	items := []ListNotificationDeliveriesRow{}
 	for rows.Next() {
-		var i NotificationOutbox
+		var i ListNotificationDeliveriesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventID,
 			&i.ChannelID,
+			&i.RecipientAccountID,
 			&i.ChannelKind,
 			&i.EventType,
 			&i.PayloadJson,
@@ -531,6 +778,41 @@ func (q *Queries) ListNotificationDeliveries(ctx context.Context, arg ListNotifi
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationPreferences = `-- name: ListNotificationPreferences :many
+SELECT event_type, enabled
+FROM account_notification_preferences
+WHERE account_id = $1
+ORDER BY event_type
+`
+
+type ListNotificationPreferencesRow struct {
+	EventType string
+	Enabled   bool
+}
+
+func (q *Queries) ListNotificationPreferences(ctx context.Context, accountID string) ([]ListNotificationPreferencesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNotificationPreferences, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationPreferencesRow{}
+	for rows.Next() {
+		var i ListNotificationPreferencesRow
+		if err := rows.Scan(&i.EventType, &i.Enabled); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -725,6 +1007,26 @@ func (q *Queries) RescheduleNotificationOutbox(ctx context.Context, arg Reschedu
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const titleSubscriptionExists = `-- name: TitleSubscriptionExists :one
+SELECT EXISTS (
+    SELECT 1 FROM title_availability_subscriptions
+    WHERE account_id = $1 AND provider = $2 AND provider_id = $3
+)
+`
+
+type TitleSubscriptionExistsParams struct {
+	AccountID  string
+	Provider   string
+	ProviderID string
+}
+
+func (q *Queries) TitleSubscriptionExists(ctx context.Context, arg TitleSubscriptionExistsParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, titleSubscriptionExists, arg.AccountID, arg.Provider, arg.ProviderID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const updateNotificationChannel = `-- name: UpdateNotificationChannel :execrows

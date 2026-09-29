@@ -12,7 +12,11 @@ import (
 )
 
 type Querier interface {
+	AddAvailabilityNotificationRecipients(ctx context.Context, arg AddAvailabilityNotificationRecipientsParams) error
+	AddNotificationEventRecipient(ctx context.Context, arg AddNotificationEventRecipientParams) error
+	AddNotificationPreference(ctx context.Context, arg AddNotificationPreferenceParams) error
 	AddNotificationSubscription(ctx context.Context, arg AddNotificationSubscriptionParams) error
+	AddPlaybackNotificationRecipients(ctx context.Context, arg AddPlaybackNotificationRecipientsParams) error
 	ArchiveLibraryItem(ctx context.Context, arg ArchiveLibraryItemParams) (int64, error)
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
@@ -29,7 +33,7 @@ type Querier interface {
 	ClaimImport(ctx context.Context, arg ClaimImportParams) (int64, error)
 	ClaimInviteProvisioningFailure(ctx context.Context, arg ClaimInviteProvisioningFailureParams) (ClaimInviteProvisioningFailureRow, error)
 	ClaimLibrarySync(ctx context.Context, arg ClaimLibrarySyncParams) (int64, error)
-	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (NotificationOutbox, error)
+	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) (ClaimNotificationOutboxRow, error)
 	ClaimRequestDispatch(ctx context.Context, arg ClaimRequestDispatchParams) (int64, error)
 	CloseOpenWatchSegment(ctx context.Context, arg CloseOpenWatchSegmentParams) (int64, error)
 	CompleteInviteProvisioningCleanup(ctx context.Context, arg CompleteInviteProvisioningCleanupParams) (int64, error)
@@ -40,6 +44,7 @@ type Querier interface {
 	CountRequestProfilesForDownloadManager(ctx context.Context, arg CountRequestProfilesForDownloadManagerParams) (int64, error)
 	CountRequestedMoviesSince(ctx context.Context, arg CountRequestedMoviesSinceParams) (int64, error)
 	CountRequestedSeasonsSince(ctx context.Context, arg CountRequestedSeasonsSinceParams) (int64, error)
+	CountTitleSubscriptions(ctx context.Context, accountID string) (int64, error)
 	// accounts.sql is the sqlc source of truth for the account store. It is SHARED
 	// by both engines (ADR 0004 item 3): sqlc.yaml compiles it once against the
 	// SQLite schema into internal/db/sqlite and once against the PostgreSQL schema
@@ -61,10 +66,13 @@ type Querier interface {
 	CreateNotificationChannel(ctx context.Context, arg CreateNotificationChannelParams) error
 	CreateNotificationEvent(ctx context.Context, arg CreateNotificationEventParams) error
 	CreateNotificationOutbox(ctx context.Context, arg CreateNotificationOutboxParams) error
+	CreatePlaybackNotificationEmission(ctx context.Context, arg CreatePlaybackNotificationEmissionParams) (int64, error)
+	CreatePlaybackNotificationEvent(ctx context.Context, arg CreatePlaybackNotificationEventParams) (int64, error)
 	CreateRequest(ctx context.Context, arg CreateRequestParams) error
 	CreateRequestProfile(ctx context.Context, arg CreateRequestProfileParams) error
 	CreateRequestProfileTag(ctx context.Context, arg CreateRequestProfileTagParams) error
 	CreateRequestSeason(ctx context.Context, arg CreateRequestSeasonParams) error
+	CreateTitleSubscription(ctx context.Context, arg CreateTitleSubscriptionParams) error
 	CreateWatchSegment(ctx context.Context, arg CreateWatchSegmentParams) error
 	DeleteAccountRequestQuota(ctx context.Context, accountID string) (int64, error)
 	DeleteArchivedLibraryItemGenres(ctx context.Context, targetMediaServerID string) (int64, error)
@@ -77,12 +85,14 @@ type Querier interface {
 	DeleteMediaServerExclusions(ctx context.Context, mediaServerID string) error
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
+	DeleteNotificationPreferences(ctx context.Context, accountID string) error
 	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
 	DeleteOrphanImportUploadChunks(ctx context.Context, arg DeleteOrphanImportUploadChunksParams) (int64, error)
 	DeleteOverlappingImportedWatches(ctx context.Context, arg DeleteOverlappingImportedWatchesParams) error
 	DeleteRequestProfile(ctx context.Context, id string) (int64, error)
 	DeleteRequestProfileTags(ctx context.Context, profileID string) error
 	DeleteRoleRequestQuota(ctx context.Context, roleID string) (int64, error)
+	DeleteTitleSubscription(ctx context.Context, arg DeleteTitleSubscriptionParams) error
 	DeleteTombstonedNotificationChannel(ctx context.Context, arg DeleteTombstonedNotificationChannelParams) (int64, error)
 	DismissInviteProvisioningFailure(ctx context.Context, arg DismissInviteProvisioningFailureParams) (int64, error)
 	// Type-agnostic library catalog queries shared by SQLite and PostgreSQL.
@@ -129,7 +139,7 @@ type Querier interface {
 	GetRequestProfile(ctx context.Context, id string) (RequestProfile, error)
 	GetRoleIDByName(ctx context.Context, roleName string) (string, error)
 	GetRoleRequestQuota(ctx context.Context, roleID string) (RoleRequestQuota, error)
-	GetUnfannedNotificationEvent(ctx context.Context) (NotificationEvent, error)
+	GetUnfannedNotificationEvent(ctx context.Context) (GetUnfannedNotificationEventRow, error)
 	IncrementInviteUse(ctx context.Context, arg IncrementInviteUseParams) (int64, error)
 	InsertImportUploadChunk(ctx context.Context, arg InsertImportUploadChunkParams) error
 	InsertImportedWatch(ctx context.Context, arg InsertImportedWatchParams) (int64, error)
@@ -148,6 +158,7 @@ type Querier interface {
 	// PostgreSQL activity queries. strpos() treats q as a literal substring.
 	// Separate statements keep each ordered-index prefix seekable.
 	ListActivityWatches(ctx context.Context, arg ListActivityWatchesParams) ([]ListActivityWatchesRow, error)
+	ListAddressedNotificationChannels(ctx context.Context, arg ListAddressedNotificationChannelsParams) ([]ListAddressedNotificationChannelsRow, error)
 	ListAdminAccountMediaUsers(ctx context.Context, arg ListAdminAccountMediaUsersParams) ([]ListAdminAccountMediaUsersRow, error)
 	ListAdminAccountRoles(ctx context.Context, arg ListAdminAccountRolesParams) ([]ListAdminAccountRolesRow, error)
 	// PostgreSQL account queries whose parameter syntax is engine-specific.
@@ -191,7 +202,8 @@ type Querier interface {
 	ListMediaServers(ctx context.Context, arg ListMediaServersParams) ([]ListMediaServersRow, error)
 	ListMissingLibraryItemIDs(ctx context.Context, arg ListMissingLibraryItemIDsParams) ([]string, error)
 	ListNotificationChannels(ctx context.Context, arg ListNotificationChannelsParams) ([]ListNotificationChannelsRow, error)
-	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]NotificationOutbox, error)
+	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]ListNotificationDeliveriesRow, error)
+	ListNotificationPreferences(ctx context.Context, accountID string) ([]ListNotificationPreferencesRow, error)
 	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
@@ -223,12 +235,15 @@ type Querier interface {
 	// PostgreSQL notification row locks. Each lock is followed by a second
 	// statement in the same Read Committed transaction that re-checks eligibility.
 	LockNotificationChannelForClaim(ctx context.Context, dueAt time.Time) (string, error)
+	LockNotificationPreferenceAccount(ctx context.Context, accountID string) (string, error)
 	LockRequestTitle(ctx context.Context, lockKey string) error
 	LockTombstonedNotificationChannels(ctx context.Context, arg LockTombstonedNotificationChannelsParams) ([]string, error)
 	LockWatchDedup(ctx context.Context, lockKey string) error
 	MarkNotificationEventFanned(ctx context.Context, arg MarkNotificationEventFannedParams) (int64, error)
 	MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error)
 	NotificationOutboxDepth(ctx context.Context) (int64, error)
+	// Playback queries are portable across SQLite and PostgreSQL.
+	PlaybackWatchExists(ctx context.Context, id string) (bool, error)
 	PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error)
 	PruneNotificationOutbox(ctx context.Context, arg PruneNotificationOutboxParams) (int64, error)
 	RebuildLibraryItemRollup(ctx context.Context, arg RebuildLibraryItemRollupParams) error
@@ -263,6 +278,7 @@ type Querier interface {
 	StatsUserRecentWatches(ctx context.Context, arg StatsUserRecentWatchesParams) ([]StatsUserRecentWatchesRow, error)
 	StatsUsers(ctx context.Context, arg StatsUsersParams) ([]StatsUsersRow, error)
 	SuppressAccountMediaUser(ctx context.Context, arg SuppressAccountMediaUserParams) (int64, error)
+	TitleSubscriptionExists(ctx context.Context, arg TitleSubscriptionExistsParams) (bool, error)
 	TransitionRequest(ctx context.Context, arg TransitionRequestParams) (int64, error)
 	TransitionRequestSeasons(ctx context.Context, arg TransitionRequestSeasonsParams) error
 	TrimWatchPositions(ctx context.Context, watchID string) error
@@ -273,7 +289,6 @@ type Querier interface {
 	UpsertAccountRequestQuota(ctx context.Context, arg UpsertAccountRequestQuotaParams) error
 	UpsertLibraryItem(ctx context.Context, arg UpsertLibraryItemParams) (int64, error)
 	UpsertMetadataProvider(ctx context.Context, arg UpsertMetadataProviderParams) error
-	// Playback queries are portable across SQLite and PostgreSQL.
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
 	UpsertRoleRequestQuota(ctx context.Context, arg UpsertRoleRequestQuotaParams) error
 	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error

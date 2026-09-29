@@ -40,6 +40,8 @@ const (
 	PermissionAdminSettings Permission = "admin.settings"
 	// PermissionAdminRoles allows reading and managing roles.
 	PermissionAdminRoles Permission = "admin.roles"
+	// PermissionNotificationsManageOwn allows managing the account's notification routing.
+	PermissionNotificationsManageOwn Permission = "notifications.manage.own"
 )
 
 // PermissionDefinition describes one entry in the public permission catalog.
@@ -76,11 +78,24 @@ var permissionCatalog = [...]PermissionDefinition{
 	{ID: PermissionStatsReadAll, Module: "stats"},
 	{ID: PermissionAdminSettings, Module: "admin"},
 	{ID: PermissionAdminRoles, Module: "admin"},
+	{ID: PermissionNotificationsManageOwn, Module: "notifications"},
 }
 
 // PermissionCatalog returns a copy of the stable catalog in contract order.
 func PermissionCatalog() []PermissionDefinition {
 	return slices.Clone(permissionCatalog[:])
+}
+
+// DerivedPermissions returns the sorted effective permission set for stored
+// role grants. Until the contract migration persists the new grant,
+// requests.read.own also confers notifications.manage.own.
+func DerivedPermissions(stored []Permission) []Permission {
+	effective := slices.Clone(stored)
+	if slices.Contains(effective, PermissionRequestsReadOwn) {
+		effective = append(effective, PermissionNotificationsManageOwn)
+	}
+	slices.Sort(effective)
+	return slices.Compact(effective)
 }
 
 // Valid reports whether p is a published permission identifier.

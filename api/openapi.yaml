@@ -1147,6 +1147,35 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/me/notification-preferences:
+    get:
+      tags: [notifications]
+      operationId: getMyNotificationPreferences
+      summary: Return the signed-in account's complete event preference matrix.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Every supported event kind exactly once; absent stored preferences default to enabled., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    put:
+      tags: [notifications]
+      operationId: updateMyNotificationPreferences
+      summary: Replace the signed-in account's complete event preference matrix.
+      description: The array must contain every supported event type exactly once. Omitted or duplicate event types are rejected.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } }
+      responses:
+        "200": { description: Updated complete event preference matrix., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/invites:
     post:
       tags: [invites]
@@ -1532,7 +1561,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: "#/components/parameters/ProviderID" }]
       responses:
-        "200": { description: Movie details., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataTitle" } } } }
+        "200": { description: Movie details with the signed-in account's subscription state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataTitleDetail" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1557,6 +1586,37 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "502": { $ref: "#/components/responses/MetadataProviderFailure" }
         "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/titles/{provider}/{provider_id}/subscription:
+    post:
+      tags: [notifications]
+      operationId: subscribeToTitleAvailability
+      summary: Idempotently subscribe the signed-in account to title availability.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [tmdb] } }
+        - { name: provider_id, in: path, required: true, schema: { type: string, pattern: "^[1-9][0-9]{0,19}$" } }
+      responses:
+        "204": { description: Subscription exists. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/TitleSubscriptionRejected" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    delete:
+      tags: [notifications]
+      operationId: unsubscribeFromTitleAvailability
+      summary: Idempotently remove the signed-in account's title subscription.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [tmdb] } }
+        - { name: provider_id, in: path, required: true, schema: { type: string, pattern: "^[1-9][0-9]{0,19}$" } }
+      responses:
+        "204": { description: Subscription is absent. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/metadata/providers/tmdb/key:
@@ -2702,6 +2762,10 @@ components:
       description: The account's rolling request quota is exhausted.
       headers: *AuthenticatedHeaders
       content: *AuthenticatedErrorContent
+    TitleSubscriptionRejected:
+      description: The title path is invalid or the account already has 500 subscriptions.
+      headers: *AuthenticatedHeaders
+      content: *AuthenticatedErrorContent
     MethodNotAllowed:
       description: The route does not accept the requested HTTP method.
       headers:
@@ -2884,7 +2948,7 @@ components:
       enum: [webhook, discord, email]
     NotificationEventType:
       type: string
-      enum: [created, approved, declined, dispatched, available, failed]
+      enum: [created, approved, declined, dispatched, available, failed, playback.session_started]
     NotificationTLSMode:
       type: string
       enum: [starttls, implicit]
@@ -2963,7 +3027,7 @@ components:
         kind: { $ref: "#/components/schemas/NotificationKind" }
         name: { type: string, minLength: 1, x-max-bytes: 100 }
         enabled: { type: boolean, description: Disabled updates skip probing and terminally fail pending deliveries without a live lease; live sends record their outcome and new claims exclude the channel. }
-        subscriptions: { type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
+        subscriptions: { type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
         subject_template: { type: string, x-max-bytes: 4096 }
         body_template: { type: string, x-max-bytes: 4096 }
         webhook: { $ref: "#/components/schemas/NotificationWebhookCreateRequest" }
@@ -2981,7 +3045,7 @@ components:
         kind: { $ref: "#/components/schemas/NotificationKind" }
         name: { type: string, minLength: 1, x-max-bytes: 100 }
         enabled: { type: boolean, description: Disabled updates skip probing and terminally fail pending deliveries without a live lease; live sends record their outcome and new claims exclude the channel. }
-        subscriptions: { type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
+        subscriptions: { type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
         subject_template: { type: string, x-max-bytes: 4096 }
         body_template: { type: string, x-max-bytes: 4096 }
         webhook: { $ref: "#/components/schemas/NotificationWebhookUpdateRequest" }
@@ -3008,7 +3072,7 @@ components:
         kind: { $ref: "#/components/schemas/NotificationKind" }
         name: { type: string, minLength: 1, x-max-bytes: 100 }
         enabled: { type: boolean, description: Whether the worker may resolve and send through this channel. }
-        subscriptions: { type: array, minItems: 1, maxItems: 6, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
+        subscriptions: { type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventType" } }
         subject_template: { type: string, x-max-bytes: 4096 }
         body_template: { type: string, x-max-bytes: 4096 }
         allow_insecure: { type: boolean }
@@ -3033,14 +3097,44 @@ components:
       properties:
         items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/NotificationChannel" } }
         next_cursor: { type: string, maxLength: 400 }
+    NotificationPreference:
+      type: object
+      required: [event_type, enabled]
+      additionalProperties: false
+      properties:
+        event_type: { $ref: "#/components/schemas/NotificationEventType" }
+        enabled: { type: boolean }
+    NotificationPreferences:
+      type: array
+      description: The complete account matrix, containing every supported event type exactly once.
+      minItems: 7
+      maxItems: 7
+      uniqueItems: true
+      items: { $ref: "#/components/schemas/NotificationPreference" }
+      allOf:
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: created } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: approved } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: declined } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: dispatched } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: available } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: failed } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: playback.session_started } } }
+          minContains: 1
     NotificationDelivery:
       type: object
-      required: [id, event_type, request_id, status, attempts, last_error, next_attempt_at, created_at, updated_at]
+      required: [id, event_type, status, attempts, last_error, next_attempt_at, created_at, updated_at]
       additionalProperties: false
       properties:
         id: { type: string, format: uuid, description: Stable delivery identifier used as the webhook idempotency key and email Message-ID local part. }
         event_type: { $ref: "#/components/schemas/NotificationEventType" }
         request_id: { type: string, format: uuid }
+        watch_id: { type: string, format: uuid }
         status: { type: string, enum: [pending, sent, failed] }
         attempts: { type: integer, minimum: 0, maximum: 8 }
         last_error: { type: string, maxLength: 512 }
@@ -3074,6 +3168,20 @@ components:
         overview: { type: string, x-max-bytes: 10000 }
         poster_path: { type: string, x-max-bytes: 500 }
         backdrop_path: { type: string, x-max-bytes: 500 }
+    MetadataTitleDetail:
+      type: object
+      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, subscribed]
+      additionalProperties: false
+      properties:
+        kind: { $ref: "#/components/schemas/MediaKind" }
+        provider: { type: string, enum: [tmdb] }
+        provider_id: { type: string, pattern: "^[1-9][0-9]{0,19}$" }
+        title: { type: string, minLength: 1, x-max-bytes: 500 }
+        year: { type: integer, minimum: 0, maximum: 9999 }
+        overview: { type: string, x-max-bytes: 10000 }
+        poster_path: { type: string, x-max-bytes: 500 }
+        backdrop_path: { type: string, x-max-bytes: 500 }
+        subscribed: { type: boolean }
     MetadataSearchResponse:
       type: object
       required: [items]
@@ -3137,7 +3245,7 @@ components:
         air_date: { type: string, format: date-time }
     MetadataSeries:
       type: object
-      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, seasons]
+      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, subscribed, seasons]
       additionalProperties: false
       properties:
         kind: { $ref: "#/components/schemas/MediaKind" }
@@ -3148,6 +3256,7 @@ components:
         overview: { type: string, x-max-bytes: 10000 }
         poster_path: { type: string, x-max-bytes: 500 }
         backdrop_path: { type: string, x-max-bytes: 500 }
+        subscribed: { type: boolean }
         seasons:
           type: array
           maxItems: 100
@@ -4286,6 +4395,7 @@ components:
         - stats.read.all
         - admin.settings
         - admin.roles
+        - notifications.manage.own
     PermissionCatalogEntry:
       type: object
       required: [id, module]
@@ -4295,7 +4405,7 @@ components:
           $ref: "#/components/schemas/Permission"
         module:
           type: string
-          enum: [users, requests, stats, admin]
+          enum: [users, requests, stats, admin, notifications]
     PermissionCatalogResponse:
       type: object
       required: [permissions]
@@ -4438,6 +4548,7 @@ components:
         - download_manager_not_found
         - download_manager_in_use
         - notification_channel_failure
+        - title_subscription_limit_exceeded
         - media_user_not_linked
         - invite_provisioning_failure_leased
         - import_in_progress

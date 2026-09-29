@@ -244,7 +244,8 @@ func configureMovie(movie *radarrapi.MovieResource, qualityID int32, root string
 }
 
 func queueProgress(item radarrapi.QueueResource) core.DownloadProgress {
-	size, left := boundedSize(item.Size), boundedSize(item.Sizeleft) //nolint:staticcheck // Radarr's v3 wire field remains sizeleft.
+	//nolint:staticcheck // Radarr's v3 wire field remains sizeleft.
+	size, left := boundedSize(item.Size), boundedSize(item.Sizeleft)
 	status := textEnum(item.Status)
 	return core.DownloadProgress{
 		Status: status, Size: size, SizeLeft: left, EstimatedCompletion: item.EstimatedCompletionTime,

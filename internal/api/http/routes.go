@@ -75,6 +75,8 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodDelete, path: "/api/v1/notification-channels/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteNotificationChannel},
 	{method: http.MethodPost, path: "/api/v1/notification-channels/{id}/test", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleTestNotificationChannel},
 	{method: http.MethodGet, path: "/api/v1/notification-channels/{id}/deliveries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListNotificationDeliveries},
+	{method: http.MethodGet, path: "/api/v1/me/notification-preferences", access: routePermission, permission: core.PermissionNotificationsManageOwn, authRequired: true, handler: (*Server).handleGetNotificationPreferences},
+	{method: http.MethodPut, path: "/api/v1/me/notification-preferences", access: routePermission, permission: core.PermissionNotificationsManageOwn, authRequired: true, handler: (*Server).handleUpdateNotificationPreferences},
 	{method: http.MethodPost, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleCreateInvite},
 	{method: http.MethodGet, path: "/api/v1/invites", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleListInvites},
 	{method: http.MethodGet, path: "/api/v1/invites/servers", access: routePermission, permission: core.PermissionUsersInvite, authRequired: true, handler: (*Server).handleListInviteServers},
@@ -116,8 +118,10 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesUpcoming},
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesUpcoming},
 	{method: http.MethodGet, path: "/api/v1/metadata/genres", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataGenres},
-	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataMovie},
-	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, permission: core.PermissionRequestsCreate, authRequired: true, handler: (*Server).handleMetadataSeries},
+	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMovie},
+	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeries},
+	{method: http.MethodPost, path: "/api/v1/titles/{provider}/{provider_id}/subscription", access: routePermission, permission: core.PermissionNotificationsManageOwn, authRequired: true, handler: (*Server).handleSubscribeTitle},
+	{method: http.MethodDelete, path: "/api/v1/titles/{provider}/{provider_id}/subscription", access: routePermission, permission: core.PermissionNotificationsManageOwn, authRequired: true, handler: (*Server).handleUnsubscribeTitle},
 	{method: http.MethodGet, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMetadataKeyPresence},
 	{method: http.MethodPut, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetMetadataKey},
 	{method: http.MethodDelete, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMetadataKey},
@@ -216,6 +220,10 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 		}
 		if strings.HasPrefix(route.path, "/api/v1/notification-channels") &&
 			(s.notificationReader == nil || s.notificationManager == nil || s.notificationTester == nil) {
+			continue
+		}
+		if (route.path == "/api/v1/me/notification-preferences" || strings.HasPrefix(route.path, "/api/v1/titles/")) &&
+			s.notificationRouting == nil {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/invite") &&
