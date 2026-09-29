@@ -52,7 +52,7 @@ const noControls = (value: string) => !/[\p{Cc}]/u.test(value);
 export const subscriptionsSchema = z
   .array(notificationEventTypeSchema)
   .min(1)
-  .max(6)
+  .max(notificationEventTypeSchema.options.length)
   .refine((items) => new Set(items).size === items.length);
 
 export const credentialPresenceSchema = z.object({
@@ -170,7 +170,9 @@ export type ChannelRequest = z.output<typeof channelRequestSchema>;
 export const deliverySchema = z.object({
   id: z.uuid(),
   event_type: notificationEventTypeSchema,
-  request_id: z.uuid(),
+  // A request event carries the request, a playback event the watch.
+  request_id: z.uuid().optional(),
+  watch_id: z.uuid().optional(),
   status: z.enum(["pending", "sent", "failed"]),
   attempts: z.number().int().min(0).max(8),
   last_error: z.string().max(512),

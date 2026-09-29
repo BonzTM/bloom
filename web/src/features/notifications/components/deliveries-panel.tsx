@@ -1,3 +1,4 @@
+import type { Delivery } from "../api/notification-schemas.js";
 import type { ReactNode } from "react";
 import { AsyncStatus } from "../../../components/async-status.js";
 import {
@@ -53,7 +54,7 @@ export function DeliveriesPanel({
             <thead>
               <tr>
                 <th scope="col">Event</th>
-                <th scope="col">Request</th>
+                <th scope="col">Source</th>
                 <th scope="col">Status</th>
                 <th scope="col">Attempts</th>
                 <th scope="col">When</th>
@@ -65,9 +66,7 @@ export function DeliveriesPanel({
                 <tr key={delivery.id}>
                   <th scope="row">{eventLabel(delivery.event_type)}</th>
                   <td>
-                    <code title={delivery.request_id}>
-                      {delivery.request_id.slice(0, 8)}
-                    </code>
+                    <DeliverySource delivery={delivery} />
                   </td>
                   <td>
                     <span className={deliveryBadgeClass(delivery.status)}>
@@ -100,6 +99,27 @@ export function DeliveriesPanel({
         failed={query.isFetchNextPageError}
         onMore={query.fetchNextPage}
       />
+    </>
+  );
+}
+
+// The request or the watch the delivery is about, whichever the event has.
+function DeliverySource({
+  delivery,
+}: Readonly<{ delivery: Delivery }>): ReactNode {
+  const source =
+    delivery.request_id !== undefined
+      ? { label: "Request", id: delivery.request_id }
+      : delivery.watch_id !== undefined
+        ? { label: "Watch", id: delivery.watch_id }
+        : undefined;
+  if (source === undefined) {
+    return <span className="row-detail">None</span>;
+  }
+  return (
+    <>
+      <span className="row-detail">{source.label} </span>
+      <code title={source.id}>{source.id.slice(0, 8)}</code>
     </>
   );
 }

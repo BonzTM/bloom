@@ -39,6 +39,13 @@ export const metadataTitleSchema = z.object({
 
 export type MetadataTitle = z.output<typeof metadataTitleSchema>;
 
+// A title page's answer always says whether the caller follows the title.
+export const metadataTitleDetailSchema = metadataTitleSchema.extend({
+  subscribed: z.boolean(),
+});
+
+export type MetadataTitleDetail = z.output<typeof metadataTitleDetailSchema>;
+
 // The caller's own request for a title, or none.
 export const metadataRequestStateSchema = z.enum([
   "none",
@@ -101,7 +108,7 @@ export const metadataSeasonSchema = z.object({
 
 export type MetadataSeason = z.output<typeof metadataSeasonSchema>;
 
-export const metadataSeriesSchema = metadataTitleSchema.extend({
+export const metadataSeriesSchema = metadataTitleDetailSchema.extend({
   seasons: z.array(metadataSeasonSchema).max(MAX_SEASONS),
 });
 

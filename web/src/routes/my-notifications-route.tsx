@@ -115,8 +115,11 @@ function PreferencesForm({
 }: PreferencesFormProps): ReactNode {
   const id = useId();
   const [draft, setDraft] = useState(() => toMap(stored));
+  // Edits after a save make "saved" untrue until the next save.
+  const [edited, setEdited] = useState(false);
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
+    setEdited(false);
     onSubmit(
       notificationEventTypeSchema.options.map((event_type) => ({
         event_type,
@@ -130,8 +133,9 @@ function PreferencesForm({
       aria-label="Notification preferences"
       onSubmit={handleSubmit}
       noValidate
+      aria-busy={pending}
     >
-      <fieldset className="field">
+      <fieldset className="field" disabled={pending}>
         <legend>Tell me when</legend>
         {notificationEventTypeSchema.options.map((eventType) => {
           const [label, detail] = EVENT_LABELS[eventType];
@@ -149,6 +153,7 @@ function PreferencesForm({
                   const next = new Map(draft);
                   next.set(eventType, event.target.checked);
                   setDraft(next);
+                  setEdited(true);
                 }}
               />
               <span>
@@ -164,12 +169,16 @@ function PreferencesForm({
           {pending ? "Saving…" : "Save preferences"}
         </button>
       </div>
-      <AsyncStatus kind={failed ? "alert" : "status"}>
-        {failed
-          ? "Your preferences could not be saved. Please try again."
-          : saved
-            ? "Preferences saved."
-            : ""}
+      <AsyncStatus kind={failed && !edited ? "alert" : "status"}>
+        {pending
+          ? "Saving your preferences…"
+          : edited
+            ? ""
+            : failed
+              ? "Your preferences could not be saved. Please try again."
+              : saved
+                ? "Preferences saved."
+                : ""}
       </AsyncStatus>
     </form>
   );

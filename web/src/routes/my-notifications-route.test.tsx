@@ -15,6 +15,28 @@ async function openPreferences() {
   return { ...rendered, form };
 }
 
+it("explains the 500-title limit on a title page", async () => {
+  const user = userEvent.setup();
+  server.use(
+    http.post("*/api/v1/titles/tmdb/:id/subscription", () =>
+      HttpResponse.json(
+        { code: "title_subscription_limit_exceeded", message: "limit" },
+        { status: 422 },
+      ),
+    ),
+  );
+  signInMockSession();
+  renderApp("/requests/movies/949");
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Notify me when available about Heat (1995)",
+    }),
+  );
+  expect(await screen.findByText(/You already follow 500 titles/)).toHaveRole(
+    "alert",
+  );
+});
+
 it("reaches the page from the navigation with notifications.manage.own", async () => {
   const user = userEvent.setup();
   setMockPermissions(["notifications.manage.own"]);

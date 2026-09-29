@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { AsyncStatus } from "../../../components/async-status.js";
-import { ApiError } from "../../../lib/api/errors.js";
+import { useSessionRecheck } from "../../auth/hooks/auth-queries.js";
+import { accessDenial, ApiError } from "../../../lib/api/errors.js";
 import { useSetTitleSubscription } from "../hooks/notifications-queries.js";
 
 type NotifyMeProps = Readonly<{
@@ -20,8 +21,11 @@ export function NotifyMe({
   subscribed,
 }: NotifyMeProps): ReactNode {
   const set = useSetTitleSubscription(accountId);
+  // A 401 or 403 means the session or the permission is gone: re-read it so
+  // the guard acts, instead of leaving a control that can never succeed.
+  useSessionRecheck(accessDenial(set.error) !== undefined, set.submittedAt);
   return (
-    <div className="notify-me">
+    <div className="notify-me" aria-busy={set.isPending}>
       <button
         type="button"
         className={subscribed ? "" : "btn-primary"}
@@ -39,13 +43,15 @@ export function NotifyMe({
         <span className="visually-hidden"> about {title}</span>
       </button>
       <AsyncStatus kind={set.isError ? "alert" : "status"}>
-        {set.isError
-          ? describeSubscriptionError(set.error)
-          : set.isSuccess
-            ? subscribed
-              ? "You will be told when it is available."
-              : "You will not be notified about this title."
-            : ""}
+        {set.isPending
+          ? "Saving…"
+          : set.isError
+            ? describeSubscriptionError(set.error)
+            : set.isSuccess
+              ? subscribed
+                ? "You will be told when it is available."
+                : "You will not be notified about this title."
+              : ""}
       </AsyncStatus>
     </div>
   );

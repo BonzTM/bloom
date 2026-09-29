@@ -222,8 +222,8 @@ export const errorCodeSchema = z.enum([
   "download_manager_in_use",
   "import_in_progress",
   "conflict",
-  "title_subscription_limit_exceeded",
   "notification_channel_failure",
+  "title_subscription_limit_exceeded",
   "media_user_not_linked",
 ]);
 
@@ -1970,6 +1970,9 @@ const requestHandlers = [
       if (denied !== undefined) {
         return denied;
       }
+      if (!/^[1-9][0-9]{0,19}$/.test(String(params.id))) {
+        return envelope(422, "validation_failed", "invalid provider id");
+      }
       if (subscriptions.size >= 500 && !subscriptions.has(String(params.id))) {
         return envelope(
           422,
@@ -1987,6 +1990,9 @@ const requestHandlers = [
       const denied = permissionDenial("notifications.manage.own");
       if (denied !== undefined) {
         return denied;
+      }
+      if (!/^[1-9][0-9]{0,19}$/.test(String(params.id))) {
+        return envelope(422, "validation_failed", "invalid provider id");
       }
       subscriptions.delete(String(params.id));
       return new HttpResponse(null, { status: 204 });

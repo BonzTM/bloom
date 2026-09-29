@@ -133,14 +133,14 @@ function TitlePage({
             <h1>{titleWithYear(title.data)}</h1>
             <p className="badge badge-neutral">{kindLabel(kind)}</p>
             <Overview title={title.data} />
-            {title.data.subscribed === undefined || !canFollow ? null : (
+            {canFollow ? (
               <NotifyMe
                 accountId={accountId}
                 providerId={providerId}
                 title={titleWithYear(title.data)}
                 subscribed={title.data.subscribed}
               />
-            )}
+            ) : null}
           </div>
         </div>
       </header>
