@@ -9,6 +9,13 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
+### Changed
+
+- Browser sessions now last 30 days and end after 7 days without a request,
+  up from 24 hours and 30 minutes. Sessions are database rows, so they
+  survive restarts either way; `BLOOM_SESSION_LIFETIME` and
+  `BLOOM_SESSION_IDLE_TIMEOUT` still override the defaults.
+
 ### Added
 
 - An Accounts page for administrators with `users.manage`: every account
