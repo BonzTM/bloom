@@ -31,6 +31,12 @@ contracts) gets an entry here.
   survive restarts either way; `BLOOM_SESSION_LIFETIME` and
   `BLOOM_SESSION_IDLE_TIMEOUT` still override the defaults.
 
+### Fixed
+
+- Registering a download manager through an address that a proxy or
+  sign-on page fronts no longer reports a rejected API key; the probe
+  recognises the HTML answer and says the address is not the instance.
+
 ### Added
 
 - An Activity page for administrators with `stats.read.all`: every watch
