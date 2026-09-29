@@ -1068,6 +1068,30 @@ button:disabled {
   padding: 0;
 }
 
+/* ---------- activity filters ---------- */
+
+.activity-filters {
+  align-items: end;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  margin-bottom: var(--space-4);
+  max-width: none;
+}
+
+.activity-filters > .form-actions {
+  align-self: end;
+}
+
+.exclusions-form {
+  max-width: 40rem;
+}
+
+.timeline-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- watch timeline ---------- */
 
 .timeline {

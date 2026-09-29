@@ -25,6 +25,7 @@ import type {
   PlaybackPosition,
   StreamDetails,
   Watch,
+  TimelineEntry,
 } from "../features/playback/api/playback-schemas.js";
 import {
   registerDownloadManagerRequestSchema,
@@ -174,6 +175,7 @@ export function resetMockSession(): void {
   signedIn = false;
   granted = allPermissions;
   providers = [localProvider];
+  resetMockExclusions();
 }
 
 export function setMockPermissions(next: readonly KnownPermission[]): void {
@@ -962,6 +964,102 @@ function playbackDenial() {
   }
   return undefined;
 }
+
+// Activity: history filtered the way the server filters it; the mock
+// answers only the filters the page sends.
+function playbackActivity(url: URL) {
+  const params = url.searchParams;
+  const serverId = params.get("media_server_id");
+  if (serverId !== null && !z.uuid().safeParse(serverId).success) {
+    return envelope(422, "validation_failed", "invalid media_server_id");
+  }
+  const q = params.get("q")?.toLowerCase();
+  const method = params.get("play_method");
+  const source = params.get("source");
+  const after = params.get("started_after");
+  const before = params.get("started_before");
+  const items = mockPlaybackHistory.filter(
+    (w) =>
+      (serverId === null || w.media_server_id === serverId) &&
+      (q === undefined ||
+        w.item_name.toLowerCase().includes(q) ||
+        w.series_name.toLowerCase().includes(q)) &&
+      (method === null || w.play_method === method) &&
+      (source === null || (w.source ?? "poll") === source) &&
+      (after === null || w.started_at >= after) &&
+      (before === null || w.started_at < before),
+  );
+  return pagedItems(url, playbackHistoryQuerySchema, items);
+}
+
+// Timeline: one person's history folded by item; the gap is echoed back.
+function playbackTimeline(url: URL, serverId: string, userId: string) {
+  const gap = Number(url.searchParams.get("gap_seconds") ?? "21600");
+  if (!Number.isInteger(gap) || gap < 1 || gap > 604_800) {
+    return envelope(422, "validation_failed", "invalid gap_seconds");
+  }
+  const own = mockPlaybackHistory.filter(
+    (w) => w.media_server_id === serverId && w.media_user_id === userId,
+  );
+  const byItem = new Map<string, TimelineEntry>();
+  for (const w of own) {
+    const entry = byItem.get(w.item_id);
+    if (entry === undefined) {
+      byItem.set(w.item_id, {
+        media_server_id: w.media_server_id,
+        media_user_id: w.media_user_id,
+        username: w.username,
+        item_id: w.item_id,
+        item_name: w.item_name,
+        item_type: w.item_type,
+        series_id: "",
+        series_name: w.series_name,
+        library_id: "",
+        library_name: w.library_name ?? "",
+        first_started_at: w.started_at,
+        last_ended_at: w.ended_at,
+        play_count: 1,
+        active_seconds: w.active_seconds,
+      });
+    } else {
+      entry.play_count += 1;
+      entry.active_seconds += w.active_seconds;
+    }
+  }
+  const items = [...byItem.values()].sort((a, b) =>
+    b.first_started_at.localeCompare(a.first_started_at),
+  );
+  return HttpResponse.json({
+    items,
+    limit: 50,
+    gap_seconds: gap,
+    next_cursor: "",
+  });
+}
+
+// Exclusions: one working copy per server, empty until saved.
+let exclusionsByServer = new Map<
+  string,
+  { excluded_media_user_ids: string[]; excluded_library_ids: string[] }
+>();
+
+export function resetMockExclusions(): void {
+  exclusionsByServer = new Map();
+}
+
+function exclusionsFor(serverId: string) {
+  return (
+    exclusionsByServer.get(serverId) ?? {
+      excluded_media_user_ids: [],
+      excluded_library_ids: [],
+    }
+  );
+}
+
+const replaceExclusionsSchema = z.strictObject({
+  excluded_media_user_ids: z.array(z.string().min(1)).max(500),
+  excluded_library_ids: z.array(z.string().min(1)).max(500),
+});
 
 function playbackHistory(url: URL) {
   const serverIds = url.searchParams.getAll("media_server_id");
@@ -3466,6 +3564,64 @@ export const handlers = [
     jsonApi(
       () => playbackDenial() ?? HttpResponse.json({ items: mockNowPlaying }),
     ),
+  ),
+  http.get(
+    "*/api/v1/activity",
+    jsonApi(
+      ({ request }) =>
+        playbackDenial() ?? playbackActivity(new URL(request.url)),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/users/:userId/timeline",
+    jsonApi(
+      ({ request, params }) =>
+        playbackDenial() ??
+        playbackTimeline(
+          new URL(request.url),
+          String(params.id),
+          decodeURIComponent(String(params.userId)),
+        ),
+    ),
+  ),
+  http.get(
+    "*/api/v1/media-servers/:id/exclusions",
+    jsonApi(({ params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      const serverId = String(params.id);
+      if (!mediaServers.some((server) => server.id === serverId)) {
+        return envelope(404, "not_found", "media server not found");
+      }
+      return HttpResponse.json({
+        media_server_id: serverId,
+        ...exclusionsFor(serverId),
+      });
+    }),
+  ),
+  http.put(
+    "*/api/v1/media-servers/:id/exclusions",
+    jsonApi(async ({ request, params }) => {
+      const denied = mediaServerDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (!sendsJson(request)) {
+        return envelope(415, "unsupported_media_type", "expected JSON");
+      }
+      const serverId = String(params.id);
+      if (!mediaServers.some((server) => server.id === serverId)) {
+        return envelope(404, "not_found", "media server not found");
+      }
+      const body = replaceExclusionsSchema.safeParse(await request.json());
+      if (!body.success) {
+        return envelope(422, "validation_failed", "invalid exclusions");
+      }
+      exclusionsByServer.set(serverId, body.data);
+      return HttpResponse.json({ media_server_id: serverId, ...body.data });
+    }),
   ),
   http.get(
     "*/api/v1/playback/history",

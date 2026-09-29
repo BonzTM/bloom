@@ -28,6 +28,15 @@ contracts) gets an entry here.
 
 ### Added
 
+- An Activity page for administrators with `stats.read.all`: every watch
+  across servers and people, newest first, filtered by title, server,
+  delivery, source, and day, with each person linked to their statistics.
+- A timeline on each person's statistics page that folds repeat plays of a
+  title within a chosen gap into one sitting.
+- An Exclusions page per media server, reached from the media servers table,
+  where an administrator with `admin.settings` chooses the people and
+  libraries Bloom leaves out.
+
 - An Accounts page for administrators with `users.manage`: every account
   searchable by username, with its roles and where each came from, how it
   signs in, and its linked media users; one account opens on its own page.

@@ -73,6 +73,13 @@ const SECTIONS: readonly Section[] = [
     anyOf: [permissions.statsReadAll],
   },
   {
+    to: "/admin/activity",
+    label: "Activity",
+    summary: "Every watch across servers and people, filtered.",
+    icon: "clock",
+    anyOf: [permissions.statsReadAll],
+  },
+  {
     to: "/admin/libraries",
     label: "Libraries",
     summary: "What each library holds, item by item, and who watched it.",

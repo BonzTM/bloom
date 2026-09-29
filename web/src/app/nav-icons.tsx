@@ -21,6 +21,7 @@ export type IconName =
   | "ticket"
   | "users"
   | "search"
+  | "clock"
   | "menu";
 
 const PATHS: Readonly<Record<IconName, string>> = {
@@ -42,6 +43,7 @@ const PATHS: Readonly<Record<IconName, string>> = {
   users:
     "M16 19v-1a4 4 0 0 0-8 0v1M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm6 1a3 3 0 1 0 0-6M20 19v-1a3 3 0 0 0-2-2.8",
   search: "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Zm10.5 3-5-5",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-13v5l3 2",
   menu: "M4 7h16M4 12h16M4 17h16",
 };
 
