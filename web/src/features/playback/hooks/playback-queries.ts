@@ -1,6 +1,10 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { HistoryFilter } from "../api/playback-api.js";
-import type { HistoryPage } from "../api/playback-schemas.js";
+import type {
+  ActivityFilter,
+  HistoryPage,
+  TimelinePage,
+} from "../api/playback-schemas.js";
 import { usePlaybackApi } from "../playback-context.js";
 
 // Keys carry the account id: what one principal may see must never be served
@@ -13,6 +17,22 @@ export const playbackKeys = {
     ["playback", "history", accountId, mediaServerId ?? ""] as const,
   positions: (accountId: string, watchId: string) =>
     ["playback", "positions", accountId, watchId] as const,
+  activity: (accountId: string, filter: ActivityFilter) =>
+    ["playback", "activity", accountId, filter] as const,
+  timeline: (
+    accountId: string,
+    serverId: string,
+    mediaUserId: string,
+    gapSeconds: number,
+  ) =>
+    [
+      "playback",
+      "timeline",
+      accountId,
+      serverId,
+      mediaUserId,
+      gapSeconds,
+    ] as const,
 };
 
 // Live watches are short-lived by nature, so they are re-read on a fixed
@@ -57,5 +77,46 @@ export function usePlaybackHistory(accountId: string, filter: HistoryFilter) {
 }
 
 function nextCursor(lastPage: HistoryPage): string | undefined {
+  return lastPage.next_cursor === "" ? undefined : lastPage.next_cursor;
+}
+
+// Every page of activity fetched so far for the signed-in account and the
+// filter; the filter is part of the key so each combination has its own pages.
+export function useActivity(accountId: string, filter: ActivityFilter) {
+  const api = usePlaybackApi();
+  return useInfiniteQuery({
+    queryKey: playbackKeys.activity(accountId, filter),
+    queryFn: ({ pageParam, signal }) => api.activity(filter, pageParam, signal),
+    initialPageParam: firstPage,
+    getNextPageParam: nextCursor,
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useTimeline(
+  accountId: string,
+  serverId: string,
+  mediaUserId: string,
+  gapSeconds: number,
+) {
+  const api = usePlaybackApi();
+  return useInfiniteQuery({
+    queryKey: playbackKeys.timeline(
+      accountId,
+      serverId,
+      mediaUserId,
+      gapSeconds,
+    ),
+    queryFn: ({ pageParam, signal }) =>
+      api.timeline(serverId, mediaUserId, gapSeconds, pageParam, signal),
+    initialPageParam: firstPage,
+    getNextPageParam: nextTimelineCursor,
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+function nextTimelineCursor(lastPage: TimelinePage): string | undefined {
   return lastPage.next_cursor === "" ? undefined : lastPage.next_cursor;
 }

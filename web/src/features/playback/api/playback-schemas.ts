@@ -20,6 +20,15 @@ export const playMethodSchema = z.enum([
 
 export type PlayMethod = z.output<typeof playMethodSchema>;
 
+export const playbackSourceSchema = z.enum([
+  "poll",
+  "websocket",
+  "webhook",
+  "import",
+]);
+
+export type PlaybackSource = z.output<typeof playbackSourceSchema>;
+
 // What was being delivered at one moment: mirrors `StreamDetails`. Every
 // field is optional so a direct-play sample carries only what it knows.
 export const streamDetailsSchema = z.object({
@@ -62,6 +71,10 @@ export const watchSchema = z.object({
   started_at: z.iso.datetime({ offset: true }),
   ended_at: z.iso.datetime({ offset: true }).optional(),
   stream: streamDetailsSchema.optional(),
+  // Where the watch came from and which library holds the item; both are
+  // absent from older servers, so neither is required.
+  source: playbackSourceSchema.optional(),
+  library_name: z.string().optional(),
 });
 
 export type Watch = z.output<typeof watchSchema>;
@@ -108,3 +121,59 @@ export type HistoryPage = z.output<typeof historyPageSchema>;
 export const historyCursorSchema = z.string().min(1).max(MAX_CURSOR_LENGTH);
 
 export const mediaServerIdSchema = z.uuid();
+
+// ---- activity (stats.read.all): every watch across servers and people,
+// filtered and paged by keyset.
+
+const MAX_FILTER_BYTES = 128;
+const filterText = z
+  .string()
+  .min(1)
+  .refine((value) => !/\p{Cc}/u.test(value))
+  .refine(
+    (value) => new TextEncoder().encode(value).length <= MAX_FILTER_BYTES,
+  );
+
+export const activityFilterSchema = z.object({
+  mediaServerId: z.uuid().optional(),
+  q: filterText.optional(),
+  playMethod: playMethodSchema.optional(),
+  source: playbackSourceSchema.optional(),
+  startedAfter: z.iso.datetime({ offset: true }).optional(),
+  startedBefore: z.iso.datetime({ offset: true }).optional(),
+});
+
+export type ActivityFilter = z.output<typeof activityFilterSchema>;
+
+export const activityCursorSchema = historyCursorSchema;
+
+// ---- timeline (stats.read.all): one person's watches grouped into sittings.
+
+export const timelineGapSchema = z.number().int().min(1).max(604_800);
+
+export const timelineEntrySchema = z.object({
+  media_server_id: z.uuid(),
+  media_user_id: z.string().min(1),
+  username: z.string(),
+  item_id: z.string().min(1),
+  item_name: z.string(),
+  item_type: z.string(),
+  series_id: z.string(),
+  series_name: z.string(),
+  library_id: z.string(),
+  library_name: z.string(),
+  first_started_at: z.iso.datetime({ offset: true }),
+  last_ended_at: z.iso.datetime({ offset: true }).optional(),
+  play_count: z.number().int().min(1).max(500),
+  active_seconds: int64(),
+});
+
+export type TimelineEntry = z.output<typeof timelineEntrySchema>;
+
+export const timelinePageSchema = z.object({
+  items: z.array(timelineEntrySchema).max(MAX_PAGE_ITEMS),
+  gap_seconds: int64(),
+  next_cursor: z.string().max(MAX_CURSOR_LENGTH),
+});
+
+export type TimelinePage = z.output<typeof timelinePageSchema>;

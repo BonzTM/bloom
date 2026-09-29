@@ -245,6 +245,12 @@ const QUICK_LINKS: readonly QuickLink[] = [
     anyOf: [permissions.statsReadAll],
   },
   {
+    to: "/admin/activity",
+    label: "Open activity",
+    icon: "clock",
+    anyOf: [permissions.statsReadAll],
+  },
+  {
     to: "/admin/libraries",
     label: "Open libraries",
     icon: "library",
