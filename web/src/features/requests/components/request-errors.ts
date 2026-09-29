@@ -105,11 +105,12 @@ const managerMessages: Messages = {
 const managerProbeMessages: Readonly<Record<ProbeFailureReason, string>> = {
   unreachable:
     "Bloom could not reach the instance at that address. Check the address and port, and that the network between Bloom and the instance allows it.",
-  unauthorized: "The instance rejected the API key.",
+  unauthorized:
+    "The instance rejected the API key. Check it against Settings, General in Radarr or Sonarr, and make sure the address is the instance itself rather than a proxy or sign-on in front of it.",
   not_found:
     "The address answered, but the instance's API was not found there. Check that the address is the instance itself, including any base path.",
   malformed:
-    "The address answered, but not like a Radarr or Sonarr instance. Check that it points at the instance itself rather than a login page or a redirect.",
+    "The address answered, but not like a Radarr or Sonarr instance: a login page, a proxy, or a redirect is in the way. Use the instance's own address and port.",
   unavailable:
     "The instance is not answering right now. Try again in a moment.",
 };

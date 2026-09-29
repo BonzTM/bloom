@@ -16,18 +16,34 @@ import (
 
 func TestGetJSONClassifiesTerminalStatusesWithoutRetry(t *testing.T) {
 	tests := []struct {
-		status int
-		kind   core.DownloadManagerErrorKind
+		name        string
+		status      int
+		contentType string
+		kind        core.DownloadManagerErrorKind
 	}{
-		{status: http.StatusUnauthorized, kind: core.DownloadManagerUnauthorized},
-		{status: http.StatusNotFound, kind: core.DownloadManagerNotFound},
+		{name: "unauthorized", status: http.StatusUnauthorized, kind: core.DownloadManagerUnauthorized},
+		{name: "unauthorized json", status: http.StatusUnauthorized, contentType: "application/json; charset=utf-8", kind: core.DownloadManagerUnauthorized},
+		{name: "forbidden json", status: http.StatusForbidden, contentType: "application/json", kind: core.DownloadManagerUnauthorized},
+		// A proxy or sign-on page in front of the instance answers with HTML
+		// before the API key is checked: that is not a rejected key.
+		{name: "unauthorized html", status: http.StatusUnauthorized, contentType: "text/html; charset=utf-8", kind: core.DownloadManagerMalformed},
+		{name: "forbidden html", status: http.StatusForbidden, contentType: "text/html", kind: core.DownloadManagerMalformed},
+		{name: "not found", status: http.StatusNotFound, kind: core.DownloadManagerNotFound},
 	}
 	for _, testCase := range tests {
-		t.Run(http.StatusText(testCase.status), func(t *testing.T) {
+		t.Run(testCase.name, func(t *testing.T) {
 			var calls atomic.Int32
 			client, closeServer := testHTTPClient(t, func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
+				if testCase.contentType != "" {
+					w.Header().Set("Content-Type", testCase.contentType)
+				}
 				w.WriteHeader(testCase.status)
+				if testCase.contentType != "" {
+					if _, err := w.Write([]byte("<html>sign in</html>")); err != nil {
+						t.Errorf("write body: %v", err)
+					}
+				}
 			})
 			defer closeServer()
 			err := client.GetJSON(t.Context(), "test", "/resource", &map[string]any{})

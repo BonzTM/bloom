@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -199,6 +200,12 @@ func (c *Client) classify(
 		c.observe(operation, "success", started)
 		return body, false, nil
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		// The instance answers an API request with JSON or nothing; an HTML
+		// page means a proxy or a sign-on in front of it refused the request
+		// before the API key was ever checked.
+		if answeredWithHTML(resp.Header.Get("Content-Type")) {
+			return nil, false, c.observedFailure(operation, "malformed", core.DownloadManagerMalformed, false, started, errProxyAnswered)
+		}
 		return nil, false, c.observedFailure(operation, "unauthorized", core.DownloadManagerUnauthorized, false, started, nil)
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, false, c.observedFailure(operation, "not_found", core.DownloadManagerNotFound, false, started, nil)
@@ -246,6 +253,13 @@ func (c *Client) observeRetry(operation, outcome string) {
 
 // CloseIdleConnections releases pooled connections.
 func (c *Client) CloseIdleConnections() { c.httpClient.CloseIdleConnections() }
+
+var errProxyAnswered = errors.New("an HTML page answered instead of the instance's API; a proxy or sign-on refused the request before the API key was checked")
+
+func answeredWithHTML(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && mediaType == "text/html"
+}
 
 func retryableStatus(status int) bool {
 	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests ||
