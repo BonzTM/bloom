@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
@@ -9,6 +10,7 @@ import type {
   ChannelsPage,
   DeliveriesPage,
   NotificationChannel,
+  NotificationPreferences,
 } from "../api/notification-schemas.js";
 import { useNotificationsApi } from "../notifications-context.js";
 
@@ -21,6 +23,8 @@ export const notificationsKeys = {
     ["notifications", "channels", accountId] as const,
   deliveries: (accountId: string, channelId: string) =>
     ["notifications", "deliveries", accountId, channelId] as const,
+  preferences: (accountId: string) =>
+    ["notifications", "preferences", accountId] as const,
 };
 
 const firstPage: string | undefined = undefined;
@@ -137,4 +141,48 @@ export function useDeliveries(accountId: string, channelId: string) {
 
 function nextCursor(page: { next_cursor: string }): string | undefined {
   return page.next_cursor === "" ? undefined : page.next_cursor;
+}
+
+export function usePreferences(accountId: string) {
+  const api = useNotificationsApi();
+  return useQuery({
+    queryKey: notificationsKeys.preferences(accountId),
+    queryFn: ({ signal }) => api.preferences(signal),
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+export function useReplacePreferences(accountId: string) {
+  const api = useNotificationsApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NotificationPreferences) =>
+      api.replacePreferences(input),
+    onSuccess: (stored) => {
+      queryClient.setQueryData(
+        notificationsKeys.preferences(accountId),
+        stored,
+      );
+    },
+  });
+}
+
+// Subscribing changes the title's own `subscribed` flag, so this account's
+// title reads are dropped and the title page re-reads it.
+export function useSetTitleSubscription(accountId: string) {
+  const api = useNotificationsApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input: Readonly<{ providerId: string; subscribed: boolean }>,
+    ) =>
+      input.subscribed
+        ? api.subscribe(input.providerId)
+        : api.unsubscribe(input.providerId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["requests", "title", accountId],
+      }),
+  });
 }

@@ -1,5 +1,6 @@
 import { http, HttpResponse, type HttpResponseResolver } from "msw";
 import { z } from "zod/v4";
+import type { NotificationPreference } from "../features/notifications/api/notification-schemas.js";
 import type { ProbeFailureReason } from "../lib/api/errors.js";
 import {
   knownPermissions,
@@ -60,6 +61,8 @@ import {
   type ChannelRequest,
   type Delivery,
   type NotificationChannel,
+  notificationEventTypeSchema,
+  notificationPreferencesSchema,
 } from "../features/notifications/api/notification-schemas.js";
 import type { ImportJob } from "../features/imports/api/imports-schemas.js";
 import type { CatalogItem } from "../features/catalog/api/catalog-schemas.js";
@@ -177,6 +180,7 @@ export function resetMockSession(): void {
   granted = allPermissions;
   providers = [localProvider];
   resetMockExclusions();
+  resetMockNotificationPreferences();
 }
 
 export function setMockPermissions(next: readonly KnownPermission[]): void {
@@ -218,6 +222,7 @@ export const errorCodeSchema = z.enum([
   "download_manager_in_use",
   "import_in_progress",
   "conflict",
+  "title_subscription_limit_exceeded",
   "notification_channel_failure",
   "media_user_not_linked",
 ]);
@@ -1566,9 +1571,38 @@ function titleDetail(
   if (title === undefined) {
     return envelope(404, "not_found", "title not found");
   }
+  const subscribed = subscriptions.has(title.provider_id);
   return HttpResponse.json(
-    kind === "series" ? { ...title, seasons: mockSeasons } : title,
+    kind === "series"
+      ? { ...title, subscribed, seasons: mockSeasons }
+      : { ...title, subscribed },
   );
+}
+
+// The account's title subscriptions and event preferences, reset with the
+// session. Preferences default to everything on.
+let subscriptions = new Set<string>();
+let preferences: NotificationPreference[] | undefined;
+
+export function resetMockNotificationPreferences(): void {
+  subscriptions = new Set();
+  preferences = undefined;
+}
+
+function currentPreferences(): NotificationPreference[] {
+  return (
+    preferences ??
+    notificationEventTypeSchema.options.map((event_type) => ({
+      event_type,
+      enabled: true,
+    }))
+  );
+}
+
+function signedInDenial() {
+  return signedIn
+    ? undefined
+    : envelope(401, "unauthorized", "sign in required");
 }
 
 let createdRequests = 0;
@@ -1906,6 +1940,59 @@ const requestHandlers = [
         permissionDenial("requests.create") ??
         searchTitles(new URL(request.url)),
     ),
+  ),
+  http.get(
+    "*/api/v1/me/notification-preferences",
+    jsonApi(() => signedInDenial() ?? HttpResponse.json(currentPreferences())),
+  ),
+  http.put(
+    "*/api/v1/me/notification-preferences",
+    jsonApi(async ({ request }) => {
+      const denied = signedInDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (!sendsJson(request)) {
+        return envelope(415, "unsupported_media_type", "expected JSON");
+      }
+      const body = notificationPreferencesSchema.safeParse(
+        await request.json(),
+      );
+      if (!body.success) {
+        return envelope(422, "validation_failed", "incomplete matrix");
+      }
+      preferences = body.data;
+      return HttpResponse.json(preferences);
+    }),
+  ),
+  http.post(
+    "*/api/v1/titles/tmdb/:id/subscription",
+    jsonApi(({ params }) => {
+      const denied = permissionDenial("requests.create");
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (subscriptions.size >= 500 && !subscriptions.has(String(params.id))) {
+        return envelope(
+          422,
+          "title_subscription_limit_exceeded",
+          "at most 500 titles",
+        );
+      }
+      subscriptions.add(String(params.id));
+      return new HttpResponse(null, { status: 204 });
+    }),
+  ),
+  http.delete(
+    "*/api/v1/titles/tmdb/:id/subscription",
+    jsonApi(({ params }) => {
+      const denied = permissionDenial("requests.create");
+      if (denied !== undefined) {
+        return denied;
+      }
+      subscriptions.delete(String(params.id));
+      return new HttpResponse(null, { status: 204 });
+    }),
   ),
   http.get(
     "*/api/v1/metadata/movies/:id",
