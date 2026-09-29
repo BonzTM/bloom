@@ -124,7 +124,8 @@ function Dashboard({ accountId }: Readonly<{ accountId: string }>): ReactNode {
       <PermissionGate anyOf={[permissions.statsReadAll]}>
         <NowPlayingPanel accountId={accountId} />
       </PermissionGate>
-      <PermissionGate anyOf={REQUESTS_PERMISSIONS}>
+      {/* Posters open a title page, which needs requests.create. */}
+      <PermissionGate anyOf={[permissions.requestsCreate]}>
         <TrendingPanel accountId={accountId} />
       </PermissionGate>
       <PermissionGate anyOf={[permissions.requestsReadOwn]}>
@@ -138,13 +139,15 @@ function Dashboard({ accountId }: Readonly<{ accountId: string }>): ReactNode {
 }
 
 // Each panel owns its query so the request is only made when the gate
-// around it rendered; a 401 asks the session to be checked again.
+// around it rendered. A 401 or 403 asks the session to be checked again,
+// so a signed-out or narrowed account loses the panel instead of keeping
+// a retry control that can never succeed.
 function NowPlayingPanel({
   accountId,
 }: Readonly<{ accountId: string }>): ReactNode {
   const query = useNowPlaying(accountId);
   useSessionRecheck(
-    accessDenial(query.error) === "unauthenticated",
+    accessDenial(query.error) !== undefined,
     query.errorUpdatedAt,
   );
   return (
@@ -163,7 +166,7 @@ function TrendingPanel({
 }: Readonly<{ accountId: string }>): ReactNode {
   const query = useDiscover(accountId, "trending", true);
   useSessionRecheck(
-    accessDenial(query.error) === "unauthenticated",
+    accessDenial(query.error) !== undefined,
     query.errorUpdatedAt,
   );
   return (
@@ -182,7 +185,7 @@ function MyRequestsPanel({
 }: Readonly<{ accountId: string }>): ReactNode {
   const query = useRequests(accountId, { requesterId: accountId });
   useSessionRecheck(
-    accessDenial(query.error) === "unauthenticated",
+    accessDenial(query.error) !== undefined,
     query.errorUpdatedAt,
   );
   return (

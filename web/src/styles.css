@@ -37,7 +37,8 @@
   --accent: #6366f1;
   --accent-2: #8b5cf6;
   --accent-soft: rgb(99 102 241 / 0.2);
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  /* Text-bearing fills use the 600 shades so white text reaches 4.5:1. */
+  --accent-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
   /* Links stay bright on dark surfaces; filled buttons darken so white text
      reads on them; the focus ring is opaque so it reaches 3:1 everywhere. */
   --link: #a5b4fc;
@@ -60,8 +61,10 @@
   --border-strong: rgb(255 255 255 / 0.16);
   --text: #f3f4f6;
   --text-muted: #a1a8b8;
-  --text-faint: #8b93a7;
-  --control-border: rgb(255 255 255 / 0.18);
+  --text-faint: #98a1b6;
+  /* Control borders and the select chevron are opaque so they reach 3:1
+     against every surface they sit on. */
+  --control-border: #6b7280;
 
   --success: #3ccf8e;
   --success-soft: rgb(60 207 142 / 0.16);
@@ -110,7 +113,7 @@
     --text: #171b26;
     --text-muted: #566079;
     --text-faint: #626b80;
-    --control-border: rgb(20 24 40 / 0.22);
+    --control-border: #6f788f;
     --accent-soft: rgb(99 102 241 / 0.12);
     --link: #4f46e5;
     --button-primary: #4f46e5;
@@ -775,7 +778,7 @@ textarea {
 
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
   background-position: right 0.6rem center;
   background-repeat: no-repeat;
   padding-right: 2.2rem;

@@ -70,6 +70,22 @@ it("shows the dashboard to a signed-in administrator", async () => {
   ).not.toBeInTheDocument();
 });
 
+it("shows requests but not trending to an account that cannot request", async () => {
+  setMockPermissions(["requests.read.own"]);
+  signInMockSession();
+  renderApp();
+
+  expect(
+    await screen.findByRole("heading", { name: "My requests", level: 2 }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "Trending this week", level: 2 }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Playing now", level: 2 }),
+  ).not.toBeInTheDocument();
+});
+
 it("shows a viewer only the panels their permissions allow", async () => {
   setMockPermissions(["stats.read.own"]);
   signInMockSession();
