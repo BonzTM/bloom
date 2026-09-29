@@ -1077,6 +1077,19 @@ func (q *Queries) ListWatchPositions(ctx context.Context, watchID string) ([]Wat
 	return items, nil
 }
 
+const playbackWatchExists = `-- name: PlaybackWatchExists :one
+
+SELECT EXISTS (SELECT 1 FROM watches WHERE id = ?1)
+`
+
+// Playback queries are portable across SQLite and PostgreSQL.
+func (q *Queries) PlaybackWatchExists(ctx context.Context, id string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, playbackWatchExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const trimWatchPositions = `-- name: TrimWatchPositions :exec
 DELETE FROM watch_positions
 WHERE watch_positions.watch_id = ?1
@@ -1095,7 +1108,6 @@ func (q *Queries) TrimWatchPositions(ctx context.Context, watchID string) error 
 }
 
 const upsertPlaybackWatch = `-- name: UpsertPlaybackWatch :exec
-
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,
     server_session_id, item_id, item_name, item_type, series_id, series_name, library_id,
@@ -1195,7 +1207,6 @@ type UpsertPlaybackWatchParams struct {
 	UpdatedAt                 string
 }
 
-// Playback queries are portable across SQLite and PostgreSQL.
 func (q *Queries) UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error {
 	_, err := q.db.ExecContext(ctx, upsertPlaybackWatch,
 		arg.ID,

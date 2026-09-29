@@ -10,33 +10,21 @@ import (
 	"github.com/BonzTM/bloom/internal/testutil"
 )
 
-type routingChannels struct {
-	values []core.NotificationRegistration
+type routingPreferences struct {
+	values []core.NotificationPreference
+	writes int
 }
 
-func (r routingChannels) GetNotificationChannel(context.Context, string) (core.NotificationRecord, error) {
-	return core.NotificationRecord{}, core.ErrNotFound
-}
-
-func (r routingChannels) ListNotificationChannels(context.Context, string, int) ([]core.NotificationRegistration, error) {
+func (r *routingPreferences) ListNotificationPreferences(
+	context.Context, string,
+) ([]core.NotificationPreference, error) {
 	return r.values, nil
 }
 
-type routingPreferences struct {
-	overrides []core.NotificationPreferenceOverride
-	writes    int
-}
-
-func (r *routingPreferences) ListNotificationPreferenceOverrides(
-	context.Context, string,
-) ([]core.NotificationPreferenceOverride, error) {
-	return r.overrides, nil
-}
-
-func (r *routingPreferences) ReplaceNotificationPreferenceOverrides(
-	_ context.Context, _ string, values []core.NotificationPreferenceOverride,
+func (r *routingPreferences) ReplaceNotificationPreferences(
+	_ context.Context, _ string, values []core.NotificationPreference,
 ) error {
-	r.overrides = values
+	r.values = values
 	r.writes++
 	return nil
 }
@@ -52,60 +40,55 @@ func (routingTitles) TitleSubscribed(context.Context, string, core.MetadataProvi
 	return false, nil
 }
 
-func TestRoutingPreferencesDefaultRequestEventsOnAndPlaybackOff(t *testing.T) {
-	channels := []core.NotificationRegistration{{ID: testRoutingID(1)}, {ID: testRoutingID(2)}}
+func TestRoutingPreferencesDefaultEveryEventOn(t *testing.T) {
 	store := &routingPreferences{}
-	service := newRoutingTestService(t, channels, store)
+	service := newRoutingTestService(t, store)
 	got, err := service.Preferences(t.Context(), testRoutingID(3))
 	if err != nil {
 		t.Fatalf("Preferences: %v", err)
 	}
-	if len(got.Preferences) != len(core.NotificationEventTypes()) {
-		t.Fatalf("preference count = %d", len(got.Preferences))
+	if len(got) != len(core.NotificationEventTypes()) {
+		t.Fatalf("preference count = %d", len(got))
 	}
-	for _, preference := range got.Preferences {
-		want := len(channels)
-		if preference.EventType == core.NotificationEventPlaybackSessionStarted {
-			want = 0
-		}
-		if len(preference.ChannelIDs) != want {
-			t.Errorf("%s channel count = %d, want %d", preference.EventType, len(preference.ChannelIDs), want)
+	for _, preference := range got {
+		if !preference.Enabled {
+			t.Errorf("%s enabled = false, want true", preference.EventType)
 		}
 	}
 }
 
-func TestRoutingPreferencesRejectUnknownChannelAndPersistPlaybackOptIn(t *testing.T) {
-	channelID := testRoutingID(1)
+func TestRoutingPreferencesPersistCompleteMatrix(t *testing.T) {
 	store := &routingPreferences{}
-	service := newRoutingTestService(t, []core.NotificationRegistration{{ID: channelID}}, store)
-	invalid := completeRoutingPreferences(channelID)
-	invalid[0].ChannelIDs = []string{testRoutingID(9)}
+	service := newRoutingTestService(t, store)
+	invalid := completeRoutingPreferences()
+	invalid[0].EventType = invalid[1].EventType
 	if _, err := service.UpdatePreferences(t.Context(), testRoutingID(3), invalid); !errors.Is(err, core.ErrInvalidArgument) {
-		t.Fatalf("unknown channel update = %v, want ErrInvalidArgument", err)
+		t.Fatalf("duplicate event update = %v, want ErrInvalidArgument", err)
 	}
 	if store.writes != 0 {
 		t.Fatalf("invalid update writes = %d", store.writes)
 	}
-	values := completeRoutingPreferences(channelID)
+	values := completeRoutingPreferences()
+	values[len(values)-1].Enabled = false
 	got, err := service.UpdatePreferences(t.Context(), testRoutingID(3), values)
 	if err != nil {
 		t.Fatalf("UpdatePreferences: %v", err)
 	}
-	if store.writes != 1 || len(store.overrides) != len(core.NotificationEventTypes()) {
-		t.Fatalf("persisted overrides = %d across %d writes", len(store.overrides), store.writes)
+	if store.writes != 1 || len(store.values) != len(core.NotificationEventTypes()) {
+		t.Fatalf("persisted preferences = %d across %d writes", len(store.values), store.writes)
 	}
-	playback := got.Preferences[len(got.Preferences)-1]
-	if playback.EventType != core.NotificationEventPlaybackSessionStarted || len(playback.ChannelIDs) != 1 {
+	playback := got[len(got)-1]
+	if playback.EventType != core.NotificationEventPlaybackSessionStarted || playback.Enabled {
 		t.Fatalf("playback preference = %+v", playback)
 	}
 }
 
 func newRoutingTestService(
-	t *testing.T, channels []core.NotificationRegistration, preferences *routingPreferences,
+	t *testing.T, preferences *routingPreferences,
 ) *RoutingService {
 	t.Helper()
 	service, err := NewRoutingService(
-		routingChannels{values: channels}, preferences, routingTitles{},
+		preferences, routingTitles{},
 		testutil.NewFakeClock(time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)),
 	)
 	if err != nil {
@@ -114,10 +97,10 @@ func newRoutingTestService(
 	return service
 }
 
-func completeRoutingPreferences(channelID string) []core.NotificationPreference {
+func completeRoutingPreferences() []core.NotificationPreference {
 	values := make([]core.NotificationPreference, 0, len(core.NotificationEventTypes()))
 	for _, eventType := range core.NotificationEventTypes() {
-		values = append(values, core.NotificationPreference{EventType: eventType, ChannelIDs: []string{channelID}})
+		values = append(values, core.NotificationPreference{EventType: eventType, Enabled: true})
 	}
 	return values
 }

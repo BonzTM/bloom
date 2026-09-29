@@ -1,5 +1,8 @@
 -- Playback queries are portable across SQLite and PostgreSQL.
 
+-- name: PlaybackWatchExists :one
+SELECT EXISTS (SELECT 1 FROM watches WHERE id = sqlc.arg(id));
+
 -- name: UpsertPlaybackWatch :exec
 INSERT INTO watches (
     id, media_server_id, media_user_id, username, device_id, device_name, client,

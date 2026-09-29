@@ -42,7 +42,6 @@ type AccountMediaUser struct {
 type AccountNotificationPreference struct {
 	AccountID string
 	EventType string
-	ChannelID string
 	Enabled   int64
 }
 
@@ -291,6 +290,11 @@ type NotificationOutbox struct {
 	SentAt             sql.NullString
 	CreatedAt          string
 	UpdatedAt          string
+}
+
+type PlaybackNotificationEmission struct {
+	WatchID   string
+	EmittedAt string
 }
 
 type Request struct {

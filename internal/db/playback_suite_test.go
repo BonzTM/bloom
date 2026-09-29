@@ -18,51 +18,14 @@ import (
 
 func runPlaybackEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
-	t.Run("session start event is idempotent across restart", func(t *testing.T) {
-		testPlaybackSessionEventRestart(t, pool, driver)
+	t.Run("session start marker survives event retention", func(t *testing.T) {
+		testPlaybackSessionEventRetention(t, pool, driver)
+	})
+	t.Run("session event failure rolls back the watch and marker", func(t *testing.T) {
+		testPlaybackSessionEventRollback(t, pool, driver)
 	})
 	t.Run("playback persistence and cascade", func(t *testing.T) {
-		reader, writer, err := db.NewMediaServerStores(pool, driver)
-		if err != nil {
-			t.Fatalf("NewMediaServerStores: %v", err)
-		}
-		_ = reader
-		now := core.NormalizeTime(time.Date(2026, 9, 23, 15, 0, 0, 0, time.UTC))
-		server := mediaServerRecord(t, "Playback "+mustID(t), "https://playback.example.test", now)
-		if err := writer.CreateMediaServer(t.Context(), server); err != nil {
-			t.Fatalf("CreateMediaServer: %v", err)
-		}
-		store := newPlaybackTestStore(t, pool, driver)
-		watch := playbackStoreWatch(t, server.ID, now)
-		position := playbackPosition(watch.ID, now, time.Minute)
-		if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{
-			Watch: watch, SegmentStart: new(now), SegmentSource: core.WatchSourceWebsocket,
-			Position: &position,
-		}}); err != nil {
-			t.Fatalf("SaveWatches(start): %v", err)
-		}
-		assertPlaybackRowSources(t, pool, watch.ID)
-		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID, 90*time.Minute)
-		updatedRuntime := 95 * time.Minute
-		watch.Runtime = &updatedRuntime
-		if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
-			t.Fatalf("SaveWatches(runtime update): %v", err)
-		}
-		assertPlaybackRestart(t, pool, driver, server.ID, watch.ID, updatedRuntime)
-		writePlaybackPositions(t, store, watch, now)
-		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 512)
-		assertPlaybackPositions(t, store, watch.ID)
-		closePlaybackWatch(t, store, watch, now)
-		assertPlaybackReads(t, store, server.ID, watch.ID)
-		if err := writer.DeleteMediaServer(t.Context(), server.ID); err != nil {
-			t.Fatalf("DeleteMediaServer: %v", err)
-		}
-		assertRowCount(t, pool, "SELECT COUNT(*) FROM watches WHERE id = $1", watch.ID, 0)
-		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_segments WHERE watch_id = $1", watch.ID, 0)
-		assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watch.ID, 0)
-		if _, err := store.ListWatchPositions(t.Context(), watch.ID); !errors.Is(err, core.ErrNotFound) {
-			t.Fatalf("ListWatchPositions deleted watch = %v, want not found", err)
-		}
+		testPlaybackPersistenceCascade(t, pool, driver)
 	})
 	t.Run("transitions outlive position-only samples", func(t *testing.T) {
 		testPlaybackTransitionRetention(t, pool, driver)
@@ -146,28 +109,132 @@ func assertPlaybackWatchRead(
 	if watch.ID != watchID || watch.State != state || watch.MediaServerName == "" || watch.Stream == nil {
 		t.Fatalf("GetWatch(%s) = %+v", watchID, watch)
 func testPlaybackSessionEventRestart(t *testing.T, pool *sql.DB, driver config.Driver) {
+func testPlaybackPersistenceCascade(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Helper()
-	server := createPlaybackTestServer(t, pool, driver, "Event restart")
+	_, writer, err := db.NewMediaServerStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewMediaServerStores: %v", err)
+	}
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 15, 0, 0, 0, time.UTC))
+	server := mediaServerRecord(t, "Playback "+mustID(t), "https://playback.example.test", now)
+	if err := writer.CreateMediaServer(t.Context(), server); err != nil {
+		t.Fatalf("CreateMediaServer: %v", err)
+	}
+	store := newPlaybackTestStore(t, pool, driver)
+	watch := playbackStoreWatch(t, server.ID, now)
+	position := playbackPosition(watch.ID, now, time.Minute)
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{
+		Watch: watch, SegmentStart: new(now), SegmentSource: core.WatchSourceWebsocket, Position: &position,
+	}}); err != nil {
+		t.Fatalf("SaveWatches(start): %v", err)
+	}
+	assertPlaybackRowSources(t, pool, watch.ID)
+	assertPlaybackRestart(t, pool, driver, server.ID, watch.ID, 90*time.Minute)
+	updatedRuntime := 95 * time.Minute
+	watch.Runtime = &updatedRuntime
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+		t.Fatalf("SaveWatches(runtime update): %v", err)
+	}
+	assertPlaybackRestart(t, pool, driver, server.ID, watch.ID, updatedRuntime)
+	writePlaybackPositions(t, store, watch, now)
+	assertPlaybackPositions(t, store, watch.ID)
+	closePlaybackWatch(t, store, watch, now)
+	assertPlaybackReads(t, store, server.ID, watch.ID)
+	deletePlaybackServerAndAssertCascade(t, writer, store, pool, server.ID, watch.ID)
+}
+
+func deletePlaybackServerAndAssertCascade(
+	t *testing.T, writer core.MediaServerWriter, store core.PlaybackStore, pool *sql.DB, serverID, watchID string,
+) {
+	t.Helper()
+	if err := writer.DeleteMediaServer(t.Context(), serverID); err != nil {
+		t.Fatalf("DeleteMediaServer: %v", err)
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM watches WHERE id = $1", watchID, 0)
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_segments WHERE watch_id = $1", watchID, 0)
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM watch_positions WHERE watch_id = $1", watchID, 0)
+	if _, err := store.ListWatchPositions(t.Context(), watchID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListWatchPositions deleted watch = %v, want not found", err)
+	}
+}
+
+func testPlaybackSessionEventRetention(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Event retention")
 	now := core.NormalizeTime(time.Date(2026, 9, 23, 14, 0, 0, 0, time.UTC))
 	watch := playbackStoreWatch(t, server.ID, now)
-	first := newPlaybackTestStore(t, pool, driver)
-	if err := first.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+	watch.CreatedAt = now.Add(-time.Minute)
+	store := newPlaybackTestStore(t, pool, driver)
+	if err := store.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
 		t.Fatalf("first SaveWatches: %v", err)
 	}
-	restarted := newPlaybackTestStore(t, pool, driver)
-	if err := restarted.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
-		t.Fatalf("restart SaveWatches: %v", err)
-	}
-	assertRowCount(t, pool,
-		"SELECT COUNT(*) FROM notification_events WHERE event_type = 'playback.session_started' AND request_id = $1",
-		watch.ID, 1,
-	)
-	event, err := notificationEventStore(t, pool, driver).GetUnfannedNotificationEvent(t.Context())
+	events, maintenance := playbackNotificationStores(t, pool, driver)
+	event, err := events.GetUnfannedNotificationEvent(t.Context())
 	if err != nil || event.Playback == nil || event.Playback.WatchID != watch.ID ||
 		event.Playback.MediaUserID != watch.MediaUserID || event.Playback.ItemID != watch.ItemID ||
 		event.Playback.Client != watch.Client || event.Playback.DeviceID != watch.DeviceID {
 		t.Fatalf("playback notification event = %+v, %v", event, err)
 	}
+	if _, err := events.FanOutNotificationEvent(t.Context(), event.ID, notificationEventPayload(event, now), now.Add(time.Minute)); err != nil {
+		t.Fatalf("FanOutNotificationEvent: %v", err)
+	}
+	if _, err := maintenance.PruneNotificationDeliveries(t.Context(), now.Add(2*time.Minute), 10); err != nil {
+		t.Fatalf("PruneNotificationDeliveries: %v", err)
+	}
+	assertNoPlaybackNotificationEvent(t, pool, watch.ID, 1)
+	watch.LastSeenAt = now.Add(3 * time.Minute)
+	watch.UpdatedAt = watch.LastSeenAt
+	if err := newPlaybackTestStore(t, pool, driver).SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+		t.Fatalf("replay SaveWatches: %v", err)
+	}
+	assertNoPlaybackNotificationEvent(t, pool, watch.ID, 1)
+}
+
+func testPlaybackSessionEventRollback(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	server := createPlaybackTestServer(t, pool, driver, "Event rollback")
+	now := core.NormalizeTime(time.Date(2026, 9, 23, 14, 45, 0, 0, time.UTC))
+	watch := playbackStoreWatch(t, server.ID, now)
+	removeFailure := rejectPlaybackNotificationEvents(t, pool, driver)
+	err := newPlaybackTestStore(t, pool, driver).SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}})
+	removeFailure()
+	if err == nil {
+		t.Fatal("SaveWatches succeeded while notification event inserts were rejected")
+	}
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM watches WHERE id=$1", watch.ID, 0)
+	assertNoPlaybackNotificationEvent(t, pool, watch.ID, 0)
+}
+
+func playbackNotificationStores(
+	t *testing.T, pool *sql.DB, driver config.Driver,
+) (core.NotificationEventStore, core.NotificationMaintenanceStore) {
+	t.Helper()
+	_, _, events, _, _, maintenance, err := db.NewNotificationStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewNotificationStores: %v", err)
+	}
+	return events, maintenance
+}
+
+func assertNoPlaybackNotificationEvent(t *testing.T, pool *sql.DB, watchID string, markers int) {
+	t.Helper()
+	assertRowCount(t, pool,
+		"SELECT COUNT(*) FROM notification_events WHERE event_type='playback.session_started' AND request_id=$1",
+		watchID, 0)
+	assertRowCount(t, pool, "SELECT COUNT(*) FROM playback_notification_emissions WHERE watch_id=$1", watchID, markers)
+}
+
+func rejectPlaybackNotificationEvents(t *testing.T, pool *sql.DB, driver config.Driver) func() {
+	t.Helper()
+	if driver == config.DriverPostgres {
+		execTestSQL(t, pool, `ALTER TABLE notification_events ADD CONSTRAINT reject_playback_event
+            CHECK (event_type <> 'playback.session_started')`)
+		return func() { execTestSQL(t, pool, "ALTER TABLE notification_events DROP CONSTRAINT reject_playback_event") }
+	}
+	execTestSQL(t, pool, `CREATE TRIGGER reject_playback_event BEFORE INSERT ON notification_events
+        WHEN NEW.event_type = 'playback.session_started'
+        BEGIN SELECT RAISE(ABORT, 'rejected playback event'); END`)
+	return func() { execTestSQL(t, pool, "DROP TRIGGER reject_playback_event") }
 }
 
 func testPlaybackFramerateRoundTrip(t *testing.T, pool *sql.DB, driver config.Driver) {

@@ -43,7 +43,6 @@ type AccountMediaUser struct {
 type AccountNotificationPreference struct {
 	AccountID string
 	EventType string
-	ChannelID string
 	Enabled   bool
 }
 
@@ -292,6 +291,11 @@ type NotificationOutbox struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	RecipientAccountID string
+}
+
+type PlaybackNotificationEmission struct {
+	WatchID   string
+	EmittedAt time.Time
 }
 
 type Request struct {

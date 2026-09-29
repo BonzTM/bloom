@@ -154,8 +154,8 @@ type notificationTester interface {
 }
 
 type notificationRouting interface {
-	Preferences(context.Context, string) (core.NotificationPreferences, error)
-	UpdatePreferences(context.Context, string, []core.NotificationPreference) (core.NotificationPreferences, error)
+	Preferences(context.Context, string) ([]core.NotificationPreference, error)
+	UpdatePreferences(context.Context, string, []core.NotificationPreference) ([]core.NotificationPreference, error)
 	SubscribeTitle(context.Context, string, core.MetadataProviderKind, string) error
 	UnsubscribeTitle(context.Context, string, core.MetadataProviderKind, string) error
 	TitleSubscribed(context.Context, string, core.MetadataProviderKind, string) (bool, error)

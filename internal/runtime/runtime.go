@@ -645,7 +645,7 @@ func notificationDependencies(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build notification service: %w", err)
 	}
-	routing, err := notifyapp.NewRoutingService(reader, preferenceStore, titleStore, clock)
+	routing, err := notifyapp.NewRoutingService(preferenceStore, titleStore, clock)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build notification routing service: %w", err)
 	}

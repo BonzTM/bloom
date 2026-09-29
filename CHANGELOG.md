@@ -75,18 +75,20 @@ contracts) gets an entry here.
   settings table, the per-user timeline keyset index, and the import job's
   unresolved-library counter.
 - Per-account notification preferences at
-  `GET/PUT /api/v1/me/notification-preferences`, with existing request events
-  enabled by default and playback session starts disabled by default.
+  `GET/PUT /api/v1/me/notification-preferences`, as a complete enabled/disabled
+  event-kind matrix. Every event defaults on; accounts never see or select the
+  operator-owned channels.
 - Idempotent title-availability subscriptions at
   `/api/v1/titles/{provider}/{provider_id}/subscription`, bounded to 500 per
   account. Fulfilment now addresses the requester and deduplicated followers,
   and title detail responses expose the caller's `subscribed` state.
 - Durable `playback.session_started` notifications for newly collected
-  watches, committed with the watch and deduplicated by watch ID across
-  restarts. Channels and accounts must both opt in.
+  watches, committed with the watch and deduplicated by a retained watch-ID
+  emission marker across restarts and notification retention.
 - SQLite/PostgreSQL migration `00028_notification_preferences` adds account
   routing preferences, event recipients, title subscriptions, playback source
-  payloads, and per-recipient outbox identity.
+  payloads, per-recipient outbox identity, and durable playback emission
+  markers.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

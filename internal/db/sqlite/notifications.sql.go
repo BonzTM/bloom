@@ -46,25 +46,19 @@ func (q *Queries) AddNotificationEventRecipient(ctx context.Context, arg AddNoti
 	return err
 }
 
-const addNotificationPreferenceOverride = `-- name: AddNotificationPreferenceOverride :exec
-INSERT INTO account_notification_preferences (account_id, event_type, channel_id, enabled)
-VALUES (?1, ?2, ?3, ?4)
+const addNotificationPreference = `-- name: AddNotificationPreference :exec
+INSERT INTO account_notification_preferences (account_id, event_type, enabled)
+VALUES (?1, ?2, ?3)
 `
 
-type AddNotificationPreferenceOverrideParams struct {
+type AddNotificationPreferenceParams struct {
 	AccountID string
 	EventType string
-	ChannelID string
 	Enabled   int64
 }
 
-func (q *Queries) AddNotificationPreferenceOverride(ctx context.Context, arg AddNotificationPreferenceOverrideParams) error {
-	_, err := q.db.ExecContext(ctx, addNotificationPreferenceOverride,
-		arg.AccountID,
-		arg.EventType,
-		arg.ChannelID,
-		arg.Enabled,
-	)
+func (q *Queries) AddNotificationPreference(ctx context.Context, arg AddNotificationPreferenceParams) error {
+	_, err := q.db.ExecContext(ctx, addNotificationPreference, arg.AccountID, arg.EventType, arg.Enabled)
 	return err
 }
 
@@ -331,6 +325,25 @@ func (q *Queries) CreateNotificationOutbox(ctx context.Context, arg CreateNotifi
 	return err
 }
 
+const createPlaybackNotificationEmission = `-- name: CreatePlaybackNotificationEmission :execrows
+INSERT INTO playback_notification_emissions (watch_id, emitted_at)
+VALUES (?1, ?2)
+ON CONFLICT (watch_id) DO NOTHING
+`
+
+type CreatePlaybackNotificationEmissionParams struct {
+	WatchID   string
+	EmittedAt string
+}
+
+func (q *Queries) CreatePlaybackNotificationEmission(ctx context.Context, arg CreatePlaybackNotificationEmissionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, createPlaybackNotificationEmission, arg.WatchID, arg.EmittedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createPlaybackNotificationEvent = `-- name: CreatePlaybackNotificationEvent :execrows
 INSERT INTO notification_events (
     id, event_type, request_id, requester_id, actor_id, media_kind, title,
@@ -340,7 +353,7 @@ INSERT INTO notification_events (
     '00000000-0000-4000-8000-000000000000', 'system', 'movie', ?3,
     'available', '', ?4, 0, ?5, NULL, ?6
 )
-ON CONFLICT DO NOTHING
+ON CONFLICT (event_type, request_id) WHERE event_type = 'playback.session_started' DO NOTHING
 `
 
 type CreatePlaybackNotificationEventParams struct {
@@ -409,12 +422,12 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, arg DeleteNotif
 	return result.RowsAffected()
 }
 
-const deleteNotificationPreferenceOverrides = `-- name: DeleteNotificationPreferenceOverrides :exec
+const deleteNotificationPreferences = `-- name: DeleteNotificationPreferences :exec
 DELETE FROM account_notification_preferences WHERE account_id = ?1
 `
 
-func (q *Queries) DeleteNotificationPreferenceOverrides(ctx context.Context, accountID string) error {
-	_, err := q.db.ExecContext(ctx, deleteNotificationPreferenceOverrides, accountID)
+func (q *Queries) DeleteNotificationPreferences(ctx context.Context, accountID string) error {
+	_, err := q.db.ExecContext(ctx, deleteNotificationPreferences, accountID)
 	return err
 }
 
@@ -722,29 +735,28 @@ func (q *Queries) ListNotificationDeliveries(ctx context.Context, arg ListNotifi
 	return items, nil
 }
 
-const listNotificationPreferenceOverrides = `-- name: ListNotificationPreferenceOverrides :many
-SELECT event_type, channel_id, enabled
+const listNotificationPreferences = `-- name: ListNotificationPreferences :many
+SELECT event_type, enabled
 FROM account_notification_preferences
 WHERE account_id = ?1
-ORDER BY event_type, channel_id
+ORDER BY event_type
 `
 
-type ListNotificationPreferenceOverridesRow struct {
+type ListNotificationPreferencesRow struct {
 	EventType string
-	ChannelID string
 	Enabled   int64
 }
 
-func (q *Queries) ListNotificationPreferenceOverrides(ctx context.Context, accountID string) ([]ListNotificationPreferenceOverridesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listNotificationPreferenceOverrides, accountID)
+func (q *Queries) ListNotificationPreferences(ctx context.Context, accountID string) ([]ListNotificationPreferencesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNotificationPreferences, accountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListNotificationPreferenceOverridesRow{}
+	items := []ListNotificationPreferencesRow{}
 	for rows.Next() {
-		var i ListNotificationPreferenceOverridesRow
-		if err := rows.Scan(&i.EventType, &i.ChannelID, &i.Enabled); err != nil {
+		var i ListNotificationPreferencesRow
+		if err := rows.Scan(&i.EventType, &i.Enabled); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

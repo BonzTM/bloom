@@ -14,7 +14,7 @@ import (
 type Querier interface {
 	AddAvailabilityNotificationRecipients(ctx context.Context, arg AddAvailabilityNotificationRecipientsParams) error
 	AddNotificationEventRecipient(ctx context.Context, arg AddNotificationEventRecipientParams) error
-	AddNotificationPreferenceOverride(ctx context.Context, arg AddNotificationPreferenceOverrideParams) error
+	AddNotificationPreference(ctx context.Context, arg AddNotificationPreferenceParams) error
 	AddNotificationSubscription(ctx context.Context, arg AddNotificationSubscriptionParams) error
 	AddPlaybackNotificationRecipients(ctx context.Context, arg AddPlaybackNotificationRecipientsParams) error
 	ArchiveLibraryItem(ctx context.Context, arg ArchiveLibraryItemParams) (int64, error)
@@ -66,6 +66,7 @@ type Querier interface {
 	CreateNotificationChannel(ctx context.Context, arg CreateNotificationChannelParams) error
 	CreateNotificationEvent(ctx context.Context, arg CreateNotificationEventParams) error
 	CreateNotificationOutbox(ctx context.Context, arg CreateNotificationOutboxParams) error
+	CreatePlaybackNotificationEmission(ctx context.Context, arg CreatePlaybackNotificationEmissionParams) (int64, error)
 	CreatePlaybackNotificationEvent(ctx context.Context, arg CreatePlaybackNotificationEventParams) (int64, error)
 	CreateRequest(ctx context.Context, arg CreateRequestParams) error
 	CreateRequestProfile(ctx context.Context, arg CreateRequestProfileParams) error
@@ -84,7 +85,7 @@ type Querier interface {
 	DeleteMediaServerExclusions(ctx context.Context, mediaServerID string) error
 	DeleteMetadataProvider(ctx context.Context, kind string) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, arg DeleteNotificationChannelParams) (int64, error)
-	DeleteNotificationPreferenceOverrides(ctx context.Context, accountID string) error
+	DeleteNotificationPreferences(ctx context.Context, accountID string) error
 	DeleteNotificationSubscriptions(ctx context.Context, channelID string) error
 	DeleteOrphanImportUploadChunks(ctx context.Context, arg DeleteOrphanImportUploadChunksParams) (int64, error)
 	DeleteOverlappingImportedWatches(ctx context.Context, arg DeleteOverlappingImportedWatchesParams) error
@@ -202,7 +203,7 @@ type Querier interface {
 	ListMissingLibraryItemIDs(ctx context.Context, arg ListMissingLibraryItemIDsParams) ([]string, error)
 	ListNotificationChannels(ctx context.Context, arg ListNotificationChannelsParams) ([]ListNotificationChannelsRow, error)
 	ListNotificationDeliveries(ctx context.Context, arg ListNotificationDeliveriesParams) ([]ListNotificationDeliveriesRow, error)
-	ListNotificationPreferenceOverrides(ctx context.Context, accountID string) ([]ListNotificationPreferenceOverridesRow, error)
+	ListNotificationPreferences(ctx context.Context, accountID string) ([]ListNotificationPreferencesRow, error)
 	ListNowPlaying(ctx context.Context, arg ListNowPlayingParams) ([]ListNowPlayingRow, error)
 	ListOpenPlaybackWatches(ctx context.Context, mediaServerID string) ([]ListOpenPlaybackWatchesRow, error)
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
@@ -241,6 +242,8 @@ type Querier interface {
 	MarkNotificationEventFanned(ctx context.Context, arg MarkNotificationEventFannedParams) (int64, error)
 	MetadataRequestStates(ctx context.Context, arg MetadataRequestStatesParams) ([]MetadataRequestStatesRow, error)
 	NotificationOutboxDepth(ctx context.Context) (int64, error)
+	// Playback queries are portable across SQLite and PostgreSQL.
+	PlaybackWatchExists(ctx context.Context, id string) (bool, error)
 	PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error)
 	PruneNotificationOutbox(ctx context.Context, arg PruneNotificationOutboxParams) (int64, error)
 	RebuildLibraryItemRollup(ctx context.Context, arg RebuildLibraryItemRollupParams) error
@@ -286,7 +289,6 @@ type Querier interface {
 	UpsertAccountRequestQuota(ctx context.Context, arg UpsertAccountRequestQuotaParams) error
 	UpsertLibraryItem(ctx context.Context, arg UpsertLibraryItemParams) (int64, error)
 	UpsertMetadataProvider(ctx context.Context, arg UpsertMetadataProviderParams) error
-	// Playback queries are portable across SQLite and PostgreSQL.
 	UpsertPlaybackWatch(ctx context.Context, arg UpsertPlaybackWatchParams) error
 	UpsertRoleRequestQuota(ctx context.Context, arg UpsertRoleRequestQuotaParams) error
 	UpsertWatchPosition(ctx context.Context, arg UpsertWatchPositionParams) error

@@ -1151,24 +1151,26 @@ paths:
     get:
       tags: [notifications]
       operationId: getMyNotificationPreferences
-      summary: Return the signed-in account's effective event-to-channel matrix.
+      summary: Return the signed-in account's complete event preference matrix.
       security: [{ sessionCookie: [] }]
       responses:
-        "200": { description: Effective preferences with safe channel metadata., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
+        "200": { description: Every supported event kind exactly once; absent stored preferences default to enabled., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
     put:
       tags: [notifications]
       operationId: updateMyNotificationPreferences
-      summary: Replace the signed-in account's complete event-to-channel matrix.
+      summary: Replace the signed-in account's complete event preference matrix.
+      description: The array must contain every supported event type exactly once. Omitted or duplicate event types are rejected.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferencesUpdate" } } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } }
       responses:
-        "200": { description: Updated effective preferences., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
+        "200": { description: Updated complete event preference matrix., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -3096,24 +3098,33 @@ components:
         next_cursor: { type: string, maxLength: 400 }
     NotificationPreference:
       type: object
-      required: [event_type, channel_ids]
+      required: [event_type, enabled]
       additionalProperties: false
       properties:
         event_type: { $ref: "#/components/schemas/NotificationEventType" }
-        channel_ids: { type: array, maxItems: 100, uniqueItems: true, items: { type: string, format: uuid } }
-    NotificationPreferencesUpdate:
-      type: object
-      required: [preferences]
-      additionalProperties: false
-      properties:
-        preferences: { type: array, minItems: 7, maxItems: 7, items: { $ref: "#/components/schemas/NotificationPreference" } }
+        enabled: { type: boolean }
     NotificationPreferences:
-      type: object
-      required: [channels, preferences]
-      additionalProperties: false
-      properties:
-        channels: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/NotificationChannel" } }
-        preferences: { type: array, minItems: 7, maxItems: 7, items: { $ref: "#/components/schemas/NotificationPreference" } }
+      type: array
+      description: The complete account matrix, containing every supported event type exactly once.
+      minItems: 7
+      maxItems: 7
+      uniqueItems: true
+      items: { $ref: "#/components/schemas/NotificationPreference" }
+      allOf:
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: created } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: approved } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: declined } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: dispatched } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: available } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: failed } } }
+          minContains: 1
+        - contains: { type: object, required: [event_type], properties: { event_type: { const: playback.session_started } } }
+          minContains: 1
     NotificationDelivery:
       type: object
       required: [id, event_type, status, attempts, last_error, next_attempt_at, created_at, updated_at]

@@ -78,7 +78,12 @@ INSERT INTO notification_events (
     '00000000-0000-4000-8000-000000000000', 'system', 'movie', sqlc.arg(title),
     'available', '', sqlc.arg(source_payload_json), 0, sqlc.arg(occurred_at), NULL, sqlc.arg(created_at)
 )
-ON CONFLICT DO NOTHING;
+ON CONFLICT (event_type, request_id) WHERE event_type = 'playback.session_started' DO NOTHING;
+
+-- name: CreatePlaybackNotificationEmission :execrows
+INSERT INTO playback_notification_emissions (watch_id, emitted_at)
+VALUES (sqlc.arg(watch_id), sqlc.arg(emitted_at))
+ON CONFLICT (watch_id) DO NOTHING;
 
 -- name: AddNotificationEventRecipient :exec
 INSERT INTO notification_event_recipients (event_id, account_id)
@@ -174,18 +179,18 @@ WHERE channel_id = sqlc.arg(channel_id)
        OR (created_at = sqlc.arg(after_created_at) AND id < sqlc.arg(after_id)))
 ORDER BY created_at DESC, id DESC LIMIT sqlc.arg(page_size);
 
--- name: ListNotificationPreferenceOverrides :many
-SELECT event_type, channel_id, enabled
+-- name: ListNotificationPreferences :many
+SELECT event_type, enabled
 FROM account_notification_preferences
 WHERE account_id = sqlc.arg(account_id)
-ORDER BY event_type, channel_id;
+ORDER BY event_type;
 
--- name: DeleteNotificationPreferenceOverrides :exec
+-- name: DeleteNotificationPreferences :exec
 DELETE FROM account_notification_preferences WHERE account_id = sqlc.arg(account_id);
 
--- name: AddNotificationPreferenceOverride :exec
-INSERT INTO account_notification_preferences (account_id, event_type, channel_id, enabled)
-VALUES (sqlc.arg(account_id), sqlc.arg(event_type), sqlc.arg(channel_id), sqlc.arg(enabled));
+-- name: AddNotificationPreference :exec
+INSERT INTO account_notification_preferences (account_id, event_type, enabled)
+VALUES (sqlc.arg(account_id), sqlc.arg(event_type), sqlc.arg(enabled));
 
 -- name: CountTitleSubscriptions :one
 SELECT COUNT(*) FROM title_availability_subscriptions WHERE account_id = sqlc.arg(account_id);

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +59,66 @@ func runNotificationEngineTests(t *testing.T, pool *sql.DB, driver config.Driver
 	t.Run("title subscription bound is enforced", func(t *testing.T) {
 		testTitleSubscriptionBound(t, pool, driver, accounts)
 	})
+	t.Run("account preferences and subscriptions are isolated", func(t *testing.T) {
+		testNotificationAccountIsolation(t, pool, driver, accounts)
+	})
+}
+
+func testNotificationAccountIsolation(
+	t *testing.T, pool *sql.DB, driver config.Driver, accounts core.AccountStore,
+) {
+	t.Helper()
+	at := core.NormalizeTime(time.Date(2026, 9, 24, 20, 0, 0, 0, time.UTC))
+	first := requestTestAccount(t, accounts, at, "routing-first")
+	second := requestTestAccount(t, accounts, at, "routing-second")
+	preferences, titles, err := db.NewNotificationRoutingStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewNotificationRoutingStore: %v", err)
+	}
+	values := completeNotificationPreferences(true)
+	values[0].Enabled = false
+	if err := preferences.ReplaceNotificationPreferences(t.Context(), first.ID, values); err != nil {
+		t.Fatalf("ReplaceNotificationPreferences: %v", err)
+	}
+	firstValues, firstErr := preferences.ListNotificationPreferences(t.Context(), first.ID)
+	secondValues, secondErr := preferences.ListNotificationPreferences(t.Context(), second.ID)
+	if firstErr != nil || len(firstValues) != len(values) || notificationPreferenceEnabled(firstValues, core.RequestEventCreated) {
+		t.Fatalf("first preferences = %+v, %v", firstValues, firstErr)
+	}
+	if secondErr != nil || len(secondValues) != 0 {
+		t.Fatalf("second preferences = %+v, %v; want no overrides", secondValues, secondErr)
+	}
+	subscription := core.TitleSubscription{
+		AccountID: first.ID, Provider: core.MetadataProviderTMDB, ProviderID: "98765", CreatedAt: at,
+	}
+	if err := titles.SubscribeTitle(t.Context(), subscription); err != nil {
+		t.Fatalf("SubscribeTitle(first): %v", err)
+	}
+	if err := titles.UnsubscribeTitle(t.Context(), second.ID, subscription.Provider, subscription.ProviderID); err != nil {
+		t.Fatalf("UnsubscribeTitle(second): %v", err)
+	}
+	firstSubscribed, firstErr := titles.TitleSubscribed(t.Context(), first.ID, subscription.Provider, subscription.ProviderID)
+	secondSubscribed, secondErr := titles.TitleSubscribed(t.Context(), second.ID, subscription.Provider, subscription.ProviderID)
+	if firstErr != nil || secondErr != nil || !firstSubscribed || secondSubscribed {
+		t.Fatalf("subscription isolation = %t/%t, %v/%v", firstSubscribed, secondSubscribed, firstErr, secondErr)
+	}
+}
+
+func notificationPreferenceEnabled(values []core.NotificationPreference, eventType core.RequestEventType) bool {
+	for _, value := range values {
+		if value.EventType == eventType {
+			return value.Enabled
+		}
+	}
+	return false
+}
+
+func completeNotificationPreferences(enabled bool) []core.NotificationPreference {
+	values := make([]core.NotificationPreference, 0, len(core.NotificationEventTypes()))
+	for _, eventType := range core.NotificationEventTypes() {
+		values = append(values, core.NotificationPreference{EventType: eventType, Enabled: enabled})
+	}
+	return values
 }
 
 func testAvailabilityRecipients(
@@ -69,7 +130,7 @@ func testAvailabilityRecipients(
 	requestWriter, requesterID, profileID := notificationRequestWriter(t, pool, driver, accounts, at)
 	subscriberA := requestTestAccount(t, accounts, at, "availability-a")
 	subscriberB := requestTestAccount(t, accounts, at, "availability-b")
-	_, titleStore, routingErr := db.NewNotificationRoutingStore(pool, driver)
+	preferenceStore, titleStore, routingErr := db.NewNotificationRoutingStore(pool, driver)
 	if routingErr != nil {
 		t.Fatalf("NewNotificationRoutingStore: %v", routingErr)
 	}
@@ -81,17 +142,33 @@ func testAvailabilityRecipients(
 			t.Fatalf("SubscribeTitle(%s): %v", accountID, err)
 		}
 	}
-	channel := notificationRecord(t, "Availability recipients", true, core.RequestEventAvailable, at)
-	if createErr := stores.writer.CreateNotificationChannel(t.Context(), channel); createErr != nil {
-		t.Fatalf("CreateNotificationChannel: %v", createErr)
+	preferences := completeNotificationPreferences(true)
+	for index := range preferences {
+		if preferences[index].EventType == core.RequestEventAvailable {
+			preferences[index].Enabled = false
+		}
+	}
+	if err := preferenceStore.ReplaceNotificationPreferences(t.Context(), subscriberA.ID, preferences); err != nil {
+		t.Fatalf("disable subscriber preference: %v", err)
+	}
+	channels := []core.NotificationRecord{
+		notificationRecord(t, "Availability recipients A", true, core.RequestEventAvailable, at),
+		notificationRecord(t, "Availability recipients B", true, core.RequestEventAvailable, at),
+	}
+	for _, channel := range channels {
+		if createErr := stores.writer.CreateNotificationChannel(t.Context(), channel); createErr != nil {
+			t.Fatalf("CreateNotificationChannel: %v", createErr)
+		}
 	}
 	fulfilRequestForNotification(t, requestWriter, request, requesterID, at)
 	fanOutAllNotificationEvents(t, stores.events, at.Add(time.Minute))
-	deliveries, err := stores.recent.ListNotificationDeliveries(t.Context(), channel.ID, nil, 10)
-	if err != nil {
-		t.Fatalf("ListNotificationDeliveries: %v", err)
+	for _, channel := range channels {
+		deliveries, err := stores.recent.ListNotificationDeliveries(t.Context(), channel.ID, nil, 10)
+		if err != nil {
+			t.Fatalf("ListNotificationDeliveries: %v", err)
+		}
+		assertNotificationRecipients(t, deliveries, []string{requesterID, subscriberB.ID})
 	}
-	assertNotificationRecipients(t, deliveries, []string{requesterID, subscriberA.ID, subscriberB.ID})
 }
 
 func fulfilRequestForNotification(
@@ -162,7 +239,7 @@ func testTitleSubscriptionBound(
 	if err != nil {
 		t.Fatalf("NewNotificationRoutingStore: %v", err)
 	}
-	for index := 1; index <= core.MaxTitleSubscriptions; index++ {
+	for index := 1; index < core.MaxTitleSubscriptions; index++ {
 		value := core.TitleSubscription{
 			AccountID: account.ID, Provider: core.MetadataProviderTMDB,
 			ProviderID: strconv.Itoa(index), CreatedAt: at,
@@ -171,16 +248,36 @@ func testTitleSubscriptionBound(
 			t.Fatalf("SubscribeTitle(%d): %v", index, err)
 		}
 	}
-	duplicate := core.TitleSubscription{
-		AccountID: account.ID, Provider: core.MetadataProviderTMDB, ProviderID: "500", CreatedAt: at,
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, providerID := range []string{"500", "501"} {
+		go func() {
+			ready.Done()
+			<-start
+			results <- store.SubscribeTitle(t.Context(), core.TitleSubscription{
+				AccountID: account.ID, Provider: core.MetadataProviderTMDB,
+				ProviderID: providerID, CreatedAt: at,
+			})
+		}()
 	}
-	if err := store.SubscribeTitle(t.Context(), duplicate); err != nil {
-		t.Fatalf("idempotent SubscribeTitle: %v", err)
+	ready.Wait()
+	close(start)
+	successes, limited := 0, 0
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, core.ErrTitleSubscriptionLimit):
+			limited++
+		default:
+			t.Fatalf("concurrent SubscribeTitle = %v", err)
+		}
 	}
-	overflow := duplicate
-	overflow.ProviderID = "501"
-	if err := store.SubscribeTitle(t.Context(), overflow); !errors.Is(err, core.ErrTitleSubscriptionLimit) {
-		t.Fatalf("overflow SubscribeTitle = %v, want ErrTitleSubscriptionLimit", err)
+	if successes != 1 || limited != 1 {
+		t.Fatalf("concurrent subscription results = %d success, %d limited; want 1/1", successes, limited)
 	}
 }
 

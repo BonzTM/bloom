@@ -682,7 +682,7 @@ Every request create and state transition commits a durable event in the same
 database transaction as the request mutation. The in-process bus only wakes a
 supervised worker, which enriches unfanned events and atomically creates one
 delivery row for every addressed account and enabled subscribed channel that
-the account selected. Missing account display
+the account has not disabled for that event kind. Missing account display
 names become empty payload fields and never discard an event. The request path
 performs no notification network call. The worker claims deliveries with
 expiring leases and retries transient failures with capped exponential backoff
@@ -694,11 +694,13 @@ counters and outbox depth are exported as metrics.
 Sent and terminally failed rows, followed by their fully fanned event rows, are
 pruned in bounded batches after `BLOOM_NOTIFY_RETENTION`.
 
-Every signed-in account can read and replace its complete event-to-channel
-matrix through `GET` and `PUT /api/v1/me/notification-preferences`. Existing
-request events default on for every channel, which preserves prior delivery
-behavior. `playback.session_started` defaults off and requires both a channel
-subscription and an account opt-in.
+Every signed-in account can read and replace its complete event-kind matrix
+through `GET` and `PUT /api/v1/me/notification-preferences`. Both routes use a
+JSON array of `{event_type, enabled}` objects. `PUT` requires every supported
+event kind exactly once and rejects missing or duplicate kinds. Every kind is
+enabled by default. Accounts never see or select channels. An addressed event
+goes to every enabled operator channel subscribed to its kind unless that
+account has disabled the kind.
 
 An account with `requests.read.own` can idempotently follow or unfollow a title
 with `POST` or `DELETE` on
@@ -899,6 +901,15 @@ both engines. It backfills the Playback Reporting row ID from legacy Jellystat
 retain the original Jellystat activity ID, so that value cannot be recovered.
 Rolling the migration down removes the origin column and index while preserving
 the watches and their existing record IDs.
+
+Migration `00028_notification_preferences` adds per-account event-kind
+preferences, title-availability subscriptions, addressed notification events,
+per-recipient delivery identity, playback event payloads, and a durable
+playback-emission marker keyed by watch ID. Notification retention never
+removes the marker, so pruning and replay cannot emit a second session-start
+event. Rolling the migration down removes playback events and markers, keeps
+the lowest recipient account ID for each older event/channel delivery, and
+restores the pre-00028 event constraints.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

@@ -36,8 +36,7 @@ JOIN notification_channels AS channel ON channel.id = subscription.channel_id
 LEFT JOIN account_notification_preferences AS preference
   ON preference.account_id = recipient.account_id
  AND preference.event_type = subscription.event_type
- AND preference.channel_id = channel.id
 WHERE recipient.event_id = sqlc.arg(event_id)
   AND channel.enabled = 1 AND channel.deleted_at IS NULL
-  AND (preference.enabled = 1 OR (preference.account_id IS NULL AND subscription.event_type <> 'playback.session_started'))
+  AND (preference.enabled = 1 OR preference.account_id IS NULL)
 ORDER BY recipient.account_id, channel.id;

@@ -281,10 +281,6 @@ func playbackSessionStartedEvent(watch core.PlaybackWatch) (core.PlaybackSession
 	return event, string(encoded), nil
 }
 
-func isNewCollectedWatch(watch core.PlaybackWatch) bool {
-	return watch.Source != core.WatchSourceImport && watch.CreatedAt.Equal(watch.UpdatedAt)
-}
-
 func playbackStoreError(operation string, err error) error {
 	return fmt.Errorf("%s: %w", operation, errors.Join(core.ErrPlaybackStore, err))
 }

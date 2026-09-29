@@ -9,18 +9,9 @@ import (
 	"github.com/BonzTM/bloom/internal/telemetry"
 )
 
-type notificationPreferenceRequest struct {
-	Preferences []notificationPreferenceResponse `json:"preferences"`
-}
-
 type notificationPreferenceResponse struct {
-	EventType  core.RequestEventType `json:"event_type"`
-	ChannelIDs []string              `json:"channel_ids"`
-}
-
-type notificationPreferencesResponse struct {
-	Channels    []notificationChannelResponse    `json:"channels"`
-	Preferences []notificationPreferenceResponse `json:"preferences"`
+	EventType core.RequestEventType `json:"event_type"`
+	Enabled   bool                  `json:"enabled"`
 }
 
 func (s *Server) handleGetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
@@ -47,12 +38,12 @@ func (s *Server) handleUpdateNotificationPreferences(w http.ResponseWriter, r *h
 		writeError(w, r, s.logger, errAuthenticationRequired)
 		return
 	}
-	body, err := httputil.DecodeJSON[notificationPreferenceRequest](w, r, s.maxBodyBytes)
+	body, err := httputil.DecodeJSON[[]notificationPreferenceResponse](w, r, s.maxBodyBytes)
 	if err != nil {
 		s.writeNotificationPreferenceValidation(w, r)
 		return
 	}
-	values := notificationPreferenceValues(body.Preferences)
+	values := notificationPreferenceValues(body)
 	updated, err := s.notificationRouting.UpdatePreferences(r.Context(), account.ID, values)
 	if errors.Is(err, core.ErrInvalidArgument) {
 		s.emitNotificationAudit(r, "notification_preferences.update", "account:"+account.ID, "", telemetry.AuditFailure)
@@ -71,7 +62,7 @@ func (s *Server) handleUpdateNotificationPreferences(w http.ResponseWriter, r *h
 func (s *Server) writeNotificationPreferenceValidation(w http.ResponseWriter, r *http.Request) {
 	s.writeValidation(w, r, []httputil.FieldError{{
 		Field: "preferences", Code: "invalid",
-		Message: "must contain every supported event once with unique registered channel IDs",
+		Message: "must contain every supported event exactly once",
 	}})
 }
 
@@ -79,23 +70,17 @@ func notificationPreferenceValues(values []notificationPreferenceResponse) []cor
 	result := make([]core.NotificationPreference, 0, len(values))
 	for _, value := range values {
 		result = append(result, core.NotificationPreference{
-			EventType: value.EventType, ChannelIDs: value.ChannelIDs,
+			EventType: value.EventType, Enabled: value.Enabled,
 		})
 	}
 	return result
 }
 
-func notificationPreferencesDTO(value core.NotificationPreferences) notificationPreferencesResponse {
-	response := notificationPreferencesResponse{
-		Channels:    make([]notificationChannelResponse, 0, len(value.Channels)),
-		Preferences: make([]notificationPreferenceResponse, 0, len(value.Preferences)),
-	}
-	for _, channel := range value.Channels {
-		response.Channels = append(response.Channels, notificationChannelDTO(channel))
-	}
-	for _, preference := range value.Preferences {
-		response.Preferences = append(response.Preferences, notificationPreferenceResponse{
-			EventType: preference.EventType, ChannelIDs: preference.ChannelIDs,
+func notificationPreferencesDTO(value []core.NotificationPreference) []notificationPreferenceResponse {
+	response := make([]notificationPreferenceResponse, 0, len(value))
+	for _, preference := range value {
+		response = append(response, notificationPreferenceResponse{
+			EventType: preference.EventType, Enabled: preference.Enabled,
 		})
 	}
 	return response

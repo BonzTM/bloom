@@ -41,9 +41,13 @@ CREATE UNIQUE INDEX notification_outbox_event_channel_recipient_idx
 CREATE TABLE account_notification_preferences (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL CHECK (event_type IN ('created', 'approved', 'declined', 'dispatched', 'available', 'failed', 'playback.session_started')),
-    channel_id TEXT NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
     enabled BOOLEAN NOT NULL,
-    PRIMARY KEY (account_id, event_type, channel_id)
+    PRIMARY KEY (account_id, event_type)
+);
+
+CREATE TABLE playback_notification_emissions (
+    watch_id TEXT PRIMARY KEY REFERENCES watches(id) ON DELETE CASCADE,
+    emitted_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE title_availability_subscriptions (
@@ -58,6 +62,7 @@ CREATE INDEX title_availability_subscriptions_title_idx
 
 -- +goose Down
 DROP TABLE title_availability_subscriptions;
+DROP TABLE playback_notification_emissions;
 DROP TABLE account_notification_preferences;
 DROP TABLE notification_event_recipients;
 
@@ -66,6 +71,13 @@ DELETE FROM notification_events WHERE event_type = 'playback.session_started';
 DELETE FROM notification_channel_subscriptions WHERE event_type = 'playback.session_started';
 
 DROP INDEX notification_outbox_event_channel_recipient_idx;
+DELETE FROM notification_outbox AS candidate
+USING notification_outbox AS preferred
+WHERE preferred.event_id = candidate.event_id
+  AND preferred.channel_id = candidate.channel_id
+  AND (preferred.recipient_account_id < candidate.recipient_account_id
+    OR (preferred.recipient_account_id = candidate.recipient_account_id
+      AND preferred.id < candidate.id));
 ALTER TABLE notification_outbox DROP CONSTRAINT notification_outbox_recipient_account_id_check;
 ALTER TABLE notification_outbox DROP COLUMN recipient_account_id;
 CREATE UNIQUE INDEX notification_outbox_event_channel_idx ON notification_outbox (event_id, channel_id);

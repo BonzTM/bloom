@@ -135,6 +135,9 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("activity exclusions migration restores rollups on rollback", func(t *testing.T) {
 		testActivityExclusionsMigration(t, pool, driver)
 	})
+	t.Run("notification preferences migration collapses recipient deliveries", func(t *testing.T) {
+		testNotificationPreferencesMigration(t, pool, driver)
+	})
 
 	// up / down / up: forward, reverse, and re-apply all succeed.
 	if err := db.Migrate(context.Background(), pool, driver); err != nil {
@@ -149,6 +152,104 @@ func prepareEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("Migrate (second up): %v", err)
 	}
 	assertUsernameMigrationVersions(t, pool, 3)
+}
+
+func testNotificationPreferencesMigration(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("prepare notification preferences migration: %v", err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 27); err != nil {
+		t.Fatalf("roll back notification preferences migration: %v", err)
+	}
+	accounts, _, err := db.NewAccountStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewAccountStores: %v", err)
+	}
+	at := core.NormalizeTime(time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC))
+	requester := requestTestAccount(t, accounts, at, "migration-requester")
+	follower := requestTestAccount(t, accounts, at, "migration-follower")
+	channelID, eventID, firstDeliveryID := seedLegacyNotificationDelivery(t, pool, driver, requester.ID, at)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("apply notification preferences migration: %v", err)
+	}
+	secondDeliveryID := mustID(t)
+	seedSecondNotificationRecipient(t, pool, driver, eventID, channelID, follower.ID, secondDeliveryID, at)
+	wantID := firstDeliveryID
+	if follower.ID < requester.ID {
+		wantID = secondDeliveryID
+	}
+	if err := db.MigrateDownTo(ctx, pool, driver, 27); err != nil {
+		t.Fatalf("roll down populated notification preferences migration: %v", err)
+	}
+	assertRetainedNotificationDelivery(t, pool, eventID, channelID, wantID)
+	if err := db.Migrate(ctx, pool, driver); err != nil {
+		t.Fatalf("re-apply notification preferences migration: %v", err)
+	}
+	assertRetainedNotificationDelivery(t, pool, eventID, channelID, wantID)
+	execTestSQL(t, pool, "DELETE FROM notification_events WHERE id=$1", eventID)
+	execTestSQL(t, pool, "DELETE FROM notification_channels WHERE id=$1", channelID)
+	execTestSQL(t, pool, "DELETE FROM accounts WHERE id IN ($1,$2)", requester.ID, follower.ID)
+	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
+		t.Fatalf("clean notification preferences migration fixture: %v", err)
+	}
+}
+
+func seedLegacyNotificationDelivery(
+	t *testing.T, pool *sql.DB, driver config.Driver, requesterID string, at time.Time,
+) (string, string, string) {
+	t.Helper()
+	_, writer, _, _, _, _, err := db.NewNotificationStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewNotificationStores: %v", err)
+	}
+	channel := notificationRecord(t, "Migration channel "+mustID(t), true, core.RequestEventCreated, at)
+	if err := writer.CreateNotificationChannel(t.Context(), channel); err != nil {
+		t.Fatalf("CreateNotificationChannel: %v", err)
+	}
+	eventID, requestID, deliveryID := mustID(t), mustID(t), mustID(t)
+	stamp := migrationTimestamp(driver, at)
+	execTestSQL(t, pool, `INSERT INTO notification_events
+        (id,event_type,request_id,requester_id,actor_id,media_kind,title,request_status,reason,event_sequence,occurred_at,fanned_at,created_at)
+        VALUES ($1,'created',$2,$3,'system','movie','Migration','pending','',0,$4,$4,$4)`,
+		eventID, requestID, requesterID, stamp)
+	execTestSQL(t, pool, `INSERT INTO notification_outbox
+        (id,event_id,channel_id,channel_kind,event_type,payload_json,status,attempts,next_attempt_at,lease_token,lease_expires_at,last_error,sent_at,created_at,updated_at)
+        VALUES ($1,$2,$3,'webhook','created','{}','pending',0,$4,'',NULL,'',NULL,$4,$4)`,
+		deliveryID, eventID, channel.ID, stamp)
+	return channel.ID, eventID, deliveryID
+}
+
+func seedSecondNotificationRecipient(
+	t *testing.T, pool *sql.DB, driver config.Driver,
+	eventID, channelID, accountID, deliveryID string, at time.Time,
+) {
+	t.Helper()
+	stamp := migrationTimestamp(driver, at.Add(time.Second))
+	execTestSQL(t, pool,
+		"INSERT INTO notification_event_recipients (event_id,account_id) VALUES ($1,$2)", eventID, accountID)
+	execTestSQL(t, pool, `INSERT INTO notification_outbox
+        (id,event_id,channel_id,recipient_account_id,channel_kind,event_type,payload_json,status,attempts,next_attempt_at,lease_token,lease_expires_at,last_error,sent_at,created_at,updated_at)
+        VALUES ($1,$2,$3,$4,'webhook','created','{}','pending',0,$5,'',NULL,'',NULL,$5,$5)`,
+		deliveryID, eventID, channelID, accountID, stamp)
+}
+
+func assertRetainedNotificationDelivery(t *testing.T, pool *sql.DB, eventID, channelID, wantID string) {
+	t.Helper()
+	var gotID string
+	err := pool.QueryRowContext(t.Context(),
+		"SELECT id FROM notification_outbox WHERE event_id=$1 AND channel_id=$2", eventID, channelID).Scan(&gotID)
+	if err != nil || gotID != wantID {
+		t.Fatalf("retained delivery = %q, %v; want %q", gotID, err, wantID)
+	}
+}
+
+func migrationTimestamp(driver config.Driver, value time.Time) any {
+	if driver == config.DriverSQLite {
+		return value.Format("2006-01-02T15:04:05.000000Z")
+	}
+	return value
 }
 
 func testActivityExclusionsMigration(t *testing.T, pool *sql.DB, driver config.Driver) {
@@ -1873,7 +1974,6 @@ func expectedForeignKeys() []string {
 		"account_media_users:account_id:accounts:id:CASCADE",
 		"account_media_users:media_server_id:media_servers:id:CASCADE",
 		"account_notification_preferences:account_id:accounts:id:CASCADE",
-		"account_notification_preferences:channel_id:notification_channels:id:CASCADE",
 		"account_request_quotas:account_id:accounts:id:CASCADE",
 		"account_roles:account_id:accounts:id:CASCADE",
 		"account_roles:role_id:roles:id:CASCADE",
@@ -1897,6 +1997,7 @@ func expectedForeignKeys() []string {
 		"notification_event_recipients:event_id:notification_events:id:CASCADE",
 		"notification_outbox:channel_id:notification_channels:id:CASCADE",
 		"notification_outbox:event_id:notification_events:id:CASCADE",
+		"playback_notification_emissions:watch_id:watches:id:CASCADE",
 		"request_profile_tags:profile_id:request_profiles:id:CASCADE",
 		"request_seasons:request_id:requests:id:CASCADE",
 		"requests:decided_by_account_id:accounts:id:RESTRICT",

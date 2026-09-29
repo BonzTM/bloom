@@ -20,7 +20,6 @@ const (
 	MaxNotificationPayloadBytes  = 32 * 1024
 	MaxNotificationTemplateBytes = 4096
 	MaxNotificationRecipients    = 32
-	MaxNotificationChannels      = 100
 	MaxTitleSubscriptions        = 500
 	MaxNotificationAttempts      = 8
 	MaxNotificationErrorBytes    = 512
@@ -226,23 +225,10 @@ type NotificationEvent struct {
 // Type returns the stable event kind for either source.
 func (e NotificationEvent) Type() RequestEventType { return e.Event.Type }
 
-// NotificationPreference selects channels for one account and event kind.
+// NotificationPreference enables or disables one event kind for an account.
 type NotificationPreference struct {
-	EventType  RequestEventType
-	ChannelIDs []string
-}
-
-// NotificationPreferenceOverride is one persisted account/event/channel choice.
-type NotificationPreferenceOverride struct {
 	EventType RequestEventType
-	ChannelID string
 	Enabled   bool
-}
-
-// NotificationPreferences is the safe account preference view.
-type NotificationPreferences struct {
-	Channels    []NotificationRegistration
-	Preferences []NotificationPreference
 }
 
 // TitleSubscription identifies an account following one provider title.
@@ -284,10 +270,10 @@ type NotificationEventStore interface {
 	FanOutNotificationEvent(ctx context.Context, eventID string, payload NotificationPayload, at time.Time) (int, error)
 }
 
-// NotificationPreferenceStore persists explicit routing choices.
+// NotificationPreferenceStore persists account event-kind choices.
 type NotificationPreferenceStore interface {
-	ListNotificationPreferenceOverrides(ctx context.Context, accountID string) ([]NotificationPreferenceOverride, error)
-	ReplaceNotificationPreferenceOverrides(ctx context.Context, accountID string, values []NotificationPreferenceOverride) error
+	ListNotificationPreferences(ctx context.Context, accountID string) ([]NotificationPreference, error)
+	ReplaceNotificationPreferences(ctx context.Context, accountID string, values []NotificationPreference) error
 }
 
 // TitleSubscriptionStore owns bounded, idempotent title follows.
@@ -454,23 +440,13 @@ func ValidateNotificationPreferences(values []NotificationPreference) error {
 	}
 	seenEvents := make(map[RequestEventType]struct{}, len(values))
 	for _, value := range values {
-		if !value.EventType.Valid() || len(value.ChannelIDs) > MaxNotificationChannels {
+		if !value.EventType.Valid() {
 			return ErrInvalidArgument
 		}
 		if _, exists := seenEvents[value.EventType]; exists {
 			return ErrInvalidArgument
 		}
 		seenEvents[value.EventType] = struct{}{}
-		seenChannels := make(map[string]struct{}, len(value.ChannelIDs))
-		for _, id := range value.ChannelIDs {
-			if !ValidID(id) {
-				return ErrInvalidArgument
-			}
-			seenChannels[id] = struct{}{}
-		}
-		if len(seenChannels) != len(value.ChannelIDs) {
-			return ErrInvalidArgument
-		}
 	}
 	return nil
 }

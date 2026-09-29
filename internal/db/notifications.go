@@ -18,7 +18,6 @@ import (
 const (
 	maxNotificationPageSize        = 101
 	maxNotificationMaintenanceSize = 1000
-	maxNotificationOverrides       = 7 * core.MaxNotificationChannels
 )
 
 type notifications struct {
@@ -680,72 +679,66 @@ func (s *notifications) NotificationOutboxDepth(ctx context.Context) (int64, err
 	return s.postgres.NotificationOutboxDepth(ctx)
 }
 
-func (s *notifications) ListNotificationPreferenceOverrides(
+func (s *notifications) ListNotificationPreferences(
 	ctx context.Context, accountID string,
-) ([]core.NotificationPreferenceOverride, error) {
+) ([]core.NotificationPreference, error) {
 	if !core.ValidID(accountID) {
 		return nil, core.ErrInvalidArgument
 	}
 	if s.sqlite != nil {
-		rows, err := s.sqlite.ListNotificationPreferenceOverrides(ctx, accountID)
+		rows, err := s.sqlite.ListNotificationPreferences(ctx, accountID)
 		if err != nil {
 			return nil, fmt.Errorf("list notification preferences: %w", err)
 		}
-		result := make([]core.NotificationPreferenceOverride, 0, len(rows))
+		result := make([]core.NotificationPreference, 0, len(rows))
 		for _, row := range rows {
-			result = append(result, core.NotificationPreferenceOverride{
-				EventType: core.RequestEventType(row.EventType), ChannelID: row.ChannelID, Enabled: row.Enabled != 0,
+			result = append(result, core.NotificationPreference{
+				EventType: core.RequestEventType(row.EventType), Enabled: row.Enabled != 0,
 			})
 		}
 		return result, nil
 	}
-	rows, err := s.postgres.ListNotificationPreferenceOverrides(ctx, accountID)
+	rows, err := s.postgres.ListNotificationPreferences(ctx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("list notification preferences: %w", err)
 	}
-	result := make([]core.NotificationPreferenceOverride, 0, len(rows))
+	result := make([]core.NotificationPreference, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, core.NotificationPreferenceOverride{
-			EventType: core.RequestEventType(row.EventType), ChannelID: row.ChannelID, Enabled: row.Enabled,
+		result = append(result, core.NotificationPreference{
+			EventType: core.RequestEventType(row.EventType), Enabled: row.Enabled,
 		})
 	}
 	return result, nil
 }
 
-func (s *notifications) ReplaceNotificationPreferenceOverrides(
-	ctx context.Context, accountID string, values []core.NotificationPreferenceOverride,
+func (s *notifications) ReplaceNotificationPreferences(
+	ctx context.Context, accountID string, values []core.NotificationPreference,
 ) error {
-	if !core.ValidID(accountID) || len(values) > maxNotificationOverrides {
+	if !core.ValidID(accountID) || core.ValidateNotificationPreferences(values) != nil {
 		return core.ErrInvalidArgument
-	}
-	for _, value := range values {
-		if !value.EventType.Valid() || !core.ValidID(value.ChannelID) {
-			return core.ErrInvalidArgument
-		}
 	}
 	if s.sqlite != nil {
 		return withSQLiteWriteTransaction(ctx, s.pool, func(conn *sql.Conn) error {
-			return replaceSQLitePreferenceOverrides(ctx, sqlite.New(conn), accountID, values)
+			return replaceSQLitePreferences(ctx, sqlite.New(conn), accountID, values)
 		})
 	}
 	return withTransaction(ctx, s.pool, func(tx *sql.Tx) error {
-		return replacePostgresPreferenceOverrides(ctx, postgres.New(tx), accountID, values)
+		return replacePostgresPreferences(ctx, postgres.New(tx), accountID, values)
 	})
 }
 
-func replaceSQLitePreferenceOverrides(
-	ctx context.Context, q *sqlite.Queries, accountID string, values []core.NotificationPreferenceOverride,
+func replaceSQLitePreferences(
+	ctx context.Context, q *sqlite.Queries, accountID string, values []core.NotificationPreference,
 ) error {
 	if _, err := q.LockNotificationPreferenceAccount(ctx, accountID); err != nil {
 		return mapNotFound("lock notification preference account", err)
 	}
-	if err := q.DeleteNotificationPreferenceOverrides(ctx, accountID); err != nil {
+	if err := q.DeleteNotificationPreferences(ctx, accountID); err != nil {
 		return fmt.Errorf("delete notification preferences: %w", err)
 	}
 	for _, value := range values {
-		err := q.AddNotificationPreferenceOverride(ctx, sqlite.AddNotificationPreferenceOverrideParams{
-			AccountID: accountID, EventType: string(value.EventType), ChannelID: value.ChannelID,
-			Enabled: boolToInt64(value.Enabled),
+		err := q.AddNotificationPreference(ctx, sqlite.AddNotificationPreferenceParams{
+			AccountID: accountID, EventType: string(value.EventType), Enabled: boolToInt64(value.Enabled),
 		})
 		if err != nil {
 			return fmt.Errorf("add notification preference: %w", err)
@@ -754,19 +747,18 @@ func replaceSQLitePreferenceOverrides(
 	return nil
 }
 
-func replacePostgresPreferenceOverrides(
-	ctx context.Context, q *postgres.Queries, accountID string, values []core.NotificationPreferenceOverride,
+func replacePostgresPreferences(
+	ctx context.Context, q *postgres.Queries, accountID string, values []core.NotificationPreference,
 ) error {
 	if _, err := q.LockNotificationPreferenceAccount(ctx, accountID); err != nil {
 		return mapNotFound("lock notification preference account", err)
 	}
-	if err := q.DeleteNotificationPreferenceOverrides(ctx, accountID); err != nil {
+	if err := q.DeleteNotificationPreferences(ctx, accountID); err != nil {
 		return fmt.Errorf("delete notification preferences: %w", err)
 	}
 	for _, value := range values {
-		err := q.AddNotificationPreferenceOverride(ctx, postgres.AddNotificationPreferenceOverrideParams{
-			AccountID: accountID, EventType: string(value.EventType), ChannelID: value.ChannelID,
-			Enabled: value.Enabled,
+		err := q.AddNotificationPreference(ctx, postgres.AddNotificationPreferenceParams{
+			AccountID: accountID, EventType: string(value.EventType), Enabled: value.Enabled,
 		})
 		if err != nil {
 			return fmt.Errorf("add notification preference: %w", err)

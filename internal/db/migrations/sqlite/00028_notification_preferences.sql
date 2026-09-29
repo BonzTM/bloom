@@ -93,9 +93,13 @@ DROP TABLE notification_events_old;
 CREATE TABLE account_notification_preferences (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL CHECK (event_type IN ('created', 'approved', 'declined', 'dispatched', 'available', 'failed', 'playback.session_started')),
-    channel_id TEXT NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-    PRIMARY KEY (account_id, event_type, channel_id)
+    PRIMARY KEY (account_id, event_type)
+) STRICT;
+
+CREATE TABLE playback_notification_emissions (
+    watch_id TEXT PRIMARY KEY REFERENCES watches(id) ON DELETE CASCADE,
+    emitted_at TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE title_availability_subscriptions (
@@ -110,6 +114,7 @@ CREATE INDEX title_availability_subscriptions_title_idx
 
 -- +goose Down
 DROP TABLE title_availability_subscriptions;
+DROP TABLE playback_notification_emissions;
 DROP TABLE account_notification_preferences;
 DROP TABLE notification_event_recipients;
 
@@ -151,10 +156,22 @@ CREATE TABLE notification_outbox (
     sent_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
     CHECK ((lease_token = '' AND lease_expires_at IS NULL) OR (length(lease_token) = 36 AND lease_expires_at IS NOT NULL))
 ) STRICT;
-INSERT OR IGNORE INTO notification_outbox
-SELECT id, event_id, channel_id, channel_kind, event_type, payload_json, status, attempts,
-       next_attempt_at, lease_token, lease_expires_at, last_error, sent_at, created_at, updated_at
-FROM notification_outbox_new WHERE event_type <> 'playback.session_started';
+INSERT INTO notification_outbox
+SELECT candidate.id, candidate.event_id, candidate.channel_id, candidate.channel_kind,
+       candidate.event_type, candidate.payload_json, candidate.status, candidate.attempts,
+       candidate.next_attempt_at, candidate.lease_token, candidate.lease_expires_at,
+       candidate.last_error, candidate.sent_at, candidate.created_at, candidate.updated_at
+FROM notification_outbox_new AS candidate
+WHERE candidate.event_type <> 'playback.session_started'
+  AND NOT EXISTS (
+      SELECT 1 FROM notification_outbox_new AS preferred
+      WHERE preferred.event_id = candidate.event_id
+        AND preferred.channel_id = candidate.channel_id
+        AND preferred.event_type <> 'playback.session_started'
+        AND (preferred.recipient_account_id < candidate.recipient_account_id
+          OR (preferred.recipient_account_id = candidate.recipient_account_id
+            AND preferred.id < candidate.id))
+  );
 CREATE UNIQUE INDEX notification_outbox_event_channel_idx ON notification_outbox (event_id, channel_id);
 CREATE INDEX notification_outbox_claim_idx ON notification_outbox (status, next_attempt_at, lease_expires_at, created_at, id);
 CREATE INDEX notification_outbox_channel_recent_idx ON notification_outbox (channel_id, created_at DESC, id DESC);
