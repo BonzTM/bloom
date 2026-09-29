@@ -281,8 +281,8 @@ const (
 	defaultConnMaxIdleTime             = 5 * time.Minute
 	defaultShutdownGrace               = 15 * time.Second
 	defaultTraceSampleRatio            = 1.0
-	defaultSessionLifetime             = 24 * time.Hour
-	defaultSessionIdleTimeout          = 30 * time.Minute
+	defaultSessionLifetime             = 30 * 24 * time.Hour
+	defaultSessionIdleTimeout          = 7 * 24 * time.Hour
 	defaultLoginRateRefillInterval     = time.Minute
 	defaultLoginRateBurst              = 5
 	defaultLoginRateMaxKeys            = 10_000

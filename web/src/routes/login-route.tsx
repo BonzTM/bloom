@@ -36,7 +36,11 @@ export default function LoginRoute(): ReactNode {
   }
   return (
     <div className="narrow">
-      <h1>Sign in</h1>
+      <div className="brand-hero">
+        <span className="brand-mark" aria-hidden="true" />
+        <h1>Sign in</h1>
+        <p>Bloom for your Jellyfin servers.</p>
+      </div>
       <OidcFailure search={location.search} />
       <SingleSignOn returnTo={destination} />
       <LoginForm

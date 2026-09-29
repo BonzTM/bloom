@@ -29,7 +29,7 @@ never weakens it.
 - **Config**: loaded and validated in `internal/config`, fail-fast at startup; every key carries the `BLOOM_` prefix and is documented in [README.md](README.md) and `.env.example`. `BLOOM_SECRET_KEY` is a `config.Secret` and never renders.
 - **Persistence (ADR 0004)**: `database/sql` + `sqlc`, two engines at full parity. Every migration is TWO files with the same name under `internal/db/migrations/{sqlite,postgres}/`. Queries in `internal/db/queries/*.sql` are portable SQL using `sqlc.arg()`; business logic is never in SQL. Timestamps cross into storage through `core.NormalizeTime` (UTC, microseconds). The parity tests in `internal/db` must pass on SQLite (always) and PostgreSQL (`-tags=integration`). Rollouts expand then contract: add nullable or defaulted columns first, read through explicit column lists (never `w.*`) so an older binary ignores the new shape, and drop or rename a column only after every running binary knows the new shape.
 - **Pluggable boundaries**: every external system sits behind a 1-3 method interface defined in `internal/core` at the consumer; adapters are wired explicitly in `internal/runtime`. No `init()` registration.
-- **Auth (ADR 0006)**: not yet implemented; the seam is `internal/api/http/auth.go`. Do not mount a state-changing or account-scoped route without wiring it. Never copy a JWT-in-cookie or global-API-key pattern.
+- **Auth (ADR 0006)**: server-side `scs` sessions, password and OIDC sign-in, and permission-based RBAC live in `internal/api/http/auth*.go` and `authorization*.go`. Every state-changing or account-scoped route is mounted behind `RequirePermission` or `RequireAnyPermission`. Never copy a JWT-in-cookie or global-API-key pattern.
 - **Testing**: every behavior change ships with a test. Hand-rolled fakes, never mock frameworks. DB boundaries need the real engine suite, not a mock.
 - **Dependencies**: stdlib first; every new module answers the handbook's Approval Questions in the PR; pure Go only (`CGO_ENABLED=0`); no committed `replace` directives.
 - **No AI attribution** in any file, commit, or comment.
@@ -60,7 +60,7 @@ Route the change; do not guess where code belongs.
 - When adding a dependency, document why stdlib or an existing dependency is insufficient.
 - Write the proving test before claiming success whenever practical.
 - If verification fails, fix it or report it clearly. Do not claim the change is done.
-- Branch prefixes are `feature/`, `fix/`, `chore/`, `bug/`; commits and PRs are attributed to the owner only.
+- Branch prefixes are `feat/`, `feature/`, `fix/`, `chore/`, `bug/`; commits and PRs are attributed to the owner only.
 
 ## Workflow
 

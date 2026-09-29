@@ -17,6 +17,11 @@ import {
 } from "../features/playback/components/stats-controls.js";
 import { ReportFailed } from "../features/playback/components/stats-panels.js";
 import { UserDashboard } from "../features/playback/components/user-dashboard.js";
+import {
+  DEFAULT_TIMELINE_GAP,
+  UserTimeline,
+} from "../features/playback/components/user-timeline.js";
+import { useTimeline } from "../features/playback/hooks/playback-queries.js";
 import { useStatsUser } from "../features/playback/hooks/stats-queries.js";
 import { accessDenial, ApiError } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
@@ -63,12 +68,19 @@ function UserStatsPage({
     [days, timeZone],
   );
   const user = useStatsUser(accountId, params, serverId, userId);
-  const username = user.data?.watches[0]?.username;
+  const [gap, setGap] = useState(DEFAULT_TIMELINE_GAP);
+  const timeline = useTimeline(accountId, serverId, userId, gap);
+  const username =
+    user.data?.watches[0]?.username ??
+    timeline.data?.pages[0]?.items[0]?.username;
   usePageTitle(
     pageTitle(username === undefined || username === "" ? "Person" : username),
   );
-  const denial = accessDenial(user.error);
-  useSessionRecheck(denial !== undefined, user.errorUpdatedAt);
+  const denial = accessDenial(user.error) ?? accessDenial(timeline.error);
+  useSessionRecheck(
+    denial !== undefined,
+    Math.max(user.errorUpdatedAt, timeline.errorUpdatedAt),
+  );
   if (denial === "forbidden") {
     return <AccessDeniedRoute />;
   }
@@ -112,6 +124,14 @@ function UserStatsPage({
       ) : (
         <UserDashboard data={user.data} />
       )}
+      <section aria-labelledby="user-timeline-heading" className="card">
+        <h2 id="user-timeline-heading">Timeline</h2>
+        <p className="section-intro">
+          Everything this person watched, newest first, with repeat plays of the
+          same title folded into one sitting.
+        </p>
+        <UserTimeline query={timeline} gapSeconds={gap} onGapChange={setGap} />
+      </section>
     </>
   );
 }

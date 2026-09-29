@@ -61,9 +61,9 @@ function DiscoverPage({
   const kind = readKind(params.get("kind"));
   const results = useSearchTitles(accountId, canSearch ? query : "", kind);
   const mine = useRequests(accountId, { requesterId: accountId }, canReadOwn);
-  // Rows load only while no search is showing; the discover endpoints are
-  // open to anyone who may create or read their own requests.
-  const browsing = query === "" && (canSearch || canReadOwn);
+  // Rows load only while no search is showing, and only for an account that
+  // may open a title page, which every poster links to.
+  const browsing = query === "" && canSearch;
   const trending = useDiscover(accountId, "trending", browsing);
   const popularMovies = useDiscover(accountId, "movies/popular", browsing);
   const popularSeries = useDiscover(accountId, "series/popular", browsing);
@@ -117,7 +117,11 @@ function DiscoverPage({
       {canReadOwn ? (
         <section aria-labelledby="my-requests-heading" className="card">
           <h2 id="my-requests-heading">My requests</h2>
-          <MyRequests query={mine} accountId={accountId} />
+          <MyRequests
+            query={mine}
+            accountId={accountId}
+            linkTitles={canSearch}
+          />
         </section>
       ) : null}
     </>

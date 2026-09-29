@@ -2,12 +2,16 @@ import type { ApiClient } from "../../../lib/api/http-client.js";
 import {
   mediaServerIdSchema,
   mediaServersCursorSchema,
+  mediaServerExclusionsSchema,
   mediaServersPageSchema,
   registeredMediaServerSchema,
   registerMediaServerRequestSchema,
+  replaceExclusionsRequestSchema,
+  type MediaServerExclusions,
   type MediaServersPage,
   type RegisteredMediaServer,
   type RegisterMediaServerInput,
+  type ReplaceExclusionsInput,
 } from "./media-servers-schemas.js";
 
 const BASE_PATH = "api/v1/media-servers";
@@ -42,6 +46,26 @@ export class MediaServersApi {
 
   remove(id: string): Promise<void> {
     return this.#client.requestEmpty(serverPath(id), { method: "DELETE" });
+  }
+
+  exclusions(id: string, signal: AbortSignal): Promise<MediaServerExclusions> {
+    return this.#client.requestJson(
+      `${serverPath(id)}/exclusions`,
+      mediaServerExclusionsSchema,
+      { signal },
+    );
+  }
+
+  // Replaces both lists at once; the server answers with what it stored.
+  replaceExclusions(
+    id: string,
+    input: ReplaceExclusionsInput,
+  ): Promise<MediaServerExclusions> {
+    return this.#client.requestJson(
+      `${serverPath(id)}/exclusions`,
+      mediaServerExclusionsSchema,
+      { method: "PUT", body: replaceExclusionsRequestSchema.parse(input) },
+    );
   }
 }
 

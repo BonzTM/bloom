@@ -187,6 +187,14 @@ it("shows only the requests to an account that cannot search", async () => {
   expect(
     screen.queryByRole("search", { name: "Search titles" }),
   ).not.toBeInTheDocument();
+  // Discover rows and request titles lead to title pages, which need
+  // requests.create, so neither is offered.
+  expect(
+    screen.queryByRole("list", { name: "Trending this week" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: "Inception (2010)" }),
+  ).not.toBeInTheDocument();
 });
 
 it("shows progress for the account's own processing request", async () => {

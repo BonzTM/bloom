@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { AsyncStatus } from "../../../components/async-status.js";
 import type {
   Capabilities,
@@ -131,12 +132,20 @@ function ServerRow({ server, removing, onRemove }: ServerRowProps): ReactNode {
         </time>
       </td>
       <td>
-        <RemoveControls
-          id={server.id}
-          name={server.name}
-          removing={removing}
-          onRemove={onRemove}
-        />
+        <div className="row-actions">
+          <Link
+            to={`/admin/media-servers/${encodeURIComponent(server.id)}/exclusions`}
+          >
+            Exclusions
+            <span className="visually-hidden"> of {server.name}</span>
+          </Link>
+          <RemoveControls
+            id={server.id}
+            name={server.name}
+            removing={removing}
+            onRemove={onRemove}
+          />
+        </div>
       </td>
     </tr>
   );

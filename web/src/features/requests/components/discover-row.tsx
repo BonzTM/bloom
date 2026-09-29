@@ -15,13 +15,22 @@ import { titlePath } from "./title-grid.js";
 type DiscoverRowProps = Readonly<{
   title: string;
   query: ReturnType<typeof useDiscover>;
+  // A bare row has no heading of its own: the caller's section names it.
+  bare?: boolean;
 }>;
 
 // One horizontal row of posters, the way Seerr lays out its discover page.
 // The row is a region named by its heading; the list inside scrolls
 // sideways and grows a page at a time.
-export function DiscoverRow({ title, query }: DiscoverRowProps): ReactNode {
+export function DiscoverRow({
+  title,
+  query,
+  bare,
+}: DiscoverRowProps): ReactNode {
   const id = useId();
+  if (bare === true) {
+    return <RowBody title={title} query={query} />;
+  }
   return (
     <section aria-labelledby={id} className="discover-row">
       <h2 id={id}>{title}</h2>
