@@ -174,7 +174,7 @@ function FormSection({
     }
   }, [subject]);
   return (
-    <section aria-labelledby="channel-form-heading" className="card">
+    <section aria-labelledby="channel-form-heading" className="card panel">
       <h2 id="channel-form-heading" ref={headingRef} tabIndex={-1}>
         {subject === undefined ? "Register a channel" : `Edit ${subject.name}`}
       </h2>

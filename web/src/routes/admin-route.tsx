@@ -121,7 +121,7 @@ export default function AdminRoute(): ReactNode {
         <ul className="card-grid">
           {SECTIONS.map((section) => (
             <PermissionGate key={section.to} anyOf={section.anyOf}>
-              <li className="card feature-tile">
+              <li className="panel feature-tile">
                 <span className="feature-tile-icon" aria-hidden="true">
                   <NavIcon name={section.icon} />
                 </span>

@@ -89,7 +89,7 @@ function RegisterSection({
   // Remounting the form after a success clears the API key from the screen.
   const [formKey, setFormKey] = useState(0);
   return (
-    <section aria-labelledby="register-manager-heading" className="card">
+    <section aria-labelledby="register-manager-heading" className="card panel">
       <h2 id="register-manager-heading">Register an instance</h2>
       <RegisterDownloadManagerForm
         key={formKey}

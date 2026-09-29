@@ -151,7 +151,7 @@ function NotLinked({
     page.items.map((server) => ({ id: server.id, name: server.name })),
   );
   return (
-    <section aria-labelledby="not-linked-heading" className="card">
+    <section aria-labelledby="not-linked-heading" className="card panel">
       <h2 id="not-linked-heading">No media-server user is linked yet</h2>
       <p>
         Bloom shows your statistics once your account is linked to a user on a

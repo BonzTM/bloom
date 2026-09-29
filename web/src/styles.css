@@ -59,6 +59,7 @@
   --surface-strong: rgb(255 255 255 / 0.07);
   --border: rgb(255 255 255 / 0.08);
   --border-strong: rgb(255 255 255 / 0.16);
+  --divider: rgb(255 255 255 / 0.14);
   --text: #f3f4f6;
   --text-muted: #a1a8b8;
   --text-faint: #98a1b6;
@@ -110,6 +111,7 @@
     --surface-strong: rgb(255 255 255 / 0.95);
     --border: rgb(20 24 40 / 0.08);
     --border-strong: rgb(20 24 40 / 0.16);
+    --divider: rgb(20 24 40 / 0.16);
     --text: #171b26;
     --text-muted: #566079;
     --text-faint: #626b80;
@@ -532,22 +534,65 @@ main:focus {
 .page-intro {
   color: var(--text-muted);
   font-size: 1rem;
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-6);
   max-width: 60ch;
 }
 
+/* A page is one continuous column of sections: a heading, then its
+   content, separated by rhythm and a hairline rather than boxed in. Only
+   objects (tables, tiles, posters, forms) carry a surface. */
 .card {
+  margin-block: var(--space-7) 0;
+}
+
+.card + .card {
+  border-top: 1px solid var(--divider);
+  padding-top: var(--space-6);
+}
+
+.card > h2:first-child,
+.card > .section-head:first-child {
+  margin-bottom: var(--space-4);
+}
+
+.card > h2 {
+  font-size: 1.25rem;
+}
+
+main > h1 + .card,
+main > .page-intro + .card,
+.dashboard > .card:first-of-type {
+  margin-top: var(--space-4);
+}
+
+/* An opt-in surface for a form or a self-contained block. */
+.panel {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  margin-block: var(--space-4);
   padding: var(--space-5);
 }
 
+.card.panel + .card {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.card + .card.panel {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-5);
+}
+
+.panel > h2:first-child {
+  font-size: 1.125rem;
+  margin-bottom: var(--space-4);
+}
+
 /* A section inside a panel is a heading and its content, not a second
-   box: the nesting is what made pages read as segmented. */
-.card .card {
+   box. */
+.panel .card,
+.panel .panel {
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -556,8 +601,8 @@ main:focus {
   padding: 0;
 }
 
-.card .card + .card {
-  border-top: 1px solid var(--border);
+.panel .card + .card {
+  border-top: 1px solid var(--divider);
   padding-top: var(--space-5);
 }
 
@@ -679,12 +724,8 @@ main:focus {
 /* A dashboard is a column of panels with a heading and a link each. */
 .dashboard {
   display: grid;
-  gap: var(--space-2);
+  gap: 0;
   grid-template-columns: minmax(0, 1fr);
-}
-
-.dashboard > .card {
-  margin-block: var(--space-2);
 }
 
 .narrow {
@@ -1440,11 +1481,11 @@ progress::-moz-progress-bar {
 }
 
 /* Inside a panel the row runs to the panel's edges, the way a slider does. */
-.card > .discover-scroller {
+.panel > .discover-scroller {
   margin-inline: calc(-1 * var(--space-5));
 }
 
-.card > .discover-scroller > .discover-list {
+.panel > .discover-scroller > .discover-list {
   padding-inline: var(--space-5);
 }
 

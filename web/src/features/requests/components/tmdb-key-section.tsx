@@ -34,7 +34,7 @@ export function TmdbKeySection({
   remove,
 }: TmdbKeySectionProps): ReactNode {
   return (
-    <section aria-labelledby="tmdb-key-heading" className="card">
+    <section aria-labelledby="tmdb-key-heading" className="card panel">
       <h2 id="tmdb-key-heading">TMDB API Read Access Token</h2>
       <p>
         Searching for titles and creating requests needs The Movie Database's
