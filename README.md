@@ -124,7 +124,9 @@ page size is 50 roles and the enforced maximum is 100. A missing session gets
 Browser sessions and logout revocations are stored in the configured database,
 so they persist across process and container restarts. Persist the database and
 keep `BLOOM_SECRET_KEY` unchanged across deployments; no process-local session
-state needs to be preserved.
+state needs to be preserved. A session lasts 30 days and ends after 7 days
+without a request; `BLOOM_SESSION_LIFETIME` and `BLOOM_SESSION_IDLE_TIMEOUT`
+change both bounds.
 
 When OIDC is enabled, `GET /api/v1/auth/providers` advertises the configured
 display name, `POST /api/v1/auth/oidc/start` with an
