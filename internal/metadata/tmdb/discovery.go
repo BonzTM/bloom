@@ -115,7 +115,11 @@ func decodeDiscoverPage(body []byte, input core.MetadataDiscover) (core.Metadata
 			continue
 		}
 		if input.List == core.MetadataTrending {
-			if _, ok := resultKind(value(result.MediaType)); !ok {
+			if result.MediaType == nil {
+				skipped++
+				continue
+			}
+			if _, ok := resultKind(*result.MediaType); !ok {
 				continue
 			}
 		}

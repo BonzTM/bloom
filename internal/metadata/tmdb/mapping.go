@@ -39,10 +39,17 @@ type rawSeason struct {
 	SeasonNumber *int    `json:"season_number"`
 }
 
+// maxSearchResults is the public contract's bound on one search answer;
+// TMDB sends twenty per page, so more than this is not a search page.
+const maxSearchResults = 100
+
 func decodeSearchResults(body []byte, filter *core.MediaKind) ([]core.MetadataTitle, int, error) {
 	var response rawTitleList
 	if err := json.Unmarshal(body, &response); err != nil || response.Results == nil {
 		return nil, 0, errors.Join(core.ErrMetadataMalformed, err)
+	}
+	if len(*response.Results) > maxSearchResults {
+		return nil, 0, errors.Join(core.ErrMetadataMalformed, core.ErrInvalidArgument)
 	}
 	items := make([]core.MetadataTitle, 0, len(*response.Results))
 	skipped := 0
@@ -52,7 +59,13 @@ func decodeSearchResults(body []byte, filter *core.MediaKind) ([]core.MetadataTi
 			skipped++
 			continue
 		}
-		kind, ok := resultKind(value(result.MediaType))
+		// A missing media type is a malformed item; a known but unsupported
+		// type such as a person is simply not a title.
+		if result.MediaType == nil {
+			skipped++
+			continue
+		}
+		kind, ok := resultKind(*result.MediaType)
 		if !ok || filter != nil && *filter != kind {
 			continue
 		}
