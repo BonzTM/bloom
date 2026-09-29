@@ -82,6 +82,7 @@ describe("metadataSeriesSchema", () => {
       year: 2021,
       overview: "",
       poster_path: "",
+      subscribed: false,
       backdrop_path: "",
       seasons: [{ number: 0, name: "Specials", episode_count: 2 }],
     });
