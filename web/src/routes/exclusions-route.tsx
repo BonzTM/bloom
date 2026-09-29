@@ -5,7 +5,6 @@ import {
   useSession,
   useSessionRecheck,
 } from "../features/auth/hooks/auth-queries.js";
-import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { useLibraries } from "../features/catalog/hooks/catalog-queries.js";
 import { mediaServerIdSchema } from "../features/media-servers/api/media-servers-schemas.js";
 import {
@@ -40,10 +39,6 @@ export default function ExclusionsRoute(): ReactNode {
       key={`${accountId}/${serverId}`}
       accountId={accountId}
       serverId={serverId}
-      canReadStats={hasPermission(
-        session.data?.permissions ?? [],
-        permissions.statsReadAll,
-      )}
     />
   );
 }
@@ -51,24 +46,14 @@ export default function ExclusionsRoute(): ReactNode {
 function ExclusionsPage({
   accountId,
   serverId,
-  canReadStats,
-}: Readonly<{
-  accountId: string;
-  serverId: string;
-  canReadStats: boolean;
-}>): ReactNode {
+}: Readonly<{ accountId: string; serverId: string }>): ReactNode {
   const servers = useMediaServers(accountId);
   const exclusions = useExclusions(accountId, serverId);
   const replace = useReplaceExclusions(accountId, serverId);
-  // The name lists need stats.read.all; without it the ids stand alone.
-  const users = useMediaServerUsers(
-    accountId,
-    canReadStats ? serverId : undefined,
-  );
-  const libraries = useLibraries(
-    accountId,
-    canReadStats ? serverId : undefined,
-  );
+  // Both name lists sit behind admin.settings, the same permission as this
+  // page; if one still fails the stored ids stand alone.
+  const users = useMediaServerUsers(accountId, serverId);
+  const libraries = useLibraries(accountId, serverId);
   const server = servers.data?.pages
     .flatMap((page) => page.items)
     .find((candidate) => candidate.id === serverId);
@@ -109,18 +94,30 @@ function ExclusionsPage({
             <LoadFailed noun="exclusions" onRetry={exclusions.refetch} />
           )
         ) : (
-          <ExclusionsForm
-            key={JSON.stringify(exclusions.data)}
-            stored={exclusions.data}
-            users={(users.data?.items ?? []).map(toChoice)}
-            libraries={(libraries.data ?? []).map(toChoice)}
-            pending={replace.isPending}
-            saved={replace.isSuccess}
-            errorSummary={describeReplaceError(replace.error)}
-            onSubmit={(input) => {
-              replace.mutate(input);
-            }}
-          />
+          <>
+            {users.isError || libraries.isError ? (
+              <AsyncStatus kind="alert">
+                The names of{" "}
+                {users.isError && libraries.isError
+                  ? "people and libraries"
+                  : users.isError
+                    ? "people"
+                    : "libraries"}{" "}
+                could not be loaded; stored ids are shown as they are.
+              </AsyncStatus>
+            ) : null}
+            <ExclusionsForm
+              stored={exclusions.data}
+              users={(users.data?.items ?? []).map(toChoice)}
+              libraries={(libraries.data ?? []).map(toChoice)}
+              pending={replace.isPending}
+              saved={replace.isSuccess}
+              errorSummary={describeReplaceError(replace.error)}
+              onSubmit={(input) => {
+                replace.mutate(input);
+              }}
+            />
+          </>
         )}
       </section>
     </>

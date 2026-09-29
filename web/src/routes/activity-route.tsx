@@ -1,4 +1,4 @@
-import { useId, type ReactNode, type SyntheticEvent } from "react";
+import { useId, useState, type ReactNode, type SyntheticEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { z } from "zod/v4";
 import {
@@ -161,7 +161,14 @@ function dayToInstant(day: string, endOfDay: boolean): string {
     return day;
   }
   const [year = 0, month = 1, date = 1] = day.split("-").map(Number);
-  const local = new Date(year, month - 1, date + (endOfDay ? 1 : 0));
+  // setFullYear keeps years below 100 as written; the Date constructor
+  // would move them into the 1900s.
+  const local = new Date(0);
+  local.setFullYear(year, month - 1, date + (endOfDay ? 1 : 0));
+  local.setHours(0, 0, 0, 0);
+  if (Number.isNaN(local.getTime())) {
+    return day;
+  }
   return local.toISOString();
 }
 
@@ -198,17 +205,23 @@ function FilterForm({
   onChange: (next: FormFilter) => void;
 }>): ReactNode {
   const id = useId();
+  const [problem, setProblem] = useState("");
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    onChange({
+    const draft: FormFilter = {
       mediaServerId: text(data.get("server")),
       q: text(data.get("q")),
       playMethod: text(data.get("method")),
       source: text(data.get("source")),
       startedAfter: dayOrEmpty(text(data.get("after")), false),
       startedBefore: dayOrEmpty(text(data.get("before")), true),
-    });
+    };
+    const found = describeProblem(draft);
+    setProblem(found);
+    if (found === "") {
+      onChange(draft);
+    }
   }
   return (
     <form
@@ -216,7 +229,7 @@ function FilterForm({
       aria-label="Filter activity"
       onSubmit={handleSubmit}
       noValidate
-      key={`${JSON.stringify(filter)}/${String(servers.length)}`}
+      key={JSON.stringify(filter)}
     >
       <div>
         <label htmlFor={`${id}-q`}>Title contains</label>
@@ -296,8 +309,37 @@ function FilterForm({
           Apply filters
         </button>
       </div>
+      <p role="alert" className="field-error activity-filters-error">
+        {problem}
+      </p>
     </form>
   );
+}
+
+// The draft is checked before it reaches the address so a search too long
+// for the server or a range that ends before it starts is explained here.
+function describeProblem(draft: FormFilter): string {
+  if (new TextEncoder().encode(draft.q).length > 128) {
+    return "The title search must be at most 128 bytes.";
+  }
+  if (
+    (draft.startedAfter !== "" &&
+      !activityFilterSchema.safeParse({ startedAfter: draft.startedAfter })
+        .success) ||
+    (draft.startedBefore !== "" &&
+      !activityFilterSchema.safeParse({ startedBefore: draft.startedBefore })
+        .success)
+  ) {
+    return "Enter each day as a calendar date.";
+  }
+  if (
+    draft.startedAfter !== "" &&
+    draft.startedBefore !== "" &&
+    draft.startedBefore <= draft.startedAfter
+  ) {
+    return "The last day must not be before the first day.";
+  }
+  return "";
 }
 
 function dayOrEmpty(day: string, endOfDay: boolean): string {

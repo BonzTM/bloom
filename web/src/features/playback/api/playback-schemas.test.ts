@@ -1,5 +1,9 @@
 import { expect, it } from "@jest/globals";
-import { historyPageSchema, nowPlayingSchema } from "./playback-schemas.js";
+import {
+  activityPageSchema,
+  historyPageSchema,
+  nowPlayingSchema,
+} from "./playback-schemas.js";
 
 const watch = {
   id: "7b2c3d4e-0000-4000-8000-000000000001",
@@ -13,7 +17,10 @@ const watch = {
   item_id: "i-1",
   item_name: "Pilot",
   item_type: "Episode",
+  series_id: "s-fringe",
   series_name: "Fringe",
+  library_id: "lib-shows",
+  library_name: "Shows",
   season_number: 1,
   episode_number: 1,
   position_ms: 754000,
@@ -22,7 +29,31 @@ const watch = {
   play_method: "direct_play",
   active_seconds: 754,
   started_at: "2026-09-24T19:00:00Z",
+  source: "poll",
 };
+
+it("accepts an open watch on an activity page and needs the limit", () => {
+  const page = activityPageSchema.parse({
+    items: [
+      watch,
+      {
+        ...watch,
+        id: "7b2c3d4e-0000-4000-8000-000000000002",
+        ended_at: "2026-09-24T19:30:00Z",
+      },
+    ],
+    limit: 50,
+    next_cursor: "",
+  });
+  expect(page.items[0]?.ended_at).toBeUndefined();
+  expect(
+    activityPageSchema.safeParse({ items: [watch], next_cursor: "" }).success,
+  ).toBe(false);
+  expect(
+    nowPlayingSchema.safeParse({ items: [{ ...watch, source: "magic" }] })
+      .success,
+  ).toBe(false);
+});
 
 it("accepts live watches and strips fields it does not know", () => {
   const now = nowPlayingSchema.parse({ items: [{ ...watch, extra: 1 }] });

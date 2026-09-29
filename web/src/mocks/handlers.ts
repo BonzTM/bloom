@@ -12,6 +12,7 @@ import {
   registerMediaServerRequestSchema,
   type MediaServer,
   type RegisterMediaServerRequest,
+  replaceExclusionsRequestSchema,
 } from "../features/media-servers/api/media-servers-schemas.js";
 import {
   acceptInviteRequestSchema,
@@ -813,7 +814,11 @@ function watch(patch: Partial<Watch> & Pick<Watch, "id">): Watch {
     item_id: "i-1",
     item_name: "Pilot",
     item_type: "Episode",
+    series_id: "s-fringe",
     series_name: "Fringe",
+    library_id: "lib-shows",
+    library_name: "Shows",
+    source: "poll",
     season_number: 1,
     episode_number: 1,
     position_ms: 754_000,
@@ -965,8 +970,30 @@ function playbackDenial() {
   return undefined;
 }
 
-// Activity: history filtered the way the server filters it; the mock
-// answers only the filters the page sends.
+// A keyset page over a fixed list: the cursor is an offset, the limit is
+// echoed back the way the server does it.
+function keysetPage(url: URL, items: readonly unknown[], extra: object = {}) {
+  const rawLimit = url.searchParams.get("limit");
+  const limit = rawLimit === null ? 50 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return envelope(422, "validation_failed", "invalid limit");
+  }
+  const cursor = url.searchParams.get("cursor");
+  const offset = cursor === null ? 0 : Number(cursor.replace("offset:", ""));
+  if (!Number.isInteger(offset) || offset < 0) {
+    return envelope(422, "validation_failed", "invalid cursor");
+  }
+  const next = offset + limit;
+  return HttpResponse.json({
+    items: items.slice(offset, next),
+    limit,
+    next_cursor: next < items.length ? `offset:${String(next)}` : "",
+    ...extra,
+  });
+}
+
+// Activity: open and finished watches together, filtered the way the
+// server filters them; the mock answers only the filters the page sends.
 function playbackActivity(url: URL) {
   const params = url.searchParams;
   const serverId = params.get("media_server_id");
@@ -978,18 +1005,20 @@ function playbackActivity(url: URL) {
   const source = params.get("source");
   const after = params.get("started_after");
   const before = params.get("started_before");
-  const items = mockPlaybackHistory.filter(
-    (w) =>
-      (serverId === null || w.media_server_id === serverId) &&
-      (q === undefined ||
-        w.item_name.toLowerCase().includes(q) ||
-        w.series_name.toLowerCase().includes(q)) &&
-      (method === null || w.play_method === method) &&
-      (source === null || (w.source ?? "poll") === source) &&
-      (after === null || w.started_at >= after) &&
-      (before === null || w.started_at < before),
-  );
-  return pagedItems(url, playbackHistoryQuerySchema, items);
+  const items = [...mockNowPlaying, ...mockPlaybackHistory]
+    .filter(
+      (w) =>
+        (serverId === null || w.media_server_id === serverId) &&
+        (q === undefined ||
+          w.item_name.toLowerCase().includes(q) ||
+          w.series_name.toLowerCase().includes(q)) &&
+        (method === null || w.play_method === method) &&
+        (source === null || w.source === source) &&
+        (after === null || w.started_at >= after) &&
+        (before === null || w.started_at < before),
+    )
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+  return keysetPage(url, items);
 }
 
 // Timeline: one person's history folded by item; the gap is echoed back.
@@ -1012,10 +1041,10 @@ function playbackTimeline(url: URL, serverId: string, userId: string) {
         item_id: w.item_id,
         item_name: w.item_name,
         item_type: w.item_type,
-        series_id: "",
+        series_id: w.series_id,
         series_name: w.series_name,
-        library_id: "",
-        library_name: w.library_name ?? "",
+        library_id: w.library_id,
+        library_name: w.library_name,
         first_started_at: w.started_at,
         last_ended_at: w.ended_at,
         play_count: 1,
@@ -1029,12 +1058,7 @@ function playbackTimeline(url: URL, serverId: string, userId: string) {
   const items = [...byItem.values()].sort((a, b) =>
     b.first_started_at.localeCompare(a.first_started_at),
   );
-  return HttpResponse.json({
-    items,
-    limit: 50,
-    gap_seconds: gap,
-    next_cursor: "",
-  });
+  return keysetPage(url, items, { gap_seconds: gap });
 }
 
 // Exclusions: one working copy per server, empty until saved.
@@ -1055,11 +1079,6 @@ function exclusionsFor(serverId: string) {
     }
   );
 }
-
-const replaceExclusionsSchema = z.strictObject({
-  excluded_media_user_ids: z.array(z.string().min(1)).max(500),
-  excluded_library_ids: z.array(z.string().min(1)).max(500),
-});
 
 function playbackHistory(url: URL) {
   const serverIds = url.searchParams.getAll("media_server_id");
@@ -3218,7 +3237,8 @@ const catalogHandlers = [
   http.get(
     "*/api/v1/media-servers/:id/libraries",
     jsonApi(({ params }) => {
-      const denied = catalogDenial();
+      // The server guards this route with admin.settings.
+      const denied = mediaServerDenial();
       if (denied !== undefined) {
         return denied;
       }
@@ -3615,7 +3635,9 @@ export const handlers = [
       if (!mediaServers.some((server) => server.id === serverId)) {
         return envelope(404, "not_found", "media server not found");
       }
-      const body = replaceExclusionsSchema.safeParse(await request.json());
+      const body = replaceExclusionsRequestSchema.safeParse(
+        await request.json(),
+      );
       if (!body.success) {
         return envelope(422, "validation_failed", "invalid exclusions");
       }

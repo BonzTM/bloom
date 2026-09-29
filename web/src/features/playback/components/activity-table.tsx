@@ -6,7 +6,7 @@ import {
   Pager,
   RefreshFailed,
 } from "../../requests/components/list-states.js";
-import type { HistoryWatch } from "../api/playback-schemas.js";
+import type { Watch } from "../api/playback-schemas.js";
 import type { useActivity } from "../hooks/playback-queries.js";
 import {
   formatActiveTime,
@@ -65,20 +65,17 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
   import: "Imported",
 };
 
-export function sourceLabel(source: string | undefined): string {
-  if (source === undefined) {
-    return "";
-  }
+export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
-function personPath(watch: HistoryWatch): string {
+function personPath(watch: Watch): string {
   return `/admin/statistics/users/${encodeURIComponent(watch.media_server_id)}/${encodeURIComponent(watch.media_user_id)}`;
 }
 
 function Table({
   watches,
-}: Readonly<{ watches: readonly HistoryWatch[] }>): ReactNode {
+}: Readonly<{ watches: readonly Watch[] }>): ReactNode {
   return (
     <div
       className="table-scroll"
@@ -116,7 +113,7 @@ function Table({
                 </Link>
               </th>
               <td>{itemTitle(watch)}</td>
-              <td>{watch.library_name ?? ""}</td>
+              <td>{watch.library_name}</td>
               <td>{watch.media_server_name}</td>
               <td>{whereLabel(watch)}</td>
               <td>{formatActiveTime(watch.active_seconds)}</td>

@@ -1083,6 +1083,10 @@ button:disabled {
   align-self: end;
 }
 
+.activity-filters-error {
+  grid-column: 1 / -1;
+}
+
 .exclusions-form {
   max-width: 40rem;
 }

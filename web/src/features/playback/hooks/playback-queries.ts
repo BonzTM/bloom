@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { HistoryFilter } from "../api/playback-api.js";
 import type {
   ActivityFilter,
+  ActivityPage,
   HistoryPage,
   TimelinePage,
 } from "../api/playback-schemas.js";
@@ -88,7 +89,7 @@ export function useActivity(accountId: string, filter: ActivityFilter) {
     queryKey: playbackKeys.activity(accountId, filter),
     queryFn: ({ pageParam, signal }) => api.activity(filter, pageParam, signal),
     initialPageParam: firstPage,
-    getNextPageParam: nextCursor,
+    getNextPageParam: nextActivityCursor,
     staleTime: 30_000,
     meta: { sessionScoped: true },
   });
@@ -115,6 +116,10 @@ export function useTimeline(
     staleTime: 30_000,
     meta: { sessionScoped: true },
   });
+}
+
+function nextActivityCursor(lastPage: ActivityPage): string | undefined {
+  return lastPage.next_cursor === "" ? undefined : lastPage.next_cursor;
 }
 
 function nextTimelineCursor(lastPage: TimelinePage): string | undefined {

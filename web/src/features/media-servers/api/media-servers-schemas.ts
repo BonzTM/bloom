@@ -157,10 +157,18 @@ const exclusionId = z
     (value) => new TextEncoder().encode(value).length <= MAX_EXCLUSION_ID_BYTES,
   );
 
+const unique = (values: readonly string[]): boolean =>
+  new Set(values).size === values.length;
+
+const exclusionList = z
+  .array(exclusionId)
+  .max(MAX_EXCLUSION_ENTRIES)
+  .refine(unique, { message: "duplicate exclusion" });
+
 export const mediaServerExclusionsSchema = z.object({
   media_server_id: z.uuid(),
-  excluded_media_user_ids: z.array(exclusionId).max(MAX_EXCLUSION_ENTRIES),
-  excluded_library_ids: z.array(exclusionId).max(MAX_EXCLUSION_ENTRIES),
+  excluded_media_user_ids: exclusionList,
+  excluded_library_ids: exclusionList,
 });
 
 export type MediaServerExclusions = z.output<
@@ -170,8 +178,8 @@ export type MediaServerExclusions = z.output<
 // The two lists together may hold at most 500 entries.
 export const replaceExclusionsRequestSchema = z
   .strictObject({
-    excluded_media_user_ids: z.array(exclusionId).max(MAX_EXCLUSION_ENTRIES),
-    excluded_library_ids: z.array(exclusionId).max(MAX_EXCLUSION_ENTRIES),
+    excluded_media_user_ids: exclusionList,
+    excluded_library_ids: exclusionList,
   })
   .refine(
     (value) =>

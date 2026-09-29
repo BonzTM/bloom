@@ -29,6 +29,13 @@ export const playbackSourceSchema = z.enum([
 
 export type PlaybackSource = z.output<typeof playbackSourceSchema>;
 
+export const importSourceSchema = z.enum([
+  "playback_reporting",
+  "jellystat",
+  "bloom_export",
+  "jellyfin_userdata",
+]);
+
 // What was being delivered at one moment: mirrors `StreamDetails`. Every
 // field is optional so a direct-play sample carries only what it knows.
 export const streamDetailsSchema = z.object({
@@ -53,13 +60,16 @@ export const watchSchema = z.object({
   media_server_name: z.string().min(1),
   media_user_id: z.string().min(1),
   username: z.string(),
-  device_id: z.string().min(1),
+  device_id: z.string(),
   device_name: z.string(),
   client: z.string(),
   item_id: z.string().min(1),
   item_name: z.string(),
   item_type: z.string(),
+  series_id: z.string(),
   series_name: z.string(),
+  library_id: z.string(),
+  library_name: z.string(),
   season_number: z.int32().nullable(),
   episode_number: z.int32().nullable(),
   position_ms: int64(),
@@ -71,10 +81,8 @@ export const watchSchema = z.object({
   started_at: z.iso.datetime({ offset: true }),
   ended_at: z.iso.datetime({ offset: true }).optional(),
   stream: streamDetailsSchema.optional(),
-  // Where the watch came from and which library holds the item; both are
-  // absent from older servers, so neither is required.
-  source: playbackSourceSchema.optional(),
-  library_name: z.string().optional(),
+  source: playbackSourceSchema,
+  import_source: importSourceSchema.optional(),
 });
 
 export type Watch = z.output<typeof watchSchema>;
@@ -147,9 +155,23 @@ export type ActivityFilter = z.output<typeof activityFilterSchema>;
 
 export const activityCursorSchema = historyCursorSchema;
 
+const pageLimitSchema = z.number().int().min(1).max(MAX_PAGE_ITEMS);
+
+// Activity pages carry open watches too, so `ended_at` stays optional.
+export const activityPageSchema = z.object({
+  items: z.array(watchSchema).max(MAX_PAGE_ITEMS),
+  limit: pageLimitSchema,
+  next_cursor: z.string().max(MAX_CURSOR_LENGTH),
+});
+
+export type ActivityPage = z.output<typeof activityPageSchema>;
+
 // ---- timeline (stats.read.all): one person's watches grouped into sittings.
 
 export const timelineGapSchema = z.number().int().min(1).max(604_800);
+
+// The timeline route bounds the media user id tighter than statistics do.
+export const timelineUserIdSchema = filterText;
 
 export const timelineEntrySchema = z.object({
   media_server_id: z.uuid(),
@@ -172,7 +194,8 @@ export type TimelineEntry = z.output<typeof timelineEntrySchema>;
 
 export const timelinePageSchema = z.object({
   items: z.array(timelineEntrySchema).max(MAX_PAGE_ITEMS),
-  gap_seconds: int64(),
+  limit: pageLimitSchema,
+  gap_seconds: timelineGapSchema,
   next_cursor: z.string().max(MAX_CURSOR_LENGTH),
 });
 

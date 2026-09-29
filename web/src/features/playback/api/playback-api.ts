@@ -35,6 +35,7 @@ import {
 import {
   activityCursorSchema,
   activityFilterSchema,
+  activityPageSchema,
   historyCursorSchema,
   historyPageSchema,
   mediaServerIdSchema,
@@ -42,8 +43,10 @@ import {
   playbackPositionsSchema,
   timelineGapSchema,
   timelinePageSchema,
+  timelineUserIdSchema,
   watchIdSchema,
   type ActivityFilter,
+  type ActivityPage,
   type HistoryPage,
   type NowPlaying,
   type PlaybackPositions,
@@ -100,10 +103,10 @@ export class PlaybackApi {
     filter: ActivityFilter,
     cursor: string | undefined,
     signal: AbortSignal,
-  ): Promise<HistoryPage> {
+  ): Promise<ActivityPage> {
     return this.#client.requestJson(
       activityPath(filter, cursor),
-      historyPageSchema,
+      activityPageSchema,
       { signal },
     );
   }
@@ -344,6 +347,6 @@ function timelinePath(
     query.set("cursor", historyCursorSchema.parse(cursor));
   }
   const server = encodeURIComponent(mediaServerIdSchema.parse(serverId));
-  const user = encodeURIComponent(mediaUserIdSchema.parse(mediaUserId));
+  const user = encodeURIComponent(timelineUserIdSchema.parse(mediaUserId));
   return `${MEDIA_SERVERS_PATH}/${server}/users/${user}/timeline?${query.toString()}`;
 }
