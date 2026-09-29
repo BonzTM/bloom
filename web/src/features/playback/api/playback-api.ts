@@ -45,12 +45,14 @@ import {
   timelinePageSchema,
   timelineUserIdSchema,
   watchIdSchema,
+  watchSchema,
   type ActivityFilter,
   type ActivityPage,
   type HistoryPage,
   type NowPlaying,
   type PlaybackPositions,
   type TimelinePage,
+  type Watch,
 } from "./playback-schemas.js";
 
 const NOW_PATH = "api/v1/playback/now";
@@ -69,6 +71,16 @@ export class PlaybackApi {
   }
 
   // Every open watch across every server, newest first.
+  // One watch, open or finished, as the lists carry it (stats.read.all).
+  watch(watchId: string, signal: AbortSignal): Promise<Watch> {
+    const id = encodeURIComponent(watchIdSchema.parse(watchId));
+    return this.#client.requestJson(
+      `api/v1/playback/watches/${id}`,
+      watchSchema,
+      { signal },
+    );
+  }
+
   // The bounded sample series of one watch, newest first.
   positions(watchId: string, signal: AbortSignal): Promise<PlaybackPositions> {
     const id = encodeURIComponent(watchIdSchema.parse(watchId));
