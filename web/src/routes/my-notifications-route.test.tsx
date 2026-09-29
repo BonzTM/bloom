@@ -15,9 +15,9 @@ async function openPreferences() {
   return { ...rendered, form };
 }
 
-it("reaches the page from the navigation for any signed-in account", async () => {
+it("reaches the page from the navigation with notifications.manage.own", async () => {
   const user = userEvent.setup();
-  setMockPermissions([]);
+  setMockPermissions(["notifications.manage.own"]);
   signInMockSession();
   renderApp();
   await user.click(
@@ -27,6 +27,18 @@ it("reaches the page from the navigation for any signed-in account", async () =>
     await screen.findByRole("heading", { name: "My notifications", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("My notifications | Bloom");
+});
+
+it("hides the page and the control without notifications.manage.own", async () => {
+  setMockPermissions(["requests.create"]);
+  signInMockSession();
+  renderApp("/notifications");
+  expect(
+    await screen.findByRole("heading", { name: "Access denied", level: 1 }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "My notifications" }),
+  ).not.toBeInTheDocument();
 });
 
 it("shows every event kind on and saves the whole matrix", async () => {

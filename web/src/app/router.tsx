@@ -113,7 +113,7 @@ const routes: RouteObject[] = [
       {
         path: "notifications",
         element: (
-          <RequirePermission anyOf={[]}>
+          <RequirePermission anyOf={[permissions.notificationsManageOwn]}>
             <LazyPage loading="Loading your notifications…">
               <LazyMyNotificationsRoute />
             </LazyPage>

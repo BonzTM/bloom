@@ -28,6 +28,7 @@ import {
   useRequestProfiles,
   useSeries,
 } from "../features/requests/hooks/requests-queries.js";
+import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { NotifyMe } from "../features/notifications/components/notify-me.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
@@ -57,6 +58,10 @@ export default function TitleRoute(): ReactNode {
       accountId={accountId}
       kind={kind}
       providerId={id}
+      canFollow={hasPermission(
+        session.data?.permissions ?? [],
+        permissions.notificationsManageOwn,
+      )}
     />
   );
 }
@@ -65,9 +70,16 @@ type TitlePageProps = Readonly<{
   accountId: string;
   kind: MediaKind;
   providerId: string;
+  // Following a title needs notifications.manage.own.
+  canFollow: boolean;
 }>;
 
-function TitlePage({ accountId, kind, providerId }: TitlePageProps): ReactNode {
+function TitlePage({
+  accountId,
+  kind,
+  providerId,
+  canFollow,
+}: TitlePageProps): ReactNode {
   const movie = useMovie(accountId, providerId, kind === "movie");
   const series = useSeries(accountId, providerId, kind === "series");
   const title = kind === "movie" ? movie : series;
@@ -121,7 +133,7 @@ function TitlePage({ accountId, kind, providerId }: TitlePageProps): ReactNode {
             <h1>{titleWithYear(title.data)}</h1>
             <p className="badge badge-neutral">{kindLabel(kind)}</p>
             <Overview title={title.data} />
-            {title.data.subscribed === undefined ? null : (
+            {title.data.subscribed === undefined || !canFollow ? null : (
               <NotifyMe
                 accountId={accountId}
                 providerId={providerId}

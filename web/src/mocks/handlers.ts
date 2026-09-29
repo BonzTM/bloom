@@ -1599,12 +1599,6 @@ function currentPreferences(): NotificationPreference[] {
   );
 }
 
-function signedInDenial() {
-  return signedIn
-    ? undefined
-    : envelope(401, "unauthorized", "sign in required");
-}
-
 let createdRequests = 0;
 
 async function createRequest(request: Request) {
@@ -1943,12 +1937,16 @@ const requestHandlers = [
   ),
   http.get(
     "*/api/v1/me/notification-preferences",
-    jsonApi(() => signedInDenial() ?? HttpResponse.json(currentPreferences())),
+    jsonApi(
+      () =>
+        permissionDenial("notifications.manage.own") ??
+        HttpResponse.json(currentPreferences()),
+    ),
   ),
   http.put(
     "*/api/v1/me/notification-preferences",
     jsonApi(async ({ request }) => {
-      const denied = signedInDenial();
+      const denied = permissionDenial("notifications.manage.own");
       if (denied !== undefined) {
         return denied;
       }
@@ -1968,7 +1966,7 @@ const requestHandlers = [
   http.post(
     "*/api/v1/titles/tmdb/:id/subscription",
     jsonApi(({ params }) => {
-      const denied = permissionDenial("requests.create");
+      const denied = permissionDenial("notifications.manage.own");
       if (denied !== undefined) {
         return denied;
       }
@@ -1986,7 +1984,7 @@ const requestHandlers = [
   http.delete(
     "*/api/v1/titles/tmdb/:id/subscription",
     jsonApi(({ params }) => {
-      const denied = permissionDenial("requests.create");
+      const denied = permissionDenial("notifications.manage.own");
       if (denied !== undefined) {
         return denied;
       }
