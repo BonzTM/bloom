@@ -199,31 +199,42 @@ func preferenceContractValue(values []notificationPreferenceResponse) []any {
 	return result
 }
 
-func TestTitleSubscriptionRoutesRequireRequestViewPermission(t *testing.T) {
+func TestNotificationRoutingRoutesRequireOwnManagementPermission(t *testing.T) {
 	harness := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
 	harness.authorization.mu.Lock()
 	harness.authorization.permissions[notificationPreferenceAccountID] = nil
 	harness.authorization.mu.Unlock()
+	paths := map[string]bool{
+		"/api/v1/me/notification-preferences":                  true,
+		"/api/v1/titles/{provider}/{provider_id}/subscription": true,
+	}
+	checked := 0
 	for _, route := range apiRouteInventory {
-		if route.path != "/api/v1/titles/{provider}/{provider_id}/subscription" {
+		if !paths[route.path] {
 			continue
 		}
-		handler, err := harness.server.routeHandler(route)
-		if err != nil {
-			t.Fatalf("routeHandler: %v", err)
-		}
-		missing := httptest.NewRecorder()
-		handler.ServeHTTP(missing, httptest.NewRequest(route.method, "https://bloom.test/api/v1/titles/tmdb/1/subscription", nil))
-		if missing.Code != http.StatusUnauthorized {
-			t.Errorf("%s missing session status = %d, want 401", route.method, missing.Code)
-		}
-		request := httptest.NewRequest(route.method, "https://bloom.test/api/v1/titles/tmdb/1/subscription", nil)
-		request.AddCookie(cookie)
-		forbidden := httptest.NewRecorder()
-		handler.ServeHTTP(forbidden, request)
-		if forbidden.Code != http.StatusForbidden {
-			t.Errorf("%s insufficient permission status = %d, want 403", route.method, forbidden.Code)
-		}
+		checked++
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			handler, err := harness.server.routeHandler(route)
+			if err != nil {
+				t.Fatalf("routeHandler: %v", err)
+			}
+			missing := httptest.NewRecorder()
+			handler.ServeHTTP(missing, httptest.NewRequest(route.method, "https://bloom.test/api/v1/titles/tmdb/1/subscription", nil))
+			if missing.Code != http.StatusUnauthorized {
+				t.Errorf("%s missing session status = %d, want 401", route.method, missing.Code)
+			}
+			request := httptest.NewRequest(route.method, "https://bloom.test/api/v1/titles/tmdb/1/subscription", nil)
+			request.AddCookie(cookie)
+			forbidden := httptest.NewRecorder()
+			handler.ServeHTTP(forbidden, request)
+			if forbidden.Code != http.StatusForbidden {
+				t.Errorf("%s insufficient permission status = %d, want 403", route.method, forbidden.Code)
+			}
+		})
+	}
+	if checked != 4 {
+		t.Fatalf("checked routes = %d, want 4", checked)
 	}
 }

@@ -137,7 +137,7 @@ type ClaimNotificationOutboxRow struct {
 	ID                 string
 	EventID            string
 	ChannelID          string
-	RecipientAccountID string
+	RecipientAccountID sql.NullString
 	ChannelKind        string
 	EventType          string
 	PayloadJson        string
@@ -320,7 +320,7 @@ type CreateNotificationOutboxParams struct {
 	ID                 string
 	EventID            string
 	ChannelID          string
-	RecipientAccountID string
+	RecipientAccountID sql.NullString
 	ChannelKind        string
 	EventType          string
 	PayloadJson        string
@@ -731,7 +731,7 @@ type ListNotificationDeliveriesRow struct {
 	ID                 string
 	EventID            string
 	ChannelID          string
-	RecipientAccountID string
+	RecipientAccountID sql.NullString
 	ChannelKind        string
 	EventType          string
 	PayloadJson        string

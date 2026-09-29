@@ -76,19 +76,24 @@ contracts) gets an entry here.
   unresolved-library counter.
 - Per-account notification preferences at
   `GET/PUT /api/v1/me/notification-preferences`, as a complete enabled/disabled
-  event-kind matrix. Every event defaults on; accounts never see or select the
-  operator-owned channels.
+  event-kind matrix guarded by `notifications.manage.own`. Every event defaults
+  on; accounts never see or select the operator-owned channels.
 - Idempotent title-availability subscriptions at
   `/api/v1/titles/{provider}/{provider_id}/subscription`, bounded to 500 per
-  account. Fulfilment now addresses the requester and deduplicated followers,
-  and title detail responses expose the caller's `subscribed` state.
+  account and guarded by `notifications.manage.own`. Fulfilment now addresses
+  the requester and deduplicated followers, and title detail responses expose
+  the caller's `subscribed` state. Migration 00028 grants the new permission to
+  `owner`, `member`, and every existing role that has `requests.read.own`.
 - Durable `playback.session_started` notifications for newly collected
   watches, committed with the watch and deduplicated by a retained watch-ID
   emission marker across restarts and notification retention.
 - SQLite/PostgreSQL migration `00028_notification_preferences` adds account
   routing preferences, event recipients, title subscriptions, playback source
   payloads, per-recipient outbox identity, and durable playback emission
-  markers.
+  markers. This release is the expand step: `recipient_account_id` remains
+  nullable, with separate partial unique indexes for legacy unaddressed rows
+  and addressed rows. One release later, the contract step must make the column
+  `NOT NULL` and drop the legacy partial index after older binaries are gone.
 - The Imports page offers a Jellystat backup as a source: choose the server,
   upload the `.jsonl` Jellystat writes under Settings, Backup, and watch the
   job like any other import.

@@ -48,6 +48,7 @@ func TestPermissionCatalogIsStableAndUnique(t *testing.T) {
 		{ID: "stats.read.all", Module: "stats"},
 		{ID: "admin.settings", Module: "admin"},
 		{ID: "admin.roles", Module: "admin"},
+		{ID: "notifications.manage.own", Module: "notifications"},
 	}
 	catalog := core.PermissionCatalog()
 	seen := make(map[core.Permission]bool, len(catalog))

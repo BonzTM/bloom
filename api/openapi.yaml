@@ -1156,6 +1156,7 @@ paths:
       responses:
         "200": { description: Every supported event kind exactly once; absent stored preferences default to enabled., content: { application/json: { schema: { $ref: "#/components/schemas/NotificationPreferences" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
     put:
@@ -4394,6 +4395,7 @@ components:
         - stats.read.all
         - admin.settings
         - admin.roles
+        - notifications.manage.own
     PermissionCatalogEntry:
       type: object
       required: [id, module]
@@ -4403,7 +4405,7 @@ components:
           $ref: "#/components/schemas/Permission"
         module:
           type: string
-          enum: [users, requests, stats, admin]
+          enum: [users, requests, stats, admin, notifications]
     PermissionCatalogResponse:
       type: object
       required: [permissions]

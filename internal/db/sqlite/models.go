@@ -277,7 +277,7 @@ type NotificationOutbox struct {
 	ID                 string
 	EventID            string
 	ChannelID          string
-	RecipientAccountID string
+	RecipientAccountID sql.NullString
 	ChannelKind        string
 	EventType          string
 	PayloadJson        string

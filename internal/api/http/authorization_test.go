@@ -154,6 +154,7 @@ func TestPermissionCatalogHandlerIsPublicStableAndCacheable(t *testing.T) {
 		{ID: "stats.read.all", Module: "stats"},
 		{ID: "admin.settings", Module: "admin"},
 		{ID: "admin.roles", Module: "admin"},
+		{ID: "notifications.manage.own", Module: "notifications"},
 	}
 	if !slices.Equal(response.Permissions, want) {
 		t.Fatalf("permissions = %v, want %v", response.Permissions, want)

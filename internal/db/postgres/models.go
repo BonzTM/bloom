@@ -290,7 +290,7 @@ type NotificationOutbox struct {
 	SentAt             sql.NullTime
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	RecipientAccountID string
+	RecipientAccountID sql.NullString
 }
 
 type PlaybackNotificationEmission struct {

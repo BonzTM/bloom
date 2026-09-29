@@ -102,12 +102,27 @@ permission identifiers are part of the API contract. New identifiers may be
 added, but existing identifiers are never renamed or removed. The public,
 cacheable catalog is available from `GET /api/v1/auth/permissions`.
 
+| Permission | Module | Capability |
+|---|---|---|
+| `users.read` | users | Read user summaries. |
+| `users.invite` | users | Administer invites. |
+| `users.manage` | users | Manage accounts. |
+| `requests.read.own` | requests | Read the account's requests. |
+| `requests.create` | requests | Create requests. |
+| `requests.approve` | requests | Approve or decline requests. |
+| `stats.read.own` | stats | Read the account's statistics. |
+| `stats.read.all` | stats | Read all statistics. |
+| `admin.settings` | admin | Manage application settings. |
+| `admin.roles` | admin | Read and manage roles. |
+| `notifications.manage.own` | notifications | Manage the account's notification preferences and title subscriptions. |
+
 The built-in `owner` role has every permission and cannot be edited or deleted.
-The built-in `member` role has `requests.read.own`, `requests.create`, and
-`stats.read.own`. The role can read its own request and statistics data and can
+The built-in `member` role has `notifications.manage.own`,
+`requests.read.own`, `requests.create`, and `stats.read.own`. The role can
+manage its notification routing, read its own request and statistics data, and
 create requests. Accounts may hold multiple roles; their effective permission
-set is the union of those roles. Bloom reads that set from the database for each
-authenticated request. It does not cache authorization decisions.
+set is the union of those roles. Bloom reads that set from the database for
+each authenticated request. It does not cache authorization decisions.
 
 `users.invite` grants invite administration and the least-privilege
 `GET /api/v1/invites/servers` selector. It does not grant media-server settings
@@ -694,16 +709,17 @@ counters and outbox depth are exported as metrics.
 Sent and terminally failed rows, followed by their fully fanned event rows, are
 pruned in bounded batches after `BLOOM_NOTIFY_RETENTION`.
 
-Every signed-in account can read and replace its complete event-kind matrix
-through `GET` and `PUT /api/v1/me/notification-preferences`. Both routes use a
-JSON array of `{event_type, enabled}` objects. `PUT` requires every supported
-event kind exactly once and rejects missing or duplicate kinds. Every kind is
-enabled by default. Accounts never see or select channels. An addressed event
-goes to every enabled operator channel subscribed to its kind unless that
-account has disabled the kind.
+An account with `notifications.manage.own` can read and replace its complete
+event-kind matrix through `GET` and `PUT` on
+`/api/v1/me/notification-preferences`. Both routes use a JSON array of
+`{event_type, enabled}` objects. `PUT` requires every supported event kind
+exactly once and rejects missing or duplicate kinds. Every kind is enabled by
+default. Accounts never see or select channels. An addressed event goes to
+every enabled operator channel subscribed to its kind unless that account has
+disabled the kind.
 
-An account with `requests.read.own` can idempotently follow or unfollow a title
-with `POST` or `DELETE` on
+An account with `notifications.manage.own` can idempotently follow or unfollow
+a title with `POST` or `DELETE` on
 `/api/v1/titles/{provider}/{provider_id}/subscription`. Each account may follow
 at most 500 titles. Movie and series detail responses include `subscribed` for
 the signed-in account. When a request becomes available, Bloom addresses the
@@ -907,9 +923,14 @@ preferences, title-availability subscriptions, addressed notification events,
 per-recipient delivery identity, playback event payloads, and a durable
 playback-emission marker keyed by watch ID. Notification retention never
 removes the marker, so pruning and replay cannot emit a second session-start
-event. Rolling the migration down removes playback events and markers, keeps
-the lowest recipient account ID for each older event/channel delivery, and
-restores the pre-00028 event constraints.
+event. The outbox recipient column stays nullable for this expand release. A
+partial legacy key preserves `(event_id, channel_id)` uniqueness for unaddressed
+rows, while addressed rows use the per-recipient key. The contract migration
+that makes `recipient_account_id` `NOT NULL` and drops the legacy partial index
+must ship one release later, after no older binary can write unaddressed rows.
+Rolling migration 00028 down removes playback events and markers, keeps the
+lowest recipient account ID for each older event/channel delivery, and restores
+the pre-00028 event constraints.
 
 Migration `00012_metadata_requests` adds encrypted metadata-provider settings,
 request profiles and tags, media requests and seasons, and role and account

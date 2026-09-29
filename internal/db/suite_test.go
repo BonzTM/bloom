@@ -170,10 +170,14 @@ func testNotificationPreferencesMigration(t *testing.T, pool *sql.DB, driver con
 	at := core.NormalizeTime(time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC))
 	requester := requestTestAccount(t, accounts, at, "migration-requester")
 	follower := requestTestAccount(t, accounts, at, "migration-follower")
+	roleID := seedLegacyNotificationRole(t, pool, driver, at)
 	channelID, eventID, firstDeliveryID := seedLegacyNotificationDelivery(t, pool, driver, requester.ID, at)
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("apply notification preferences migration: %v", err)
 	}
+	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, true)
+	legacyDeliveryID := seedLegacyNotificationOutbox(t, pool, driver, eventID, channelID, at.Add(2*time.Second))
+	assertLegacyNotificationDelivery(t, pool, driver, channelID, legacyDeliveryID)
 	secondDeliveryID := mustID(t)
 	seedSecondNotificationRecipient(t, pool, driver, eventID, channelID, follower.ID, secondDeliveryID, at)
 	wantID := firstDeliveryID
@@ -183,17 +187,73 @@ func testNotificationPreferencesMigration(t *testing.T, pool *sql.DB, driver con
 	if err := db.MigrateDownTo(ctx, pool, driver, 27); err != nil {
 		t.Fatalf("roll down populated notification preferences migration: %v", err)
 	}
+	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, false)
 	assertRetainedNotificationDelivery(t, pool, eventID, channelID, wantID)
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("re-apply notification preferences migration: %v", err)
 	}
+	assertRolePermission(t, pool, roleID, core.PermissionNotificationsManageOwn, true)
 	assertRetainedNotificationDelivery(t, pool, eventID, channelID, wantID)
 	execTestSQL(t, pool, "DELETE FROM notification_events WHERE id=$1", eventID)
 	execTestSQL(t, pool, "DELETE FROM notification_channels WHERE id=$1", channelID)
 	execTestSQL(t, pool, "DELETE FROM accounts WHERE id IN ($1,$2)", requester.ID, follower.ID)
+	execTestSQL(t, pool, "DELETE FROM roles WHERE id=$1", roleID)
 	if err := db.MigrateDownAll(ctx, pool, driver); err != nil {
 		t.Fatalf("clean notification preferences migration fixture: %v", err)
 	}
+}
+
+func seedLegacyNotificationRole(t *testing.T, pool *sql.DB, driver config.Driver, at time.Time) string {
+	t.Helper()
+	roleID := mustID(t)
+	execTestSQL(t, pool, `INSERT INTO roles (id,name,description,built_in,created_at)
+        VALUES ($1,$2,'Legacy notification role',FALSE,$3)`,
+		roleID, "legacy-notification-"+roleID, migrationTimestamp(driver, at))
+	execTestSQL(t, pool, "INSERT INTO role_permissions (role_id,permission) VALUES ($1,'requests.read.own')", roleID)
+	return roleID
+}
+
+func assertRolePermission(
+	t *testing.T, pool *sql.DB, roleID string, permission core.Permission, want bool,
+) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM role_permissions WHERE role_id=$1 AND permission=$2",
+		roleID, string(permission)).Scan(&count); err != nil {
+		t.Fatalf("count role permission: %v", err)
+	}
+	if got := count == 1; got != want {
+		t.Fatalf("role %s permission %s present = %t, want %t", roleID, permission, got, want)
+	}
+}
+
+func assertLegacyNotificationDelivery(
+	t *testing.T, pool *sql.DB, driver config.Driver, channelID, deliveryID string,
+) {
+	t.Helper()
+	var recipient sql.NullString
+	if err := pool.QueryRowContext(t.Context(),
+		"SELECT recipient_account_id FROM notification_outbox WHERE id=$1", deliveryID).Scan(&recipient); err != nil {
+		t.Fatalf("read legacy recipient: %v", err)
+	}
+	if recipient.Valid {
+		t.Fatalf("legacy recipient = %q, want NULL", recipient.String)
+	}
+	_, _, _, _, reader, _, err := db.NewNotificationStores(pool, driver)
+	if err != nil {
+		t.Fatalf("NewNotificationStores: %v", err)
+	}
+	deliveries, err := reader.ListNotificationDeliveries(t.Context(), channelID, nil, 10)
+	if err != nil {
+		t.Fatalf("ListNotificationDeliveries: %v", err)
+	}
+	for _, delivery := range deliveries {
+		if delivery.ID == deliveryID && delivery.RecipientID == "" {
+			return
+		}
+	}
+	t.Fatalf("legacy deliveries = %+v, want unaddressed delivery %s", deliveries, deliveryID)
 }
 
 func seedLegacyNotificationDelivery(
@@ -208,17 +268,26 @@ func seedLegacyNotificationDelivery(
 	if err := writer.CreateNotificationChannel(t.Context(), channel); err != nil {
 		t.Fatalf("CreateNotificationChannel: %v", err)
 	}
-	eventID, requestID, deliveryID := mustID(t), mustID(t), mustID(t)
+	eventID, requestID := mustID(t), mustID(t)
 	stamp := migrationTimestamp(driver, at)
 	execTestSQL(t, pool, `INSERT INTO notification_events
         (id,event_type,request_id,requester_id,actor_id,media_kind,title,request_status,reason,event_sequence,occurred_at,fanned_at,created_at)
         VALUES ($1,'created',$2,$3,'system','movie','Migration','pending','',0,$4,$4,$4)`,
 		eventID, requestID, requesterID, stamp)
+	deliveryID := seedLegacyNotificationOutbox(t, pool, driver, eventID, channel.ID, at)
+	return channel.ID, eventID, deliveryID
+}
+
+func seedLegacyNotificationOutbox(
+	t *testing.T, pool *sql.DB, driver config.Driver, eventID, channelID string, at time.Time,
+) string {
+	t.Helper()
+	deliveryID := mustID(t)
 	execTestSQL(t, pool, `INSERT INTO notification_outbox
         (id,event_id,channel_id,channel_kind,event_type,payload_json,status,attempts,next_attempt_at,lease_token,lease_expires_at,last_error,sent_at,created_at,updated_at)
         VALUES ($1,$2,$3,'webhook','created','{}','pending',0,$4,'',NULL,'',NULL,$4,$4)`,
-		deliveryID, eventID, channel.ID, stamp)
-	return channel.ID, eventID, deliveryID
+		deliveryID, eventID, channelID, migrationTimestamp(driver, at))
+	return deliveryID
 }
 
 func seedSecondNotificationRecipient(
@@ -1633,7 +1702,7 @@ func testRoleMigrationNotice(t *testing.T, pool *sql.DB, driver config.Driver) {
 		t.Fatalf("already-applied migration logged notice: %q", logs.String())
 	}
 	assertSeedCount(t, pool, "roles", 2)
-	assertSeedCount(t, pool, "role_permissions", 13)
+	assertSeedCount(t, pool, "role_permissions", 15)
 	if _, err := pool.ExecContext(ctx, "DELETE FROM accounts WHERE id = $1", account.ID); err != nil {
 		t.Fatalf("delete legacy role-less account: %v", err)
 	}
@@ -1756,12 +1825,14 @@ func assertBuiltInPermissions(
 	t.Helper()
 	assertAccountPermissions(t, authorizer, ownerID, wantOwner)
 	assertAccountPermissions(t, authorizer, memberID, []core.Permission{
-		core.PermissionRequestsCreate, core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
+		core.PermissionNotificationsManageOwn, core.PermissionRequestsCreate,
+		core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
 	})
 	assertAccountPermissions(t, authorizer, rolelessID, nil)
 	assertAuthorizationSnapshot(t, authorizer, ownerID, []string{"owner"}, wantOwner)
 	assertAuthorizationSnapshot(t, authorizer, memberID, []string{"member"}, []core.Permission{
-		core.PermissionRequestsCreate, core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
+		core.PermissionNotificationsManageOwn, core.PermissionRequestsCreate,
+		core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
 	})
 	assertAuthorizationSnapshot(t, authorizer, rolelessID, nil, nil)
 }
@@ -1802,7 +1873,8 @@ func assertSeededRoles(t *testing.T, roles core.RoleReader, wantOwner []core.Per
 			Description: "Access to owned data and creating requests.", BuiltIn: true,
 			CreatedAt: time.Unix(0, 0).UTC(),
 			Permissions: []core.Permission{
-				core.PermissionRequestsCreate, core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
+				core.PermissionNotificationsManageOwn, core.PermissionRequestsCreate,
+				core.PermissionRequestsReadOwn, core.PermissionStatsReadOwn,
 			},
 		},
 		{

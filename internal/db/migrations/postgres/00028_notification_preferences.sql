@@ -31,12 +31,13 @@ UPDATE notification_outbox AS delivery
 SET recipient_account_id = event.requester_id
 FROM notification_events AS event
 WHERE event.id = delivery.event_id;
-ALTER TABLE notification_outbox ALTER COLUMN recipient_account_id SET NOT NULL;
 ALTER TABLE notification_outbox ADD CONSTRAINT notification_outbox_recipient_account_id_check
     CHECK (length(recipient_account_id) = 36);
 DROP INDEX notification_outbox_event_channel_idx;
+CREATE UNIQUE INDEX notification_outbox_event_channel_idx
+    ON notification_outbox (event_id, channel_id) WHERE recipient_account_id IS NULL;
 CREATE UNIQUE INDEX notification_outbox_event_channel_recipient_idx
-    ON notification_outbox (event_id, channel_id, recipient_account_id);
+    ON notification_outbox (event_id, channel_id, recipient_account_id) WHERE recipient_account_id IS NOT NULL;
 
 CREATE TABLE account_notification_preferences (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -60,7 +61,18 @@ CREATE TABLE title_availability_subscriptions (
 CREATE INDEX title_availability_subscriptions_title_idx
     ON title_availability_subscriptions (provider, provider_id, account_id);
 
+INSERT INTO role_permissions (role_id, permission) VALUES
+    ('00000000-0000-4000-8000-000000000001', 'notifications.manage.own'),
+    ('00000000-0000-4000-8000-000000000002', 'notifications.manage.own')
+ON CONFLICT DO NOTHING;
+INSERT INTO role_permissions (role_id, permission)
+SELECT role_id, 'notifications.manage.own'
+FROM role_permissions
+WHERE permission = 'requests.read.own'
+ON CONFLICT DO NOTHING;
+
 -- +goose Down
+DELETE FROM role_permissions WHERE permission = 'notifications.manage.own';
 DROP TABLE title_availability_subscriptions;
 DROP TABLE playback_notification_emissions;
 DROP TABLE account_notification_preferences;
@@ -70,14 +82,23 @@ DELETE FROM notification_outbox WHERE event_type = 'playback.session_started';
 DELETE FROM notification_events WHERE event_type = 'playback.session_started';
 DELETE FROM notification_channel_subscriptions WHERE event_type = 'playback.session_started';
 
+DROP INDEX notification_outbox_event_channel_idx;
 DROP INDEX notification_outbox_event_channel_recipient_idx;
 DELETE FROM notification_outbox AS candidate
 USING notification_outbox AS preferred
 WHERE preferred.event_id = candidate.event_id
   AND preferred.channel_id = candidate.channel_id
-  AND (preferred.recipient_account_id < candidate.recipient_account_id
-    OR (preferred.recipient_account_id = candidate.recipient_account_id
-      AND preferred.id < candidate.id));
+  AND (
+    CASE WHEN preferred.recipient_account_id IS NULL THEN 1 ELSE 0 END
+      < CASE WHEN candidate.recipient_account_id IS NULL THEN 1 ELSE 0 END
+    OR (
+      CASE WHEN preferred.recipient_account_id IS NULL THEN 1 ELSE 0 END
+        = CASE WHEN candidate.recipient_account_id IS NULL THEN 1 ELSE 0 END
+      AND (COALESCE(preferred.recipient_account_id, '') < COALESCE(candidate.recipient_account_id, '')
+        OR (COALESCE(preferred.recipient_account_id, '') = COALESCE(candidate.recipient_account_id, '')
+          AND preferred.id < candidate.id))
+    )
+  );
 ALTER TABLE notification_outbox DROP CONSTRAINT notification_outbox_recipient_account_id_check;
 ALTER TABLE notification_outbox DROP COLUMN recipient_account_id;
 CREATE UNIQUE INDEX notification_outbox_event_channel_idx ON notification_outbox (event_id, channel_id);

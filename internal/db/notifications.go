@@ -454,8 +454,9 @@ func createSQLiteOutbox(
 	}
 	stamp := formatSQLiteTime(at)
 	if err := queries.CreateNotificationOutbox(ctx, sqlite.CreateNotificationOutboxParams{
-		ID: id, EventID: eventID, ChannelID: channelID, RecipientAccountID: recipientID,
-		ChannelKind: kind, EventType: event, PayloadJson: payload,
+		ID: id, EventID: eventID, ChannelID: channelID,
+		RecipientAccountID: sql.NullString{String: recipientID, Valid: true},
+		ChannelKind:        kind, EventType: event, PayloadJson: payload,
 		NextAttemptAt: stamp, CreatedAt: stamp, UpdatedAt: stamp,
 	}); err != nil {
 		return fmt.Errorf("create notification delivery: %w", err)
@@ -471,8 +472,9 @@ func createPostgresOutbox(
 		return fmt.Errorf("create notification delivery id: %w", err)
 	}
 	if err := queries.CreateNotificationOutbox(ctx, postgres.CreateNotificationOutboxParams{
-		ID: id, EventID: eventID, ChannelID: channelID, RecipientAccountID: recipientID,
-		ChannelKind: kind, EventType: event, PayloadJson: payload,
+		ID: id, EventID: eventID, ChannelID: channelID,
+		RecipientAccountID: sql.NullString{String: recipientID, Valid: true},
+		ChannelKind:        kind, EventType: event, PayloadJson: payload,
 		NextAttemptAt: at, CreatedAt: at, UpdatedAt: at,
 	}); err != nil {
 		return fmt.Errorf("create notification delivery: %w", err)
@@ -1140,7 +1142,7 @@ func mapSQLiteDelivery(row sqlite.NotificationOutbox) (core.NotificationDelivery
 	if err != nil {
 		return core.NotificationDelivery{}, err
 	}
-	return decodeDelivery(row.ID, row.ChannelID, row.RecipientAccountID, row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
+	return decodeDelivery(row.ID, row.ChannelID, recipientAccountID(row.RecipientAccountID), row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
 		int(row.Attempts), next, row.LeaseToken, lease, row.LastError, sent, created, updated)
 }
 
@@ -1154,9 +1156,16 @@ func mapPostgresDelivery(row postgres.NotificationOutbox) (core.NotificationDeli
 		value := core.NormalizeTime(row.SentAt.Time)
 		sent = &value
 	}
-	return decodeDelivery(row.ID, row.ChannelID, row.RecipientAccountID, row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
+	return decodeDelivery(row.ID, row.ChannelID, recipientAccountID(row.RecipientAccountID), row.ChannelKind, row.EventType, row.PayloadJson, row.Status,
 		int(row.Attempts), core.NormalizeTime(row.NextAttemptAt), row.LeaseToken, lease, row.LastError, sent,
 		core.NormalizeTime(row.CreatedAt), core.NormalizeTime(row.UpdatedAt))
+}
+
+func recipientAccountID(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }
 
 func decodeDelivery(

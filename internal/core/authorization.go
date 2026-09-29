@@ -40,6 +40,8 @@ const (
 	PermissionAdminSettings Permission = "admin.settings"
 	// PermissionAdminRoles allows reading and managing roles.
 	PermissionAdminRoles Permission = "admin.roles"
+	// PermissionNotificationsManageOwn allows managing the account's notification routing.
+	PermissionNotificationsManageOwn Permission = "notifications.manage.own"
 )
 
 // PermissionDefinition describes one entry in the public permission catalog.
@@ -76,6 +78,7 @@ var permissionCatalog = [...]PermissionDefinition{
 	{ID: PermissionStatsReadAll, Module: "stats"},
 	{ID: PermissionAdminSettings, Module: "admin"},
 	{ID: PermissionAdminRoles, Module: "admin"},
+	{ID: PermissionNotificationsManageOwn, Module: "notifications"},
 }
 
 // PermissionCatalog returns a copy of the stable catalog in contract order.
