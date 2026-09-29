@@ -11,6 +11,11 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Pages are one continuous column: a section is a heading and its content
+  separated by rhythm and a hairline, not a bordered box. Only objects carry
+  a surface: forms, tables, tiles, posters, and stat cards. The home
+  dashboard, statistics, libraries, and every administration page follow
+  the same shape.
 - The web app's look: layered translucent panels over a lit background
   instead of bordered boxes, a gradient accent on the active navigation item
   and primary buttons, larger type, full-width pages, posters that lift on

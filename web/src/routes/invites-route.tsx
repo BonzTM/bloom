@@ -179,7 +179,7 @@ function CreateSection({
   // Remounting the form after a success clears it for the next invite.
   const [formKey, setFormKey] = useState(0);
   return (
-    <section aria-labelledby="create-invite-heading" className="card">
+    <section aria-labelledby="create-invite-heading" className="card panel">
       <h2 id="create-invite-heading">Create an invite</h2>
       {serversState === "loading" ? (
         <AsyncStatus>Loading media servers…</AsyncStatus>

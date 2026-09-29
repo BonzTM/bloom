@@ -89,7 +89,7 @@ function RegisterSection({
   // Remounting the form after a success clears the API key from the screen.
   const [formKey, setFormKey] = useState(0);
   return (
-    <section aria-labelledby="register-server-heading" className="card">
+    <section aria-labelledby="register-server-heading" className="card panel">
       <h2 id="register-server-heading">Register a server</h2>
       <RegisterMediaServerForm
         key={formKey}

@@ -159,7 +159,7 @@ function ProfileSection({
     }
   }, [subject]);
   return (
-    <section aria-labelledby="profile-form-heading" className="card">
+    <section aria-labelledby="profile-form-heading" className="card panel">
       <h2 id="profile-form-heading" ref={headingRef} tabIndex={-1}>
         {subject === undefined ? "Create a profile" : `Edit ${subject.name}`}
       </h2>

@@ -110,7 +110,7 @@ function Landing(): ReactNode {
 function AreaCard({ area }: Readonly<{ area: Area }>): ReactNode {
   const headingId = `${area.id}-heading`;
   return (
-    <section aria-labelledby={headingId} className="card feature-tile">
+    <section aria-labelledby={headingId} className="panel feature-tile">
       <span className="feature-tile-icon" aria-hidden="true">
         <NavIcon name={area.icon} />
       </span>

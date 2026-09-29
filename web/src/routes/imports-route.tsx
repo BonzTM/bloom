@@ -83,7 +83,7 @@ function ImportsPage({
         where it left off after a restart, and never records the same source row
         twice.
       </p>
-      <section aria-labelledby="start-import-heading" className="card">
+      <section aria-labelledby="start-import-heading" className="card panel">
         <h2 id="start-import-heading">Start an import</h2>
         {servers.status === "pending" ? (
           <AsyncStatus>Loading servers…</AsyncStatus>

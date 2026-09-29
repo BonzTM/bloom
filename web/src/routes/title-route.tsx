@@ -197,7 +197,7 @@ function RequestSection({
     );
   }
   return (
-    <section aria-labelledby="request-heading" className="card">
+    <section aria-labelledby="request-heading" className="card panel">
       <h2 id="request-heading">
         Request this {kindLabel(title.kind).toLowerCase()}
       </h2>
