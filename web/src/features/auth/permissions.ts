@@ -10,6 +10,7 @@ export const permissions = {
   usersManage: "users.manage",
   statsReadAll: "stats.read.all",
   statsReadOwn: "stats.read.own",
+  notificationsManageOwn: "notifications.manage.own",
   requestsApprove: "requests.approve",
   requestsCreate: "requests.create",
   requestsReadOwn: "requests.read.own",
