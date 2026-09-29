@@ -13,7 +13,7 @@ type RequirePermissionProps = Readonly<{
 
 // Route guard. A signed-out visitor is sent to sign in and brought back here
 // afterwards; a signed-in account without any of the permissions sees a
-// refusal. The server still authorizes every request this page makes, so the
+// refusal. An empty list means any signed-in account may enter. The server still authorizes every request this page makes, so the
 // guard only decides what the page shows. The session check itself is
 // announced and retried from the navigation, which is on every page; the
 // guard adds no second status or control for it.
@@ -36,7 +36,7 @@ export function RequirePermission({
   if (session.data === null) {
     return null;
   }
-  if (!hasAnyPermission(session.data.permissions, anyOf)) {
+  if (anyOf.length > 0 && !hasAnyPermission(session.data.permissions, anyOf)) {
     return <AccessDeniedRoute />;
   }
   return children;

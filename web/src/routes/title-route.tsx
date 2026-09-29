@@ -28,6 +28,7 @@ import {
   useRequestProfiles,
   useSeries,
 } from "../features/requests/hooks/requests-queries.js";
+import { NotifyMe } from "../features/notifications/components/notify-me.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
 import { NotFoundRoute } from "./not-found-route.js";
@@ -120,6 +121,14 @@ function TitlePage({ accountId, kind, providerId }: TitlePageProps): ReactNode {
             <h1>{titleWithYear(title.data)}</h1>
             <p className="badge badge-neutral">{kindLabel(kind)}</p>
             <Overview title={title.data} />
+            {title.data.subscribed === undefined ? null : (
+              <NotifyMe
+                accountId={accountId}
+                providerId={providerId}
+                title={titleWithYear(title.data)}
+                subscribed={title.data.subscribed}
+              />
+            )}
           </div>
         </div>
       </header>

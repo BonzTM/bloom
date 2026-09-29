@@ -63,6 +63,9 @@ export function AppLayout(): ReactNode {
                 My statistics
               </NavItem>
             </PermissionGate>
+            <NavItem to="/notifications" icon="bell">
+              My notifications
+            </NavItem>
             <NavItem to="/about" icon="info">
               About
             </NavItem>

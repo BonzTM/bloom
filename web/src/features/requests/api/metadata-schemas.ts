@@ -32,6 +32,9 @@ export const metadataTitleSchema = z.object({
   overview: boundedBytes(MAX_OVERVIEW_BYTES),
   poster_path: boundedBytes(MAX_POSTER_BYTES),
   backdrop_path: boundedBytes(MAX_POSTER_BYTES),
+  // Whether the caller asked to be told when this title becomes available;
+  // optional so a server without subscriptions still parses.
+  subscribed: z.boolean().optional(),
 });
 
 export type MetadataTitle = z.output<typeof metadataTitleSchema>;
