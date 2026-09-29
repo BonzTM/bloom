@@ -59,6 +59,7 @@
   --surface-strong: rgb(255 255 255 / 0.07);
   --border: rgb(255 255 255 / 0.08);
   --border-strong: rgb(255 255 255 / 0.16);
+  --divider: rgb(255 255 255 / 0.14);
   --text: #f3f4f6;
   --text-muted: #a1a8b8;
   --text-faint: #98a1b6;
@@ -110,6 +111,7 @@
     --surface-strong: rgb(255 255 255 / 0.95);
     --border: rgb(20 24 40 / 0.08);
     --border-strong: rgb(20 24 40 / 0.16);
+    --divider: rgb(20 24 40 / 0.16);
     --text: #171b26;
     --text-muted: #566079;
     --text-faint: #626b80;
@@ -544,7 +546,7 @@ main:focus {
 }
 
 .card + .card {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--divider);
   padding-top: var(--space-6);
 }
 
@@ -578,7 +580,7 @@ main > .page-intro + .card,
 }
 
 .card + .card.panel {
-  border-top: 0;
+  border-top: 1px solid var(--border);
   padding-top: var(--space-5);
 }
 
@@ -600,7 +602,7 @@ main > .page-intro + .card,
 }
 
 .panel .card + .card {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--divider);
   padding-top: var(--space-5);
 }
 
