@@ -263,6 +263,129 @@ func (q *Queries) FindRecentPlaybackWatch(ctx context.Context, arg FindRecentPla
 	return i, err
 }
 
+const getPlaybackWatch = `-- name: GetPlaybackWatch :one
+SELECT w.id, w.media_server_id, w.media_user_id, w.username, w.device_id, w.device_name,
+       w.client, w.server_session_id, w.item_id, w.item_name, w.item_type, w.series_name,
+       w.season_number, w.episode_number, w.play_method, w.state, w.started_at, w.last_seen_at,
+       w.ended_at, w.active_seconds, w.last_position_ms, w.source, w.created_at, w.updated_at,
+       w.library_id, w.library_name, w.stream_container, w.stream_video_codec,
+       w.stream_audio_codec, w.stream_bitrate, w.stream_width, w.stream_height,
+       w.stream_framerate_hundredths, w.stream_audio_channels, w.stream_is_video_direct,
+       w.stream_is_audio_direct, w.stream_transcode_reasons, w.runtime_ms, w.import_record_id,
+       w.series_id, w.import_source, w.import_provenance_guard, w.import_origin_record_id,
+       ms.name AS media_server_name
+FROM watches w
+JOIN media_servers ms ON ms.id = w.media_server_id
+WHERE w.id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM media_server_exclusions e
+      WHERE e.media_server_id = w.media_server_id
+        AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
+          OR (e.kind = 'library' AND (e.external_id = w.library_id OR EXISTS (
+              SELECT 1 FROM library_items li WHERE li.media_server_id = w.media_server_id
+                AND li.item_id = w.item_id AND li.library_id = e.external_id))))
+  )
+`
+
+type GetPlaybackWatchRow struct {
+	ID                        string
+	MediaServerID             string
+	MediaUserID               string
+	Username                  string
+	DeviceID                  string
+	DeviceName                string
+	Client                    string
+	ServerSessionID           string
+	ItemID                    string
+	ItemName                  string
+	ItemType                  string
+	SeriesName                string
+	SeasonNumber              sql.NullInt32
+	EpisodeNumber             sql.NullInt32
+	PlayMethod                string
+	State                     string
+	StartedAt                 time.Time
+	LastSeenAt                time.Time
+	EndedAt                   sql.NullTime
+	ActiveSeconds             int64
+	LastPositionMs            int64
+	Source                    string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	LibraryID                 string
+	LibraryName               string
+	StreamContainer           sql.NullString
+	StreamVideoCodec          sql.NullString
+	StreamAudioCodec          sql.NullString
+	StreamBitrate             sql.NullInt64
+	StreamWidth               sql.NullInt32
+	StreamHeight              sql.NullInt32
+	StreamFramerateHundredths sql.NullInt32
+	StreamAudioChannels       sql.NullInt32
+	StreamIsVideoDirect       sql.NullBool
+	StreamIsAudioDirect       sql.NullBool
+	StreamTranscodeReasons    sql.NullString
+	RuntimeMs                 sql.NullInt64
+	ImportRecordID            sql.NullString
+	SeriesID                  sql.NullString
+	ImportSource              sql.NullString
+	ImportProvenanceGuard     sql.NullInt32
+	ImportOriginRecordID      sql.NullString
+	MediaServerName           string
+}
+
+func (q *Queries) GetPlaybackWatch(ctx context.Context, id string) (GetPlaybackWatchRow, error) {
+	row := q.db.QueryRowContext(ctx, getPlaybackWatch, id)
+	var i GetPlaybackWatchRow
+	err := row.Scan(
+		&i.ID,
+		&i.MediaServerID,
+		&i.MediaUserID,
+		&i.Username,
+		&i.DeviceID,
+		&i.DeviceName,
+		&i.Client,
+		&i.ServerSessionID,
+		&i.ItemID,
+		&i.ItemName,
+		&i.ItemType,
+		&i.SeriesName,
+		&i.SeasonNumber,
+		&i.EpisodeNumber,
+		&i.PlayMethod,
+		&i.State,
+		&i.StartedAt,
+		&i.LastSeenAt,
+		&i.EndedAt,
+		&i.ActiveSeconds,
+		&i.LastPositionMs,
+		&i.Source,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LibraryID,
+		&i.LibraryName,
+		&i.StreamContainer,
+		&i.StreamVideoCodec,
+		&i.StreamAudioCodec,
+		&i.StreamBitrate,
+		&i.StreamWidth,
+		&i.StreamHeight,
+		&i.StreamFramerateHundredths,
+		&i.StreamAudioChannels,
+		&i.StreamIsVideoDirect,
+		&i.StreamIsAudioDirect,
+		&i.StreamTranscodeReasons,
+		&i.RuntimeMs,
+		&i.ImportRecordID,
+		&i.SeriesID,
+		&i.ImportSource,
+		&i.ImportProvenanceGuard,
+		&i.ImportOriginRecordID,
+		&i.MediaServerName,
+	)
+	return i, err
+}
+
 const getPlaybackWatchID = `-- name: GetPlaybackWatchID :one
 SELECT w.id FROM watches w
 WHERE w.id = $1

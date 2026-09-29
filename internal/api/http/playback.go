@@ -136,12 +136,23 @@ func (s *Server) handlePlaybackHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handlePlaybackWatch(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.playbackWatchID(w, r)
+	if !ok {
+		return
+	}
+	watch, err := s.playbackReader.GetWatch(r.Context(), id)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
+	}
+	writeJSON(w, r, s.logger, http.StatusOK,
+		playbackWatchDTO(watch, core.NormalizeTime(s.clock.Now())))
+}
+
 func (s *Server) handlePlaybackPositions(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !core.ValidID(id) {
-		s.writeValidation(w, r, []httputil.FieldError{{
-			Field: "id", Code: "invalid", Message: "must be a valid UUID",
-		}})
+	id, ok := s.playbackWatchID(w, r)
+	if !ok {
 		return
 	}
 	positions, err := s.playbackReader.ListWatchPositions(r.Context(), id)
@@ -154,6 +165,17 @@ func (s *Server) handlePlaybackPositions(w http.ResponseWriter, r *http.Request)
 		items = append(items, playbackPositionDTO(position))
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, playbackPositionsResponse{Items: items})
+}
+
+func (s *Server) playbackWatchID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.PathValue("id")
+	if core.ValidID(id) {
+		return id, true
+	}
+	s.writeValidation(w, r, []httputil.FieldError{{
+		Field: "id", Code: "invalid", Message: "must be a valid UUID",
+	}})
+	return "", false
 }
 
 func playbackListQuery(

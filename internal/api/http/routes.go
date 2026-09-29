@@ -86,6 +86,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/invite/{code}/accept", access: routePublic, sessions: true, authRequired: true, optionalAccount: true, handler: (*Server).handleAcceptInvite},
 	{method: http.MethodGet, path: "/api/v1/playback/now", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackNow},
 	{method: http.MethodGet, path: "/api/v1/playback/history", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackHistory},
+	{method: http.MethodGet, path: "/api/v1/playback/watches/{id}", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackWatch},
 	{method: http.MethodGet, path: "/api/v1/playback/watches/{id}/positions", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handlePlaybackPositions},
 	{method: http.MethodGet, path: "/api/v1/activity", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleActivity},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users/{media_user_id}/timeline", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleTimeline},

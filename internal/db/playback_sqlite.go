@@ -223,6 +223,26 @@ func (s *sqlitePlaybackStore) ListWatchPositions(
 	return positions, nil
 }
 
+func (s *sqlitePlaybackStore) GetWatch(
+	ctx context.Context, watchID string,
+) (core.PlaybackWatch, error) {
+	if !core.ValidID(watchID) {
+		return core.PlaybackWatch{}, fmt.Errorf("get playback watch: %w", core.ErrInvalidArgument)
+	}
+	row, err := s.q.GetPlaybackWatch(ctx, watchID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return core.PlaybackWatch{}, core.ErrNotFound
+	}
+	if err != nil {
+		return core.PlaybackWatch{}, playbackStoreError("get playback watch", err)
+	}
+	watch, err := sqlitePlaybackWatch(row)
+	if err != nil {
+		return core.PlaybackWatch{}, playbackStoreError("map playback watch", err)
+	}
+	return watch, nil
+}
+
 func (s *sqlitePlaybackStore) ListWatches(
 	ctx context.Context,
 	query core.PlaybackQuery,
@@ -647,6 +667,21 @@ func sqliteNowWatch(row sqlite.ListNowPlayingRow) (core.PlaybackWatch, error) {
 }
 
 func sqliteHistoryWatch(row sqlite.ListPlaybackHistoryRow) (core.PlaybackWatch, error) {
+	return sqliteStoredWatch(
+		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
+		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,
+		row.ItemID, row.ItemName, row.ItemType, row.SeriesID, row.SeriesName, row.LibraryID, row.LibraryName,
+		row.SeasonNumber, row.EpisodeNumber,
+		row.PlayMethod, row.State, row.StartedAt, row.LastSeenAt, row.EndedAt,
+		row.ActiveSeconds, row.LastPositionMs, row.RuntimeMs, row.Source, row.CreatedAt, row.UpdatedAt,
+		row.ImportSource, row.ImportRecordID, row.ImportOriginRecordID,
+		sqliteStream(row.StreamContainer, row.StreamVideoCodec, row.StreamAudioCodec,
+			row.StreamBitrate, row.StreamWidth, row.StreamHeight, row.StreamFramerateHundredths,
+			row.StreamAudioChannels, row.StreamIsVideoDirect, row.StreamIsAudioDirect, row.StreamTranscodeReasons),
+	)
+}
+
+func sqlitePlaybackWatch(row sqlite.GetPlaybackWatchRow) (core.PlaybackWatch, error) {
 	return sqliteStoredWatch(
 		row.ID, row.MediaServerID, row.MediaServerName, row.MediaUserID, row.Username,
 		row.DeviceID, row.DeviceName, row.Client, row.ServerSessionID,

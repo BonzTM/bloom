@@ -483,6 +483,12 @@ type blockingExportPlaybackReader struct {
 	deadlineSeen bool
 }
 
+func (*blockingExportPlaybackReader) GetWatch(
+	context.Context, string,
+) (core.PlaybackWatch, error) {
+	return core.PlaybackWatch{}, core.ErrNotFound
+}
+
 func (r *blockingExportPlaybackReader) ListWatches(
 	ctx context.Context, _ core.PlaybackQuery,
 ) ([]core.PlaybackWatch, error) {

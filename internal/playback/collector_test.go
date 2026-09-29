@@ -64,6 +64,12 @@ func (s *memoryPlaybackStore) SaveWatches(ctx context.Context, mutations []core.
 	return nil
 }
 
+func (*memoryPlaybackStore) GetWatch(
+	_ context.Context, _ string,
+) (core.PlaybackWatch, error) {
+	return core.PlaybackWatch{}, core.ErrNotFound
+}
+
 func (s *memoryPlaybackStore) ListWatches(
 	ctx context.Context,
 	query core.PlaybackQuery,

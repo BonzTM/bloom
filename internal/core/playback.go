@@ -276,6 +276,7 @@ type PlaybackQuery struct {
 type PlaybackStore interface {
 	LoadOpenWatches(ctx context.Context, mediaServerID string) ([]PlaybackWatch, error)
 	SaveWatches(ctx context.Context, mutations []PlaybackMutation) error
+	GetWatch(ctx context.Context, watchID string) (PlaybackWatch, error)
 	ListWatches(ctx context.Context, query PlaybackQuery) ([]PlaybackWatch, error)
 	ListWatchPositions(ctx context.Context, watchID string) ([]PlaybackPosition, error)
 }

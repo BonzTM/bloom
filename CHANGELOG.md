@@ -45,6 +45,9 @@ contracts) gets an entry here.
 
 ### Added
 
+- `GET /api/v1/playback/watches/{id}`, guarded by `stats.read.all`, returns one
+  visible open or finished watch and conceals excluded users and libraries as
+  `404 not_found`.
 - An Activity page for administrators with `stats.read.all`: every watch
   across servers and people, newest first, filtered by title, server,
   delivery, source, and day, with each person linked to their statistics.
