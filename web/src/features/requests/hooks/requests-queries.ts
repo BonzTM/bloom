@@ -246,13 +246,14 @@ export function useRegisterDownloadManager(accountId: string) {
       return api.registerManager(input);
     },
     gcTime: 0,
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: requestsKeys.managers(accountId),
-      }),
+    // The list is refreshed whichever way it ends: a probe that outlives
+    // the browser's wait still registers the instance on the server.
     onSettled: () => {
       pending.current = null;
       inFlight.current = false;
+      void queryClient.invalidateQueries({
+        queryKey: requestsKeys.managers(accountId),
+      });
     },
   });
   const { mutate } = mutation;
