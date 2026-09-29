@@ -54,6 +54,7 @@ type PromMetrics struct {
 	metadataRequests           *prometheus.CounterVec
 	metadataSeconds            *prometheus.HistogramVec
 	metadataRetries            *prometheus.CounterVec
+	metadataItemsSkipped       *prometheus.CounterVec
 	mediaRequests              *prometheus.CounterVec
 	downloadManagerRequests    *prometheus.CounterVec
 	downloadManagerSeconds     *prometheus.HistogramVec
@@ -165,6 +166,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		metadataRequests:           requestCollectors.metadataRequests,
 		metadataSeconds:            requestCollectors.metadataSeconds,
 		metadataRetries:            requestCollectors.metadataRetries,
+		metadataItemsSkipped:       requestCollectors.metadataItemsSkipped,
 		mediaRequests:              requestCollectors.mediaRequests,
 		downloadManagerRequests:    downloadCollectors.requests,
 		downloadManagerSeconds:     downloadCollectors.seconds,
@@ -205,10 +207,11 @@ func newDownloadManagerCollectors(namespace string) downloadManagerCollectors {
 }
 
 type requestCollectors struct {
-	metadataRequests *prometheus.CounterVec
-	metadataSeconds  *prometheus.HistogramVec
-	metadataRetries  *prometheus.CounterVec
-	mediaRequests    *prometheus.CounterVec
+	metadataRequests     *prometheus.CounterVec
+	metadataSeconds      *prometheus.HistogramVec
+	metadataRetries      *prometheus.CounterVec
+	metadataItemsSkipped *prometheus.CounterVec
+	mediaRequests        *prometheus.CounterVec
 }
 
 func newRequestCollectors(namespace string) requestCollectors {
@@ -226,6 +229,10 @@ func newRequestCollectors(namespace string) requestCollectors {
 			Namespace: namespace, Name: "metadata_retries_total",
 			Help: "Total outbound metadata retries by provider, operation, and outcome.",
 		}, metadataLabels),
+		metadataItemsSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace, Name: "metadata_items_skipped_total",
+			Help: "Total malformed metadata items skipped by provider and operation.",
+		}, []string{"provider", "operation"}),
 		mediaRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace, Name: "media_requests_total",
 			Help: "Total media request lifecycle outcomes by kind and outcome.",
@@ -402,6 +409,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.metadataRequests,
 		m.metadataSeconds,
 		m.metadataRetries,
+		m.metadataItemsSkipped,
 		m.mediaRequests,
 		m.downloadManagerRequests,
 		m.downloadManagerSeconds,
@@ -514,6 +522,13 @@ func (m *PromMetrics) ObserveMetadataRequest(provider, operation, outcome string
 // ObserveMetadataRetry records one metadata-provider retry outcome.
 func (m *PromMetrics) ObserveMetadataRetry(provider, operation, outcome string) {
 	m.metadataRetries.WithLabelValues(provider, operation, outcome).Inc()
+}
+
+// AddMetadataItemsSkipped records malformed items omitted from a usable metadata response.
+func (m *PromMetrics) AddMetadataItemsSkipped(provider, operation string, count int) {
+	if count > 0 {
+		m.metadataItemsSkipped.WithLabelValues(provider, operation).Add(float64(count))
+	}
 }
 
 // IncMediaRequest records one media request lifecycle outcome.

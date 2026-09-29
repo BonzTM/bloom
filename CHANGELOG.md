@@ -39,6 +39,9 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- TMDB discovery and series pages tolerate additive fields, missing or null
+  optional metadata, fractional ratings, and malformed individual list items.
+  Missing dates now render with an unknown year instead of failing the row.
 - Registering a download manager through an address that a proxy or
   sign-on page fronts no longer reports a rejected API key; the probe
   recognises the HTML answer and says the address is not the instance.

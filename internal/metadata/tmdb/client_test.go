@@ -77,6 +77,97 @@ func TestClientDiscoverLists(t *testing.T) {
 	}
 }
 
+func TestClientAcceptsRealShapedResponses(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		body        string
+		operation   string
+		list        core.MetadataDiscoverList
+		wantYear    int
+		wantSkipped int
+	}{
+		{
+			name: "tv popular", path: "/3/tv/popular", body: realTVPopularFixture,
+			operation: "discover_series_popular", list: core.MetadataSeriesPopular, wantSkipped: 1,
+		},
+		{
+			name: "tv on the air", path: "/3/tv/on_the_air", body: realTVOnTheAirFixture,
+			operation: "discover_series_upcoming", list: core.MetadataSeriesUpcoming,
+		},
+		{
+			name: "movie upcoming", path: "/3/movie/upcoming", body: realMovieUpcomingFixture,
+			operation: "discover_movies_upcoming", list: core.MetadataMoviesUpcoming, wantSkipped: 1,
+		},
+		{
+			name: "tv details", path: "/3/tv/108978", body: realTVDetailsFixture,
+			operation: "series", wantYear: 2022, wantSkipped: 1,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			metrics := &metadataMetricsRecorder{}
+			client := newFixtureClient(t, testCase.path, testCase.body, metrics)
+			assertRealShapedResponse(t, client, testCase.list, testCase.wantYear)
+			if got := metrics.skipped[testCase.operation]; got != testCase.wantSkipped {
+				t.Fatalf("skipped %s = %d, want %d", testCase.operation, got, testCase.wantSkipped)
+			}
+		})
+	}
+}
+
+func assertRealShapedResponse(t *testing.T, client *Client, list core.MetadataDiscoverList, wantYear int) {
+	t.Helper()
+	if list.Valid() {
+		page, err := client.Discover(t.Context(), core.MetadataDiscover{List: list, Page: 1})
+		if err != nil || len(page.Items) != 1 || page.Items[0].Year != wantYear || page.Items[0].PosterPath != "" {
+			t.Fatalf("Discover(%s) = %+v, %v", list, page, err)
+		}
+		return
+	}
+	series, err := client.Series(t.Context(), "108978", false)
+	if err != nil || series.Year != wantYear || len(series.Seasons) != 1 || series.Seasons[0].AirDate != nil {
+		t.Fatalf("Series = %+v, %v", series, err)
+	}
+}
+
+func newFixtureClient(t *testing.T, path, body string, metrics Metrics) *Client {
+	t.Helper()
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != path {
+			t.Errorf("path = %q, want %q", request.URL.Path, path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(body)), Request: request,
+		}, nil
+	})
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC))
+	client, err := New(testReadAccessToken, Dependencies{
+		BaseURL: "https://tmdb.test", BaseTransport: transport, Clock: clock, Metrics: metrics,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(client.CloseIdleConnections)
+	return client
+}
+
+type metadataMetricsRecorder struct {
+	skipped map[string]int
+}
+
+func (*metadataMetricsRecorder) ObserveMetadataRequest(string, string, string, float64) {}
+
+func (*metadataMetricsRecorder) ObserveMetadataRetry(string, string, string) {}
+
+func (m *metadataMetricsRecorder) AddMetadataItemsSkipped(_, operation string, count int) {
+	if m.skipped == nil {
+		m.skipped = make(map[string]int)
+	}
+	m.skipped[operation] += count
+}
+
 func TestClientGenres(t *testing.T) {
 	client := newDiscoveryTestClient(t)
 	for _, testCase := range []struct {
@@ -104,7 +195,7 @@ func TestClientRejectsInvalidDiscoverResponses(t *testing.T) {
 	input := core.MetadataDiscover{List: core.MetadataMoviesPopular, Page: 2}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := decodeDiscoverPage([]byte(testCase.body), input)
+			_, _, err := decodeDiscoverPage([]byte(testCase.body), input)
 			if !errors.Is(err, core.ErrMetadataMalformed) {
 				t.Fatalf("decodeDiscoverPage error = %v, want %v", err, core.ErrMetadataMalformed)
 			}
@@ -262,6 +353,16 @@ const (
 		`{"id":13,"media_type":"person","name":"Ignored"}]}`
 	discoverMovieFixture  = `{"page":2,"total_pages":50,"results":[{"id":11,"title":"Film","release_date":"2024-01-02","backdrop_path":"/backdrop.jpg"}]}`
 	discoverSeriesFixture = `{"page":2,"total_pages":50,"results":[{"id":12,"name":"Show","first_air_date":"2023-04-05","backdrop_path":"/backdrop.jpg"}]}`
+	realTVPopularFixture  = `{"page":1,"results":[` +
+		`{"adult":false,"backdrop_path":null,"first_air_date":"","genre_ids":[18],"id":108978,"name":"Reacher","overview":"Plot","poster_path":null,"vote_average":8.1,"unexpected":"ignored"},` +
+		`{"id":"not-an-integer","name":"Bad Item"}],"total_pages":4,"total_results":61,"unexpected_top":{"ignored":true}}`
+	realTVOnTheAirFixture    = `{"page":1,"results":[{"backdrop_path":null,"id":12,"name":"Undated Show","overview":"Plot","poster_path":null,"vote_average":7.125}],"total_pages":1,"total_results":1,"new_field":true}`
+	realMovieUpcomingFixture = `{"dates":{"maximum":"2026-11-04","minimum":"2026-10-01"},"page":1,"results":[` +
+		`{"adult":false,"backdrop_path":null,"id":713704,"original_language":"en","original_title":"Future Film","overview":"Plot","poster_path":null,"release_date":"","title":"Future Film","video":false,"vote_average":6.75},` +
+		`{"release_date":"2026-10-20","title":"Missing ID"}],"total_pages":2,"total_results":21}`
+	realTVDetailsFixture = `{"adult":false,"backdrop_path":null,"episode_run_time":[],"first_air_date":"2022-02-03","id":108978,"last_air_date":null,"last_episode_to_air":null,"name":"Reacher","next_episode_to_air":null,"overview":"Plot","poster_path":null,"seasons":[` +
+		`{"air_date":null,"episode_count":8,"id":157065,"name":"Season 1","season_number":1,"vote_average":7.8},` +
+		`{"air_date":null,"episode_count":2,"id":157066,"name":"","season_number":2,"vote_average":0}],"unknown_detail":"ignored"}`
 )
 
 func TestClientProbeClassifiesUnauthorized(t *testing.T) {
