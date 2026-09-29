@@ -1,10 +1,16 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import type { HistoryFilter } from "../api/playback-api.js";
 import type {
   ActivityFilter,
   ActivityPage,
   HistoryPage,
   TimelinePage,
+  Watch,
 } from "../api/playback-schemas.js";
 import { usePlaybackApi } from "../playback-context.js";
 
@@ -124,4 +130,45 @@ function nextActivityCursor(lastPage: ActivityPage): string | undefined {
 
 function nextTimelineCursor(lastPage: TimelinePage): string | undefined {
   return lastPage.next_cursor === "" ? undefined : lastPage.next_cursor;
+}
+
+// The watch a person arrived from, if any list this account has loaded
+// (playing now, history, activity) still holds it. Nothing is fetched: a
+// watch has no read of its own yet, so a cold deep link shows the page
+// without the card.
+export function useKnownWatch(
+  accountId: string,
+  id: string,
+): Watch | undefined {
+  const queryClient = useQueryClient();
+  const entries = queryClient.getQueriesData({
+    queryKey: ["playback"],
+  });
+  for (const [key, data] of entries) {
+    if (key[2] !== accountId) {
+      continue;
+    }
+    const found = watchesIn(data).find((watch) => watch.id === id);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function watchesIn(data: unknown): readonly Watch[] {
+  if (data === null || typeof data !== "object") {
+    return [];
+  }
+  if ("pages" in data) {
+    const pages = (data as InfiniteData<{ items: readonly Watch[] }>).pages;
+    return pages.flatMap((page) => page.items);
+  }
+  if ("items" in data && Array.isArray(data.items)) {
+    const items = (data as { items: readonly Watch[] }).items;
+    return items.filter(
+      (item) => typeof item.id === "string" && "started_at" in item,
+    );
+  }
+  return [];
 }

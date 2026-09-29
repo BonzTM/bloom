@@ -11,6 +11,12 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Playing-now cards show who, what, how far, and one line of where and how;
+  the stream details moved to the watch's own page. A watch's page opens
+  as a card with artwork, the person, and the facts that matter, followed
+  by what happened; the raw sample table is gone.
+- Select menus follow the page's colour scheme, so their option lists no
+  longer draw light text on a light background.
 - Pages are one continuous column: a section is a heading and its content
   separated by rhythm and a hairline, not a bordered box. Only objects carry
   a surface: forms, tables, tiles, posters, and stat cards. The home

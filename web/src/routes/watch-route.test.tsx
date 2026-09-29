@@ -4,22 +4,30 @@ import userEvent from "@testing-library/user-event";
 import { signInMockSession, WATCH_WITH_SERIES } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
 
-it("shows the stream on the playing-now card and links to the series", async () => {
+it("opens a watch from its card and shows it with artwork and facts", async () => {
   const user = userEvent.setup();
   signInMockSession();
   renderApp("/admin/playback");
   const cards = await screen.findByRole("list", { name: "Playing now" });
   const alice = within(cards).getByRole("article", { name: "alice" });
-  expect(alice).toHaveTextContent("1080p · h264/aac · 8.2 Mbit/s");
+  // The card keeps to who, what, how far, and where; the stream lives on
+  // the watch's own page.
+  expect(alice).not.toHaveTextContent("h264");
+  expect(alice).toHaveTextContent("Direct play");
 
   await user.click(
     within(alice).getByRole("link", { name: /^Details of Fringe S01E01/ }),
   );
 
   expect(
-    await screen.findByRole("heading", { name: "Watch", level: 1 }),
+    await screen.findByRole("heading", { name: /^Fringe S01E01/, level: 1 }),
   ).toBeVisible();
-  expect(document.title).toBe("Watch | Bloom");
+  expect(document.title).toMatch(/^Fringe S01E01.*\| Bloom$/);
+  // The stream in play comes from the newest sample once it has loaded.
+  await screen.findByText("720p · h264/aac · 4.0 Mbit/s");
+  expect(screen.getByText("Watched").nextElementSibling).toHaveTextContent(
+    "12 min 34 s",
+  );
   const timeline = await screen.findByRole("list", { name: "Watch timeline" });
   const events = within(timeline).getAllByRole("listitem");
   expect(events[0]).toHaveTextContent("Started at 5:00");
@@ -30,15 +38,21 @@ it("shows the stream on the playing-now card and links to the series", async () 
     "because ContainerNotSupported, AudioCodecNotSupported",
   );
   expect(events.at(-1)).toHaveTextContent("Last seen at 12:34");
-  await user.click(screen.getByText(/^All samples \(2\)$/));
-  const samples = screen.getByRole("table", { name: "Samples, newest first" });
-  const rows = within(samples).getAllByRole("row").slice(1);
-  expect(rows).toHaveLength(2);
-  expect(rows[0]).toHaveTextContent("Transcode");
-  expect(rows[1]).toHaveTextContent("Direct play");
+  expect(screen.queryByText(/All samples/)).not.toBeInTheDocument();
   expect(
     screen.getByRole("link", { name: "Back to playback" }),
   ).toHaveAttribute("href", "/admin/playback");
+});
+
+it("shows the timeline alone on a cold deep link", async () => {
+  signInMockSession();
+  renderApp(`/admin/playback/watches/${WATCH_WITH_SERIES}`);
+  expect(
+    await screen.findByRole("heading", { name: "Watch", level: 1 }),
+  ).toBeVisible();
+  expect(
+    await screen.findByRole("list", { name: "Watch timeline" }),
+  ).toBeVisible();
 });
 
 it("shows not found for an unknown watch or a bad id", async () => {

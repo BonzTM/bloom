@@ -44,7 +44,6 @@ it("shows who is watching what, where, and how far along", async () => {
   const cards = await openPlayback();
   const alice = within(cards).getByRole("article", { name: "alice" });
   expect(alice).toHaveTextContent("Fringe S01E01 · Pilot");
-  expect(alice).toHaveTextContent("Episode");
   expect(alice).toHaveTextContent("Living room TV (Jellyfin Web) · Cabin");
   expect(alice).toHaveTextContent("12:34 of 45:00");
   expect(
@@ -55,7 +54,7 @@ it("shows who is watching what, where, and how far along", async () => {
   expect(alice).toHaveTextContent("Direct play · watched 12 min 34 s");
   const bob = within(cards).getByRole("article", { name: "bob" });
   expect(bob).toHaveTextContent("Heat");
-  expect(bob).toHaveTextContent("1:30:00 of 2:50:00 paused");
+  expect(bob).toHaveTextContent("1:30:00 of 2:50:00 Paused");
   expect(bob).toHaveTextContent("Transcode");
   expect(bob).toHaveTextContent("1 h 0 min");
 });

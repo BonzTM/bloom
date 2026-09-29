@@ -429,7 +429,18 @@ main {
   padding: 0.125rem 0;
 }
 
-.global-search input::placeholder {
+.global-search option {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: light) {
+  select {
+    color-scheme: light;
+  }
+}
+
+input::placeholder {
   color: var(--text-faint);
 }
 
@@ -816,7 +827,11 @@ textarea {
   width: 100%;
 }
 
+/* The popup list of a select is drawn by the browser: it follows the
+   element's own colour scheme, so the scheme is pinned per palette and the
+   options are coloured for browsers that let a page style them. */
 select {
+  color-scheme: dark;
   appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237b8394' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
   background-position: right 0.6rem center;
@@ -1382,41 +1397,84 @@ button:disabled {
 .session-cards {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+/* A session: artwork on the left, a short column of facts on the right.
+   Episodes carry wide artwork, films a poster. */
 .session-card {
-  background: var(--surface-strong);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: 7rem minmax(0, 1fr);
+  grid-template-columns: 6rem minmax(0, 1fr);
+  overflow: hidden;
   padding: var(--space-4);
+  transition:
+    border-color var(--motion) ease,
+    transform var(--motion) ease;
 }
 
-.session-card .item-image-wide {
+.session-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
+
+.session-card-wide {
+  grid-template-columns: 9rem minmax(0, 1fr);
+}
+
+.session-card-art {
   align-self: start;
+  display: block;
+}
+
+.session-card-art .item-image {
+  border-radius: var(--radius-md);
 }
 
 .session-card-body {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .session-card-user {
-  font-size: 1rem;
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.875rem;
+  font-weight: 600;
+  gap: var(--space-2);
   margin: 0;
 }
 
+.avatar-small {
+  font-size: 0.75rem;
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
 .session-card-title {
-  font-weight: 600;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.3;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.session-card-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.session-card-title a:hover {
+  text-decoration: underline;
 }
 
 .session-card-meta {
@@ -1432,38 +1490,87 @@ button:disabled {
   margin: 0;
 }
 
-progress {
-  appearance: none;
-  background: var(--bg-hover);
-  border: 0;
-  border-radius: var(--radius-pill);
-  display: block;
-  height: 0.375rem;
-  overflow: hidden;
-  width: 100%;
-}
-
-progress::-webkit-progress-bar {
-  background: transparent;
-}
-
-progress::-webkit-progress-value {
-  background: var(--accent-gradient);
-  border-radius: var(--radius-pill);
-}
-
-progress::-moz-progress-bar {
-  background: var(--accent-gradient);
-  border-radius: var(--radius-pill);
-}
-
-.session-card progress {
-  accent-color: var(--accent);
+.session-card-position > span {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .session-card-link {
   font-size: 0.875rem;
+  font-weight: 600;
   justify-self: start;
+  text-decoration: none;
+}
+
+.session-card-link:hover {
+  text-decoration: underline;
+}
+
+/* The watch page's own card: the same shape at page scale. */
+.watch-hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  margin-bottom: var(--space-4);
+  padding: var(--space-6);
+}
+
+.watch-hero-wide {
+  grid-template-columns: minmax(12rem, 20rem) minmax(0, 1fr);
+}
+
+.watch-hero-art .item-image {
+  border-radius: var(--radius-md);
+}
+
+.watch-hero-body {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.watch-hero-body h1 {
+  margin: 0;
+}
+
+.watch-hero-person {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-weight: 600;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.watch-hero-when {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.watch-facts {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.watch-facts dd {
+  font-weight: 600;
+}
+
+@media (max-width: 40rem) {
+  .watch-hero,
+  .watch-hero-wide {
+    grid-template-columns: 1fr;
+  }
+
+  .watch-hero-art {
+    max-width: 14rem;
+  }
 }
 
 /* ---------- discover rows ---------- */
