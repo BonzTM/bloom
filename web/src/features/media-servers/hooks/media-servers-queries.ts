@@ -62,7 +62,9 @@ export function useRegisterMediaServer(accountId: string) {
       }
       return api.register(input);
     },
-    onSuccess: () => invalidateList(queryClient, accountId),
+    // Refreshed whichever way it ends: a probe that outlives the browser's
+    // wait still registers the server.
+    onSettled: () => invalidateList(queryClient, accountId),
   });
   const { mutate } = mutation;
   // The guard is synchronous: a second call while one is in flight is dropped

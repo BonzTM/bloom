@@ -1,4 +1,7 @@
-import type { ApiClient } from "../../../lib/api/http-client.js";
+import {
+  PROBE_TIMEOUT_MS,
+  type ApiClient,
+} from "../../../lib/api/http-client.js";
 import {
   channelIdSchema,
   channelRequestSchema,
@@ -59,6 +62,7 @@ export class NotificationsApi {
     return this.#client
       .requestJson(`${CHANNELS_PATH}/${segment(id)}/test`, testResponseSchema, {
         method: "POST",
+        timeoutMs: PROBE_TIMEOUT_MS,
       })
       .then(() => undefined);
   }
