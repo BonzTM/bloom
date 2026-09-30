@@ -27,6 +27,7 @@ export const notificationEventTypeSchema = z.enum([
   "dispatched",
   "available",
   "failed",
+  "playback.session_started",
 ]);
 
 export type NotificationEventType = z.output<
@@ -51,7 +52,7 @@ const noControls = (value: string) => !/[\p{Cc}]/u.test(value);
 export const subscriptionsSchema = z
   .array(notificationEventTypeSchema)
   .min(1)
-  .max(6)
+  .max(notificationEventTypeSchema.options.length)
   .refine((items) => new Set(items).size === items.length);
 
 export const credentialPresenceSchema = z.object({
@@ -169,7 +170,9 @@ export type ChannelRequest = z.output<typeof channelRequestSchema>;
 export const deliverySchema = z.object({
   id: z.uuid(),
   event_type: notificationEventTypeSchema,
-  request_id: z.uuid(),
+  // A request event carries the request, a playback event the watch.
+  request_id: z.uuid().optional(),
+  watch_id: z.uuid().optional(),
   status: z.enum(["pending", "sent", "failed"]),
   attempts: z.number().int().min(0).max(8),
   last_error: z.string().max(512),
@@ -202,3 +205,30 @@ export const notificationLimits = {
   maxTemplateBytes: MAX_TEMPLATE_BYTES,
   maxRecipients: MAX_RECIPIENTS,
 } as const;
+
+// ---- the account's own preferences: one switch per event kind.
+
+export const notificationPreferenceSchema = z.object({
+  event_type: notificationEventTypeSchema,
+  enabled: z.boolean(),
+});
+
+export type NotificationPreference = z.output<
+  typeof notificationPreferenceSchema
+>;
+
+// The complete matrix: every supported event exactly once.
+export const notificationPreferencesSchema = z
+  .array(notificationPreferenceSchema)
+  .length(notificationEventTypeSchema.options.length)
+  .refine(
+    (items) =>
+      new Set(items.map((item) => item.event_type)).size === items.length,
+    { message: "each event type once" },
+  );
+
+export type NotificationPreferences = z.output<
+  typeof notificationPreferencesSchema
+>;
+
+export const titleProviderIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);

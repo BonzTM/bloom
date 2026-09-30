@@ -7,20 +7,58 @@ import {
   deliveriesCursorSchema,
   deliveriesPageSchema,
   notificationChannelSchema,
+  notificationPreferencesSchema,
   testResponseSchema,
+  titleProviderIdSchema,
   type ChannelRequest,
   type ChannelsPage,
   type DeliveriesPage,
   type NotificationChannel,
+  type NotificationPreferences,
 } from "./notification-schemas.js";
 
 const CHANNELS_PATH = "api/v1/notification-channels";
+const PREFERENCES_PATH = "api/v1/me/notification-preferences";
+const TITLES_PATH = "api/v1/titles";
 
 export class NotificationsApi {
   readonly #client: ApiClient;
 
   constructor(client: ApiClient) {
     this.#client = client;
+  }
+
+  // ---- the account's own preferences and title subscriptions
+
+  preferences(signal: AbortSignal): Promise<NotificationPreferences> {
+    return this.#client.requestJson(
+      PREFERENCES_PATH,
+      notificationPreferencesSchema,
+      { signal },
+    );
+  }
+
+  // Replaces the whole matrix; the server answers with what it stored.
+  replacePreferences(
+    input: NotificationPreferences,
+  ): Promise<NotificationPreferences> {
+    return this.#client.requestJson(
+      PREFERENCES_PATH,
+      notificationPreferencesSchema,
+      { method: "PUT", body: notificationPreferencesSchema.parse(input) },
+    );
+  }
+
+  subscribe(providerId: string): Promise<void> {
+    return this.#client.requestEmpty(subscriptionPath(providerId), {
+      method: "POST",
+    });
+  }
+
+  unsubscribe(providerId: string): Promise<void> {
+    return this.#client.requestEmpty(subscriptionPath(providerId), {
+      method: "DELETE",
+    });
   }
 
   list(cursor: string | undefined, signal: AbortSignal): Promise<ChannelsPage> {
@@ -94,4 +132,8 @@ function paged(
 
 function segment(id: string): string {
   return encodeURIComponent(channelIdSchema.parse(id));
+}
+
+function subscriptionPath(providerId: string): string {
+  return `${TITLES_PATH}/tmdb/${encodeURIComponent(titleProviderIdSchema.parse(providerId))}/subscription`;
 }

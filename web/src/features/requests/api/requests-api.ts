@@ -19,12 +19,13 @@ import {
   metadataDiscoverResponseSchema,
   metadataSearchResponseSchema,
   metadataSeriesSchema,
-  metadataTitleSchema,
+  metadataTitleDetailSchema,
   providerIdSchema,
   searchQuerySchema,
   type CreateMediaRequest,
   type MetadataSeries,
   type MetadataTitle,
+  type MetadataTitleDetail,
   type DiscoverList,
   type MetadataDiscoverResponse,
 } from "./metadata-schemas.js";
@@ -201,10 +202,10 @@ export class RequestsApi {
     );
   }
 
-  movie(providerId: string, signal: AbortSignal): Promise<MetadataTitle> {
+  movie(providerId: string, signal: AbortSignal): Promise<MetadataTitleDetail> {
     return this.#client.requestJson(
       `${METADATA_PATH}/movies/${providerIdSchema.parse(providerId)}`,
-      metadataTitleSchema,
+      metadataTitleDetailSchema,
       { signal },
     );
   }

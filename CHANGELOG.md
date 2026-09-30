@@ -51,6 +51,10 @@ contracts) gets an entry here.
 - `GET /api/v1/playback/watches/{id}`, guarded by `stats.read.all`, returns one
   visible open or finished watch and conceals excluded users and libraries as
   `404 not_found`.
+- A My notifications page for every signed-in account: one switch per
+  event kind, saved as a whole; and a Notify me control on each title page
+  that asks to be told when the title becomes available.
+
 - An Activity page for administrators with `stats.read.all`: every watch
   across servers and people, newest first, filtered by title, server,
   delivery, source, and day, with each person linked to their statistics.

@@ -1152,6 +1152,28 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* Notifications: the notify-me control on a title and detailed choices. */
+.notify-me {
+  margin-top: var(--space-4);
+}
+
+.notify-me [role="status"],
+.notify-me [role="alert"] {
+  margin-top: var(--space-2);
+}
+
+.choice-detailed {
+  align-items: flex-start;
+}
+
+.choice-detailed > input {
+  margin-top: 0.3rem;
+}
+
+.preferences-form {
+  max-width: 34rem;
+}
+
 /* ---------- watch timeline ---------- */
 
 .timeline {
