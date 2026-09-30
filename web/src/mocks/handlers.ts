@@ -3537,6 +3537,27 @@ export const handlers = [
   ...requestHandlers,
   ...roleQuotaHandlers,
   http.get(
+    "*/api/v1/playback/watches/:id",
+    jsonApi(({ params }) => {
+      const denied = playbackDenial();
+      if (denied !== undefined) {
+        return denied;
+      }
+      if (
+        typeof params.id !== "string" ||
+        !z.uuid().safeParse(params.id).success
+      ) {
+        return envelope(422, "validation_failed", "invalid id");
+      }
+      const watch = [...mockNowPlaying, ...mockPlaybackHistory].find(
+        (candidate) => candidate.id === params.id,
+      );
+      return watch === undefined
+        ? envelope(404, "not_found", "watch not found")
+        : HttpResponse.json(watch);
+    }),
+  ),
+  http.get(
     "*/api/v1/playback/watches/:id/positions",
     jsonApi(({ params }) => {
       const denied = playbackDenial();

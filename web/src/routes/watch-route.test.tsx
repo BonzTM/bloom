@@ -44,12 +44,15 @@ it("opens a watch from its card and shows it with artwork and facts", async () =
   ).toHaveAttribute("href", "/admin/playback");
 });
 
-it("shows the timeline alone on a cold deep link", async () => {
+it("reads the watch itself on a cold deep link", async () => {
   signInMockSession();
   renderApp(`/admin/playback/watches/${WATCH_WITH_SERIES}`);
   expect(
-    await screen.findByRole("heading", { name: "Watch", level: 1 }),
+    await screen.findByRole("heading", { name: /^Fringe S01E01/, level: 1 }),
   ).toBeVisible();
+  expect(screen.getByText("Server").nextElementSibling).toHaveTextContent(
+    "Cabin",
+  );
   expect(
     await screen.findByRole("list", { name: "Watch timeline" }),
   ).toBeVisible();
