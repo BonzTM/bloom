@@ -23,6 +23,7 @@ import {
 import { watchTimeline } from "../features/playback/components/watch-timeline.js";
 import {
   useKnownWatch,
+  useWatch,
   useWatchPositions,
 } from "../features/playback/hooks/playback-queries.js";
 import { accessDenial, ApiError } from "../lib/api/errors.js";
@@ -31,8 +32,8 @@ import { NotFoundRoute } from "./not-found-route.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
 
 // One watch: what was watched, by whom, how it was delivered, and what
-// happened along the way. The watch itself comes from the list the person
-// arrived from; the sample series is read on its own.
+// happened along the way. The watch is read on its own; until it arrives
+// the copy from the list the person came from stands in.
 export default function WatchRoute(): ReactNode {
   const { id = "" } = useParams();
   const session = useSession();
@@ -50,15 +51,20 @@ function WatchPage({
   accountId,
   id,
 }: Readonly<{ accountId: string; id: string }>): ReactNode {
-  const watch = useKnownWatch(accountId, id);
+  const known = useKnownWatch(accountId, id);
+  const fetched = useWatch(accountId, id);
   const positions = useWatchPositions(accountId, id);
+  const watch = fetched.data ?? known;
   usePageTitle(pageTitle(watch === undefined ? "Watch" : itemTitle(watch)));
-  const denial = accessDenial(positions.error);
-  useSessionRecheck(denial !== undefined, positions.errorUpdatedAt);
+  const denial = accessDenial(positions.error) ?? accessDenial(fetched.error);
+  useSessionRecheck(
+    denial !== undefined,
+    Math.max(positions.errorUpdatedAt, fetched.errorUpdatedAt),
+  );
   if (denial === "forbidden") {
     return <AccessDeniedRoute />;
   }
-  if (positions.error instanceof ApiError && positions.error.status === 404) {
+  if (isNotFound(positions.error) || isNotFound(fetched.error)) {
     return <NotFoundRoute />;
   }
   return (
@@ -172,6 +178,10 @@ function WatchHero({
       </div>
     </header>
   );
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
 }
 
 function positionLabel(watch: Watch): string {

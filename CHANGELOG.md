@@ -11,6 +11,9 @@ contracts) gets an entry here.
 
 ### Changed
 
+- The watch page reads the watch itself, so a shared or bookmarked link
+  shows the card with artwork and facts, not only what happened.
+
 - Playing-now cards show who, what, how far, and one line of where and how;
   the stream details moved to the watch's own page. A watch's page opens
   as a card with artwork, the person, and the facts that matter, followed

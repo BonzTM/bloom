@@ -24,6 +24,8 @@ export const playbackKeys = {
     ["playback", "history", accountId, mediaServerId ?? ""] as const,
   positions: (accountId: string, watchId: string) =>
     ["playback", "positions", accountId, watchId] as const,
+  watch: (accountId: string, watchId: string) =>
+    ["playback", "watch", accountId, watchId] as const,
   activity: (accountId: string, filter: ActivityFilter) =>
     ["playback", "activity", accountId, filter] as const,
   timeline: (
@@ -47,6 +49,16 @@ export const playbackKeys = {
 export const NOW_PLAYING_REFRESH_MS = 10_000;
 
 const firstPage: string | undefined = undefined;
+
+export function useWatch(accountId: string, watchId: string) {
+  const api = usePlaybackApi();
+  return useQuery({
+    queryKey: playbackKeys.watch(accountId, watchId),
+    queryFn: ({ signal }) => api.watch(watchId, signal),
+    staleTime: 30_000,
+    meta: { sessionScoped: true },
+  });
+}
 
 export function useWatchPositions(accountId: string, watchId: string) {
   const api = usePlaybackApi();
@@ -133,9 +145,9 @@ function nextTimelineCursor(lastPage: TimelinePage): string | undefined {
 }
 
 // The watch a person arrived from, if any list this account has loaded
-// (playing now, history, activity) still holds it. Nothing is fetched: a
-// watch has no read of its own yet, so a cold deep link shows the page
-// without the card.
+// (playing now, history, activity) still holds it. Nothing is fetched here;
+// the page shows it while the watch's own read is on its way, or when that
+// read is not available.
 export function useKnownWatch(
   accountId: string,
   id: string,
