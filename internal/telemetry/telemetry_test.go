@@ -116,6 +116,9 @@ func populatedPromMetrics(t *testing.T) *PromMetrics {
 	m.IncPlaybackRefreshFailure()
 	m.IncLibraryResolution("resolved")
 	m.ObserveStatsQuery("overview", "success", 0.04)
+	m.ObserveMetadataRequest("tmdb", "series", "success", 0.05)
+	m.ObserveMetadataRetry("tmdb", "series", "retry")
+	m.AddMetadataItemsSkipped("tmdb", "series", 2)
 	m.SetOpenWatches("jellyfin", "server-1", 2)
 	m.SetOpenWatches("jellyfin", "server-2", 3)
 	m.IncWatchesClosed("jellyfin", "timeout")
@@ -160,6 +163,8 @@ func assertPromMetricNames(t *testing.T, metrics *PromMetrics) {
 		"bloomtest_library_catalog_items_upserted_total", "bloomtest_library_catalog_items_archived_total",
 		"bloomtest_library_catalog_syncs_running",
 		"bloomtest_stats_query_duration_seconds",
+		"bloomtest_metadata_requests_total", "bloomtest_metadata_request_duration_seconds",
+		"bloomtest_metadata_retries_total", "bloomtest_metadata_items_skipped_total",
 	} {
 		if !names[want] {
 			t.Errorf("metric %q not exposed", want)
@@ -238,9 +243,29 @@ func assertPromMetricLabels(t *testing.T, metrics *PromMetrics) {
 	}
 	assertRetryMetricOutcomes(t, metrics.Registry())
 	assertLibraryResolutionMetric(t, metrics.Registry())
+	assertMetadataSkippedMetric(t, metrics.Registry())
 	if loginLabels["provider"] != "local" || loginLabels["outcome"] != "success" {
 		t.Errorf("login metric labels = %v", loginLabels)
 	}
+}
+
+func assertMetadataSkippedMetric(t *testing.T, gatherer prometheus.Gatherer) {
+	t.Helper()
+	families, err := gatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metadata skipped metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "bloomtest_metadata_items_skipped_total" {
+			continue
+		}
+		metric := family.GetMetric()[0]
+		if metric.GetCounter().GetValue() != 2 || len(metric.GetLabel()) != 2 {
+			t.Fatalf("metadata skipped metric = %+v", metric)
+		}
+		return
+	}
+	t.Fatal("metadata skipped metric family not gathered")
 }
 
 func assertLibraryResolutionMetric(t *testing.T, gatherer prometheus.Gatherer) {

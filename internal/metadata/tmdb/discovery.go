@@ -18,9 +18,9 @@ type providerResponse interface {
 }
 
 type rawDiscoverPage struct {
-	Page       *int                `json:"page"`
-	Results    *[]rawDiscoverTitle `json:"results"`
-	TotalPages *int                `json:"total_pages"`
+	Page       *int               `json:"page"`
+	Results    *[]json.RawMessage `json:"results"`
+	TotalPages *int               `json:"total_pages"`
 }
 
 type rawDiscoverTitle struct {
@@ -53,31 +53,36 @@ func (c *Client) Discover(ctx context.Context, input core.MetadataDiscover) (cor
 	defer cancel()
 	operation := "discover_" + string(input.List)
 	started := c.clock.Now()
-	response, err := c.callDiscover(ctx, input)
+	httpResponse, callErr := c.callDiscover(ctx, input) //nolint:bodyclose // readProviderResponse closes every returned body.
+	response, err := readProviderResponse(httpResponse, callErr)
 	status := responseStatus(response, err)
-	c.observe(operation, started, status, err)
 	if err != nil {
+		c.observe(operation, started, status, err)
 		return core.MetadataPage{}, classifyCallError(operation, err)
 	}
-	if err := validateDiscoveryStatus(operation, status); err != nil {
-		return core.MetadataPage{}, err
+	if statusErr := validateDiscoveryStatus(operation, status); statusErr != nil {
+		c.observe(operation, started, status, statusErr)
+		return core.MetadataPage{}, statusErr
 	}
-	return decodeDiscoverPage(response.GetBody(), input)
+	page, skipped, err := decodeDiscoverPage(response.GetBody(), input)
+	c.observe(operation, started, status, err)
+	c.observeSkipped(operation, skipped)
+	return page, err
 }
 
-func (c *Client) callDiscover(ctx context.Context, input core.MetadataDiscover) (providerResponse, error) {
+func (c *Client) callDiscover(ctx context.Context, input core.MetadataDiscover) (*http.Response, error) {
 	page := int32(input.Page) //nolint:gosec // ValidateMetadataDiscover bounds this value to 1..20.
 	switch input.List {
 	case core.MetadataTrending:
-		return c.api.TrendingAllWithResponse(ctx, tmdbapi.Week, nil, withPage(page))
+		return c.api.TrendingAll(ctx, tmdbapi.Week, nil, withPage(page))
 	case core.MetadataMoviesPopular:
-		return c.api.MoviePopularListWithResponse(ctx, &tmdbapi.MoviePopularListParams{Page: &page})
+		return c.api.MoviePopularList(ctx, &tmdbapi.MoviePopularListParams{Page: &page})
 	case core.MetadataSeriesPopular:
-		return c.api.TvSeriesPopularListWithResponse(ctx, &tmdbapi.TvSeriesPopularListParams{Page: &page})
+		return c.api.TvSeriesPopularList(ctx, &tmdbapi.TvSeriesPopularListParams{Page: &page})
 	case core.MetadataMoviesUpcoming:
-		return c.api.MovieUpcomingListWithResponse(ctx, &tmdbapi.MovieUpcomingListParams{Page: &page})
+		return c.api.MovieUpcomingList(ctx, &tmdbapi.MovieUpcomingListParams{Page: &page})
 	case core.MetadataSeriesUpcoming:
-		return c.api.TvSeriesOnTheAirListWithResponse(ctx, &tmdbapi.TvSeriesOnTheAirListParams{Page: &page})
+		return c.api.TvSeriesOnTheAirList(ctx, &tmdbapi.TvSeriesOnTheAirListParams{Page: &page})
 	default:
 		return nil, core.ErrInvalidArgument
 	}
@@ -92,22 +97,40 @@ func withPage(page int32) tmdbapi.RequestEditorFn {
 	}
 }
 
-func decodeDiscoverPage(body []byte, input core.MetadataDiscover) (core.MetadataPage, error) {
+func decodeDiscoverPage(body []byte, input core.MetadataDiscover) (core.MetadataPage, int, error) {
 	var raw rawDiscoverPage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return core.MetadataPage{}, malformedDiscover(input.List, err)
+		return core.MetadataPage{}, 0, malformedDiscover(input.List, err)
 	}
 	if raw.Page == nil || raw.Results == nil || raw.TotalPages == nil || *raw.Page != input.Page ||
 		*raw.TotalPages < 0 || len(*raw.Results) > core.MetadataPageSize {
-		return core.MetadataPage{}, malformedDiscover(input.List, core.ErrInvalidArgument)
+		return core.MetadataPage{}, 0, malformedDiscover(input.List, core.ErrInvalidArgument)
 	}
 	items := make([]core.MetadataTitle, 0, len(*raw.Results))
-	for _, result := range *raw.Results {
+	skipped := 0
+	for _, encoded := range *raw.Results {
+		var result rawDiscoverTitle
+		if err := json.Unmarshal(encoded, &result); err != nil {
+			skipped++
+			continue
+		}
+		if input.List == core.MetadataTrending {
+			if result.MediaType == nil {
+				skipped++
+				continue
+			}
+			if _, ok := resultKind(*result.MediaType); !ok {
+				continue
+			}
+		}
 		if title, ok := mapDiscoverTitle(result, input.List); ok {
 			items = append(items, title)
+		} else {
+			skipped++
 		}
 	}
-	return core.MetadataPage{Items: items, Page: input.Page, TotalPages: min(*raw.TotalPages, core.MaxMetadataPage)}, nil
+	page := core.MetadataPage{Items: items, Page: input.Page, TotalPages: min(*raw.TotalPages, core.MaxMetadataPage)}
+	return page, skipped, nil
 }
 
 func mapDiscoverTitle(raw rawDiscoverTitle, list core.MetadataDiscoverList) (core.MetadataTitle, bool) {
