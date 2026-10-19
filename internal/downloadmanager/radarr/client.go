@@ -3,6 +3,7 @@ package radarr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -29,6 +30,11 @@ type Config struct {
 // Client adapts Radarr's API to the download-manager seam.
 type Client struct {
 	http *arr.Client
+}
+
+type existingMovieResource struct {
+	resource radarrapi.MovieResource
+	raw      json.RawMessage
 }
 
 var _ core.DownloadManagerAdapter = (*Client)(nil)
@@ -101,13 +107,13 @@ func (c *Client) Add(
 		return "", err
 	}
 	if movie, ok := existingMovie(existing, tmdbID); ok {
-		return c.reconcileMovie(ctx, movie, qualityID, options.RootFolder, tags)
+		return c.reconcileMovie(ctx, movie, tags)
 	}
 	movie, err := c.lookup(ctx, tmdbID)
 	if err != nil {
 		return "", err
 	}
-	configureMovie(&movie, qualityID, options.RootFolder, tags, true)
+	configureNewMovie(&movie, qualityID, options.RootFolder, tags)
 	var added radarrapi.MovieResource
 	if err := c.http.PostJSON(ctx, "add", "/api/v3/movie", movie, &added); err != nil {
 		return "", err
@@ -119,15 +125,18 @@ func (c *Client) Add(
 }
 
 func (c *Client) reconcileMovie(
-	ctx context.Context, movie radarrapi.MovieResource, qualityID int32, root string, tags []int32,
+	ctx context.Context, movie existingMovieResource, tags []int32,
 ) (string, error) {
-	id := *movie.Id
-	configureMovie(&movie, qualityID, root, tags, false)
+	id := *movie.resource.Id
+	merged, err := mergeExistingMovie(movie.raw, tags)
+	if err != nil {
+		return "", malformedError("reconcile", err)
+	}
 	path := "/api/v3/movie/" + strconv.FormatInt(int64(id), 10)
-	if err := c.http.PutJSON(ctx, "reconcile", path, movie, &movie); err != nil {
+	if err := c.http.PutRawJSON(ctx, "reconcile", path, merged, &movie.resource); err != nil {
 		return "", err
 	}
-	if movie.HasFile == nil || !*movie.HasFile {
+	if movie.resource.HasFile == nil || !*movie.resource.HasFile {
 		command := map[string]any{"name": "MoviesSearch", "movieIds": []int32{id}}
 		var response map[string]any
 		if err := c.http.PostJSON(ctx, "search", "/api/v3/command", command, &response); err != nil {
@@ -137,13 +146,22 @@ func (c *Client) reconcileMovie(
 	return strconv.FormatInt(int64(id), 10), nil
 }
 
-func (c *Client) movies(ctx context.Context, tmdbID int32) ([]radarrapi.MovieResource, error) {
+func (c *Client) movies(ctx context.Context, tmdbID int32) ([]existingMovieResource, error) {
 	var values []radarrapi.MovieResource
 	path := "/api/v3/movie?tmdbId=" + strconv.FormatInt(int64(tmdbID), 10)
-	if err := c.http.GetJSON(ctx, "find", path, &values); err != nil {
+	raw, err := c.http.GetJSONWithRaw(ctx, "find", path, &values)
+	if err != nil {
 		return nil, err
 	}
-	return values, nil
+	var rawValues []json.RawMessage
+	if err := json.Unmarshal(raw, &rawValues); err != nil || len(rawValues) != len(values) {
+		return nil, malformedError("find", errors.New("invalid movie list"))
+	}
+	result := make([]existingMovieResource, len(values))
+	for index := range values {
+		result[index] = existingMovieResource{resource: values[index], raw: rawValues[index]}
+	}
+	return result, nil
 }
 
 func (c *Client) lookup(ctx context.Context, tmdbID int32) (radarrapi.MovieResource, error) {
@@ -221,26 +239,23 @@ func parsePositiveInt32(value string) (int32, error) {
 	return int32(parsed), nil
 }
 
-func existingMovie(values []radarrapi.MovieResource, tmdbID int32) (radarrapi.MovieResource, bool) {
+func existingMovie(values []existingMovieResource, tmdbID int32) (existingMovieResource, bool) {
 	for _, value := range values {
-		if value.TmdbId != nil && *value.TmdbId == tmdbID && value.Id != nil && *value.Id > 0 {
+		movie := value.resource
+		if movie.TmdbId != nil && *movie.TmdbId == tmdbID && movie.Id != nil && *movie.Id > 0 {
 			return value, true
 		}
 	}
-	return radarrapi.MovieResource{}, false
+	return existingMovieResource{}, false
 }
 
-func configureMovie(movie *radarrapi.MovieResource, qualityID int32, root string, tags []int32, add bool) {
+func configureNewMovie(movie *radarrapi.MovieResource, qualityID int32, root string, tags []int32) {
 	monitored, search := true, true
 	movie.QualityProfileId = &qualityID
 	movie.RootFolderPath = &root
 	movie.Tags = &tags
 	movie.Monitored = &monitored
-	if add {
-		movie.AddOptions = &radarrapi.AddMovieOptions{SearchForMovie: &search}
-	} else {
-		movie.AddOptions = nil
-	}
+	movie.AddOptions = &radarrapi.AddMovieOptions{SearchForMovie: &search}
 }
 
 func queueProgress(item radarrapi.QueueResource) core.DownloadProgress {

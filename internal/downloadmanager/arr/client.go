@@ -1,4 +1,4 @@
-// Package arr contains the shared bounded HTTP policy for Radarr and Sonarr.
+// Package arr contains shared bounded HTTP and raw-resource update policy for Radarr and Sonarr.
 package arr
 
 import (
@@ -94,14 +94,22 @@ func configuredHTTPClient(input *http.Client, timeout time.Duration) *http.Clien
 
 // GetJSON performs a retryable GET and decodes its bounded JSON response.
 func (c *Client) GetJSON(ctx context.Context, operation, path string, target any) error {
+	_, err := c.GetJSONWithRaw(ctx, operation, path, target)
+	return err
+}
+
+// GetJSONWithRaw performs a retryable GET and returns the bounded response after decoding it.
+func (c *Client) GetJSONWithRaw(
+	ctx context.Context, operation, path string, target any,
+) (json.RawMessage, error) {
 	body, err := c.do(ctx, operation, http.MethodGet, path, nil, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := json.Unmarshal(body, target); err != nil {
-		return c.failure(operation, core.DownloadManagerMalformed, false, err)
+		return nil, c.failure(operation, core.DownloadManagerMalformed, false, err)
 	}
-	return nil
+	return json.RawMessage(body), nil
 }
 
 // PostJSON performs a non-retryable POST and decodes its bounded JSON response.
@@ -127,8 +135,24 @@ func (c *Client) PutJSON(ctx context.Context, operation, path string, input, tar
 	if err != nil {
 		return c.failure(operation, core.DownloadManagerMalformed, false, err)
 	}
+	defer clear(body)
+	return c.putJSON(ctx, operation, path, body, target)
+}
+
+// PutRawJSON performs a retryable idempotent PUT without rewriting the validated JSON body.
+func (c *Client) PutRawJSON(
+	ctx context.Context, operation, path string, input json.RawMessage, target any,
+) error {
+	if !json.Valid(input) {
+		return c.failure(operation, core.DownloadManagerMalformed, false, errors.New("invalid JSON request body"))
+	}
+	body := bytes.Clone(input)
+	defer clear(body)
+	return c.putJSON(ctx, operation, path, body, target)
+}
+
+func (c *Client) putJSON(ctx context.Context, operation, path string, body []byte, target any) error {
 	response, err := c.do(ctx, operation, http.MethodPut, path, body, true)
-	clear(body)
 	if err != nil {
 		return err
 	}

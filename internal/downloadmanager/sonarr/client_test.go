@@ -12,9 +12,9 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-func TestAddAdoptsExistingSeriesAndUpdatesSeasons(t *testing.T) {
+func TestAddAdoptsExistingSeriesWithoutReplacingOperatorFields(t *testing.T) {
 	var puts, searches atomic.Int32
-	var updated map[string]any
+	var updated map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v3/series/lookup":
@@ -23,7 +23,18 @@ func TestAddAdoptsExistingSeriesAndUpdatesSeasons(t *testing.T) {
 			}
 			writeTestJSON(t, w, []map[string]any{{"tmdbId": 200, "tvdbId": 300, "seasons": []map[string]any{{"seasonNumber": 1}, {"seasonNumber": 2}}}})
 		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodGet:
-			writeTestJSON(t, w, []map[string]any{{"id": 19, "tmdbId": 200, "tvdbId": 300, "seasons": []map[string]any{{"seasonNumber": 1, "monitored": true}, {"seasonNumber": 2, "monitored": false}}}})
+			writeTestJSON(t, w, []map[string]any{{
+				"id": 19, "tmdbId": 200, "tvdbId": 300, "monitored": false,
+				"qualityProfileId": 7, "rootFolderPath": "/operator/series", "path": "/operator/series/show",
+				"tags": []int{3, 2}, "addOptions": map[string]any{"monitor": "all"},
+				"language":     map[string]any{"id": 1, "name": "English"},
+				"folders":      []map[string]any{{"path": "/operator/series/show"}},
+				"translations": []map[string]any{{"title": "Show"}},
+				"seasons": []map[string]any{
+					{"seasonNumber": 1, "monitored": true, "seasonType": "standard"},
+					{"seasonNumber": 2, "monitored": false, "seasonType": "standard"},
+				},
+			}})
 		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
 			puts.Add(1)
 			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
@@ -32,6 +43,11 @@ func TestAddAdoptsExistingSeriesAndUpdatesSeasons(t *testing.T) {
 			writeTestJSON(t, w, updated)
 		case r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost:
 			searches.Add(1)
+			// Sonarr searches monitored episodes only: the season must be
+			// monitored before its search starts.
+			if puts.Load() != 1 {
+				t.Error("season search started before the season was monitored")
+			}
 			var command map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
 				t.Errorf("decode command: %v", err)
@@ -48,18 +64,57 @@ func TestAddAdoptsExistingSeriesAndUpdatesSeasons(t *testing.T) {
 	client := newTestClient(t, server)
 	title := seriesTitle()
 	title.Seasons = []int{2}
-	id, err := client.Add(t.Context(), title, seriesOptions())
+	options := seriesOptions()
+	options.Tags = []string{"2", "4"}
+	id, err := client.Add(t.Context(), title, options)
 	if err != nil || id != "19" || puts.Load() != 1 || searches.Load() != 1 {
 		t.Fatalf("Add = %q, %v; puts %d searches %d", id, err, puts.Load(), searches.Load())
 	}
-	seasons, ok := updated["seasons"].([]any)
-	if !ok || len(seasons) != 2 {
-		t.Fatalf("updated series = %+v", updated)
+	assertRawValue(t, updated, "qualityProfileId", `7`)
+	assertRawValue(t, updated, "rootFolderPath", `"/operator/series"`)
+	assertRawValue(t, updated, "path", `"/operator/series/show"`)
+	assertRawValue(t, updated, "monitored", `true`)
+	assertRawValue(t, updated, "tags", `[3,2,4]`)
+	assertRawValue(t, updated, "language", `{"id":1,"name":"English"}`)
+	assertRawValue(t, updated, "folders", `[{"path":"/operator/series/show"}]`)
+	assertRawValue(t, updated, "translations", `[{"title":"Show"}]`)
+	if _, exists := updated["addOptions"]; exists {
+		t.Fatal("PUT body retains addOptions")
 	}
-	first, firstOK := seasons[0].(map[string]any)
-	second, secondOK := seasons[1].(map[string]any)
-	if !firstOK || !secondOK || first["monitored"] != true || second["monitored"] != true {
-		t.Fatalf("updated seasons = %+v", seasons)
+	var seasons []map[string]json.RawMessage
+	if err := json.Unmarshal(updated["seasons"], &seasons); err != nil {
+		t.Fatalf("decode updated seasons: %v", err)
+	}
+	assertRawValue(t, seasons[0], "monitored", `true`)
+	assertRawValue(t, seasons[0], "seasonType", `"standard"`)
+	assertRawValue(t, seasons[1], "monitored", `true`)
+	assertRawValue(t, seasons[1], "seasonType", `"standard"`)
+}
+
+func TestAddRejectsMalformedExistingSeriesWithoutWrite(t *testing.T) {
+	var writes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			writeTestJSON(t, w, []map[string]any{{"tmdbId": 200, "tvdbId": 300}})
+		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodGet:
+			writeTestJSON(t, w, []map[string]any{{
+				"id": 19, "tmdbId": 200, "tvdbId": 300, "tags": nil,
+				"seasons": []map[string]any{{"seasonNumber": 1, "monitored": false}},
+			}})
+		default:
+			writes.Add(1)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	_, err := newTestClient(t, server).Add(t.Context(), seriesTitle(), seriesOptions())
+	var classified *core.DownloadManagerError
+	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
+		t.Fatalf("Add error = %T %v", err, err)
+	}
+	if writes.Load() != 0 {
+		t.Fatalf("write requests = %d, want 0", writes.Load())
 	}
 }
 

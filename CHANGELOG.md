@@ -52,6 +52,13 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- A request for a series or movie that Sonarr or Radarr already manages
+  keeps that title's quality profile, root folder, path, existing tags, and
+  every field Bloom does not model; Bloom only turns on monitoring, monitors
+  the requested seasons, and adds the request profile's tags. Requested
+  seasons are monitored before their search starts, so the search finds
+  their episodes.
+
 - Registering a media server or a download manager, testing a channel, or
   storing the TMDB token no longer fails in the browser after ten seconds
   while the server finishes the probe and stores the result anyway; these
