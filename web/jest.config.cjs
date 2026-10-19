@@ -5,7 +5,7 @@ module.exports = {
   setupFiles: ["<rootDir>/src/test/polyfills.cjs"],
   transform: { "^.+\\.[cm]?[jt]sx?$": "babel-jest" },
   transformIgnorePatterns: [
-    "node_modules/(?!(@bundled-es-modules|@mswjs|@open-draft|msw|rettime|until-async)/)",
+    "node_modules/(?!(@bundled-es-modules|@msw|@mswjs|@open-draft|cookie|msw|rettime|until-async)/)",
   ],
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",

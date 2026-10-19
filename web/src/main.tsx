@@ -24,7 +24,7 @@ async function start(): Promise<void> {
   const config = readPublicConfig(import.meta.env, window.location.origin);
   if (import.meta.env.DEV && config.enableMsw) {
     const { worker } = await import("./mocks/browser.js");
-    await worker.start({ onUnhandledRequest: "bypass" });
+    await worker.start({ onUnhandledFrame: "bypass" });
   }
   const rootElement = document.querySelector<HTMLElement>("#root");
   if (rootElement === null) {
