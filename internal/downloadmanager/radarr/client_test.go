@@ -2,6 +2,7 @@ package radarr
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,16 +12,23 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-func TestAddReconcilesAndSearchesExistingMovieWithoutFile(t *testing.T) {
+func TestAddReconcilesExistingMovieWithoutReplacingOperatorFields(t *testing.T) {
 	var puts, searches atomic.Int32
-	var updated map[string]any
+	var updated map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Api-Key") != "secret" {
 			t.Error("missing API key")
 		}
 		switch {
 		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet:
-			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "monitored": false, "hasFile": false}})
+			writeTestJSON(t, w, []map[string]any{{
+				"id": 17, "tmdbId": 100, "monitored": false, "hasFile": false,
+				"qualityProfileId": 7, "rootFolderPath": "/operator/movies", "path": "/operator/movies/film",
+				"tags": []int{3, 2}, "addOptions": map[string]any{"searchForMovie": false},
+				"language":     map[string]any{"id": 1, "name": "English"},
+				"folders":      []map[string]any{{"path": "/operator/movies/film"}},
+				"translations": []map[string]any{{"title": "Film"}},
+			}})
 		case r.URL.Path == "/api/v3/movie/17" && r.Method == http.MethodPut:
 			puts.Add(1)
 			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
@@ -43,13 +51,71 @@ func TestAddReconcilesAndSearchesExistingMovieWithoutFile(t *testing.T) {
 	}))
 	defer server.Close()
 	client := newTestClient(t, server)
-	id, err := client.Add(t.Context(), movieTitle(), movieOptions())
+	options := movieOptions()
+	options.Tags = []string{"2", "4"}
+	id, err := client.Add(t.Context(), movieTitle(), options)
 	if err != nil || id != "17" || puts.Load() != 1 || searches.Load() != 1 {
 		t.Fatalf("Add = %q, %v; puts %d searches %d", id, err, puts.Load(), searches.Load())
 	}
-	if updated["monitored"] != true || updated["qualityProfileId"] != float64(1) ||
-		updated["rootFolderPath"] != "/movies" {
-		t.Fatalf("updated movie = %+v", updated)
+	assertRawValue(t, updated, "monitored", `true`)
+	assertRawValue(t, updated, "qualityProfileId", `7`)
+	assertRawValue(t, updated, "rootFolderPath", `"/operator/movies"`)
+	assertRawValue(t, updated, "path", `"/operator/movies/film"`)
+	assertRawValue(t, updated, "tags", `[3,2,4]`)
+	assertRawValue(t, updated, "language", `{"id":1,"name":"English"}`)
+	assertRawValue(t, updated, "folders", `[{"path":"/operator/movies/film"}]`)
+	assertRawValue(t, updated, "translations", `[{"title":"Film"}]`)
+	if _, exists := updated["addOptions"]; exists {
+		t.Fatal("PUT body retains addOptions")
+	}
+}
+
+func TestAddTreatsAbsentTagsAndNullResponseIDAsEmpty(t *testing.T) {
+	var updated map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet:
+			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "hasFile": true}})
+		case r.URL.Path == "/api/v3/movie/17" && r.Method == http.MethodPut:
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			writeTestJSON(t, w, map[string]any{"id": nil})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	id, err := newTestClient(t, server).Add(t.Context(), movieTitle(), movieOptions())
+	if err != nil || id != "17" {
+		t.Fatalf("Add = %q, %v", id, err)
+	}
+	assertRawValue(t, updated, "tags", `[2]`)
+}
+
+func TestAddRejectsConflictingMovieResponseID(t *testing.T) {
+	var searches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet:
+			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "tags": []int{}, "hasFile": false}})
+		case r.URL.Path == "/api/v3/movie/17" && r.Method == http.MethodPut:
+			writeTestJSON(t, w, map[string]any{"id": 18, "hasFile": false})
+		case r.URL.Path == "/api/v3/command":
+			searches.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 91})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	_, err := newTestClient(t, server).Add(t.Context(), movieTitle(), movieOptions())
+	var classified *core.DownloadManagerError
+	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
+		t.Fatalf("Add error = %T %v", err, err)
+	}
+	if searches.Load() != 0 {
+		t.Fatalf("searches = %d, want 0", searches.Load())
 	}
 }
 
@@ -77,6 +143,29 @@ func TestAddMissLooksUpAndPostsOnce(t *testing.T) {
 	id, err := client.Add(t.Context(), movieTitle(), movieOptions())
 	if err != nil || id != "18" || posts.Load() != 1 {
 		t.Fatalf("Add = %q, %v; posts %d", id, err, posts.Load())
+	}
+}
+
+func TestAddRejectsNullFindListWithoutWrite(t *testing.T) {
+	var writes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			writes.Add(1)
+		}
+		if r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet {
+			writeTestJSON(t, w, nil)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	_, err := newTestClient(t, server).Add(t.Context(), movieTitle(), movieOptions())
+	var classified *core.DownloadManagerError
+	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
+		t.Fatalf("Add error = %T %v", err, err)
+	}
+	if writes.Load() != 0 {
+		t.Fatalf("writes = %d, want 0", writes.Load())
 	}
 }
 
