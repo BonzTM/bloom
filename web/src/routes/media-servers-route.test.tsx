@@ -12,6 +12,7 @@ import {
 } from "../mocks/handlers.js";
 import { http, HttpResponse } from "msw";
 import { renderApp, type AppRender } from "../test/render-app.js";
+import { findSidebar, openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -50,8 +51,7 @@ it("offers the media servers page only to an account with admin.settings", async
   const user = userEvent.setup();
   signInMockSession();
   renderApp();
-  await user.click(await screen.findByRole("link", { name: "Admin" }));
-  await user.click(await screen.findByRole("link", { name: "Media servers" }));
+  await openArea(user, "Settings", "Media servers");
   expect(
     await screen.findByRole("heading", { name: "Media servers", level: 1 }),
   ).toBeVisible();
@@ -62,7 +62,13 @@ it("hides the media servers link without admin.settings", async () => {
   setMockPermissions(["admin.roles"]);
   signInMockSession();
   renderApp("/admin");
-  expect(await screen.findByRole("link", { name: "Roles" })).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "Roles", level: 1 }),
+  ).toBeVisible();
+  const sidebar = await findSidebar();
+  expect(
+    sidebar.queryByRole("link", { name: "Settings" }),
+  ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("link", { name: "Media servers" }),
   ).not.toBeInTheDocument();

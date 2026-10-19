@@ -1,21 +1,13 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { NavIcon, type IconName } from "../app/nav-icons.js";
+import { NavIcon } from "../app/nav-icons.js";
 import { PermissionGate } from "../features/auth/components/permission-gate.js";
 import {
   useSession,
   useSessionRecheck,
 } from "../features/auth/hooks/auth-queries.js";
-import type {
-  KnownPermission,
-  Permission,
-} from "../features/auth/api/auth-schemas.js";
-import {
-  ADMIN_PERMISSIONS,
-  hasPermission,
-  permissions,
-  REQUESTS_PERMISSIONS,
-} from "../features/auth/permissions.js";
+import type { Permission } from "../features/auth/api/auth-schemas.js";
+import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { NowPlaying } from "../features/playback/components/now-playing.js";
 import { useNowPlaying } from "../features/playback/hooks/playback-queries.js";
 import { DiscoverRow } from "../features/requests/components/discover-row.js";
@@ -24,13 +16,12 @@ import {
   useDiscover,
   useRequests,
 } from "../features/requests/hooks/requests-queries.js";
-import { VersionBadge } from "../features/system/components/version-badge.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
 
-// Signed out, the home page introduces the three areas of the app. Signed
-// in, it is a dashboard: what is playing, what is trending, the account's
-// own requests, and quick links into each area the account may use.
+// Signed out, the home page introduces Bloom. Signed in, it is a dashboard:
+// what is playing, what is trending, and the account's own requests. The
+// sidebar is the way into every other area.
 export function HomeRoute(): ReactNode {
   usePageTitle(pageTitle("Home"));
   const session = useSession();
@@ -47,79 +38,39 @@ export function HomeRoute(): ReactNode {
           granted={session.data?.permissions ?? []}
         />
       )}
-      <VersionBadge />
     </>
   );
 }
 
-type Area = Readonly<{
-  id: string;
-  heading: string;
-  summary: string;
-  icon: IconName;
-  to: string;
-  action: string;
-}>;
-
-const areas: readonly Area[] = [
-  {
-    id: "users",
-    heading: "Users & invites",
-    summary:
-      "Create invite links, manage media-server accounts, and assign permissions and libraries.",
-    icon: "ticket",
-    to: "/admin/invites",
-    action: "Open invites",
-  },
-  {
-    id: "statistics",
-    heading: "Statistics",
-    summary:
-      "See who is watching now, browse playback history, and explore per-user and per-library dashboards.",
-    icon: "chart",
-    to: "/admin/statistics",
-    action: "Open statistics",
-  },
-  {
-    id: "requests",
-    heading: "Requests",
-    summary:
-      "Discover movies and series, request them with quotas and approval rules, and follow availability.",
-    icon: "compass",
-    to: "/requests",
-    action: "Open requests",
-  },
-];
-
+// Signed out, the home page says what Bloom is and offers sign-in; every
+// area needs an account, so there is nothing else to open yet.
 function Landing(): ReactNode {
   return (
-    <>
+    <div className="landing">
       <p className="page-intro">
         Invites, statistics, and requests for your Jellyfin servers, in one
         place.
       </p>
-      <div className="card-grid">
-        {areas.map((area) => (
-          <AreaCard key={area.id} area={area} />
-        ))}
-      </div>
-    </>
-  );
-}
-
-function AreaCard({ area }: Readonly<{ area: Area }>): ReactNode {
-  const headingId = `${area.id}-heading`;
-  return (
-    <section aria-labelledby={headingId} className="panel feature-tile">
-      <span className="feature-tile-icon" aria-hidden="true">
-        <NavIcon name={area.icon} />
-      </span>
-      <h2 id={headingId}>{area.heading}</h2>
-      <p>{area.summary}</p>
+      <ul className="landing-points">
+        <li>
+          <NavIcon name="ticket" />
+          Invite people and manage their media-server accounts.
+        </li>
+        <li>
+          <NavIcon name="chart" />
+          See what is playing and what everyone watched.
+        </li>
+        <li>
+          <NavIcon name="compass" />
+          Discover movies and series and request them.
+        </li>
+      </ul>
       <p>
-        <Link to={area.to}>{area.action}</Link>
+        <Link to="/login" className="btn btn-primary">
+          Sign in to get started
+        </Link>
       </p>
-    </section>
+    </div>
   );
 }
 
@@ -147,9 +98,6 @@ function Dashboard({
           accountId={accountId}
           canRequest={hasPermission(granted, permissions.requestsCreate)}
         />
-      </PermissionGate>
-      <PermissionGate anyOf={[...ADMIN_PERMISSIONS, ...REQUESTS_PERMISSIONS]}>
-        <QuickLinks />
       </PermissionGate>
     </div>
   );
@@ -214,92 +162,5 @@ function MyRequestsPanel({
       </div>
       <MyRequests query={query} accountId={accountId} linkTitles={canRequest} />
     </section>
-  );
-}
-
-type QuickLink = Readonly<{
-  to: string;
-  label: string;
-  icon: IconName;
-  anyOf: readonly KnownPermission[];
-}>;
-
-// The link names match the landing page so either entry reads the same.
-const QUICK_LINKS: readonly QuickLink[] = [
-  {
-    to: "/requests",
-    label: "Open requests",
-    icon: "compass",
-    anyOf: REQUESTS_PERMISSIONS,
-  },
-  {
-    to: "/admin/playback",
-    label: "Open playback",
-    icon: "play",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/statistics",
-    label: "Open statistics",
-    icon: "chart",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/activity",
-    label: "Open activity",
-    icon: "clock",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/libraries",
-    label: "Open libraries",
-    icon: "library",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/invites",
-    label: "Open invites",
-    icon: "ticket",
-    anyOf: [permissions.usersInvite],
-  },
-  {
-    to: "/admin/accounts",
-    label: "Open accounts",
-    icon: "users",
-    anyOf: [permissions.usersManage],
-  },
-  {
-    to: "/admin/media-servers",
-    label: "Open media servers",
-    icon: "server",
-    anyOf: [permissions.adminSettings],
-  },
-  {
-    to: "/admin",
-    label: "Open administration",
-    icon: "shield",
-    anyOf: ADMIN_PERMISSIONS,
-  },
-];
-
-function QuickLinks(): ReactNode {
-  return (
-    <nav aria-labelledby="home-links-heading" className="card">
-      <div className="section-head">
-        <h2 id="home-links-heading">Go to</h2>
-      </div>
-      <ul className="quick-links">
-        {QUICK_LINKS.map((link) => (
-          <PermissionGate key={link.to} anyOf={link.anyOf}>
-            <li>
-              <Link to={link.to} className="quick-link">
-                <NavIcon name={link.icon} />
-                {link.label}
-              </Link>
-            </li>
-          </PermissionGate>
-        ))}
-      </ul>
-    </nav>
   );
 }

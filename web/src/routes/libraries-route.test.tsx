@@ -3,16 +3,15 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setMockPermissions, signInMockSession } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 
 const CABIN = "3d7f1a2b-0000-4000-8000-000000000001";
 
 it("reaches the libraries page from the sidebar and shows a card per library", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(
-    await screen.findByRole("link", { name: "Administration: Libraries" }),
-  );
+  renderApp();
+  await openArea(user, "Libraries");
   expect(
     await screen.findByRole("heading", { name: "Libraries", level: 1 }),
   ).toBeVisible();

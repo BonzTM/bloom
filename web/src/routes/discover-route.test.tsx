@@ -11,6 +11,7 @@ import {
   UNCONFIGURED_QUERY,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -25,14 +26,14 @@ async function search(user: User, query: string): Promise<void> {
   await user.type(box, `${query}{Enter}`);
 }
 
-it("offers requests from the navigation and the home page", async () => {
+it("offers Discover from the sidebar and the home page", async () => {
   const user = userEvent.setup();
   signInMockSession();
   renderApp();
   expect(
-    await screen.findByRole("link", { name: "Open requests" }),
+    await screen.findByRole("link", { name: "Discover more" }),
   ).toHaveAttribute("href", "/requests");
-  await user.click(await screen.findByRole("link", { name: "Discover" }));
+  await openArea(user, "Discover");
   expect(
     await screen.findByRole("heading", { name: "Discover", level: 1 }),
   ).toBeVisible();

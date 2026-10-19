@@ -3,6 +3,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setMockPermissions, signInMockSession } from "../mocks/handlers.js";
+import { openAccountMenu } from "../test/account-menu.js";
 import { renderApp } from "../test/render-app.js";
 import { server } from "../test/server.js";
 
@@ -37,14 +38,13 @@ it("explains the 500-title limit on a title page", async () => {
   );
 });
 
-it("reaches the page from the navigation with notifications.manage.own", async () => {
+it("reaches the page from the account menu with notifications.manage.own", async () => {
   const user = userEvent.setup();
   setMockPermissions(["notifications.manage.own"]);
   signInMockSession();
   renderApp();
-  await user.click(
-    await screen.findByRole("link", { name: "My notifications" }),
-  );
+  await openAccountMenu(user);
+  await user.click(screen.getByRole("link", { name: "My notifications" }));
   expect(
     await screen.findByRole("heading", { name: "My notifications", level: 1 }),
   ).toBeVisible();
@@ -58,6 +58,8 @@ it("hides the page and the control without notifications.manage.own", async () =
   expect(
     await screen.findByRole("heading", { name: "Access denied", level: 1 }),
   ).toBeVisible();
+  // The account menu hides its links while closed; open it first.
+  await openAccountMenu(userEvent.setup());
   expect(
     screen.queryByRole("link", { name: "My notifications" }),
   ).not.toBeInTheDocument();
@@ -111,6 +113,7 @@ it("keeps a saved choice on the next visit", async () => {
   await screen.findByText("Preferences saved.");
 
   await user.click(screen.getByRole("link", { name: "Home" }));
+  await openAccountMenu(user);
   await user.click(screen.getByRole("link", { name: "My notifications" }));
   const again = await screen.findByRole("form", {
     name: "Notification preferences",

@@ -11,6 +11,7 @@ import {
 } from "../mocks/handlers.js";
 import { createGate } from "../test/gate.js";
 import { renderApp } from "../test/render-app.js";
+import { openAccountMenu } from "../test/account-menu.js";
 import { server } from "../test/server.js";
 
 async function signInFromLoginPage(user: ReturnType<typeof userEvent.setup>) {
@@ -20,18 +21,33 @@ async function signInFromLoginPage(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Sign in" }));
 }
 
-it("hides the admin link from a signed-out visitor", async () => {
+// Every area that needs a permission this test's accounts lack.
+const SIGNED_IN_AREAS = [
+  "Discover",
+  "Requests",
+  "Playback",
+  "Statistics",
+  "Libraries",
+  "Users",
+  "Settings",
+];
+
+it("hides every administration area from a signed-out visitor", async () => {
   renderApp();
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+  for (const name of SIGNED_IN_AREAS) {
+    expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
+  }
 });
 
-it("hides the admin link from an account without admin permissions", async () => {
+it("hides every administration area from an account without admin permissions", async () => {
   setMockPermissions(["users.read"]);
   signInMockSession();
   renderApp();
   expect(await screen.findByText("Signed in as admin")).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+  for (const name of SIGNED_IN_AREAS) {
+    expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
+  }
 });
 
 it("takes an administrator from the navigation to the roles page", async () => {
@@ -39,22 +55,36 @@ it("takes an administrator from the navigation to the roles page", async () => {
   signInMockSession();
   renderApp();
 
-  await user.click(await screen.findByRole("link", { name: "Admin" }));
+  const sidebar = within(
+    await screen.findByRole("navigation", { name: "Main navigation" }),
+  );
+  await user.click(await sidebar.findByRole("link", { name: "Users" }));
   expect(
-    await screen.findByRole("heading", { name: "Administration", level: 1 }),
+    await screen.findByRole("heading", { name: "Accounts", level: 1 }),
   ).toBeVisible();
-  expect(document.title).toBe("Administration | Bloom");
+  const tabs = within(screen.getByRole("navigation", { name: "Users pages" }));
+  expect(tabs.getAllByRole("link").map((link) => link.textContent)).toEqual([
+    "Accounts",
+    "Invites",
+    "Roles",
+  ]);
 
-  await user.click(screen.getByRole("link", { name: "Roles" }));
+  await user.click(tabs.getByRole("link", { name: "Roles" }));
   expect(
     await screen.findByRole("heading", { name: "Roles", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Roles | Bloom");
-  expect(
-    screen.getByRole("link", { name: "Administration: Roles" }),
-  ).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", { name: "Admin" })).not.toHaveAttribute(
+  expect(tabs.getByRole("link", { name: "Roles" })).toHaveAttribute(
     "aria-current",
+    "page",
+  );
+  expect(tabs.getByRole("link", { name: "Accounts" })).not.toHaveAttribute(
+    "aria-current",
+  );
+  // Users links to Accounts, so on Roles it marks the location, not the page.
+  expect(sidebar.getByRole("link", { name: "Users" })).toHaveAttribute(
+    "aria-current",
+    "location",
   );
 });
 
@@ -230,7 +260,7 @@ it("refuses the roles page to an administrator without the roles permission", as
     "Your account does not have permission to view this page.",
   );
   expect(document.title).toBe("Access denied | Bloom");
-  expect(screen.getByRole("link", { name: "Admin" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
 });
 
@@ -245,13 +275,29 @@ it("refuses the whole admin area to an account with no admin permission", async 
   expect(screen.getByRole("link", { name: "Return to home" })).toBeVisible();
 });
 
-it("hides the roles section from the administration page without the roles permission", async () => {
+it("sends /admin to the first page the account may open", async () => {
+  setMockPermissions(["users.manage"]);
+  signInMockSession();
+  renderApp("/admin");
+
+  expect(
+    await screen.findByRole("heading", { name: "Accounts", level: 1 }),
+  ).toBeVisible();
+  // One page in the area means no tabs, so Roles is offered nowhere.
+  expect(
+    screen.queryByRole("navigation", { name: "Users pages" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Roles" })).not.toBeInTheDocument();
+});
+
+it("sends /admin to Settings for an account that only manages settings", async () => {
   setMockPermissions(["admin.settings"]);
   signInMockSession();
   renderApp("/admin");
 
-  await screen.findByRole("heading", { name: "Administration", level: 1 });
-  expect(screen.queryByRole("link", { name: "Roles" })).not.toBeInTheDocument();
+  expect(
+    await screen.findByRole("heading", { name: "Media servers", level: 1 }),
+  ).toBeVisible();
 });
 
 it("shows the refusal page when the server forbids the roles request", async () => {
@@ -430,6 +476,7 @@ it("drops the cached roles when the person signs out", async () => {
     queryClient.getQueryCache().findAll({ queryKey: ["roles"] }),
   ).toHaveLength(1);
 
+  await openAccountMenu(user);
   await user.click(screen.getByRole("button", { name: "Sign out" }));
 
   await screen.findByRole("heading", { name: "Sign in", level: 1 });

@@ -11,6 +11,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { findSidebar, openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 async function openPlayback(): Promise<HTMLElement> {
@@ -19,11 +20,11 @@ async function openPlayback(): Promise<HTMLElement> {
   return screen.findByRole("list", { name: "Playing now" });
 }
 
-it("offers the playback page from the administration index", async () => {
+it("offers the playback page from the sidebar", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(await screen.findByRole("link", { name: "Playback" }));
+  renderApp();
+  await openArea(user, "Playback");
   expect(
     await screen.findByRole("heading", { name: "Playback", level: 1 }),
   ).toBeVisible();
@@ -34,9 +35,12 @@ it("hides the playback link without stats.read.all", async () => {
   setMockPermissions(["admin.roles"]);
   signInMockSession();
   renderApp("/admin");
-  expect(await screen.findByRole("link", { name: "Roles" })).toBeVisible();
   expect(
-    screen.queryByRole("link", { name: "Playback" }),
+    await screen.findByRole("heading", { name: "Roles", level: 1 }),
+  ).toBeVisible();
+  const sidebar = await findSidebar();
+  expect(
+    sidebar.queryByRole("link", { name: "Playback" }),
   ).not.toBeInTheDocument();
 });
 

@@ -3,14 +3,13 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setMockPermissions, signInMockSession } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 
 it("reaches the accounts page from the sidebar and lists accounts with their facts", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(
-    await screen.findByRole("link", { name: "Administration: Accounts" }),
-  );
+  renderApp();
+  await openArea(user, "Users", "Accounts");
   expect(
     await screen.findByRole("heading", { name: "Accounts", level: 1 }),
   ).toBeVisible();

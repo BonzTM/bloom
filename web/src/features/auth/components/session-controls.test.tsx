@@ -9,6 +9,7 @@ import {
   mockSession,
 } from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
+import { openAccountMenu } from "../../../test/account-menu.js";
 import { createGate } from "../../../test/gate.js";
 import { server } from "../../../test/server.js";
 import { authKeys } from "../hooks/auth-queries.js";
@@ -80,7 +81,8 @@ it("keeps the account when sign-out fails on the server", async () => {
   );
   renderApp();
 
-  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+  await openAccountMenu(user);
+  await user.click(screen.getByRole("button", { name: "Sign out" }));
 
   expect(
     await screen.findByText("Sign-out failed. Please try again."),
@@ -102,7 +104,8 @@ it("forgets the account when the server says there was no session", async () => 
   );
   renderApp();
 
-  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+  await openAccountMenu(user);
+  await user.click(screen.getByRole("button", { name: "Sign out" }));
 
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
 });
@@ -122,17 +125,24 @@ it("announces sign-out while it is pending and settles cleanly", async () => {
   );
   renderApp();
 
-  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+  await openAccountMenu(user);
+  // The live region must already exist, empty, before the message arrives,
+  // or a screen reader may not announce it.
+  const before = within(screen.getByRole("banner")).getAllByRole("status");
+  await user.click(screen.getByRole("button", { name: "Sign out" }));
 
   expect(
     await screen.findByRole("button", { name: "Signing out…" }),
   ).toBeDisabled();
-  expect(screen.getByText("Signing out, please wait.")).toHaveRole("status");
+  const message = screen.getByText("Signing out, please wait.");
+  expect(message).toHaveRole("status");
+  expect(before).toContain(message);
   gate.open();
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
 it("keeps showing the last known account when a refresh fails", async () => {
+  const user = userEvent.setup();
   signInMockSession();
   let failing = false;
   server.use(
@@ -157,6 +167,7 @@ it("keeps showing the last known account when a refresh fails", async () => {
     );
   });
   expect(screen.getByText("Signed in as admin")).toBeVisible();
+  await openAccountMenu(user);
   expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
 
@@ -243,3 +254,95 @@ it.each([
     });
   },
 );
+
+it("closes the account menu on Escape and returns focus to its button", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp();
+  await openAccountMenu(user);
+  const button = screen.getByRole("button", { name: "Signed in as admin" });
+  expect(button).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeVisible();
+
+  await user.keyboard("{Escape}");
+
+  expect(button).toHaveAttribute("aria-expanded", "false");
+  expect(button).toHaveFocus();
+  expect(
+    screen.queryByRole("button", { name: "Sign out" }),
+  ).not.toBeInTheDocument();
+});
+
+it("closes the account menu on a click elsewhere and on a new page", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp();
+  await openAccountMenu(user);
+  await user.click(screen.getByRole("main"));
+  expect(
+    screen.getByRole("button", { name: "Signed in as admin" }),
+  ).toHaveAttribute("aria-expanded", "false");
+
+  await openAccountMenu(user);
+  await user.click(screen.getByRole("link", { name: "My statistics" }));
+  expect(
+    await screen.findByRole("heading", { name: "My statistics", level: 1 }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Signed in as admin" }),
+  ).toHaveAttribute("aria-expanded", "false");
+});
+
+it("moves focus into the drawer and returns it to the menu button on Escape", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp();
+  const toggle = await screen.findByRole("button", { name: "Menu" });
+
+  await user.click(toggle);
+
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("link", { name: "Home" }),
+  ).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(toggle).toHaveFocus();
+});
+
+it("closes the account menu when a link leads to the page already open", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/statistics");
+  await screen.findByRole("heading", { name: "My statistics", level: 1 });
+  await openAccountMenu(user);
+
+  await user.click(
+    within(screen.getByRole("banner")).getByRole("link", {
+      name: "My statistics",
+    }),
+  );
+
+  expect(
+    screen.getByRole("button", { name: "Signed in as admin" }),
+  ).toHaveAttribute("aria-expanded", "false");
+});
+
+it("closes the drawer when its link leads to the page already open", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/about");
+  await screen.findByRole("heading", { name: "About Bloom", level: 1 });
+  const toggle = screen.getByRole("button", { name: "Menu" });
+  await user.click(toggle);
+
+  await user.click(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("link", { name: "About" }),
+  );
+
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+});
