@@ -70,15 +70,43 @@ func TestAddReconcilesExistingMovieWithoutReplacingOperatorFields(t *testing.T) 
 	}
 }
 
-func TestAddRejectsMalformedExistingMovieWithoutWrite(t *testing.T) {
-	var writes atomic.Int32
+func TestAddTreatsAbsentTagsAndNullResponseIDAsEmpty(t *testing.T) {
+	var updated map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet {
-			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "tags": nil}})
-			return
+		switch {
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet:
+			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "hasFile": true}})
+		case r.URL.Path == "/api/v3/movie/17" && r.Method == http.MethodPut:
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			writeTestJSON(t, w, map[string]any{"id": nil})
+		default:
+			http.NotFound(w, r)
 		}
-		writes.Add(1)
-		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	id, err := newTestClient(t, server).Add(t.Context(), movieTitle(), movieOptions())
+	if err != nil || id != "17" {
+		t.Fatalf("Add = %q, %v", id, err)
+	}
+	assertRawValue(t, updated, "tags", `[2]`)
+}
+
+func TestAddRejectsConflictingMovieResponseID(t *testing.T) {
+	var searches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet:
+			writeTestJSON(t, w, []map[string]any{{"id": 17, "tmdbId": 100, "tags": []int{}, "hasFile": false}})
+		case r.URL.Path == "/api/v3/movie/17" && r.Method == http.MethodPut:
+			writeTestJSON(t, w, map[string]any{"id": 18, "hasFile": false})
+		case r.URL.Path == "/api/v3/command":
+			searches.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 91})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer server.Close()
 	_, err := newTestClient(t, server).Add(t.Context(), movieTitle(), movieOptions())
@@ -86,8 +114,8 @@ func TestAddRejectsMalformedExistingMovieWithoutWrite(t *testing.T) {
 	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
 		t.Fatalf("Add error = %T %v", err, err)
 	}
-	if writes.Load() != 0 {
-		t.Fatalf("write requests = %d, want 0", writes.Load())
+	if searches.Load() != 0 {
+		t.Fatalf("searches = %d, want 0", searches.Load())
 	}
 }
 

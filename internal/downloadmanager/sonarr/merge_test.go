@@ -2,6 +2,7 @@ package sonarr
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -25,11 +26,14 @@ func TestMergeExistingSeriesPreservesFieldsAndUpdatesRequestedState(t *testing.T
 		]
 	}`)
 
-	merged, err := mergeExistingSeries(raw, []int32{2, 9, 9}, []int{2})
+	result, err := mergeExistingSeries(raw, []int32{2, 9, 9}, []int{2})
 	if err != nil {
 		t.Fatalf("mergeExistingSeries: %v", err)
 	}
-	object := decodeRawObjectForTest(t, merged)
+	if !slices.Equal(result.searchSeasons, []int{2}) {
+		t.Fatalf("search seasons = %v, want [2]", result.searchSeasons)
+	}
+	object := decodeRawObjectForTest(t, result.body)
 	assertRawValue(t, object, "qualityProfileId", `7`)
 	assertRawValue(t, object, "rootFolderPath", `"/operator/series"`)
 	assertRawValue(t, object, "path", `"/operator/series/show"`)
@@ -54,6 +58,22 @@ func TestMergeExistingSeriesPreservesFieldsAndUpdatesRequestedState(t *testing.T
 	assertRawValue(t, seasons[2], "monitored", `true`)
 }
 
+func TestMergeExistingSeriesSelectsSearchesFromFileState(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"tags":[],"seasons":[
+		{"seasonNumber":1,"statistics":{"episodeCount":8,"episodeFileCount":3}},
+		{"seasonNumber":2,"statistics":{"episodeCount":8,"episodeFileCount":8}},
+		{"seasonNumber":3}
+	]}`)
+	result, err := mergeExistingSeries(raw, nil, []int{1, 2, 3})
+	if err != nil {
+		t.Fatalf("mergeExistingSeries: %v", err)
+	}
+	if !slices.Equal(result.searchSeasons, []int{1, 3}) {
+		t.Fatalf("search seasons = %v, want [1 3]", result.searchSeasons)
+	}
+}
+
 func TestMergeExistingSeriesRejectsMalformedShapes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -62,10 +82,8 @@ func TestMergeExistingSeriesRejectsMalformedShapes(t *testing.T) {
 	}{
 		{name: "invalid JSON", raw: `{`},
 		{name: "not object", raw: `[]`},
-		{name: "missing seasons", raw: `{"tags":[]}`},
 		{name: "seasons not array", raw: `{"tags":[],"seasons":{}}`},
 		{name: "season not object", raw: `{"tags":[],"seasons":[1]}`},
-		{name: "missing tags", raw: `{"seasons":[]}`},
 		{name: "tags not array", raw: `{"tags":{},"seasons":[]}`},
 		{name: "tag not integer", raw: `{"tags":[1.5],"seasons":[]}`},
 		{name: "tag not number", raw: `{"tags":["1"],"seasons":[]}`},
@@ -78,6 +96,52 @@ func TestMergeExistingSeriesRejectsMalformedShapes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMergeExistingSeriesRejectsDuplicateSeasonMembers(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"tags":[],"seasons":[{"seasonNumber":1,"seasonNumber":2}]}`)
+	if _, err := mergeExistingSeries(raw, nil, []int{1}); err == nil {
+		t.Fatal("mergeExistingSeries returned nil error")
+	}
+}
+
+func TestMergeExistingSeriesValidatesSeasonNumbers(t *testing.T) {
+	t.Parallel()
+	values := []string{
+		`{"tags":[],"seasons":[{"monitored":false}]}`,
+		`{"tags":[],"seasons":[{"seasonNumber":1},{"seasonNumber":1}]}`,
+		`{"tags":[],"seasons":[{"seasonNumber":2147483648}]}`,
+	}
+	for _, raw := range values {
+		if _, err := mergeExistingSeries(json.RawMessage(raw), nil, []int{1}); err == nil {
+			t.Fatalf("mergeExistingSeries(%s) returned nil error", raw)
+		}
+	}
+}
+
+func TestMergeExistingSeriesBoundsSeasons(t *testing.T) {
+	t.Parallel()
+	if _, err := mergeExistingSeries(seriesWithSeasons(t, maxSeasons), nil, []int{1}); err != nil {
+		t.Fatalf("mergeExistingSeries at limit: %v", err)
+	}
+	if _, err := mergeExistingSeries(seriesWithSeasons(t, maxSeasons+1), nil, []int{1}); err == nil {
+		t.Fatal("mergeExistingSeries over limit returned nil error")
+	}
+}
+
+func seriesWithSeasons(t *testing.T, count int) json.RawMessage {
+	t.Helper()
+	seasons := make([]map[string]any, count)
+	for index := range count {
+		seasons[index] = map[string]any{"seasonNumber": index, "monitored": false}
+	}
+	value, err := json.Marshal(map[string]any{"tags": []int{}, "seasons": seasons})
+	if err != nil {
+		t.Fatalf("marshal series: %v", err)
+		return nil
+	}
+	return value
 }
 
 func decodeRawObjectForTest(t *testing.T, raw json.RawMessage) map[string]json.RawMessage {

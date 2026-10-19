@@ -3,9 +3,11 @@ package sonarr
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -91,8 +93,8 @@ func TestAddAdoptsExistingSeriesWithoutReplacingOperatorFields(t *testing.T) {
 	assertRawValue(t, seasons[1], "seasonType", `"standard"`)
 }
 
-func TestAddRejectsMalformedExistingSeriesWithoutWrite(t *testing.T) {
-	var writes atomic.Int32
+func TestAddTreatsNullTagsAndNullResponseIDAsEmpty(t *testing.T) {
+	var updated map[string]json.RawMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v3/series/lookup":
@@ -100,21 +102,176 @@ func TestAddRejectsMalformedExistingSeriesWithoutWrite(t *testing.T) {
 		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodGet:
 			writeTestJSON(t, w, []map[string]any{{
 				"id": 19, "tmdbId": 200, "tvdbId": 300, "tags": nil,
-				"seasons": []map[string]any{{"seasonNumber": 1, "monitored": false}},
+				"seasons": []map[string]any{{
+					"seasonNumber": 1, "monitored": false,
+					"statistics": map[string]any{"episodeCount": 8, "episodeFileCount": 8},
+				}},
 			}})
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			writeTestJSON(t, w, map[string]any{"id": nil})
 		default:
-			writes.Add(1)
 			http.NotFound(w, r)
 		}
 	}))
+	defer server.Close()
+	id, err := newTestClient(t, server).Add(t.Context(), seriesTitle(), seriesOptions())
+	if err != nil || id != "19" {
+		t.Fatalf("Add = %q, %v", id, err)
+	}
+	assertRawValue(t, updated, "tags", `[2]`)
+	if _, exists := updated["addOptions"]; exists {
+		t.Fatal("PUT body retains addOptions")
+	}
+}
+
+func TestAddRetriesSearchAfterSuccessfulMonitoringUpdate(t *testing.T) {
+	var puts, searches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			writeTestJSON(t, w, []map[string]any{{"tmdbId": 200, "tvdbId": 300}})
+		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodGet:
+			monitored := puts.Load() > 0
+			writeTestJSON(t, w, []map[string]any{{
+				"id": 19, "tvdbId": 300, "tags": []int{},
+				"seasons": []map[string]any{{"seasonNumber": 1, "monitored": monitored}},
+			}})
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
+			puts.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 19})
+		case r.URL.Path == "/api/v3/command" && r.Method == http.MethodPost:
+			if searches.Add(1) == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			writeTestJSON(t, w, map[string]any{"id": 92})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(t, server)
+	if _, err := client.Add(t.Context(), seriesTitle(), seriesOptions()); err == nil {
+		t.Fatal("first Add returned nil error")
+	}
+	id, err := client.Add(t.Context(), seriesTitle(), seriesOptions())
+	if err != nil || id != "19" || puts.Load() != 2 || searches.Load() != 2 {
+		t.Fatalf("retry Add = %q, %v; puts %d searches %d", id, err, puts.Load(), searches.Load())
+	}
+}
+
+func TestAddDoesNotSearchFullyDownloadedSeason(t *testing.T) {
+	var puts, searches atomic.Int32
+	server := newExistingSeriesServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
+			puts.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 19})
+		case r.URL.Path == "/api/v3/command":
+			searches.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 92})
+		default:
+			http.NotFound(w, r)
+		}
+	}, `{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1,"monitored":false,"statistics":{"episodeCount":8,"episodeFileCount":8}}]}`)
+	defer server.Close()
+	id, err := newTestClient(t, server).Add(t.Context(), seriesTitle(), seriesOptions())
+	if err != nil || id != "19" || puts.Load() != 1 || searches.Load() != 0 {
+		t.Fatalf("Add = %q, %v; puts %d searches %d", id, err, puts.Load(), searches.Load())
+	}
+}
+
+func TestAddFetchesSeriesDetailWhenListSeasonsAreNull(t *testing.T) {
+	var detailGets, puts atomic.Int32
+	server := newExistingSeriesServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodGet:
+			detailGets.Add(1)
+			writeRawTestJSON(t, w, `{"id":19,"tags":[],"seasons":[{"seasonNumber":1,"statistics":{"episodeCount":8,"episodeFileCount":8}}]}`)
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
+			puts.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 19})
+		default:
+			http.NotFound(w, r)
+		}
+	}, `{"id":19,"tvdbId":300,"tags":[],"seasons":null}`)
+	defer server.Close()
+	id, err := newTestClient(t, server).Add(t.Context(), seriesTitle(), seriesOptions())
+	if err != nil || id != "19" || detailGets.Load() != 1 || puts.Load() != 1 {
+		t.Fatalf("Add = %q, %v; detail GETs %d puts %d", id, err, detailGets.Load(), puts.Load())
+	}
+}
+
+func TestAddReturnsNotFoundWhenDetailLacksRequestedSeason(t *testing.T) {
+	var puts atomic.Int32
+	server := newExistingSeriesServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodGet:
+			writeRawTestJSON(t, w, `{"id":19,"tags":[],"seasons":[{"seasonNumber":1}]}`)
+		case r.Method == http.MethodPut:
+			puts.Add(1)
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}, `{"id":19,"tvdbId":300,"tags":[]}`)
+	defer server.Close()
+	title := seriesTitle()
+	title.Seasons = []int{2}
+	_, err := newTestClient(t, server).Add(t.Context(), title, seriesOptions())
+	var classified *core.DownloadManagerError
+	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerNotFound ||
+		classified.Err == nil || !strings.Contains(classified.Err.Error(), "2") {
+		t.Fatalf("Add error = %T %v", err, err)
+	}
+	if puts.Load() != 0 {
+		t.Fatalf("puts = %d, want 0", puts.Load())
+	}
+}
+
+func TestAddRejectsMalformedExistingSeasonDataWithoutWrite(t *testing.T) {
+	tests := []string{
+		`{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1}],"x":1,"x":2}`,
+		`{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1,"x":1,"x":2}]}`,
+		`{"id":19,"tvdbId":300,"tags":[],"seasons":[{"monitored":false}]}`,
+		`{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1},{"seasonNumber":1}]}`,
+	}
+	for _, raw := range tests {
+		_, writes, err := addWithRawSeries(t, raw, seriesTitle())
+		var classified *core.DownloadManagerError
+		if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
+			t.Fatalf("Add(%s) error = %T %v", raw, err, err)
+		}
+		if writes != 0 {
+			t.Fatalf("Add(%s) writes = %d, want 0", raw, writes)
+		}
+	}
+}
+
+func TestAddRejectsConflictingSeriesResponseID(t *testing.T) {
+	var searches atomic.Int32
+	server := newExistingSeriesServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
+			writeTestJSON(t, w, map[string]any{"id": 20})
+		case r.URL.Path == "/api/v3/command":
+			searches.Add(1)
+			writeTestJSON(t, w, map[string]any{"id": 92})
+		default:
+			http.NotFound(w, r)
+		}
+	}, `{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1}]}`)
 	defer server.Close()
 	_, err := newTestClient(t, server).Add(t.Context(), seriesTitle(), seriesOptions())
 	var classified *core.DownloadManagerError
 	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
 		t.Fatalf("Add error = %T %v", err, err)
 	}
-	if writes.Load() != 0 {
-		t.Fatalf("write requests = %d, want 0", writes.Load())
+	if searches.Load() != 0 {
+		t.Fatalf("searches = %d, want 0", searches.Load())
 	}
 }
 
@@ -263,6 +420,36 @@ func newTestClient(t *testing.T, server *httptest.Server) *Client {
 	return client
 }
 
+func newExistingSeriesServer(
+	t *testing.T, next http.HandlerFunc, rawSeries string,
+) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/series/lookup":
+			writeTestJSON(t, w, []map[string]any{{"tmdbId": 200, "tvdbId": 300}})
+		case r.URL.Path == "/api/v3/series" && r.Method == http.MethodGet:
+			writeRawTestJSON(t, w, "["+rawSeries+"]")
+		default:
+			next(w, r)
+		}
+	}))
+}
+
+func addWithRawSeries(t *testing.T, raw string, title core.DownloadTitle) (string, int32, error) {
+	t.Helper()
+	var writes atomic.Int32
+	server := newExistingSeriesServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut || r.Method == http.MethodPost {
+			writes.Add(1)
+		}
+		http.NotFound(w, r)
+	}, raw)
+	defer server.Close()
+	id, err := newTestClient(t, server).Add(t.Context(), title, seriesOptions())
+	return id, writes.Load(), err
+}
+
 type rewriteTransport struct {
 	target *url.URL
 	base   http.RoundTripper
@@ -288,5 +475,13 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Errorf("encode response: %v", err)
+	}
+}
+
+func writeRawTestJSON(t *testing.T, w http.ResponseWriter, value string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := io.WriteString(w, value); err != nil {
+		t.Errorf("write response: %v", err)
 	}
 }

@@ -33,9 +33,13 @@ type Client struct {
 }
 
 type existingMovieResource struct {
-	resource radarrapi.MovieResource
-	raw      json.RawMessage
+	id      int32
+	tmdbID  int32
+	hasFile bool
+	raw     json.RawMessage
 }
+
+const maxMovieResults = 1024
 
 var _ core.DownloadManagerAdapter = (*Client)(nil)
 
@@ -102,12 +106,12 @@ func (c *Client) Add(
 	if err != nil {
 		return "", err
 	}
-	existing, err := c.movies(ctx, tmdbID)
+	existing, err := c.find(ctx, tmdbID)
 	if err != nil {
 		return "", err
 	}
-	if movie, ok := existingMovie(existing, tmdbID); ok {
-		return c.reconcileMovie(ctx, movie, tags)
+	if existing != nil {
+		return c.reconcileMovie(ctx, *existing, tags)
 	}
 	movie, err := c.lookup(ctx, tmdbID)
 	if err != nil {
@@ -127,16 +131,27 @@ func (c *Client) Add(
 func (c *Client) reconcileMovie(
 	ctx context.Context, movie existingMovieResource, tags []int32,
 ) (string, error) {
-	id := *movie.resource.Id
+	id, err := existingMovieID(movie)
+	if err != nil {
+		return "", malformedError("reconcile", err)
+	}
 	merged, err := mergeExistingMovie(movie.raw, tags)
 	if err != nil {
 		return "", malformedError("reconcile", err)
 	}
 	path := "/api/v3/movie/" + strconv.FormatInt(int64(id), 10)
-	if err := c.http.PutRawJSON(ctx, "reconcile", path, merged, &movie.resource); err != nil {
+	response, err := c.http.PutRawJSON(ctx, "reconcile", path, merged)
+	if err != nil {
 		return "", err
 	}
-	if movie.resource.HasFile == nil || !*movie.resource.HasFile {
+	responseID, err := decodeMovieResponseID(response)
+	if err != nil {
+		return "", malformedError("reconcile", err)
+	}
+	if err := validateMovieResponseID(id, responseID); err != nil {
+		return "", malformedError("reconcile", err)
+	}
+	if !movie.hasFile {
 		command := map[string]any{"name": "MoviesSearch", "movieIds": []int32{id}}
 		var response map[string]any
 		if err := c.http.PostJSON(ctx, "search", "/api/v3/command", command, &response); err != nil {
@@ -146,22 +161,89 @@ func (c *Client) reconcileMovie(
 	return strconv.FormatInt(int64(id), 10), nil
 }
 
-func (c *Client) movies(ctx context.Context, tmdbID int32) ([]existingMovieResource, error) {
-	var values []radarrapi.MovieResource
-	path := "/api/v3/movie?tmdbId=" + strconv.FormatInt(int64(tmdbID), 10)
-	raw, err := c.http.GetJSONWithRaw(ctx, "find", path, &values)
+func existingMovieID(movie existingMovieResource) (int32, error) {
+	if movie.id <= 0 {
+		return 0, errors.New("missing movie id")
+	}
+	return movie.id, nil
+}
+
+func validateMovieResponseID(expected int32, actual *int32) error {
+	if actual != nil && *actual != expected {
+		return errors.New("movie id changed in response")
+	}
+	return nil
+}
+
+func decodeMovieResponseID(raw json.RawMessage) (*int32, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	object, err := arr.DecodeObject(raw)
 	if err != nil {
 		return nil, err
 	}
-	var rawValues []json.RawMessage
-	if err := json.Unmarshal(raw, &rawValues); err != nil || len(rawValues) != len(values) {
-		return nil, malformedError("find", errors.New("invalid movie list"))
+	id, present, err := arr.DecodeOptionalInt32(object, "id")
+	if err != nil || !present {
+		return nil, err
 	}
-	result := make([]existingMovieResource, len(values))
-	for index := range values {
-		result[index] = existingMovieResource{resource: values[index], raw: rawValues[index]}
+	return &id, nil
+}
+
+func (c *Client) find(ctx context.Context, tmdbID int32) (*existingMovieResource, error) {
+	path := "/api/v3/movie?tmdbId=" + strconv.FormatInt(int64(tmdbID), 10)
+	raw, err := c.http.GetRawJSON(ctx, "find", path)
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	value, err := findExistingMovie(raw, tmdbID)
+	if err != nil {
+		return nil, malformedError("find", err)
+	}
+	return value, nil
+}
+
+func findExistingMovie(raw json.RawMessage, tmdbID int32) (*existingMovieResource, error) {
+	rawValues, err := arr.DecodeArray(raw, maxMovieResults, "movies")
+	if err != nil {
+		return nil, err
+	}
+	for _, rawValue := range rawValues {
+		object, decodeErr := arr.DecodeObject(rawValue)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		value, decodeErr := decodeExistingMovie(object, rawValue)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if value.tmdbID != tmdbID {
+			continue
+		}
+		if value.id <= 0 {
+			return nil, errors.New("matched movie has no positive id")
+		}
+		return &value, nil
+	}
+	return nil, nil
+}
+
+func decodeExistingMovie(
+	object map[string]json.RawMessage, raw json.RawMessage,
+) (existingMovieResource, error) {
+	id, _, err := arr.DecodeOptionalInt32(object, "id")
+	if err != nil {
+		return existingMovieResource{}, err
+	}
+	tmdbID, _, err := arr.DecodeOptionalInt32(object, "tmdbId")
+	if err != nil {
+		return existingMovieResource{}, err
+	}
+	hasFile, _, err := arr.DecodeOptionalBool(object, "hasFile")
+	if err != nil {
+		return existingMovieResource{}, err
+	}
+	return existingMovieResource{id: id, tmdbID: tmdbID, hasFile: hasFile, raw: raw}, nil
 }
 
 func (c *Client) lookup(ctx context.Context, tmdbID int32) (radarrapi.MovieResource, error) {
@@ -237,16 +319,6 @@ func parsePositiveInt32(value string) (int32, error) {
 		return 0, core.ErrInvalidArgument
 	}
 	return int32(parsed), nil
-}
-
-func existingMovie(values []existingMovieResource, tmdbID int32) (existingMovieResource, bool) {
-	for _, value := range values {
-		movie := value.resource
-		if movie.TmdbId != nil && *movie.TmdbId == tmdbID && movie.Id != nil && *movie.Id > 0 {
-			return value, true
-		}
-	}
-	return existingMovieResource{}, false
 }
 
 func configureNewMovie(movie *radarrapi.MovieResource, qualityID int32, root string, tags []int32) {

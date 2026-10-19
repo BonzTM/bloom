@@ -34,9 +34,11 @@ type Client struct {
 }
 
 type existingSeries struct {
-	resource sonarrapi.SeriesResource
-	raw      json.RawMessage
+	id  int32
+	raw json.RawMessage
 }
+
+const maxSeriesResults = 1024
 
 var _ core.DownloadManagerAdapter = (*Client)(nil)
 
@@ -112,21 +114,7 @@ func (c *Client) Add(
 		return "", err
 	}
 	if existing != nil {
-		newSeasons := newlyMonitoredSeasons(existing.resource, title.Seasons)
-		merged, mergeErr := mergeExistingSeries(existing.raw, tags, title.Seasons)
-		if mergeErr != nil {
-			return "", managerError("monitor_seasons", core.DownloadManagerMalformed, mergeErr)
-		}
-		// Sonarr's season search covers monitored episodes only, so the
-		// seasons are monitored first and searched afterwards.
-		path := "/api/v3/series/" + strconv.FormatInt(int64(*existing.resource.Id), 10)
-		if err := c.http.PutRawJSON(ctx, "monitor_seasons", path, merged, &existing.resource); err != nil {
-			return "", err
-		}
-		if err := c.searchSeasons(ctx, *existing.resource.Id, newSeasons); err != nil {
-			return "", err
-		}
-		return strconv.FormatInt(int64(*existing.resource.Id), 10), nil
+		return c.reconcileSeries(ctx, existing, tags, title.Seasons)
 	}
 	configureNewSeries(&series, qualityID, options.RootFolder, tags, title.Seasons)
 	var added sonarrapi.SeriesResource
@@ -137,6 +125,103 @@ func (c *Client) Add(
 		return "", managerError("add", core.DownloadManagerMalformed, errors.New("missing series id"))
 	}
 	return strconv.FormatInt(int64(*added.Id), 10), nil
+}
+
+func (c *Client) reconcileSeries(
+	ctx context.Context, existing *existingSeries, tags []int32, requested []int,
+) (string, error) {
+	id, err := existingSeriesID(existing)
+	if err != nil {
+		return "", managerError("monitor_seasons", core.DownloadManagerMalformed, err)
+	}
+	raw, err := c.completeSeriesRaw(ctx, id, existing.raw)
+	if err != nil {
+		return "", err
+	}
+	merged, err := mergeExistingSeries(raw, tags, requested)
+	if err != nil {
+		return "", classifySeriesMergeError(err)
+	}
+	path := "/api/v3/series/" + strconv.FormatInt(int64(id), 10)
+	response, err := c.http.PutRawJSON(ctx, "monitor_seasons", path, merged.body)
+	if err != nil {
+		return "", err
+	}
+	responseID, err := decodeSeriesResponseID(response)
+	if err != nil {
+		return "", managerError("monitor_seasons", core.DownloadManagerMalformed, err)
+	}
+	if err := validateSeriesResponseID(id, responseID); err != nil {
+		return "", managerError("monitor_seasons", core.DownloadManagerMalformed, err)
+	}
+	if err := c.searchSeasons(ctx, id, merged.searchSeasons); err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(int64(id), 10), nil
+}
+
+func (c *Client) completeSeriesRaw(
+	ctx context.Context, id int32, raw json.RawMessage,
+) (json.RawMessage, error) {
+	present, err := hasSeasonCollection(raw)
+	if err != nil {
+		return nil, managerError("monitor_seasons", core.DownloadManagerMalformed, err)
+	}
+	if present {
+		return raw, nil
+	}
+	path := "/api/v3/series/" + strconv.FormatInt(int64(id), 10)
+	detailRaw, err := c.http.GetRawJSON(ctx, "series", path)
+	if err != nil {
+		return nil, err
+	}
+	if _, decodeErr := hasSeasonCollection(detailRaw); decodeErr != nil {
+		return nil, managerError("series", core.DownloadManagerMalformed, decodeErr)
+	}
+	detailID, err := decodeSeriesResponseID(detailRaw)
+	if err != nil {
+		return nil, managerError("series", core.DownloadManagerMalformed, err)
+	}
+	if err := validateSeriesResponseID(id, detailID); err != nil {
+		return nil, managerError("series", core.DownloadManagerMalformed, err)
+	}
+	return detailRaw, nil
+}
+
+func existingSeriesID(existing *existingSeries) (int32, error) {
+	if existing == nil || existing.id <= 0 {
+		return 0, errors.New("missing series id")
+	}
+	return existing.id, nil
+}
+
+func validateSeriesResponseID(expected int32, actual *int32) error {
+	if actual != nil && *actual != expected {
+		return errors.New("series id changed in response")
+	}
+	return nil
+}
+
+func decodeSeriesResponseID(raw json.RawMessage) (*int32, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	object, err := arr.DecodeObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	id, present, err := arr.DecodeOptionalInt32(object, "id")
+	if err != nil || !present {
+		return nil, err
+	}
+	return &id, nil
+}
+
+func classifySeriesMergeError(err error) error {
+	if _, found := errors.AsType[*missingSeasonsError](err); found {
+		return managerError("monitor_seasons", core.DownloadManagerNotFound, err)
+	}
+	return managerError("monitor_seasons", core.DownloadManagerMalformed, err)
 }
 
 func (c *Client) searchSeasons(ctx context.Context, seriesID int32, seasons []int) error {
@@ -167,22 +252,54 @@ func (c *Client) lookup(ctx context.Context, tmdbID int32) (sonarrapi.SeriesReso
 }
 
 func (c *Client) find(ctx context.Context, tvdbID int32) (*existingSeries, error) {
-	var values []sonarrapi.SeriesResource
 	path := "/api/v3/series?tvdbId=" + strconv.FormatInt(int64(tvdbID), 10)
-	raw, err := c.http.GetJSONWithRaw(ctx, "find", path, &values)
+	raw, err := c.http.GetRawJSON(ctx, "find", path)
 	if err != nil {
 		return nil, err
 	}
-	var rawValues []json.RawMessage
-	if err := json.Unmarshal(raw, &rawValues); err != nil || len(rawValues) != len(values) {
-		return nil, managerError("find", core.DownloadManagerMalformed, errors.New("invalid series list"))
+	existing, err := findExistingSeries(raw, tvdbID)
+	if err != nil {
+		return nil, managerError("find", core.DownloadManagerMalformed, err)
 	}
-	for index := range values {
-		if values[index].TvdbId != nil && *values[index].TvdbId == tvdbID && values[index].Id != nil && *values[index].Id > 0 {
-			return &existingSeries{resource: values[index], raw: rawValues[index]}, nil
+	return existing, nil
+}
+
+func findExistingSeries(raw json.RawMessage, tvdbID int32) (*existingSeries, error) {
+	values, err := arr.DecodeArray(raw, maxSeriesResults, "series")
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		object, decodeErr := arr.DecodeObject(value)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		candidate, matched, decodeErr := matchExistingSeries(object, value, tvdbID)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if matched {
+			return candidate, nil
 		}
 	}
 	return nil, nil
+}
+
+func matchExistingSeries(
+	object map[string]json.RawMessage, raw json.RawMessage, tvdbID int32,
+) (*existingSeries, bool, error) {
+	candidateTVDBID, present, err := arr.DecodeOptionalInt32(object, "tvdbId")
+	if err != nil || !present || candidateTVDBID != tvdbID {
+		return nil, false, err
+	}
+	id, present, err := arr.DecodeOptionalInt32(object, "id")
+	if err != nil {
+		return nil, false, err
+	}
+	if !present || id <= 0 {
+		return nil, false, errors.New("matched series has no positive id")
+	}
+	return &existingSeries{id: id, raw: raw}, true, nil
 }
 
 // Queue reads live queue progress and falls back to the series file state.
@@ -241,21 +358,6 @@ func configureNewSeries(
 	}
 	monitor := sonarrapi.MonitorTypes("none")
 	series.AddOptions = &sonarrapi.AddSeriesOptions{Monitor: &monitor, SearchForMissingEpisodes: &search}
-}
-
-func newlyMonitoredSeasons(series sonarrapi.SeriesResource, requested []int) []int {
-	result := make([]int, 0, len(requested))
-	if series.Seasons == nil {
-		return result
-	}
-	for _, season := range *series.Seasons {
-		selected := season.SeasonNumber != nil && containsSeason(requested, int(*season.SeasonNumber))
-		monitored := season.Monitored != nil && *season.Monitored
-		if selected && !monitored {
-			result = append(result, int(*season.SeasonNumber))
-		}
-	}
-	return result
 }
 
 func containsSeason(values []int, target int) bool {

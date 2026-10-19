@@ -46,7 +46,6 @@ func TestMergeExistingMovieRejectsMalformedShapes(t *testing.T) {
 	}{
 		{name: "invalid JSON", raw: `{`},
 		{name: "not object", raw: `[]`},
-		{name: "missing tags", raw: `{}`},
 		{name: "tags not array", raw: `{"tags":{}}`},
 		{name: "tag not integer", raw: `{"tags":[1.5]}`},
 		{name: "tag not number", raw: `{"tags":["1"]}`},
@@ -58,6 +57,17 @@ func TestMergeExistingMovieRejectsMalformedShapes(t *testing.T) {
 				t.Fatal("mergeExistingMovie returned nil error")
 			}
 		})
+	}
+}
+
+func TestMergeExistingMovieTreatsNullOrAbsentTagsAsEmpty(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{`{}`, `{"tags":null}`} {
+		merged, err := mergeExistingMovie(json.RawMessage(raw), []int32{2})
+		if err != nil {
+			t.Fatalf("mergeExistingMovie(%s): %v", raw, err)
+		}
+		assertRawValue(t, decodeRawObjectForTest(t, merged), "tags", `[2]`)
 	}
 }
 

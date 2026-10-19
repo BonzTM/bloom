@@ -94,20 +94,24 @@ func configuredHTTPClient(input *http.Client, timeout time.Duration) *http.Clien
 
 // GetJSON performs a retryable GET and decodes its bounded JSON response.
 func (c *Client) GetJSON(ctx context.Context, operation, path string, target any) error {
-	_, err := c.GetJSONWithRaw(ctx, operation, path, target)
-	return err
+	body, err := c.GetRawJSON(ctx, operation, path)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		return c.failure(operation, core.DownloadManagerMalformed, false, err)
+	}
+	return nil
 }
 
-// GetJSONWithRaw performs a retryable GET and returns the bounded response after decoding it.
-func (c *Client) GetJSONWithRaw(
-	ctx context.Context, operation, path string, target any,
-) (json.RawMessage, error) {
+// GetRawJSON performs a retryable GET and returns its bounded, validated JSON response.
+func (c *Client) GetRawJSON(ctx context.Context, operation, path string) (json.RawMessage, error) {
 	body, err := c.do(ctx, operation, http.MethodGet, path, nil, true)
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return nil, c.failure(operation, core.DownloadManagerMalformed, false, err)
+	if !json.Valid(body) {
+		return nil, c.failure(operation, core.DownloadManagerMalformed, false, errors.New("invalid JSON response"))
 	}
 	return json.RawMessage(body), nil
 }
@@ -139,16 +143,23 @@ func (c *Client) PutJSON(ctx context.Context, operation, path string, input, tar
 	return c.putJSON(ctx, operation, path, body, target)
 }
 
-// PutRawJSON performs a retryable idempotent PUT without rewriting the validated JSON body.
+// PutRawJSON performs a retryable idempotent PUT and returns its bounded JSON response.
 func (c *Client) PutRawJSON(
-	ctx context.Context, operation, path string, input json.RawMessage, target any,
-) error {
+	ctx context.Context, operation, path string, input json.RawMessage,
+) (json.RawMessage, error) {
 	if !json.Valid(input) {
-		return c.failure(operation, core.DownloadManagerMalformed, false, errors.New("invalid JSON request body"))
+		return nil, c.failure(operation, core.DownloadManagerMalformed, false, errors.New("invalid JSON request body"))
 	}
 	body := bytes.Clone(input)
 	defer clear(body)
-	return c.putJSON(ctx, operation, path, body, target)
+	response, err := c.do(ctx, operation, http.MethodPut, path, body, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(response) != 0 && !json.Valid(response) {
+		return nil, c.failure(operation, core.DownloadManagerMalformed, false, errors.New("invalid JSON response"))
+	}
+	return json.RawMessage(response), nil
 }
 
 func (c *Client) putJSON(ctx context.Context, operation, path string, body []byte, target any) error {
