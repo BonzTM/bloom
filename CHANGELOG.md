@@ -9,6 +9,13 @@ contracts) gets an entry here.
 
 ## [Unreleased]
 
+### Security
+
+- The image builds with Go 1.27.2 and `golang.org/x/net` 0.60.0, which
+  close the advisories the vulnerability scan reports for 1.27.1 and
+  0.58.0. Frontend build tooling resolves patched `brace-expansion` and
+  `source-map-js` releases.
+
 ### Changed
 
 - The watch page reads the watch itself, so a shared or bookmarked link
