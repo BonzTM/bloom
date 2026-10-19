@@ -152,6 +152,11 @@ const ACCOUNT_LINKS: readonly AccountLink[] = [
     label: "My statistics",
     permission: permissions.statsReadOwn,
   },
+  {
+    to: "/notifications",
+    label: "My notifications",
+    permission: permissions.notificationsManageOwn,
+  },
 ];
 
 function AccountLinks({

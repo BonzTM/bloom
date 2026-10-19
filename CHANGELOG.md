@@ -24,7 +24,8 @@ contracts) gets an entry here.
   managers, Request settings, Notifications, and Imports under Settings.
   `/admin` opens the first administration page the account may use.
 - The signed-in account is an avatar button in the top bar that opens a
-  small menu with the account's own pages and sign-out.
+  small menu with the account's own pages, My statistics and My
+  notifications, and sign-out.
 - The interface uses one gray palette with solid surfaces, a single indigo
   accent, and the Inter typeface, which ships with the app. A page is one
   column of sections separated by space; only objects carry a surface:
