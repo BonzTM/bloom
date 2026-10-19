@@ -97,7 +97,7 @@ func decodeSeasons(raw json.RawMessage) ([]json.RawMessage, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, nil
 	}
-	values, err := arr.DecodeArray(raw, maxSeasons, "seasons")
+	values, err := arr.DecodeNullableArray(raw, maxSeasons, "seasons")
 	if err != nil {
 		return nil, fmt.Errorf("decode seasons: %w", err)
 	}

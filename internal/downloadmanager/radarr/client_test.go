@@ -146,6 +146,29 @@ func TestAddMissLooksUpAndPostsOnce(t *testing.T) {
 	}
 }
 
+func TestAddRejectsNullFindListWithoutWrite(t *testing.T) {
+	var writes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			writes.Add(1)
+		}
+		if r.URL.Path == "/api/v3/movie" && r.Method == http.MethodGet {
+			writeTestJSON(t, w, nil)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	_, err := newTestClient(t, server).Add(t.Context(), movieTitle(), movieOptions())
+	var classified *core.DownloadManagerError
+	if !errors.As(err, &classified) || classified.Kind != core.DownloadManagerMalformed {
+		t.Fatalf("Add error = %T %v", err, err)
+	}
+	if writes.Load() != 0 {
+		t.Fatalf("writes = %d, want 0", writes.Load())
+	}
+}
+
 func TestProbeOptionsAndQueueProgress(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

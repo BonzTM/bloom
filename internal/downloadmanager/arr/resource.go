@@ -86,11 +86,26 @@ func DecodeArray(raw json.RawMessage, max int, field string) ([]json.RawMessage,
 		return nil, fmt.Errorf("decode %s: %w", field, err)
 	}
 	if token == nil {
-		return nil, requireJSONEnd(decoder)
+		return nil, fmt.Errorf("%s must be an array", field)
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
 		return nil, fmt.Errorf("%s must be an array", field)
 	}
+	return decodeArrayValues(decoder, max, field)
+}
+
+// DecodeNullableArray decodes a bounded array or JSON null.
+func DecodeNullableArray(raw json.RawMessage, max int, field string) ([]json.RawMessage, error) {
+	if max < 0 || field == "" {
+		return nil, errors.New("invalid array decode parameters")
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	return DecodeArray(raw, max, field)
+}
+
+func decodeArrayValues(decoder *json.Decoder, max int, field string) ([]json.RawMessage, error) {
 	values := make([]json.RawMessage, 0, min(max, 16))
 	for decoder.More() {
 		if len(values) >= max {
@@ -254,7 +269,7 @@ func decodeIntegerArray(raw json.RawMessage) ([]int32, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return []int32{}, nil
 	}
-	values, err := DecodeArray(raw, maxTags, "tags")
+	values, err := DecodeNullableArray(raw, maxTags, "tags")
 	if err != nil {
 		return nil, err
 	}

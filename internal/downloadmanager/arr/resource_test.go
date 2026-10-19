@@ -15,6 +15,21 @@ func TestDecodeObjectRejectsDuplicateMemberNames(t *testing.T) {
 	}
 }
 
+func TestDecodeArrayRejectsNull(t *testing.T) {
+	t.Parallel()
+	if _, err := DecodeArray(json.RawMessage(`null`), 1, "values"); err == nil {
+		t.Fatal("DecodeArray returned nil error")
+	}
+}
+
+func TestDecodeNullableArrayAcceptsNull(t *testing.T) {
+	t.Parallel()
+	values, err := DecodeNullableArray(json.RawMessage(`null`), 1, "values")
+	if err != nil || values != nil {
+		t.Fatalf("DecodeNullableArray = %v, %v; want nil, nil", values, err)
+	}
+}
+
 func TestMergeResourceBoundsObjectMembers(t *testing.T) {
 	t.Parallel()
 	if _, err := MergeResource(resourceWithMembers(maxObjectMembers), nil); err != nil {

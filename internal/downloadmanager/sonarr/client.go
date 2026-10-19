@@ -38,7 +38,16 @@ type existingSeries struct {
 	raw json.RawMessage
 }
 
-const maxSeriesResults = 1024
+// episodesMonitoredResource is the non-null request shape from Sonarr's pinned schema.
+type episodesMonitoredResource struct {
+	EpisodeIDs []int32 `json:"episodeIds"`
+	Monitored  bool    `json:"monitored"`
+}
+
+const (
+	maxSeriesResults  = 1024
+	maxEpisodeResults = 2000
+)
 
 var _ core.DownloadManagerAdapter = (*Client)(nil)
 
@@ -226,6 +235,9 @@ func classifySeriesMergeError(err error) error {
 
 func (c *Client) searchSeasons(ctx context.Context, seriesID int32, seasons []int) error {
 	for _, season := range seasons {
+		if err := c.monitorSeasonEpisodes(ctx, seriesID, season); err != nil {
+			return err
+		}
 		command := map[string]any{
 			"name": "SeasonSearch", "seriesId": seriesID, "seasonNumber": season,
 		}
@@ -235,6 +247,64 @@ func (c *Client) searchSeasons(ctx context.Context, seriesID int32, seasons []in
 		}
 	}
 	return nil
+}
+
+func (c *Client) monitorSeasonEpisodes(ctx context.Context, seriesID int32, season int) error {
+	path := "/api/v3/episode?seriesId=" + strconv.FormatInt(int64(seriesID), 10) +
+		"&seasonNumber=" + strconv.Itoa(season)
+	raw, err := c.http.GetRawJSON(ctx, "list_episodes", path)
+	if err != nil {
+		return err
+	}
+	ids, err := unmonitoredEpisodeIDs(raw)
+	if err != nil {
+		return managerError("list_episodes", core.DownloadManagerMalformed, err)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	request := episodesMonitoredResource{EpisodeIDs: ids, Monitored: true}
+	return c.http.PutJSON(ctx, "monitor_episodes", "/api/v3/episode/monitor", request, nil)
+}
+
+func unmonitoredEpisodeIDs(raw json.RawMessage) ([]int32, error) {
+	values, err := arr.DecodeArray(raw, maxEpisodeResults, "episodes")
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int32, 0, len(values))
+	for index, value := range values {
+		id, monitored, decodeErr := decodeEpisodeMonitorState(value)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("episode %d: %w", index, decodeErr)
+		}
+		if !monitored {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func decodeEpisodeMonitorState(raw json.RawMessage) (int32, bool, error) {
+	object, err := arr.DecodeObject(raw)
+	if err != nil {
+		return 0, false, err
+	}
+	id, idPresent, err := arr.DecodeOptionalInt32(object, "id")
+	if err != nil {
+		return 0, false, err
+	}
+	if !idPresent || id <= 0 {
+		return 0, false, errors.New("episode has no positive id")
+	}
+	monitored, monitoredPresent, err := arr.DecodeOptionalBool(object, "monitored")
+	if err != nil {
+		return 0, false, err
+	}
+	if !monitoredPresent {
+		return 0, false, errors.New("episode has no monitored state")
+	}
+	return id, monitored, nil
 }
 
 func (c *Client) lookup(ctx context.Context, tmdbID int32) (sonarrapi.SeriesResource, error) {
