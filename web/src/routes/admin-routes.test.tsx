@@ -21,10 +21,21 @@ async function signInFromLoginPage(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Sign in" }));
 }
 
+// Every area that needs a permission this test's accounts lack.
+const SIGNED_IN_AREAS = [
+  "Discover",
+  "Requests",
+  "Playback",
+  "Statistics",
+  "Libraries",
+  "Users",
+  "Settings",
+];
+
 it("hides every administration area from a signed-out visitor", async () => {
   renderApp();
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
-  for (const name of ["Requests", "Playback", "Users", "Settings"]) {
+  for (const name of SIGNED_IN_AREAS) {
     expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
   }
 });
@@ -34,7 +45,7 @@ it("hides every administration area from an account without admin permissions", 
   signInMockSession();
   renderApp();
   expect(await screen.findByText("Signed in as admin")).toBeVisible();
-  for (const name of ["Requests", "Playback", "Users", "Settings"]) {
+  for (const name of SIGNED_IN_AREAS) {
     expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
   }
 });
@@ -70,9 +81,10 @@ it("takes an administrator from the navigation to the roles page", async () => {
   expect(tabs.getByRole("link", { name: "Accounts" })).not.toHaveAttribute(
     "aria-current",
   );
+  // Users links to Accounts, so on Roles it marks the location, not the page.
   expect(sidebar.getByRole("link", { name: "Users" })).toHaveAttribute(
     "aria-current",
-    "page",
+    "location",
   );
 });
 

@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -39,15 +40,18 @@ import { useRouteFocus } from "./use-route-focus.js";
 export function AppLayout(): ReactNode {
   const main = useRef<HTMLElement>(null);
   const bar = useRef<HTMLElement>(null);
+  const sidebar = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navId = useId();
   useRouteFocus(main);
   useBarHeight(bar);
   useCloseOnNavigate(location.pathname, setOpen);
+  useDrawerFocus(open, setOpen, sidebar, toggle);
   return (
     <div className={open ? "shell nav-open" : "shell"}>
-      <aside className="sidebar" id={navId}>
+      <aside className="sidebar" id={navId} ref={sidebar}>
         <Link to="/" className="brand">
           <span className="brand-mark" aria-hidden="true" />
           Bloom
@@ -60,6 +64,7 @@ export function AppLayout(): ReactNode {
       <div className="content">
         <header className="topbar" ref={bar}>
           <button
+            ref={toggle}
             type="button"
             className="btn-ghost nav-toggle"
             aria-expanded={open}
@@ -135,18 +140,32 @@ function SidebarLink({
   current,
   children,
 }: SidebarLinkProps): ReactNode {
+  const { pathname } = useLocation();
+  const exact = pathname === to;
   return (
     <li>
       <Link
         to={to}
         className={current ? "active" : undefined}
-        aria-current={current ? "page" : undefined}
+        aria-current={sidebarCurrent(current, exact)}
       >
         <NavIcon name={icon} />
         <span>{children}</span>
       </Link>
     </li>
   );
+}
+
+// The link of the open page is the current page; an area's link while one
+// of its other pages is open marks the current location instead.
+function sidebarCurrent(
+  current: boolean,
+  exact: boolean,
+): "page" | "location" | undefined {
+  if (!current) {
+    return undefined;
+  }
+  return exact ? "page" : "location";
 }
 
 // The pages of the current area as tabs, shown only when the account may
@@ -227,6 +246,33 @@ function GlobalSearch(): ReactNode {
       />
     </form>
   );
+}
+
+// On narrow screens the drawer opens from a button that follows it in the
+// page, so opening it moves focus to its first link; Escape closes it and
+// returns focus to the button.
+function useDrawerFocus(
+  open: boolean,
+  setOpen: (open: boolean) => void,
+  sidebar: RefObject<HTMLElement | null>,
+  toggle: RefObject<HTMLButtonElement | null>,
+): void {
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    sidebar.current?.querySelector<HTMLElement>("nav a[href]")?.focus();
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setOpen(false);
+        toggle.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, setOpen, sidebar, toggle]);
 }
 
 function useCloseOnNavigate(

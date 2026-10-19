@@ -126,12 +126,17 @@ it("announces sign-out while it is pending and settles cleanly", async () => {
   renderApp();
 
   await openAccountMenu(user);
+  // The live region must already exist, empty, before the message arrives,
+  // or a screen reader may not announce it.
+  const before = within(screen.getByRole("banner")).getAllByRole("status");
   await user.click(screen.getByRole("button", { name: "Sign out" }));
 
   expect(
     await screen.findByRole("button", { name: "Signing out…" }),
   ).toBeDisabled();
-  expect(screen.getByText("Signing out, please wait.")).toHaveRole("status");
+  const message = screen.getByText("Signing out, please wait.");
+  expect(message).toHaveRole("status");
+  expect(before).toContain(message);
   gate.open();
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
 });
@@ -286,4 +291,23 @@ it("closes the account menu on a click elsewhere and on a new page", async () =>
   expect(
     screen.getByRole("button", { name: "Signed in as admin" }),
   ).toHaveAttribute("aria-expanded", "false");
+});
+
+it("moves focus into the drawer and returns it to the menu button on Escape", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp();
+  const toggle = await screen.findByRole("button", { name: "Menu" });
+
+  await user.click(toggle);
+
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("link", { name: "Home" }),
+  ).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(toggle).toHaveFocus();
 });
