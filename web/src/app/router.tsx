@@ -28,6 +28,9 @@ const LazyPlaybackRoute = lazy(() => import("../routes/playback-route.js"));
 const LazyWatchRoute = lazy(() => import("../routes/watch-route.js"));
 const LazyStatisticsRoute = lazy(() => import("../routes/statistics-route.js"));
 const LazyMyStatsRoute = lazy(() => import("../routes/my-stats-route.js"));
+const LazyMyNotificationsRoute = lazy(
+  () => import("../routes/my-notifications-route.js"),
+);
 const LazyUserStatsRoute = lazy(() => import("../routes/user-stats-route.js"));
 const LazyActivityRoute = lazy(() => import("../routes/activity-route.js"));
 const LazyExclusionsRoute = lazy(() => import("../routes/exclusions-route.js"));
@@ -105,6 +108,16 @@ const routes: RouteObject[] = [
           <LazyPage loading="Loading your invite…">
             <LazyInviteAcceptRoute />
           </LazyPage>
+        ),
+      },
+      {
+        path: "notifications",
+        element: (
+          <RequirePermission anyOf={[permissions.notificationsManageOwn]}>
+            <LazyPage loading="Loading your notifications…">
+              <LazyMyNotificationsRoute />
+            </LazyPage>
+          </RequirePermission>
         ),
       },
       {

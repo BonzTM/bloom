@@ -32,9 +32,19 @@ export const metadataTitleSchema = z.object({
   overview: boundedBytes(MAX_OVERVIEW_BYTES),
   poster_path: boundedBytes(MAX_POSTER_BYTES),
   backdrop_path: boundedBytes(MAX_POSTER_BYTES),
+  // Whether the caller asked to be told when this title becomes available;
+  // optional so a server without subscriptions still parses.
+  subscribed: z.boolean().optional(),
 });
 
 export type MetadataTitle = z.output<typeof metadataTitleSchema>;
+
+// A title page's answer always says whether the caller follows the title.
+export const metadataTitleDetailSchema = metadataTitleSchema.extend({
+  subscribed: z.boolean(),
+});
+
+export type MetadataTitleDetail = z.output<typeof metadataTitleDetailSchema>;
 
 // The caller's own request for a title, or none.
 export const metadataRequestStateSchema = z.enum([
@@ -98,7 +108,7 @@ export const metadataSeasonSchema = z.object({
 
 export type MetadataSeason = z.output<typeof metadataSeasonSchema>;
 
-export const metadataSeriesSchema = metadataTitleSchema.extend({
+export const metadataSeriesSchema = metadataTitleDetailSchema.extend({
   seasons: z.array(metadataSeasonSchema).max(MAX_SEASONS),
 });
 

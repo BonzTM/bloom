@@ -16,6 +16,7 @@ const EVENT_LABELS: Readonly<Record<NotificationEventType, string>> = {
   dispatched: "Sent to the download manager",
   available: "Available to watch",
   failed: "Fulfilment failed",
+  "playback.session_started": "Playback started",
 };
 
 export function kindLabel(kind: NotificationKind): string {
