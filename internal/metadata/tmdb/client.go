@@ -30,16 +30,18 @@ const (
 	rateBurst                      = 40
 )
 
-// Metrics observes bounded outbound TMDB requests and retries.
+// Metrics observes bounded outbound TMDB activity.
 type Metrics interface {
 	ObserveMetadataRequest(provider, operation, outcome string, seconds float64)
 	ObserveMetadataRetry(provider, operation, outcome string)
+	AddMetadataItemsSkipped(provider, operation string, count int)
 }
 
 type nopMetrics struct{}
 
 func (nopMetrics) ObserveMetadataRequest(string, string, string, float64) {}
 func (nopMetrics) ObserveMetadataRetry(string, string, string)            {}
+func (nopMetrics) AddMetadataItemsSkipped(string, string, int)            {}
 
 // Dependencies configures the TMDB client and its test seams.
 type Dependencies struct {
@@ -293,22 +295,26 @@ func (c *Client) Search(ctx context.Context, input core.MetadataSearch) ([]core.
 	ctx, cancel := c.operationContext(ctx)
 	defer cancel()
 	started := c.clock.Now()
-	response, err := c.api.SearchMultiWithResponse(ctx, &tmdbapi.SearchMultiParams{Query: input.Query})
-	status := 0
-	if response != nil {
-		status = response.StatusCode()
-	}
-	c.observe("search", started, status, err)
+	httpResponse, callErr := c.api.SearchMulti( //nolint:bodyclose // readProviderResponse closes every returned body.
+		ctx, &tmdbapi.SearchMultiParams{Query: input.Query},
+	)
+	response, err := readProviderResponse(httpResponse, callErr)
+	status := response.StatusCode()
 	if err != nil {
+		c.observe("search", started, status, err)
 		return nil, classifyCallError("search", err)
 	}
-	if err := validateStatus("search", response.StatusCode()); err != nil {
-		return nil, err
+	if statusErr := validateStatus("search", response.StatusCode()); statusErr != nil {
+		c.observe("search", started, status, statusErr)
+		return nil, statusErr
 	}
-	if response.JSON200 == nil || response.JSON200.Results == nil {
-		return nil, classifyError("search", response.StatusCode(), core.ErrMetadataMalformed)
+	items, skipped, err := decodeSearchResults(response.GetBody(), input.Kind)
+	c.observe("search", started, status, err)
+	c.observeSkipped("search", skipped)
+	if err != nil {
+		return nil, classifyError("search", status, err)
 	}
-	return mapSearchResults(*response.JSON200.Results, input.Kind), nil
+	return items, nil
 }
 
 // Movie returns TMDB movie details.
@@ -320,31 +326,20 @@ func (c *Client) Movie(ctx context.Context, providerID string) (core.MetadataTit
 	ctx, cancel := c.operationContext(ctx)
 	defer cancel()
 	started := c.clock.Now()
-	response, err := c.api.MovieDetailsWithResponse(ctx, id, nil)
-	status := 0
-	if response != nil {
-		status = response.StatusCode()
-	}
-	c.observe("movie", started, status, err)
+	httpResponse, callErr := c.api.MovieDetails(ctx, id, nil) //nolint:bodyclose // readProviderResponse closes every returned body.
+	response, err := readProviderResponse(httpResponse, callErr)
+	status := response.StatusCode()
 	if err != nil {
+		c.observe("movie", started, status, err)
 		return core.MetadataTitle{}, classifyCallError("movie", err)
 	}
-	if err := validateStatus("movie", response.StatusCode()); err != nil {
-		return core.MetadataTitle{}, err
+	if statusErr := validateStatus("movie", response.StatusCode()); statusErr != nil {
+		c.observe("movie", started, status, statusErr)
+		return core.MetadataTitle{}, statusErr
 	}
-	if response.JSON200 == nil || response.JSON200.Id == nil || response.JSON200.Title == nil {
-		return core.MetadataTitle{}, classifyError("movie", response.StatusCode(), core.ErrMetadataMalformed)
-	}
-	title := core.MetadataTitle{
-		Kind: core.MediaKindMovie, Provider: core.MetadataProviderTMDB,
-		ProviderID: strconv.Itoa(*response.JSON200.Id), Title: *response.JSON200.Title,
-		Year: yearFromDate(value(response.JSON200.ReleaseDate)), Overview: value(response.JSON200.Overview),
-		PosterPath: value(response.JSON200.PosterPath), BackdropPath: value(response.JSON200.BackdropPath),
-	}
-	if err := core.ValidateMetadataTitle(title); err != nil {
-		return core.MetadataTitle{}, classifyError("movie", response.StatusCode(), errors.Join(core.ErrMetadataMalformed, err))
-	}
-	return title, nil
+	title, err := decodeMovieResponse(response.GetBody(), status)
+	c.observe("movie", started, status, err)
+	return title, err
 }
 
 // Series returns TMDB series details and seasons.
@@ -356,19 +351,21 @@ func (c *Client) Series(ctx context.Context, providerID string, includeSpecials 
 	ctx, cancel := c.operationContext(ctx)
 	defer cancel()
 	started := c.clock.Now()
-	response, err := c.api.TvSeriesDetailsWithResponse(ctx, id, nil)
-	status := 0
-	if response != nil {
-		status = response.StatusCode()
-	}
-	c.observe("series", started, status, err)
+	httpResponse, callErr := c.api.TvSeriesDetails(ctx, id, nil) //nolint:bodyclose // readProviderResponse closes every returned body.
+	response, err := readProviderResponse(httpResponse, callErr)
+	status := response.StatusCode()
 	if err != nil {
+		c.observe("series", started, status, err)
 		return core.MetadataSeries{}, classifyCallError("series", err)
 	}
-	if err := validateStatus("series", response.StatusCode()); err != nil {
-		return core.MetadataSeries{}, err
+	if statusErr := validateStatus("series", response.StatusCode()); statusErr != nil {
+		c.observe("series", started, status, statusErr)
+		return core.MetadataSeries{}, statusErr
 	}
-	return mapSeriesResponse(response, includeSpecials)
+	series, skipped, err := decodeSeriesResponse(response.GetBody(), status, includeSpecials)
+	c.observe("series", started, status, err)
+	c.observeSkipped("series", skipped)
+	return series, err
 }
 
 func (c *Client) observe(operation string, started time.Time, status int, err error) {
@@ -377,6 +374,12 @@ func (c *Client) observe(operation string, started time.Time, status int, err er
 		outcome = "failure"
 	}
 	c.metrics.ObserveMetadataRequest("tmdb", operation, outcome, c.clock.Now().Sub(started).Seconds())
+}
+
+func (c *Client) observeSkipped(operation string, count int) {
+	if count > 0 {
+		c.metrics.AddMetadataItemsSkipped("tmdb", operation, count)
+	}
 }
 
 // CloseIdleConnections closes idle connections owned by the client transport.

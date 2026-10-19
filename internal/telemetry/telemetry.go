@@ -167,6 +167,9 @@ func (NopMetrics) ObserveMetadataRequest(string, string, string, float64) {}
 // ObserveMetadataRetry discards a metadata-provider retry observation.
 func (NopMetrics) ObserveMetadataRetry(string, string, string) {}
 
+// AddMetadataItemsSkipped discards a metadata-provider skipped-item count.
+func (NopMetrics) AddMetadataItemsSkipped(string, string, int) {}
+
 // IncMediaRequest discards a media request outcome.
 func (NopMetrics) IncMediaRequest(string, string) {}
 
