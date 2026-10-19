@@ -329,3 +329,20 @@ it("closes the account menu when a link leads to the page already open", async (
     screen.getByRole("button", { name: "Signed in as admin" }),
   ).toHaveAttribute("aria-expanded", "false");
 });
+
+it("closes the drawer when its link leads to the page already open", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/about");
+  await screen.findByRole("heading", { name: "About Bloom", level: 1 });
+  const toggle = screen.getByRole("button", { name: "Menu" });
+  await user.click(toggle);
+
+  await user.click(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("link", { name: "About" }),
+  );
+
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+});

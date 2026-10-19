@@ -57,7 +57,12 @@ export function AppLayout(): ReactNode {
           <span className="brand-mark" aria-hidden="true" />
           Bloom
         </Link>
-        <Sidebar pathname={normalizePath(location.pathname)} />
+        <Sidebar
+          pathname={normalizePath(location.pathname)}
+          onNavigate={() => {
+            setOpen(false);
+          }}
+        />
         <div className="sidebar-footer">
           <VersionBadge quiet />
         </div>
@@ -97,14 +102,23 @@ export function AppLayout(): ReactNode {
 
 // Home, each area the account may open, and About. An area is current when
 // the page is any of its pages or beneath one, such as a title under
-// Discover or a watch under Playback.
-function Sidebar({ pathname }: Readonly<{ pathname: string }>): ReactNode {
+// Discover or a watch under Playback. Following a link closes the drawer
+// even when it leads to the page already open.
+function Sidebar({
+  pathname,
+  onNavigate,
+}: Readonly<{ pathname: string; onNavigate: () => void }>): ReactNode {
   const session = useSession();
   const granted = session.data?.permissions ?? [];
   return (
     <nav aria-label="Main navigation">
       <ul>
-        <SidebarLink to="/" icon="home" current={pathname === "/"}>
+        <SidebarLink
+          to="/"
+          icon="home"
+          current={pathname === "/"}
+          onNavigate={onNavigate}
+        >
           Home
         </SidebarLink>
         {NAV_GROUPS.map((group) => {
@@ -115,12 +129,18 @@ function Sidebar({ pathname }: Readonly<{ pathname: string }>): ReactNode {
               to={first.to}
               icon={group.icon}
               current={pageFor(group, pathname) !== undefined}
+              onNavigate={onNavigate}
             >
               {group.label}
             </SidebarLink>
           );
         })}
-        <SidebarLink to="/about" icon="info" current={pathname === "/about"}>
+        <SidebarLink
+          to="/about"
+          icon="info"
+          current={pathname === "/about"}
+          onNavigate={onNavigate}
+        >
           About
         </SidebarLink>
       </ul>
@@ -132,6 +152,7 @@ type SidebarLinkProps = Readonly<{
   to: string;
   icon: IconName;
   current: boolean;
+  onNavigate: () => void;
   children: ReactNode;
 }>;
 
@@ -139,6 +160,7 @@ function SidebarLink({
   to,
   icon,
   current,
+  onNavigate,
   children,
 }: SidebarLinkProps): ReactNode {
   const { pathname } = useLocation();
@@ -149,6 +171,7 @@ function SidebarLink({
         to={to}
         className={current ? "active" : undefined}
         aria-current={sidebarCurrent(current, exact)}
+        onClick={onNavigate}
       >
         <NavIcon name={icon} />
         <span>{children}</span>

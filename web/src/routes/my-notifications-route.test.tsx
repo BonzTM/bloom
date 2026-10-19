@@ -58,6 +58,8 @@ it("hides the page and the control without notifications.manage.own", async () =
   expect(
     await screen.findByRole("heading", { name: "Access denied", level: 1 }),
   ).toBeVisible();
+  // The account menu hides its links while closed; open it first.
+  await openAccountMenu(userEvent.setup());
   expect(
     screen.queryByRole("link", { name: "My notifications" }),
   ).not.toBeInTheDocument();

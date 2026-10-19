@@ -9,6 +9,7 @@ import {
   setMockPermissions,
   signInMockSession,
 } from "../mocks/handlers.js";
+import { openAccountMenu } from "../test/account-menu.js";
 import { renderApp } from "../test/render-app.js";
 import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
@@ -33,6 +34,8 @@ it("hides the page without stats.read.own", async () => {
   expect(
     await screen.findByRole("heading", { name: "Access denied" }),
   ).toBeVisible();
+  // The account menu hides its links while closed; open it first.
+  await openAccountMenu(userEvent.setup());
   expect(
     screen.queryByRole("link", { name: "My statistics" }),
   ).not.toBeInTheDocument();
