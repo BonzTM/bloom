@@ -18,14 +18,15 @@ import (
 const playbackTestServerID = "33333333-3333-4333-8333-333333333333"
 
 type fakePlaybackReader struct {
-	mu              sync.Mutex
-	watches         []core.PlaybackWatch
-	positions       []core.PlaybackPosition
-	err             error
-	errorsByCall    []error
-	queries         []core.PlaybackQuery
-	watchID         string
-	positionWatchID string
+	mu                 sync.Mutex
+	watches            []core.PlaybackWatch
+	positions          []core.PlaybackPosition
+	err                error
+	errorsByCall       []error
+	excludedLibraryIDs map[string]bool
+	queries            []core.PlaybackQuery
+	watchID            string
+	positionWatchID    string
 }
 
 func (f *fakePlaybackReader) GetWatch(
@@ -38,6 +39,9 @@ func (f *fakePlaybackReader) GetWatch(
 		return core.PlaybackWatch{}, f.err
 	}
 	if len(f.watches) == 0 || f.watches[0].ID != watchID {
+		return core.PlaybackWatch{}, core.ErrNotFound
+	}
+	if f.excludedLibraryIDs[f.watches[0].LibraryID] {
 		return core.PlaybackWatch{}, core.ErrNotFound
 	}
 	return f.watches[0], nil
@@ -261,18 +265,66 @@ func TestPlaybackWatchReturnsFinishedWatch(t *testing.T) {
 }
 
 func TestPlaybackWatchReturnsNotFoundForUnknownOrExcludedWatch(t *testing.T) {
-	for _, name := range []string{"unknown", "excluded"} {
-		t.Run(name, func(t *testing.T) {
-			h := newAuthHarness(t, nil)
-			h.playback.err = core.ErrNotFound
-			cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
-			path := "/api/v1/playback/watches/22222222-2222-4222-8222-222222222222"
-			recorder := h.request(t, http.MethodGet, path, "", cookie)
-			if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"not_found"`) {
-				t.Fatalf("GET %s playback watch = %d: %s", name, recorder.Code, recorder.Body.String())
-			}
-		})
+	h := newAuthHarness(t, nil)
+	excluded := playbackHTTPWatch(h.clock.Now(), core.WatchStopped)
+	excluded.LibraryID = "excluded-library"
+	h.playback.watches = []core.PlaybackWatch{excluded}
+	h.playback.excludedLibraryIDs = map[string]bool{excluded.LibraryID: true}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	unknownResponse := playbackWatchRequest(t, h,
+		"/api/v1/playback/watches/44444444-4444-4444-8444-444444444444", cookie, "unknown-request")
+	excludedResponse := playbackWatchRequest(t, h,
+		"/api/v1/playback/watches/"+excluded.ID, cookie, "excluded-request")
+
+	if unknownResponse.Code != http.StatusNotFound || excludedResponse.Code != unknownResponse.Code {
+		t.Fatalf("unknown status = %d, excluded status = %d; want both %d",
+			unknownResponse.Code, excludedResponse.Code, http.StatusNotFound)
 	}
+	for _, name := range []string{
+		"Content-Type", "Cache-Control", "X-Content-Type-Options", "X-Frame-Options",
+		"Referrer-Policy", "Content-Security-Policy",
+	} {
+		unknownHeader := unknownResponse.Header().Get(name)
+		excludedHeader := excludedResponse.Header().Get(name)
+		if unknownHeader == "" || excludedHeader != unknownHeader {
+			t.Errorf("%s: unknown = %q, excluded = %q", name, unknownHeader, excludedHeader)
+		}
+	}
+	unknownBody := normalizedPlaybackErrorBody(t, unknownResponse)
+	excludedBody := normalizedPlaybackErrorBody(t, excludedResponse)
+	if unknownBody != excludedBody {
+		t.Fatalf("normalized bodies differ: unknown = %s, excluded = %s", unknownBody, excludedBody)
+	}
+}
+
+func playbackWatchRequest(
+	t *testing.T, h authHarness, path string, cookie *http.Cookie, requestID string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "https://bloom.test"+path, nil)
+	request.RemoteAddr = "192.0.2.10:4321"
+	request.Header.Set("X-Request-ID", requestID)
+	request.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	h.h.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func normalizedPlaybackErrorBody(t *testing.T, recorder *httptest.ResponseRecorder) string {
+	t.Helper()
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode playback error: %v", err)
+	}
+	if _, ok := response["request_id"]; !ok {
+		t.Fatal("playback error is missing request_id")
+	}
+	delete(response, "request_id")
+	normalized, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("normalize playback error: %v", err)
+	}
+	return string(normalized)
 }
 
 func TestPlaybackWatchRejectsMalformedID(t *testing.T) {
