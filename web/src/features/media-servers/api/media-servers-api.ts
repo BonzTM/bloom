@@ -1,4 +1,7 @@
-import type { ApiClient } from "../../../lib/api/http-client.js";
+import {
+  PROBE_TIMEOUT_MS,
+  type ApiClient,
+} from "../../../lib/api/http-client.js";
 import {
   mediaServerIdSchema,
   mediaServersCursorSchema,
@@ -41,6 +44,7 @@ export class MediaServersApi {
     return this.#client.requestJson(BASE_PATH, registeredMediaServerSchema, {
       method: "POST",
       body: registerMediaServerRequestSchema.parse(input),
+      timeoutMs: PROBE_TIMEOUT_MS,
     });
   }
 

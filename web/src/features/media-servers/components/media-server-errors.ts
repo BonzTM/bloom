@@ -10,6 +10,10 @@ const GENERIC_REMOVE_FAILURE =
   "The server could not be removed. Please try again.";
 const UNREACHABLE =
   "Bloom could not be reached. Check your connection and try again.";
+// The server keeps working after the browser stops waiting, so the outcome
+// is unknown here rather than failed.
+const TIMED_OUT =
+  "The server took too long to answer, so the outcome is unknown. Check the list below before trying again.";
 const CROSS_SITE =
   "The request was refused as cross-site. Reload the page and try again.";
 
@@ -74,6 +78,9 @@ function describe(
   }
   if (error.kind === "network") {
     return UNREACHABLE;
+  }
+  if (error.kind === "aborted") {
+    return TIMED_OUT;
   }
   return fallback;
 }

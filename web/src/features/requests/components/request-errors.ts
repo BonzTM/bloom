@@ -4,6 +4,10 @@ import {
   type ProbeFailureReason,
 } from "../../../lib/api/errors.js";
 
+// The server keeps working after the browser stops waiting, so the outcome
+// is unknown here rather than failed.
+const TIMED_OUT =
+  "That took too long to answer, so the outcome is unknown. Check the list before trying again.";
 const UNREACHABLE =
   "Bloom could not be reached. Check your connection and try again.";
 const CROSS_SITE =
@@ -163,6 +167,9 @@ function describe(
   }
   if (error.kind === "network") {
     return UNREACHABLE;
+  }
+  if (error.kind === "aborted") {
+    return TIMED_OUT;
   }
   return fallback;
 }
