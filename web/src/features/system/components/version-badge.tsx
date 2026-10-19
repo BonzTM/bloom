@@ -4,8 +4,18 @@ import { useVersion } from "../hooks/system-queries.js";
 
 const SHORT_COMMIT_LENGTH = 7;
 
-export function VersionBadge(): ReactNode {
+type VersionBadgeProps = Readonly<{
+  // A quiet badge, as in the sidebar on every page, says nothing until the
+  // version is known and nothing if it cannot be loaded: a live status on
+  // every page load would only be noise. The About page shows both.
+  quiet?: boolean;
+}>;
+
+export function VersionBadge({ quiet }: VersionBadgeProps): ReactNode {
   const query = useVersion();
+  if (quiet === true && !query.isSuccess) {
+    return null;
+  }
   if (query.isPending) {
     return <AsyncStatus>Loading server version…</AsyncStatus>;
   }

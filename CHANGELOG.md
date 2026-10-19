@@ -18,30 +18,32 @@ contracts) gets an entry here.
 
 ### Changed
 
+- The sidebar lists each area once: Home, Discover, Requests, Playback,
+  Statistics, Libraries, Users, Settings, and About. An area with several
+  pages shows them as tabs above the page, such as Media servers, Download
+  managers, Request settings, Notifications, and Imports under Settings.
+  `/admin` opens the first administration page the account may use.
+- The signed-in account is an avatar button in the top bar that opens a
+  small menu with the account's own pages and sign-out.
+- The interface uses one gray palette with solid surfaces, a single indigo
+  accent, and the Inter typeface, which ships with the app. A page is one
+  column of sections separated by space; only objects carry a surface:
+  forms, tables, posters, cards, and stat cards. Discover rows run to the
+  page's edges, posters grow on hover, and a title's backdrop fills the
+  top of its page. Motion follows the system's reduced-motion setting.
+- The server version sits at the foot of the sidebar and on the About
+  page.
 - The watch page reads the watch itself, so a shared or bookmarked link
   shows the card with artwork and facts, not only what happened.
-
 - Playing-now cards show who, what, how far, and one line of where and how;
   the stream details moved to the watch's own page. A watch's page opens
   as a card with artwork, the person, and the facts that matter, followed
   by what happened; the raw sample table is gone.
 - Select menus follow the page's colour scheme, so their option lists no
   longer draw light text on a light background.
-- Pages are one continuous column: a section is a heading and its content
-  separated by rhythm and a hairline, not a bordered box. Only objects carry
-  a surface: forms, tables, tiles, posters, and stat cards. The home
-  dashboard, statistics, libraries, and every administration page follow
-  the same shape.
-- The web app's look: layered translucent panels over a lit background
-  instead of bordered boxes, a gradient accent on the active navigation item
-  and primary buttons, larger type, full-width pages, posters that lift on
-  hover, cleaner tables and forms, and a branded sign-in page. Every page
-  keeps its structure, names, and keyboard behaviour; motion follows the
-  system's reduced-motion setting.
 - The signed-in home page is a dashboard: what is playing now, what is
-  trending this week, the account's own requests, and links into each area
-  the account may use. Signed out, it still introduces the three areas.
-- The administration index shows each section as a tile with an icon.
+  trending this week, and the account's own requests. Signed out, it says
+  what Bloom does and offers sign-in. The sign-in page carries the brand.
 - Browser sessions now last 30 days and end after 7 days without a request,
   up from 24 hours and 30 minutes. Sessions are database rows, so they
   survive restarts either way; `BLOOM_SESSION_LIFETIME` and
@@ -58,6 +60,9 @@ contracts) gets an entry here.
 - TMDB discovery and series pages tolerate additive fields, missing or null
   optional metadata, fractional ratings, and malformed individual list items.
   Missing dates now render with an unknown year instead of failing the row.
+
+- A page with a Discover row no longer scrolls sideways: a hidden label
+  inside the row sat far past the page's right edge.
 
 - Registering a download manager through an address that a proxy or
   sign-on page fronts no longer reports a rejected API key; the probe

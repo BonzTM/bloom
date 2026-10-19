@@ -1,5 +1,5 @@
 import { expect, it } from "@jest/globals";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { envelope, jsonApi } from "../../../mocks/handlers.js";
 import { renderApp } from "../../../test/render-app.js";
@@ -13,7 +13,7 @@ it("shows a recoverable alert when the version endpoint fails", async () => {
     ),
   );
 
-  renderApp();
+  renderApp("/about");
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "The server version could not be loaded",
@@ -30,7 +30,7 @@ it("rejects a version payload from a different product", async () => {
     ),
   );
 
-  renderApp();
+  renderApp("/about");
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "The server version could not be loaded",
@@ -47,8 +47,9 @@ it("labels an empty commit as unknown", async () => {
     ),
   );
 
-  renderApp();
+  renderApp("/about");
 
-  expect(await screen.findByText(/Version 0\.2\.0/)).toBeVisible();
-  expect(screen.getByText("unknown")).toBeVisible();
+  const main = within(screen.getByRole("main"));
+  expect(await main.findByText(/Version 0\.2\.0/)).toBeVisible();
+  expect(main.getByText("unknown")).toBeVisible();
 });

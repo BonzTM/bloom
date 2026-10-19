@@ -11,6 +11,7 @@ import {
   UNREACHABLE_MANAGER_HOST,
 } from "../mocks/handlers.js";
 import { renderApp, type AppRender } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -51,13 +52,11 @@ function cachedText(queryClient: QueryClient): string {
   ]);
 }
 
-it("offers download managers from the administration index", async () => {
+it("offers download managers from the Settings tabs", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(
-    await screen.findByRole("link", { name: "Download managers" }),
-  );
+  renderApp();
+  await openArea(user, "Settings", "Download managers");
   expect(
     await screen.findByRole("heading", { name: "Download managers", level: 1 }),
   ).toBeVisible();

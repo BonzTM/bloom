@@ -10,6 +10,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp, type AppRender } from "../test/render-app.js";
+import { findSidebar, openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 // Changing the filter replaces the table, so it is found again afterwards.
@@ -26,11 +27,11 @@ async function openRequests(): Promise<AppRender & { table: HTMLElement }> {
   return { ...rendered, table };
 }
 
-it("offers the requests page from the administration index", async () => {
+it("offers the requests page from the sidebar", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(await screen.findByRole("link", { name: "Requests" }));
+  renderApp();
+  await openArea(user, "Requests");
   expect(
     await screen.findByRole("heading", { name: "Requests", level: 1 }),
   ).toBeVisible();
@@ -42,10 +43,11 @@ it("hides the requests link without requests.approve", async () => {
   signInMockSession();
   renderApp("/admin");
   expect(
-    await screen.findByRole("link", { name: "Request settings" }),
+    await screen.findByRole("heading", { name: "Media servers", level: 1 }),
   ).toBeVisible();
+  const sidebar = await findSidebar();
   expect(
-    screen.queryByRole("link", { name: "Requests" }),
+    sidebar.queryByRole("link", { name: "Requests" }),
   ).not.toBeInTheDocument();
 });
 

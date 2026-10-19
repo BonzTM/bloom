@@ -10,7 +10,6 @@ import {
 import {
   isRouteErrorResponse,
   Link,
-  NavLink,
   Outlet,
   useLocation,
   useNavigate,
@@ -18,18 +17,23 @@ import {
 } from "react-router-dom";
 import { PermissionGate } from "../features/auth/components/permission-gate.js";
 import { SessionControls } from "../features/auth/components/session-controls.js";
-import type { KnownPermission } from "../features/auth/api/auth-schemas.js";
-import {
-  ADMIN_PERMISSIONS,
-  permissions,
-  REQUESTS_PERMISSIONS,
-} from "../features/auth/permissions.js";
+import { useSession } from "../features/auth/hooks/auth-queries.js";
+import { permissions } from "../features/auth/permissions.js";
+import { VersionBadge } from "../features/system/components/version-badge.js";
 import { NavIcon, type IconName } from "./nav-icons.js";
+import {
+  groupFor,
+  NAV_GROUPS,
+  pageFor,
+  visiblePages,
+  type NavPage,
+} from "./nav-model.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
 import { useRouteFocus } from "./use-route-focus.js";
 
-// The app shell: a sidebar with the brand and the navigation, a top bar
-// with search and the session controls, and the page. On narrow screens the
+// The app shell: a sidebar with the brand and one short list of areas, a
+// top bar with search and the account menu, and the page. An area with
+// several pages shows them as tabs above the page. On narrow screens the
 // sidebar becomes a drawer opened from the top bar; there is one navigation
 // and one set of names either way.
 export function AppLayout(): ReactNode {
@@ -48,52 +52,10 @@ export function AppLayout(): ReactNode {
           <span className="brand-mark" aria-hidden="true" />
           Bloom
         </Link>
-        <nav aria-label="Main navigation">
-          <ul>
-            <NavItem to="/" icon="home" end>
-              Home
-            </NavItem>
-            <PermissionGate anyOf={REQUESTS_PERMISSIONS}>
-              <NavItem to="/requests" icon="compass">
-                Discover
-              </NavItem>
-            </PermissionGate>
-            <PermissionGate anyOf={[permissions.statsReadOwn]}>
-              <NavItem to="/statistics" icon="chart">
-                My statistics
-              </NavItem>
-            </PermissionGate>
-            <PermissionGate anyOf={[permissions.notificationsManageOwn]}>
-              <NavItem to="/notifications" icon="bell">
-                My notifications
-              </NavItem>
-            </PermissionGate>
-            <NavItem to="/about" icon="info">
-              About
-            </NavItem>
-          </ul>
-          <PermissionGate anyOf={ADMIN_PERMISSIONS}>
-            <p className="nav-section-label" id={`${navId}-admin`}>
-              Administration
-            </p>
-            <ul aria-labelledby={`${navId}-admin`}>
-              <NavItem to="/admin" icon="shield" end>
-                Admin
-              </NavItem>
-              {ADMIN_LINKS.map((link) => (
-                <PermissionGate key={link.to} anyOf={link.anyOf}>
-                  <NavItem
-                    to={link.to}
-                    icon={link.icon}
-                    section="Administration"
-                  >
-                    {link.label}
-                  </NavItem>
-                </PermissionGate>
-              ))}
-            </ul>
-          </PermissionGate>
-        </nav>
+        <Sidebar pathname={location.pathname} />
+        <div className="sidebar-footer">
+          <VersionBadge quiet />
+        </div>
       </aside>
       <div className="content">
         <header className="topbar" ref={bar}>
@@ -117,6 +79,7 @@ export function AppLayout(): ReactNode {
           </div>
         </header>
         <main ref={main} tabIndex={-1}>
+          <SectionTabs pathname={location.pathname} />
           <RouteErrorBoundary>
             <Outlet />
           </RouteErrorBoundary>
@@ -126,120 +89,112 @@ export function AppLayout(): ReactNode {
   );
 }
 
-type AdminLink = Readonly<{
+// Home, each area the account may open, and About. An area is current when
+// the page is any of its pages or beneath one, such as a title under
+// Discover or a watch under Playback.
+function Sidebar({ pathname }: Readonly<{ pathname: string }>): ReactNode {
+  const session = useSession();
+  const granted = session.data?.permissions ?? [];
+  return (
+    <nav aria-label="Main navigation">
+      <ul>
+        <SidebarLink to="/" icon="home" current={pathname === "/"}>
+          Home
+        </SidebarLink>
+        {NAV_GROUPS.map((group) => {
+          const first = visiblePages(group, granted)[0];
+          return first === undefined ? null : (
+            <SidebarLink
+              key={group.label}
+              to={first.to}
+              icon={group.icon}
+              current={pageFor(group, pathname) !== undefined}
+            >
+              {group.label}
+            </SidebarLink>
+          );
+        })}
+        <SidebarLink to="/about" icon="info" current={pathname === "/about"}>
+          About
+        </SidebarLink>
+      </ul>
+    </nav>
+  );
+}
+
+type SidebarLinkProps = Readonly<{
   to: string;
-  label: string;
   icon: IconName;
-  anyOf: readonly KnownPermission[];
+  current: boolean;
+  children: ReactNode;
 }>;
 
-const ADMIN_LINKS: readonly AdminLink[] = [
-  {
-    to: "/admin/requests",
-    label: "Requests",
-    icon: "inbox",
-    anyOf: [permissions.requestsApprove],
-  },
-  {
-    to: "/admin/playback",
-    label: "Playback",
-    icon: "play",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/statistics",
-    label: "Statistics",
-    icon: "chart",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/activity",
-    label: "Activity",
-    icon: "clock",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/libraries",
-    label: "Libraries",
-    icon: "library",
-    anyOf: [permissions.statsReadAll],
-  },
-  {
-    to: "/admin/media-servers",
-    label: "Media servers",
-    icon: "server",
-    anyOf: [permissions.adminSettings],
-  },
-  {
-    to: "/admin/download-managers",
-    label: "Download managers",
-    icon: "download",
-    anyOf: [permissions.adminSettings],
-  },
-  {
-    to: "/admin/request-profiles",
-    label: "Request settings",
-    icon: "sliders",
-    anyOf: [permissions.adminSettings],
-  },
-  {
-    to: "/admin/notifications",
-    label: "Notifications",
-    icon: "bell",
-    anyOf: [permissions.adminSettings],
-  },
-  {
-    to: "/admin/imports",
-    label: "Imports",
-    icon: "upload",
-    anyOf: [permissions.adminSettings],
-  },
-  {
-    to: "/admin/invites",
-    label: "Invites",
-    icon: "ticket",
-    anyOf: [permissions.usersInvite],
-  },
-  {
-    to: "/admin/accounts",
-    label: "Accounts",
-    icon: "users",
-    anyOf: [permissions.usersManage],
-  },
-  {
-    to: "/admin/roles",
-    label: "Roles",
-    icon: "users",
-    anyOf: [permissions.adminRoles],
-  },
-];
-
-function NavItem({
+function SidebarLink({
   to,
   icon,
-  end,
-  section,
+  current,
   children,
-}: Readonly<{
-  to: string;
-  icon: IconName;
-  end?: boolean;
-  // Spoken before the label so a section link never shares a name with a
-  // page's own link of the same title.
-  section?: string;
-  children: ReactNode;
-}>): ReactNode {
+}: SidebarLinkProps): ReactNode {
   return (
     <li>
-      <NavLink to={to} end={end === true}>
+      <Link
+        to={to}
+        className={current ? "active" : undefined}
+        aria-current={current ? "page" : undefined}
+      >
         <NavIcon name={icon} />
-        {section === undefined ? null : (
-          <span className="visually-hidden">{section}: </span>
-        )}
         <span>{children}</span>
-      </NavLink>
+      </Link>
     </li>
   );
+}
+
+// The pages of the current area as tabs, shown only when the account may
+// open more than one of them. The tab of the open page is marked current;
+// a page beneath it, such as one watch, marks its tab as the location.
+function SectionTabs({ pathname }: Readonly<{ pathname: string }>): ReactNode {
+  const session = useSession();
+  const group = groupFor(pathname);
+  if (
+    group === undefined ||
+    session.data === undefined ||
+    session.data === null
+  ) {
+    return null;
+  }
+  const pages = visiblePages(group, session.data.permissions);
+  if (pages.length < 2) {
+    return null;
+  }
+  const current = pageFor(group, pathname);
+  return (
+    <nav className="section-tabs" aria-label={`${group.label} pages`}>
+      <ul>
+        {pages.map((page) => (
+          <li key={page.to}>
+            <Link
+              to={page.to}
+              className={page === current ? "active" : undefined}
+              aria-current={tabCurrent(page, current, pathname)}
+            >
+              {page.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+function tabCurrent(
+  page: NavPage,
+  current: NavPage | undefined,
+  pathname: string,
+): "page" | "location" | undefined {
+  if (page !== current) {
+    return undefined;
+  }
+  return pathname === page.to ? "page" : "location";
 }
 
 // One search box for the whole app: it lands on the requests page with the

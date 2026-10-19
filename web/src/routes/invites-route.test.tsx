@@ -10,6 +10,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp, type AppRender } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -37,11 +38,11 @@ function cachedMutationText(queryClient: QueryClient): string {
   );
 }
 
-it("offers the invites page from the administration index", async () => {
+it("offers the invites page from the Users tabs", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(await screen.findByRole("link", { name: "Invites" }));
+  renderApp();
+  await openArea(user, "Users", "Invites");
   expect(
     await screen.findByRole("heading", { name: "Invites", level: 1 }),
   ).toBeVisible();
@@ -52,7 +53,9 @@ it("hides the invites link without users.invite", async () => {
   setMockPermissions(["admin.roles"]);
   signInMockSession();
   renderApp("/admin");
-  expect(await screen.findByRole("link", { name: "Roles" })).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "Roles", level: 1 }),
+  ).toBeVisible();
   expect(
     screen.queryByRole("link", { name: "Invites" }),
   ).not.toBeInTheDocument();

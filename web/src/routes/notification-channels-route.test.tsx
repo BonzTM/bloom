@@ -13,6 +13,7 @@ import {
   UNREACHABLE_CHANNEL_HOST,
 } from "../mocks/handlers.js";
 import { renderApp, type AppRender } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -54,11 +55,11 @@ function cachedText(queryClient: QueryClient): string {
   ]);
 }
 
-it("offers notifications from the administration index", async () => {
+it("offers notifications from the Settings tabs", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(await screen.findByRole("link", { name: "Notifications" }));
+  renderApp();
+  await openArea(user, "Settings", "Notifications");
   expect(
     await screen.findByRole("heading", { name: "Notifications", level: 1 }),
   ).toBeVisible();

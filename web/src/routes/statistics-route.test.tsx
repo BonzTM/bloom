@@ -9,6 +9,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 async function openStatistics(): Promise<void> {
@@ -17,15 +18,11 @@ async function openStatistics(): Promise<void> {
   await screen.findByRole("heading", { name: "Statistics", level: 1 });
 }
 
-it("offers statistics from the home page and the administration index", async () => {
+it("offers statistics from the sidebar", async () => {
   const user = userEvent.setup();
   signInMockSession();
   renderApp();
-  expect(
-    await screen.findByRole("link", { name: "Open statistics" }),
-  ).toHaveAttribute("href", "/admin/statistics");
-  await user.click(await screen.findByRole("link", { name: "Admin" }));
-  await user.click(await screen.findByRole("link", { name: "Statistics" }));
+  await openArea(user, "Statistics");
   expect(
     await screen.findByRole("heading", { name: "Statistics", level: 1 }),
   ).toBeVisible();

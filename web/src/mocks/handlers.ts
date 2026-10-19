@@ -1472,7 +1472,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     year: 1995,
     overview: "A group of professional bank robbers start to feel the heat.",
     poster_path: "/heat.jpg",
-    backdrop_path: "",
+    backdrop_path: "/backdrop.jpg",
   },
   {
     kind: "movie",
@@ -1483,7 +1483,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     overview:
       "Paul Atreides travels to the most dangerous planet in the universe.",
     poster_path: "",
-    backdrop_path: "",
+    backdrop_path: "/backdrop.jpg",
   },
   {
     kind: "movie",
@@ -1493,7 +1493,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     year: 1999,
     overview: "An insomniac office worker forms an underground fight club.",
     poster_path: "/fight.jpg",
-    backdrop_path: "",
+    backdrop_path: "/backdrop.jpg",
   },
   {
     kind: "series",
@@ -1503,7 +1503,7 @@ export const mockCatalogue: readonly MetadataTitle[] = [
     year: 2021,
     overview: "Strangers land in a small town and nothing is the same again.",
     poster_path: "/arrival.jpg",
-    backdrop_path: "",
+    backdrop_path: "/backdrop.jpg",
   },
 ];
 
@@ -2883,7 +2883,7 @@ function discoverPage(url: URL, kind: "movie" | "series" | undefined) {
       year: 2006,
       overview: "Two rival stage magicians engage in a bitter battle.",
       poster_path: "",
-      backdrop_path: "",
+      backdrop_path: "/backdrop.jpg",
     },
   ].filter((title) => kind === undefined || title.kind === kind);
   // Repeat the small catalogue so rows have enough tiles to scroll and page.

@@ -82,12 +82,17 @@ function AccountRow({
   return (
     <tr>
       <th scope="row">
-        <Link to={`/admin/accounts/${encodeURIComponent(account.id)}`}>
-          {account.username}
-        </Link>{" "}
-        {account.is_self ? (
-          <span className="badge badge-neutral">You</span>
-        ) : null}
+        <span className="account-cell">
+          <span className="avatar avatar-small" aria-hidden="true">
+            {account.username.slice(0, 1).toUpperCase()}
+          </span>
+          <Link to={`/admin/accounts/${encodeURIComponent(account.id)}`}>
+            {account.username}
+          </Link>
+          {account.is_self ? (
+            <span className="badge badge-neutral">You</span>
+          ) : null}
+        </span>
       </th>
       <td>{rolesLabel(account.roles)}</td>
       <td>{signInMethodLabel(account.sign_in_method)}</td>

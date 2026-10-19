@@ -1,5 +1,5 @@
 import { expect, it } from "@jest/globals";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import {
@@ -13,6 +13,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openAccountMenu } from "../test/account-menu.js";
 import type { Session } from "../features/auth/api/auth-schemas.js";
 import { authKeys } from "../features/auth/hooks/auth-queries.js";
 import { createGate } from "../test/gate.js";
@@ -24,18 +25,20 @@ it("renders the home page with the server version from the API", async () => {
   expect(
     screen.getByRole("heading", { name: "Bloom", level: 1 }),
   ).toBeVisible();
-  expect(screen.getByText(/Loading server version/)).toHaveRole("status");
   expect(await screen.findByText(/Version 0\.1\.0-dev/)).toBeVisible();
   expect(screen.getByText("0123456")).toBeVisible();
+  const main = within(screen.getByRole("main"));
   expect(
-    screen.getByRole("heading", { name: "Users & invites", level: 2 }),
-  ).toBeVisible();
-  expect(
-    screen.getByRole("heading", { name: "Statistics", level: 2 }),
-  ).toBeVisible();
-  expect(
-    screen.getByRole("heading", { name: "Requests", level: 2 }),
-  ).toBeVisible();
+    main.getByRole("link", { name: "Sign in to get started" }),
+  ).toHaveAttribute("href", "/login");
+  // A visitor sees only the areas open to everyone.
+  const nav = within(
+    screen.getByRole("navigation", { name: "Main navigation" }),
+  );
+  expect(nav.getAllByRole("link").map((link) => link.textContent)).toEqual([
+    "Home",
+    "About",
+  ]);
   expect(document.title).toBe("Home | Bloom");
 });
 
@@ -61,13 +64,25 @@ it("shows the dashboard to a signed-in administrator", async () => {
   expect(
     await screen.findByRole("link", { name: "Inception (2010)" }),
   ).toBeVisible();
-  expect(screen.getByRole("link", { name: "Open playback" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "All playback" })).toHaveAttribute(
     "href",
     "/admin/playback",
   );
-  expect(
-    screen.queryByRole("heading", { name: "Users & invites", level: 2 }),
-  ).not.toBeInTheDocument();
+  // The sidebar lists each area once, in a fixed order.
+  const nav = within(
+    screen.getByRole("navigation", { name: "Main navigation" }),
+  );
+  expect(nav.getAllByRole("link").map((link) => link.textContent)).toEqual([
+    "Home",
+    "Discover",
+    "Requests",
+    "Playback",
+    "Statistics",
+    "Libraries",
+    "Users",
+    "Settings",
+    "About",
+  ]);
 });
 
 it("shows requests but not trending to an account that cannot request", async () => {
@@ -114,9 +129,15 @@ it("shows a viewer only the panels their permissions allow", async () => {
   expect(
     screen.queryByRole("heading", { name: "My requests", level: 2 }),
   ).not.toBeInTheDocument();
-  expect(
-    screen.queryByRole("link", { name: "Open playback" }),
-  ).not.toBeInTheDocument();
+  // Statistics leads to the account's own page; nothing else is offered.
+  const nav = within(
+    screen.getByRole("navigation", { name: "Main navigation" }),
+  );
+  expect(nav.getByRole("link", { name: "Statistics" })).toHaveAttribute(
+    "href",
+    "/statistics",
+  );
+  expect(nav.queryByRole("link", { name: "Playback" })).not.toBeInTheDocument();
 });
 
 it("navigates to the lazy about route and updates the page title", async () => {
@@ -230,7 +251,8 @@ it("signs out from the navigation and offers sign-in again", async () => {
   signInMockSession();
   renderApp();
 
-  await user.click(await screen.findByRole("button", { name: "Sign out" }));
+  await openAccountMenu(user);
+  await user.click(screen.getByRole("button", { name: "Sign out" }));
 
   expect(await screen.findByRole("link", { name: "Sign in" })).toBeVisible();
   expect(screen.queryByText("Signed in as admin")).not.toBeInTheDocument();

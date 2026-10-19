@@ -10,15 +10,16 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 const LIVING_ROOM = "3d7f1a2b-0000-4000-8000-000000000002";
 
-it("offers the page from the main navigation", async () => {
+it("offers the page from the Statistics tabs", async () => {
   const user = userEvent.setup();
   signInMockSession();
   renderApp();
-  await user.click(await screen.findByRole("link", { name: "My statistics" }));
+  await openArea(user, "Statistics", "My statistics");
   expect(
     await screen.findByRole("heading", { name: "My statistics", level: 1 }),
   ).toBeVisible();

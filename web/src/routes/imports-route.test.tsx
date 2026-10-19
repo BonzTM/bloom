@@ -10,6 +10,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 async function openImports(): Promise<HTMLElement> {
@@ -18,17 +19,19 @@ async function openImports(): Promise<HTMLElement> {
   return screen.findByRole("table", { name: "Imports, newest first" });
 }
 
-it("reaches the imports page from the sidebar and the admin index", async () => {
+it("reaches the imports page from the Settings tabs", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(await screen.findByRole("link", { name: "Imports" }));
+  renderApp();
+  await openArea(user, "Settings", "Imports");
   expect(
     await screen.findByRole("heading", { name: "Imports", level: 1 }),
   ).toBeVisible();
   expect(document.title).toBe("Imports | Bloom");
   expect(
-    screen.getByRole("link", { name: "Administration: Imports" }),
+    within(
+      screen.getByRole("navigation", { name: "Settings pages" }),
+    ).getByRole("link", { name: "Imports" }),
   ).toHaveAttribute("aria-current", "page");
 });
 

@@ -75,7 +75,7 @@ export function LineChart({
                 x2={WIDTH - 8}
                 y1={y}
                 y2={y}
-                className="chart-grid"
+                className="chart-gridline"
               />
               <text
                 x={PAD_LEFT - 6}

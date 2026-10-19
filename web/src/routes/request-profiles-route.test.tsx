@@ -12,6 +12,7 @@ import {
   signInMockSession,
 } from "../mocks/handlers.js";
 import { renderApp, type AppRender } from "../test/render-app.js";
+import { openArea } from "../test/navigation.js";
 import { server } from "../test/server.js";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -58,13 +59,11 @@ function cachedText(queryClient: QueryClient): string {
   ]);
 }
 
-it("offers request settings from the administration index", async () => {
+it("offers request settings from the Settings tabs", async () => {
   const user = userEvent.setup();
   signInMockSession();
-  renderApp("/admin");
-  await user.click(
-    await screen.findByRole("link", { name: "Request settings" }),
-  );
+  renderApp();
+  await openArea(user, "Settings", "Request settings");
   expect(
     await screen.findByRole("heading", { name: "Request settings", level: 1 }),
   ).toBeVisible();

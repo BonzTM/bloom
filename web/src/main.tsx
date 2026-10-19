@@ -16,6 +16,8 @@ import { SystemApi } from "./features/system/api/system-api.js";
 import { AppProviders } from "./app/providers.js";
 import { createQueryClient } from "./app/query-client.js";
 import { createAppRouter } from "./app/router.js";
+// Inter ships with the app (font-src is self only): no third-party request.
+import "@fontsource-variable/inter";
 import "./styles.css";
 
 async function start(): Promise<void> {
