@@ -64,20 +64,30 @@ func testPlaybackWatchRead(t *testing.T, pool *sql.DB, driver config.Driver) {
 	finished.LibraryName = "Finished Library"
 	finished.State = core.WatchStopped
 	finished.EndedAt = new(finished.LastSeenAt)
-	if err := store.SaveWatches(t.Context(), playbackMutations(open, finished)); err != nil {
+	mapped := playbackStoreWatch(t, server.ID, now.Add(-2*time.Hour))
+	mapped.MediaUserID = "mapped-user"
+	mapped.DeviceID = "mapped-device"
+	mapped.ItemID = "mapped-item"
+	mapped.LibraryID = ""
+	if err := store.SaveWatches(t.Context(), playbackMutations(open, finished, mapped)); err != nil {
 		t.Fatalf("SaveWatches: %v", err)
 	}
+	execTestSQL(t, pool, `INSERT INTO library_items
+        (media_server_id,item_id,library_id,item_type,name,genres,first_seen_at,last_seen_at,updated_at)
+        VALUES ($1,$2,$3,'Episode','Mapped item','[]',$4,$4,$4)`,
+		server.ID, mapped.ItemID, finished.LibraryID, now)
 	assertPlaybackWatchRead(t, store, open.ID, core.WatchPlaying)
 	assertPlaybackWatchRead(t, store, finished.ID, core.WatchStopped)
+	assertPlaybackWatchRead(t, store, mapped.ID, core.WatchPlaying)
 	if _, err := store.GetWatch(t.Context(), mustID(t)); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("GetWatch(unknown) = %v, want ErrNotFound", err)
 	}
-	assertPlaybackWatchesExcluded(t, pool, driver, store, server.ID, open, finished)
+	assertPlaybackWatchesExcluded(t, pool, driver, store, server.ID, open, finished, mapped)
 }
 
 func assertPlaybackWatchesExcluded(
 	t *testing.T, pool *sql.DB, driver config.Driver, store core.PlaybackStore, serverID string,
-	open, finished core.PlaybackWatch,
+	open, finished, mapped core.PlaybackWatch,
 ) {
 	t.Helper()
 	exclusions, err := db.NewExclusionStore(pool, driver)
@@ -91,7 +101,7 @@ func assertPlaybackWatchesExcluded(
 	}); err != nil {
 		t.Fatalf("ReplaceExclusions: %v", err)
 	}
-	for _, watchID := range []string{open.ID, finished.ID} {
+	for _, watchID := range []string{open.ID, finished.ID, mapped.ID} {
 		if _, err := store.GetWatch(t.Context(), watchID); !errors.Is(err, core.ErrNotFound) {
 			t.Errorf("GetWatch(excluded %s) = %v, want ErrNotFound", watchID, err)
 		}
