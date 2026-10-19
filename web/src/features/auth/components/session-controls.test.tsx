@@ -311,3 +311,21 @@ it("moves focus into the drawer and returns it to the menu button on Escape", as
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   expect(toggle).toHaveFocus();
 });
+
+it("closes the account menu when a link leads to the page already open", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/statistics");
+  await screen.findByRole("heading", { name: "My statistics", level: 1 });
+  await openAccountMenu(user);
+
+  await user.click(
+    within(screen.getByRole("banner")).getByRole("link", {
+      name: "My statistics",
+    }),
+  );
+
+  expect(
+    screen.getByRole("button", { name: "Signed in as admin" }),
+  ).toHaveAttribute("aria-expanded", "false");
+});

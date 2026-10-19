@@ -148,10 +148,19 @@ export function visiblePages(
   return group.pages.filter((page) => hasAnyPermission(granted, page.anyOf));
 }
 
+// The router matches paths without regard to case or a trailing slash, so
+// the navigation compares them the same way.
+export function normalizePath(pathname: string): string {
+  const lower = pathname.toLowerCase();
+  const trimmed = lower.replace(/\/+$/, "");
+  return trimmed === "" ? "/" : trimmed;
+}
+
 // True when the path is the page or one of the pages beneath it, such as a
 // title under Discover or a watch under Playback.
 export function isWithin(pathname: string, page: NavPage): boolean {
-  return pathname === page.to || pathname.startsWith(`${page.to}/`);
+  const path = normalizePath(pathname);
+  return path === page.to || path.startsWith(`${page.to}/`);
 }
 
 // The page of the group the path belongs to, or undefined. The longest

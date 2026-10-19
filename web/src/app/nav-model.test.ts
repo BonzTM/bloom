@@ -27,6 +27,8 @@ describe("groupFor", () => {
     ["/admin/libraries/s/items/i", "Libraries"],
     ["/admin/accounts/a", "Users"],
     ["/admin/media-servers/s/exclusions", "Settings"],
+    ["/ADMIN/Playback", "Playback"],
+    ["/admin/roles/", "Users"],
   ])("puts %s under %s", (path, label) => {
     expect(groupFor(path)?.label).toBe(label);
   });

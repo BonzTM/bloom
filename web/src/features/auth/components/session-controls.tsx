@@ -123,7 +123,7 @@ function AccountMenu({
           </span>
           {username}
         </p>
-        <AccountLinks granted={granted} />
+        <AccountLinks granted={granted} onNavigate={close} />
         <button
           type="button"
           className="btn-ghost account-sign-out"
@@ -159,9 +159,15 @@ const ACCOUNT_LINKS: readonly AccountLink[] = [
   },
 ];
 
+// A link closes the panel itself: following it to the page already open
+// changes no path, so the path alone would leave the panel open.
 function AccountLinks({
   granted,
-}: Readonly<{ granted: readonly Permission[] }>): ReactNode {
+  onNavigate,
+}: Readonly<{
+  granted: readonly Permission[];
+  onNavigate: () => void;
+}>): ReactNode {
   const links = ACCOUNT_LINKS.filter((link) =>
     hasPermission(granted, link.permission),
   );
@@ -172,7 +178,9 @@ function AccountLinks({
     <ul>
       {links.map((link) => (
         <li key={link.to}>
-          <Link to={link.to}>{link.label}</Link>
+          <Link to={link.to} onClick={onNavigate}>
+            {link.label}
+          </Link>
         </li>
       ))}
     </ul>

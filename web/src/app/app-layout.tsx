@@ -25,6 +25,7 @@ import { NavIcon, type IconName } from "./nav-icons.js";
 import {
   groupFor,
   NAV_GROUPS,
+  normalizePath,
   pageFor,
   visiblePages,
   type NavPage,
@@ -56,7 +57,7 @@ export function AppLayout(): ReactNode {
           <span className="brand-mark" aria-hidden="true" />
           Bloom
         </Link>
-        <Sidebar pathname={location.pathname} />
+        <Sidebar pathname={normalizePath(location.pathname)} />
         <div className="sidebar-footer">
           <VersionBadge quiet />
         </div>
@@ -84,7 +85,7 @@ export function AppLayout(): ReactNode {
           </div>
         </header>
         <main ref={main} tabIndex={-1}>
-          <SectionTabs pathname={location.pathname} />
+          <SectionTabs pathname={normalizePath(location.pathname)} />
           <RouteErrorBoundary>
             <Outlet />
           </RouteErrorBoundary>
@@ -141,7 +142,7 @@ function SidebarLink({
   children,
 }: SidebarLinkProps): ReactNode {
   const { pathname } = useLocation();
-  const exact = pathname === to;
+  const exact = normalizePath(pathname) === to;
   return (
     <li>
       <Link
