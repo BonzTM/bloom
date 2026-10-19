@@ -98,3 +98,24 @@ func mustJSON(value any) string {
 	}
 	return string(encoded)
 }
+
+func TestFindExistingMovieBoundsResultList(t *testing.T) {
+	t.Parallel()
+	list := func(count int) json.RawMessage {
+		items := make([]map[string]any, count)
+		for index := range items {
+			items[index] = map[string]any{"id": index + 1, "tmdbId": 1}
+		}
+		value, err := json.Marshal(items)
+		if err != nil {
+			t.Fatalf("marshal list: %v", err)
+		}
+		return value
+	}
+	if _, err := findExistingMovie(list(maxMovieResults), 2); err != nil {
+		t.Fatalf("list at the limit: %v", err)
+	}
+	if _, err := findExistingMovie(list(maxMovieResults+1), 2); err == nil {
+		t.Fatal("list past the limit was accepted")
+	}
+}

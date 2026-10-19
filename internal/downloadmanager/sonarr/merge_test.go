@@ -2,6 +2,7 @@ package sonarr
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -61,8 +62,8 @@ func TestMergeExistingSeriesPreservesFieldsAndUpdatesRequestedState(t *testing.T
 func TestMergeExistingSeriesSelectsSearchesFromFileState(t *testing.T) {
 	t.Parallel()
 	raw := json.RawMessage(`{"tags":[],"seasons":[
-		{"seasonNumber":1,"statistics":{"episodeCount":8,"episodeFileCount":3}},
-		{"seasonNumber":2,"statistics":{"episodeCount":8,"episodeFileCount":8}},
+		{"seasonNumber":1,"statistics":{"episodeCount":8,"episodeFileCount":3,"totalEpisodeCount":8}},
+		{"seasonNumber":2,"statistics":{"episodeCount":8,"episodeFileCount":8,"totalEpisodeCount":8}},
 		{"seasonNumber":3}
 	]}`)
 	result, err := mergeExistingSeries(raw, nil, []int{1, 2, 3})
@@ -170,4 +171,69 @@ func mustJSON(value any) string {
 		return "<invalid JSON>"
 	}
 	return string(encoded)
+}
+
+func TestMergeExistingSeriesSearchesBySeasonTotal(t *testing.T) {
+	t.Parallel()
+	// Sonarr counts only monitored or downloaded episodes in episodeCount,
+	// so an unmonitored season with nothing on disk reads 0 of 0.
+	raw := json.RawMessage(`{"tags":[],"seasons":[
+		{"seasonNumber":1,"monitored":false,"statistics":{"episodeCount":0,"episodeFileCount":0,"totalEpisodeCount":8}},
+		{"seasonNumber":2,"monitored":true,"statistics":{"episodeCount":8,"episodeFileCount":8,"totalEpisodeCount":8}},
+		{"seasonNumber":3,"monitored":false,"statistics":{"episodeCount":0}}
+	]}`)
+	result, err := mergeExistingSeries(raw, nil, []int{1, 2, 3})
+	if err != nil {
+		t.Fatalf("mergeExistingSeries: %v", err)
+	}
+	if !slices.Equal(result.searchSeasons, []int{1, 3}) {
+		t.Fatalf("search seasons = %v, want [1 3]", result.searchSeasons)
+	}
+}
+
+func TestMergeExistingSeriesRejectsDuplicateStatisticsMembers(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"tags":[],"seasons":[
+		{"seasonNumber":1,"statistics":{"totalEpisodeCount":8,"totalEpisodeCount":0,"episodeFileCount":0}}
+	]}`)
+	if _, err := mergeExistingSeries(raw, nil, []int{1}); err == nil {
+		t.Fatal("duplicate statistics member was accepted")
+	}
+}
+
+func TestMergeExistingSeriesBoundsSeasonNumbers(t *testing.T) {
+	t.Parallel()
+	for _, number := range []int{0, 999} {
+		raw := json.RawMessage(fmt.Sprintf(`{"tags":[],"seasons":[{"seasonNumber":%d}]}`, number))
+		if _, err := mergeExistingSeries(raw, nil, []int{number}); err != nil {
+			t.Errorf("season %d: %v", number, err)
+		}
+	}
+	for _, number := range []int{-1, 1000} {
+		raw := json.RawMessage(fmt.Sprintf(`{"tags":[],"seasons":[{"seasonNumber":%d}]}`, number))
+		if _, err := mergeExistingSeries(raw, nil, []int{1}); err == nil {
+			t.Errorf("season %d was accepted", number)
+		}
+	}
+}
+
+func TestFindExistingSeriesBoundsResultList(t *testing.T) {
+	t.Parallel()
+	list := func(count int) json.RawMessage {
+		items := make([]map[string]any, count)
+		for index := range items {
+			items[index] = map[string]any{"id": index + 1, "tvdbId": 1}
+		}
+		value, err := json.Marshal(items)
+		if err != nil {
+			t.Fatalf("marshal list: %v", err)
+		}
+		return value
+	}
+	if _, err := findExistingSeries(list(maxSeriesResults), 2); err != nil {
+		t.Fatalf("list at the limit: %v", err)
+	}
+	if _, err := findExistingSeries(list(maxSeriesResults+1), 2); err == nil {
+		t.Fatal("list past the limit was accepted")
+	}
 }

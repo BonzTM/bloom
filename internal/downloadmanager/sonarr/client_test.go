@@ -104,7 +104,7 @@ func TestAddTreatsNullTagsAndNullResponseIDAsEmpty(t *testing.T) {
 				"id": 19, "tmdbId": 200, "tvdbId": 300, "tags": nil,
 				"seasons": []map[string]any{{
 					"seasonNumber": 1, "monitored": false,
-					"statistics": map[string]any{"episodeCount": 8, "episodeFileCount": 8},
+					"statistics": map[string]any{"episodeCount": 8, "episodeFileCount": 8, "totalEpisodeCount": 8},
 				}},
 			}})
 		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
@@ -176,7 +176,7 @@ func TestAddDoesNotSearchFullyDownloadedSeason(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}, `{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1,"monitored":false,"statistics":{"episodeCount":8,"episodeFileCount":8}}]}`)
+	}, `{"id":19,"tvdbId":300,"tags":[],"seasons":[{"seasonNumber":1,"monitored":false,"statistics":{"episodeCount":8,"episodeFileCount":8,"totalEpisodeCount":8}}]}`)
 	defer server.Close()
 	id, err := newTestClient(t, server).Add(t.Context(), seriesTitle(), seriesOptions())
 	if err != nil || id != "19" || puts.Load() != 1 || searches.Load() != 0 {
@@ -190,7 +190,7 @@ func TestAddFetchesSeriesDetailWhenListSeasonsAreNull(t *testing.T) {
 		switch {
 		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodGet:
 			detailGets.Add(1)
-			writeRawTestJSON(t, w, `{"id":19,"tags":[],"seasons":[{"seasonNumber":1,"statistics":{"episodeCount":8,"episodeFileCount":8}}]}`)
+			writeRawTestJSON(t, w, `{"id":19,"tags":[],"seasons":[{"seasonNumber":1,"statistics":{"episodeCount":8,"episodeFileCount":8,"totalEpisodeCount":8}}]}`)
 		case r.URL.Path == "/api/v3/series/19" && r.Method == http.MethodPut:
 			puts.Add(1)
 			writeTestJSON(t, w, map[string]any{"id": 19})

@@ -10,7 +10,11 @@ import (
 	"github.com/BonzTM/bloom/internal/downloadmanager/arr"
 )
 
-const maxSeasons = 1024
+// Season numbers run 0..999 and are unique, so a series has at most 1000.
+const (
+	maxSeasonNumber = 999
+	maxSeasons      = maxSeasonNumber + 1
+)
 
 type mergedSeries struct {
 	body          json.RawMessage
@@ -117,6 +121,10 @@ func mergeOneSeason(raw json.RawMessage, requested map[int]bool) (mergedSeason, 
 	if err != nil {
 		return mergedSeason{}, err
 	}
+	// Season zero holds specials; Bloom's season domain ends at 999.
+	if number < 0 || number > maxSeasonNumber {
+		return mergedSeason{}, fmt.Errorf("seasonNumber %d is out of range", number)
+	}
 	result := mergedSeason{body: raw, number: number}
 	if !requested[int(number)] {
 		return result, nil
@@ -130,22 +138,31 @@ func mergeOneSeason(raw json.RawMessage, requested map[int]bool) (mergedSeason, 
 	return result, err
 }
 
+// seasonNeedsSearch reports whether a requested season may lack files.
+// Sonarr's episodeCount counts only monitored or downloaded episodes, so an
+// unmonitored season reads 0 of 0; the file count is compared with the
+// season's total instead. Missing counts mean unknown, which searches.
 func seasonNeedsSearch(object map[string]json.RawMessage) (bool, error) {
 	raw, exists := object["statistics"]
 	if !exists || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return true, nil
 	}
-	var statistics struct {
-		EpisodeCount     *int32 `json:"episodeCount"`
-		EpisodeFileCount *int32 `json:"episodeFileCount"`
+	statistics, err := arr.DecodeObject(raw)
+	if err != nil {
+		return false, fmt.Errorf("season statistics: %w", err)
 	}
-	if err := json.Unmarshal(raw, &statistics); err != nil {
-		return false, errors.New("season statistics are malformed")
+	files, filesKnown, err := arr.DecodeOptionalInt32(statistics, "episodeFileCount")
+	if err != nil {
+		return false, err
 	}
-	if statistics.EpisodeCount == nil || statistics.EpisodeFileCount == nil {
-		return false, errors.New("season statistics must include episode counts")
+	total, totalKnown, err := arr.DecodeOptionalInt32(statistics, "totalEpisodeCount")
+	if err != nil {
+		return false, err
 	}
-	return *statistics.EpisodeFileCount < *statistics.EpisodeCount, nil
+	if !filesKnown || !totalKnown || total <= 0 {
+		return true, nil
+	}
+	return files < total, nil
 }
 
 func finishSeasonCollection(
