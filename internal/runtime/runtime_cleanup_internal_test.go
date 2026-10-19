@@ -274,7 +274,10 @@ func TestRuntimeShutdownWaitsForAdmittedHandlerBeforeClosingDependencies(t *test
 	if err := <-done; !errors.Is(err, drainFailure) {
 		t.Fatalf("shutdown error = %v, want forced drain failure", err)
 	}
-	<-fixture.requestDone
+	// The forced close may cut the request off; only its completion matters.
+	if requestErr := <-fixture.requestDone; requestErr != nil {
+		t.Logf("request ended by the forced close: %v", requestErr)
+	}
 	if serveErr := <-fixture.serveDone; !errors.Is(serveErr, http.ErrServerClosed) {
 		t.Fatalf("Serve error = %v, want http.ErrServerClosed", serveErr)
 	}

@@ -658,7 +658,9 @@ func newPipeHTTPClient(t *testing.T, handler http.Handler, writeTimeout time.Dur
 	t.Cleanup(func() {
 		transport.CloseIdleConnections()
 		_ = server.Close()
-		<-serveDone
+		if err := <-serveDone; !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("Serve error = %v, want http.ErrServerClosed", err)
+		}
 	})
 	return &http.Client{Transport: transport}
 }
