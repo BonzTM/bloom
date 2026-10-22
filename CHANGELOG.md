@@ -489,12 +489,9 @@ contracts) gets an entry here.
   ranked poster tiles; the statistics page adds most-popular rows ranked by
   how many different people watched; most active people and libraries are
   cards instead of bar charts.
-- Watch exports are now one streamed ZIP download containing a manifest, every
+- Watch exports are one streamed ZIP download containing a manifest, every
   watch, import-job provenance, and a trailing summary with record counts and
-  entry byte sizes. Bloom export imports accept that ZIP by content while
-  retaining JSONL compatibility. An export larger than the 256 MiB browser
-  upload cap cannot be re-imported through the browser yet; inspect
-  `summary.json` before attempting the round trip.
+  entry byte sizes. Bloom export imports accept that compressed ZIP only.
 - Import uploads now stream into fixed-size database chunks. Terminal job
   transitions delete linked chunks in the same transaction, and worker scans
   delete bounded batches of expired orphan uploads.

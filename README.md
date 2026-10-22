@@ -386,10 +386,11 @@ Bloom `.zip` export, plus `media_server_id` and `source: bloom_export` fields.
 Bloom detects ZIP by content rather than filename. Bare JSONL and archives with
 an entry that does not use Deflate compression are validation failures. The
 256 MiB upload limit measures compressed bytes. The declared uncompressed size
-limit is 4 GiB each for `watches.jsonl` and `imports.jsonl`, and 1 MiB for each
-metadata entry. An entry's declared uncompressed size cannot exceed 100 times
-its compressed size. The 64 KiB JSONL line limit remains in effect. Only one
-upload is staged at a time per process.
+limit is 4 GiB each for `watches.jsonl` and `imports.jsonl`, 1 MiB for each
+metadata entry, and 4 GiB + 2 MiB for all entries together. An entry's declared
+uncompressed size cannot exceed 256 times its compressed size, four times the
+ratio Bloom's own exports reach on the most repetitive history. The 64 KiB JSONL
+line limit remains in effect. Only one upload is staged at a time per process.
 
 Uploads are held in the database as fixed 1 MiB chunks until the job completes,
 fails, or is cancelled. The terminal state change and chunk deletion use the
