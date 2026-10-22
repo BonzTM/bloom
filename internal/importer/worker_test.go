@@ -27,6 +27,7 @@ type workerStore struct {
 	uploads       *memoryUploadStore
 	infoHook      func(context.Context, string) (core.ImportUploadInfo, error)
 	readChunkHook func(int64)
+	commitHook    func(core.ImportBatch)
 	renewed       int
 }
 
@@ -111,6 +112,9 @@ func (s *workerStore) CommitImportBatch(_ context.Context, batch core.ImportBatc
 	s.job.Cursor = batch.Cursor
 	s.job.Read, s.job.Imported, s.job.Skipped = s.result.Read, s.result.Imported, s.result.Skipped
 	s.job.Duplicate, s.job.UnresolvedLibrary = s.result.Duplicate, s.result.UnresolvedLibrary
+	if s.commitHook != nil {
+		s.commitHook(batch)
+	}
 	return s.result, nil
 }
 
@@ -300,9 +304,14 @@ func TestCompressedBloomImportResumesFromCursorExactlyOnce(t *testing.T) {
 	if closeErr := firstReader.Close(); err != nil || closeErr != nil {
 		t.Fatalf("read first batch: %v; close: %v", err, closeErr)
 	}
+	checkpoint, err := decodeFileCursor(cursor)
+	if err != nil {
+		t.Fatalf("decode checkpoint: %v", err)
+	}
+	legacyCursor := fmt.Sprintf(`{"id":%q,"offset":%d}`, checkpoint.ID, checkpoint.Offset)
 	secondReader := &jsonlReader{staging: staging}
 	second, _, _, err := secondReader.ReadImportBatch(t.Context(), core.ImportJob{
-		Cursor: cursor, Read: int64(len(first)),
+		Cursor: legacyCursor, Read: int64(len(first)),
 	})
 	if closeErr := secondReader.Close(); err != nil || closeErr != nil {
 		t.Fatalf("read resumed batch: %v; close: %v", err, closeErr)
@@ -313,6 +322,51 @@ func TestCompressedBloomImportResumesFromCursorExactlyOnce(t *testing.T) {
 	}
 	if len(first) != core.ImportBatchSize || len(second) != 3 || len(seen) != recordCount {
 		t.Fatalf("resumed records = first %d second %d unique %d", len(first), len(second), len(seen))
+	}
+}
+
+func TestCompressedBloomImportResumeCountsSourceRecordsBeforeExclusions(t *testing.T) {
+	const recordCount = core.ImportBatchSize + 3
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceBloomExport
+	store := workerStore{job: job}
+	firstWorker := newTestWorker(t, &store, reportingStub{})
+	id, err := firstWorker.deps.Staging.stage(
+		t.Context(), bytes.NewReader(compressedWatchArchive(t, recordCount)), staticClock{time.Now()},
+	)
+	if err != nil {
+		t.Fatalf("stage compressed archive: %v", err)
+	}
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	exclusions := importerExclusions{value: core.MediaServerExclusions{
+		MediaServerID: job.MediaServerID, MediaUserIDs: []string{"user"},
+	}}
+	firstWorker.deps.Exclusions = exclusions
+	ctx, cancel := context.WithCancel(t.Context())
+	store.commitHook = func(core.ImportBatch) { cancel() }
+	if runErr := firstWorker.runOnce(ctx); runErr != nil {
+		t.Fatalf("first worker pass: %v", runErr)
+	}
+	if store.result.Read != core.ImportBatchSize || store.result.Skipped != core.ImportBatchSize || store.finished != "" {
+		t.Fatalf("checkpoint counters = %+v, state %q", store.result, store.finished)
+	}
+	checkpoint, err := decodeFileCursor(store.job.Cursor)
+	if err != nil || !checkpoint.recordsKnown || checkpoint.Records != core.ImportBatchSize {
+		t.Fatalf("checkpoint cursor = %+v, %v", checkpoint, err)
+	}
+
+	store.commitHook = nil
+	resumedWorker := newTestWorker(t, &store, reportingStub{})
+	resumedWorker.deps.Exclusions = exclusions
+	if err := resumedWorker.runOnce(t.Context()); err != nil {
+		t.Fatalf("resumed worker pass: %v", err)
+	}
+	if store.finished != core.ImportCompleted || store.result.Read != recordCount ||
+		store.result.Imported != 0 || store.result.Skipped != recordCount {
+		t.Fatalf("resumed job = state %q counters %+v", store.finished, store.result)
 	}
 }
 
@@ -347,8 +401,8 @@ func TestWorkerKeepsCompressedWatchEntryOpenAcrossBatches(t *testing.T) {
 		t.Fatalf("encode cursor: %v", err)
 	}
 	opened := 0
-	worker.sources.openWatch = func(upload *UploadReader, offset int64) (io.ReadCloser, error) {
-		return openWatchUploadWith(upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
+	worker.sources.openWatch = func(ctx context.Context, upload *UploadReader, offset int64) (io.ReadCloser, error) {
+		return openWatchUploadWith(ctx, upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
 			opened++
 			return entry.Open()
 		})

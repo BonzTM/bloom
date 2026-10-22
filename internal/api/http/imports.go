@@ -428,16 +428,27 @@ func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	exportedAt := core.NormalizeTime(time.Now().UTC())
+	if !s.commitWatchExportResponse(w, r, exportedAt) {
+		return
+	}
+	if err := s.streamWatchExportZip(exportCtx, w, query, start, exportedAt); err != nil {
+		s.abortWatchExport(r, err)
+	}
+	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
+}
+
+func (s *Server) commitWatchExportResponse(w http.ResponseWriter, r *http.Request, exportedAt time.Time) bool {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(
 		`attachment; filename="bloom-export-%s.zip"`, exportedAt.Format(time.DateOnly),
 	))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	if err := s.streamWatchExportZip(exportCtx, w, query, start, exportedAt); err != nil {
-		s.abortWatchExport(r, err)
+	if streamingSessionCommitFailed(w) {
+		s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditFailure, "failed")
+		return false
 	}
-	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
+	return true
 }
 
 func (s *Server) failWatchExport(w http.ResponseWriter, r *http.Request, err error) {

@@ -19,7 +19,10 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-const maxJSONLLineBytes = 64 << 10
+const (
+	maxJSONLLineBytes       = 64 << 10
+	discardUploadBlockBytes = 64 << 10
+)
 
 const (
 	maxImportArchiveEntries        = 16
@@ -147,12 +150,21 @@ func streamWire(stream *core.StreamDetails) *streamJSONLWire {
 }
 
 type fileCursor struct {
-	ID     string `json:"id"`
-	Offset int64  `json:"offset"`
+	ID           string
+	Offset       int64
+	Records      int64
+	recordsKnown bool
+}
+
+type fileCursorWire struct {
+	ID      string `json:"id"`
+	Offset  int64  `json:"offset"`
+	Records *int64 `json:"records,omitempty"`
 }
 
 func encodeFileCursor(cursor fileCursor) (string, error) {
-	data, err := json.Marshal(cursor)
+	records := cursor.Records
+	data, err := json.Marshal(fileCursorWire{ID: cursor.ID, Offset: cursor.Offset, Records: &records})
 	if err != nil || len(data) > core.MaxImportCursorBytes {
 		return "", fmt.Errorf("encode import file cursor: %w", errors.Join(err, core.ErrInvalidArgument))
 	}
@@ -160,20 +172,25 @@ func encodeFileCursor(cursor fileCursor) (string, error) {
 }
 
 func decodeFileCursor(value string) (fileCursor, error) {
-	var cursor fileCursor
+	var wire fileCursorWire
 	decoder := json.NewDecoder(bytes.NewBufferString(value))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || !core.ValidID(cursor.ID) || cursor.Offset < 0 {
+	if err := decoder.Decode(&wire); err != nil || !core.ValidID(wire.ID) || wire.Offset < 0 ||
+		wire.Records != nil && *wire.Records < 0 {
 		return fileCursor{}, fmt.Errorf("decode import file cursor: %w", core.ErrInvalidArgument)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return fileCursor{}, fmt.Errorf("decode import file cursor: %w", core.ErrInvalidArgument)
 	}
+	cursor := fileCursor{ID: wire.ID, Offset: wire.Offset}
+	if wire.Records != nil {
+		cursor.Records, cursor.recordsKnown = *wire.Records, true
+	}
 	return cursor, nil
 }
 
-type watchOpener func(*UploadReader, int64) (io.ReadCloser, error)
+type watchOpener func(context.Context, *UploadReader, int64) (io.ReadCloser, error)
 
 type jsonlReader struct {
 	staging         *Staging
@@ -199,7 +216,9 @@ func (s *jsonlReader) ReadImportBatch(
 		if openErr := s.open(ctx, cursor); openErr != nil {
 			return nil, "", 0, openErr
 		}
-		s.recordsRead = job.Read - job.Skipped
+		if countErr := s.initializeRecordCount(cursor); countErr != nil {
+			return nil, "", 0, countErr
+		}
 		if countErr := s.validateRecordCount(false); countErr != nil {
 			return nil, "", 0, countErr
 		}
@@ -215,8 +234,23 @@ func (s *jsonlReader) ReadImportBatch(
 		return nil, "", 0, countErr
 	}
 	s.offset = offset
-	next, err := encodeFileCursor(fileCursor{ID: cursor.ID, Offset: offset})
+	next, err := encodeFileCursor(fileCursor{ID: cursor.ID, Offset: offset, Records: s.recordsRead})
 	return records, next, skipped, err
+}
+
+func (s *jsonlReader) initializeRecordCount(cursor fileCursor) error {
+	stream, ok := s.stream.(*bloomWatchStream)
+	if !ok {
+		if cursor.recordsKnown {
+			s.recordsRead = cursor.Records
+		}
+		return nil
+	}
+	if cursor.recordsKnown && cursor.Records != stream.prefixRecords {
+		return fmt.Errorf("validate import cursor record count: %w", core.ErrInvalidArgument)
+	}
+	s.recordsRead = stream.prefixRecords
+	return nil
 }
 
 func (s *jsonlReader) validateRecordCount(complete bool) error {
@@ -238,7 +272,7 @@ func (s *jsonlReader) open(ctx context.Context, cursor fileCursor) error {
 	if opener == nil {
 		opener = openWatchUpload
 	}
-	stream, err := opener(upload, cursor.Offset)
+	stream, err := opener(ctx, upload, cursor.Offset)
 	if err != nil {
 		return err
 	}
@@ -259,15 +293,18 @@ func (s *jsonlReader) Close() error {
 	return err
 }
 
-func openWatchUpload(upload *UploadReader, offset int64) (io.ReadCloser, error) {
-	return openWatchUploadWith(upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
+func openWatchUpload(ctx context.Context, upload *UploadReader, offset int64) (io.ReadCloser, error) {
+	return openWatchUploadWith(ctx, upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
 		return entry.Open()
 	})
 }
 
 func openWatchUploadWith(
-	upload *UploadReader, offset int64, openEntry func(*zip.File) (io.ReadCloser, error),
+	ctx context.Context, upload *UploadReader, offset int64, openEntry func(*zip.File) (io.ReadCloser, error),
 ) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("open import upload: %w", err)
+	}
 	archive, err := openImportArchive(upload)
 	if err != nil {
 		return nil, err
@@ -277,7 +314,7 @@ func openWatchUploadWith(
 		return nil, err
 	}
 	watchesSize := int64(watches.UncompressedSize64) //nolint:gosec // Archive validation caps this below MaxInt64.
-	if offset > watchesSize {
+	if offset < 0 || offset > watchesSize {
 		return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
 	}
 	reader, err := openEntry(watches)
@@ -288,15 +325,19 @@ func openWatchUploadWith(
 	if err != nil {
 		return nil, err
 	}
-	if err := discardUploadPrefix(validated, offset); err != nil {
+	prefixRecords, err := discardUploadPrefix(ctx, validated, offset)
+	if err != nil {
 		return nil, errors.Join(err, validated.Close())
 	}
-	return &bloomWatchStream{ReadCloser: validated, expectedRecords: expectedRecords}, nil
+	return &bloomWatchStream{
+		ReadCloser: validated, expectedRecords: expectedRecords, prefixRecords: prefixRecords,
+	}, nil
 }
 
 type bloomWatchStream struct {
 	io.ReadCloser
 	expectedRecords int64
+	prefixRecords   int64
 }
 
 func openImportArchive(upload *UploadReader) (*zip.Reader, error) {
@@ -665,15 +706,91 @@ func importArchiveEntryLimit(name string) uint64 {
 	return maxImportMetadataBytes
 }
 
-func discardUploadPrefix(reader io.Reader, offset int64) error {
-	if offset == 0 {
-		return nil
+func discardUploadPrefix(ctx context.Context, reader io.Reader, offset int64) (int64, error) {
+	if offset < 0 || offset > core.MaxImportArchiveEntryBytes {
+		return 0, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
 	}
-	written, err := io.CopyN(io.Discard, reader, offset)
-	if err != nil || written != offset {
-		return fmt.Errorf("seek import upload: %w", errors.Join(err, core.ErrInvalidArgument))
+	if offset == 0 {
+		return 0, nil
+	}
+	counter := prefixRecordCounter{line: make([]byte, 0, maxJSONLLineBytes)}
+	buffer := make([]byte, discardUploadBlockBytes)
+	remaining := offset
+	for range int64(core.MaxImportArchiveEntryBytes/discardUploadBlockBytes) + 1 {
+		if remaining == 0 {
+			return counter.finish()
+		}
+		if err := ctx.Err(); err != nil {
+			return 0, fmt.Errorf("seek import upload: %w", err)
+		}
+		readSize := min(int64(len(buffer)), remaining)
+		read, err := io.ReadFull(contextReader{ctx: ctx, reader: reader}, buffer[:readSize])
+		if countErr := counter.consume(buffer[:read]); countErr != nil {
+			return 0, countErr
+		}
+		remaining -= int64(read)
+		if err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return 0, fmt.Errorf("seek import upload: %w", contextErr)
+			}
+			return 0, fmt.Errorf("seek import upload: %w", errors.Join(err, core.ErrInvalidArgument))
+		}
+	}
+	return 0, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(destination []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(destination)
+}
+
+type prefixRecordCounter struct {
+	line    []byte
+	records int64
+}
+
+func (c *prefixRecordCounter) consume(data []byte) error {
+	for len(data) > 0 {
+		lineEnd := bytes.IndexByte(data, '\n')
+		if lineEnd < 0 {
+			return c.appendLine(data)
+		}
+		if err := c.appendLine(data[:lineEnd+1]); err != nil {
+			return err
+		}
+		c.finishLine()
+		data = data[lineEnd+1:]
 	}
 	return nil
+}
+
+func (c *prefixRecordCounter) appendLine(data []byte) error {
+	if len(c.line)+len(data) > maxJSONLLineBytes {
+		return errors.New("JSONL line exceeds size limit")
+	}
+	c.line = append(c.line, data...)
+	return nil
+}
+
+func (c *prefixRecordCounter) finishLine() {
+	if len(bytes.TrimSpace(c.line)) > 0 {
+		c.records++
+	}
+	c.line = c.line[:0]
+}
+
+func (c *prefixRecordCounter) finish() (int64, error) {
+	if len(c.line) > 0 {
+		c.finishLine()
+	}
+	return c.records, nil
 }
 
 func readJSONLLines(

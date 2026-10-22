@@ -1904,6 +1904,8 @@ paths:
           description: A complete Bloom export ZIP archive.
           headers:
             Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+            Set-Cookie: { $ref: "#/components/headers/SetCookie" }
+            Vary: { $ref: "#/components/headers/VaryCookie" }
             X-Request-ID: { $ref: "#/components/headers/XRequestID" }
             Content-Disposition:
               description: Attachment filename in the form `bloom-export-YYYY-MM-DD.zip`, using the UTC export date.

@@ -533,7 +533,8 @@ func TestMetricsMountedWithPrometheus(t *testing.T) {
 }
 
 func TestRecoverMiddlewareReturnsEnvelope(t *testing.T) {
-	h := recoverMiddleware(slog.New(slog.DiscardHandler))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	var logs strings.Builder
+	h := recoverMiddleware(slog.New(slog.NewTextHandler(&logs, nil)))(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("boom")
 	}))
 	rec := httptest.NewRecorder()
@@ -544,6 +545,33 @@ func TestRecoverMiddlewareReturnsEnvelope(t *testing.T) {
 	env := decodeEnvelope(t, rec)
 	if env.Code != codeInternal || strings.Contains(rec.Body.String(), "boom") {
 		t.Errorf("envelope = %+v (body %s), want opaque internal", env, rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "panic recovered") || strings.Contains(logs.String(), "boom") {
+		t.Errorf("recovery log = %q", logs.String())
+	}
+}
+
+func TestRecoverMiddlewareAbortsAfterResponseCommit(t *testing.T) {
+	var logs strings.Builder
+	h := recoverMiddleware(slog.New(slog.NewTextHandler(&logs, nil)))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("zip-prefix")); err != nil {
+			panic(err)
+		}
+		panic("secret-panic-detail")
+	}))
+	recorder := httptest.NewRecorder()
+	recovered := capturePanic(func() {
+		h.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/x", nil))
+	})
+	abortErr, ok := recovered.(error)
+	if !ok || !errors.Is(abortErr, http.ErrAbortHandler) || recorder.Code != http.StatusOK ||
+		recorder.Body.String() != "zip-prefix" {
+		t.Fatalf("committed panic = %v, status %d, body %q", recovered, recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(logs.String(), "panic after response committed") ||
+		strings.Contains(logs.String(), "secret-panic-detail") {
+		t.Fatalf("committed panic log = %q", logs.String())
 	}
 }
 

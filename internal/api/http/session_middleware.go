@@ -142,6 +142,11 @@ func (w *streamingSessionResponse) Write(data []byte) (int, error) {
 
 func (w *streamingSessionResponse) Unwrap() http.ResponseWriter { return w.destination }
 
+func streamingSessionCommitFailed(writer http.ResponseWriter) bool {
+	response, ok := writer.(*streamingSessionResponse)
+	return ok && response.failed
+}
+
 func (w *streamingSessionResponse) finish() {
 	if !w.wroteHeader {
 		w.status, w.wroteHeader = http.StatusOK, true

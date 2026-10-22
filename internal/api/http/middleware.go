@@ -51,6 +51,31 @@ type statusRecorder struct {
 	status int
 }
 
+type commitTrackingResponseWriter struct {
+	http.ResponseWriter
+	committed bool
+}
+
+func (w *commitTrackingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *commitTrackingResponseWriter) WriteHeader(code int) {
+	w.ResponseWriter.WriteHeader(code)
+	w.committed = true
+}
+
+func (w *commitTrackingResponseWriter) Write(data []byte) (int, error) {
+	written, err := w.ResponseWriter.Write(data)
+	if written > 0 || err == nil {
+		w.committed = true
+	}
+	return written, err
+}
+
+func (w *commitTrackingResponseWriter) FlushError() error {
+	w.committed = true
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -78,16 +103,24 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 // stuff kilobytes into every log line; longer values are replaced.
 const maxRequestIDLen = 128
 
-// recoverMiddleware converts a panic in any inner handler or middleware into a
-// 500 so a single bad request cannot crash the process. It logs the panic once
-// with the request context.
+// recoverMiddleware converts a pre-commit panic into an opaque 500. After a
+// response is committed, it logs the panic and aborts the connection so an
+// error body cannot corrupt a streaming response.
 func recoverMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tracked := &commitTrackingResponseWriter{ResponseWriter: w}
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					if recoveredErr, ok := recovered.(error); ok && errors.Is(recoveredErr, http.ErrAbortHandler) {
 						panic(recovered)
+					}
+					if tracked.committed {
+						logger.ErrorContext(r.Context(), "panic after response committed",
+							"method", r.Method,
+							"route", routePattern(r),
+						)
+						panic(http.ErrAbortHandler)
 					}
 					logger.ErrorContext(r.Context(), "panic recovered",
 						"method", r.Method,
@@ -103,7 +136,7 @@ func recoverMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 					})
 				}
 			}()
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(tracked, r)
 		})
 	}
 }

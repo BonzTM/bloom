@@ -351,6 +351,164 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	}
 }
 
+func TestWatchExportFullRouteRefreshesSessionAndSetsStreamingHeaders(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	harness.playback.watches = []core.PlaybackWatch{
+		exportHTTPWatch(time.Date(2026, 9, 25, 12, 1, 0, 0, time.UTC)),
+	}
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	response := harness.request(t, http.MethodGet, "/api/v1/exports/watches", "", cookie)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("full-route export = %d %q: %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if response.Header().Get("Set-Cookie") == "" || !strings.Contains(response.Header().Get("Vary"), "Cookie") {
+		t.Fatalf("session headers = Set-Cookie %q Vary %q", response.Header().Get("Set-Cookie"), response.Header().Get("Vary"))
+	}
+	refreshed := sessionCookie(t, response)
+	if refreshed.Value != cookie.Value || !refreshed.Secure || !refreshed.HttpOnly || refreshed.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("refreshed session cookie = %+v", refreshed)
+	}
+	assertExportSecurityHeaders(t, response)
+	readExportZip(t, response.Body.Bytes())
+}
+
+func TestWatchExportFullRouteRejectsMalformedAndRevokedSessions(t *testing.T) {
+	tests := map[string]func(*testing.T, authHarness) *http.Cookie{
+		"malformed": malformedExportSession,
+		"revoked":   revokedExportSession,
+	}
+	for name, session := range tests {
+		t.Run(name, func(t *testing.T) {
+			harness := newAuthHarness(t, nil)
+			response := harness.request(t, http.MethodGet, "/api/v1/exports/watches", "", session(t, harness))
+			if response.Code != http.StatusUnauthorized ||
+				!strings.HasPrefix(response.Header().Get("Content-Type"), "application/json") {
+				t.Fatalf("%s session = %d %q: %s", name, response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			if response.Header().Get("Set-Cookie") == "" || !strings.Contains(response.Header().Get("Vary"), "Cookie") {
+				t.Fatalf("%s session headers = %v", name, response.Header())
+			}
+			if cleared := sessionCookie(t, response); cleared.MaxAge >= 0 {
+				t.Fatalf("%s session cookie was not expired: %+v", name, cleared)
+			}
+			assertExportSecurityHeaders(t, response)
+		})
+	}
+}
+
+func TestWatchExportFullRouteRejectsMissingPermissionBeforeStreaming(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	harness.authorization.mu.Lock()
+	harness.authorization.permissions[testRequestAccountID] = nil
+	harness.authorization.mu.Unlock()
+	response := harness.request(t, http.MethodGet, "/api/v1/exports/watches", "", cookie)
+	if response.Code != http.StatusForbidden ||
+		!strings.HasPrefix(response.Header().Get("Content-Type"), "application/json") ||
+		strings.Contains(response.Body.String(), "PK") {
+		t.Fatalf("authorization failure = %d %q: %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	assertExportSecurityHeaders(t, response)
+}
+
+func TestWatchExportFullRouteReturnsJSONWhenSessionCommitFails(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	harness.sessionStore.mu.Lock()
+	harness.sessionStore.commitErr = errors.New("session store unavailable")
+	harness.sessionStore.mu.Unlock()
+	request := exportRouteRequest(cookie)
+	recorder := httptest.NewRecorder()
+	recovered := capturePanic(func() { harness.h.ServeHTTP(recorder, request) })
+	if recovered != nil || recorder.Code != http.StatusInternalServerError ||
+		!strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("session commit failure = panic %v status %d type %q body %s",
+			recovered, recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
+	assertExportSecurityHeaders(t, recorder)
+	if event := harness.audit.last(t); event.Action != "watch.export" || event.Result != telemetry.AuditFailure {
+		t.Fatalf("session commit failure audit = %+v", event)
+	}
+}
+
+func TestWatchExportFullRouteAbortsUnexpectedPanicAfterCommit(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	harness.server.playbackReader = &panicAfterCommittedExportReader{watches: exportTimeoutWatches(exportBatchSize + 1)}
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	recorder := httptest.NewRecorder()
+	recovered := capturePanic(func() { harness.h.ServeHTTP(recorder, exportRouteRequest(cookie)) })
+	abortErr, ok := recovered.(error)
+	if !ok || !errors.Is(abortErr, http.ErrAbortHandler) || recorder.Code != http.StatusOK ||
+		strings.Contains(recorder.Body.String(), `"code":"internal_error"`) {
+		t.Fatalf("post-commit panic = %v status %d body bytes %d", recovered, recorder.Code, recorder.Body.Len())
+	}
+	if _, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len())); err == nil {
+		t.Fatal("post-commit panic produced a readable ZIP archive")
+	}
+	if !strings.Contains(harness.logs.String(), "panic after response committed") ||
+		strings.Contains(harness.logs.String(), "secret-export-panic") {
+		t.Fatalf("post-commit panic log = %q", harness.logs.String())
+	}
+}
+
+func malformedExportSession(t *testing.T, harness authHarness) *http.Cookie {
+	t.Helper()
+	token := "malformed-export-session"
+	if err := harness.sessions.Store.Commit(hashedSessionToken(token), []byte("bad"), futureSessionInstant()); err != nil {
+		t.Fatalf("seed malformed export session: %v", err)
+	}
+	return &http.Cookie{Name: sessionCookieName, Value: token}
+}
+
+func revokedExportSession(t *testing.T, harness authHarness) *http.Cookie {
+	t.Helper()
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	if err := harness.sessions.Store.Delete(hashedSessionToken(cookie.Value)); err != nil {
+		t.Fatalf("revoke export session: %v", err)
+	}
+	return cookie
+}
+
+func exportRouteRequest(cookie *http.Cookie) *http.Request {
+	request := httptest.NewRequest(http.MethodGet, "https://bloom.test/api/v1/exports/watches", nil)
+	request.RemoteAddr = "192.0.2.10:4321"
+	request.Header.Set("X-Request-ID", "request-1")
+	request.AddCookie(cookie)
+	return request
+}
+
+func assertExportSecurityHeaders(t *testing.T, response interface{ Header() http.Header }) {
+	t.Helper()
+	header := response.Header()
+	if header.Get("X-Content-Type-Options") != "nosniff" || header.Get("X-Frame-Options") != "DENY" ||
+		header.Get("Referrer-Policy") == "" || header.Get("Content-Security-Policy") == "" ||
+		header.Get("Cache-Control") != "no-store" || header.Get("X-Request-ID") == "" {
+		t.Fatalf("security headers = %v", header)
+	}
+}
+
+type panicAfterCommittedExportReader struct {
+	watches []core.PlaybackWatch
+	calls   int
+}
+
+func (*panicAfterCommittedExportReader) GetWatch(context.Context, string) (core.PlaybackWatch, error) {
+	return core.PlaybackWatch{}, core.ErrNotFound
+}
+
+func (r *panicAfterCommittedExportReader) ListWatches(context.Context, core.PlaybackQuery) ([]core.PlaybackWatch, error) {
+	r.calls++
+	if r.calls > 1 {
+		panic("secret-export-panic")
+	}
+	return r.watches, nil
+}
+
+func (*panicAfterCommittedExportReader) ListWatchPositions(context.Context, string) ([]core.PlaybackPosition, error) {
+	return nil, nil
+}
+
 type exportImportStore struct {
 	chunks map[int64][]byte
 	info   core.ImportUploadInfo
@@ -474,7 +632,8 @@ func TestWatchExportOpenAPIOnlyDocumentsMediaServerFilter(t *testing.T) {
 		t.Fatalf("export parameters = %+v, want only media_server_id", operation.Parameters)
 	}
 	response := operation.Responses.Value("200").Value
-	if response.Content.Get("application/zip") == nil || response.Headers["X-Next-Cursor"] != nil {
+	if response.Content.Get("application/zip") == nil || response.Headers["X-Next-Cursor"] != nil ||
+		response.Headers["Set-Cookie"] == nil || response.Headers["Vary"] == nil {
 		t.Fatalf("export response does not match ZIP contract: %+v", response)
 	}
 }

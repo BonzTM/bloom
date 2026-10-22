@@ -211,8 +211,31 @@ func openStagedWatch(t *testing.T, payload []byte) error {
 	if err != nil {
 		t.Fatalf("open staged zip: %v", err)
 	}
-	_, err = openWatchUpload(upload, 0)
+	_, err = openWatchUpload(t.Context(), upload, 0)
 	return err
+}
+
+func TestDiscardUploadPrefixStopsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	reader := &cancelAfterFirstRead{cancel: cancel}
+	_, err := discardUploadPrefix(ctx, reader, 2*discardUploadBlockBytes)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, core.ErrInvalidArgument) || reader.reads != 1 {
+		t.Fatalf("discardUploadPrefix = reads %d, error %v", reader.reads, err)
+	}
+}
+
+type cancelAfterFirstRead struct {
+	cancel context.CancelFunc
+	reads  int
+}
+
+func (r *cancelAfterFirstRead) Read(destination []byte) (int, error) {
+	r.reads++
+	clear(destination)
+	if r.reads == 1 {
+		r.cancel()
+	}
+	return len(destination), nil
 }
 
 func TestBloomUploadRejectsMalformedAndOversizedZip64Records(t *testing.T) {
