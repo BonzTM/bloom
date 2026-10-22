@@ -107,8 +107,11 @@ func TestCreatePlaybackReportingImportMatchesOpenAPI(t *testing.T) {
 	}
 }
 
-func TestCreateBloomExportAcceptsBoundedNDJSONPart(t *testing.T) {
+func TestCreateBloomExportRejectsBareJSONLAsDocumentedValidationFailure(t *testing.T) {
 	server, manager, _ := importHandlerServer(t)
+	manager.err = &core.InvalidArgumentError{
+		Field: "file", Code: "invalid", Message: "must be a compressed Bloom ZIP with Deflate entries",
+	}
 	payload := "{\"id\":\"watch\"}\n"
 	body, contentType := bloomMultipart(t, payload)
 	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
@@ -117,14 +120,27 @@ func TestCreateBloomExportAcceptsBoundedNDJSONPart(t *testing.T) {
 	request.Header.Set("Content-Type", contentType)
 	recorder := httptest.NewRecorder()
 	server.handleCreateImport(recorder, request)
-	if recorder.Code != http.StatusCreated || manager.upload != payload || !manager.stageHasDeadline {
+	if recorder.Code != http.StatusUnprocessableEntity || manager.upload != payload || !manager.stageHasDeadline ||
+		manager.discarded != manager.stagingID {
 		t.Fatalf("multipart import = %d upload %q: %s", recorder.Code, manager.upload, recorder.Body.String())
 	}
+	var response struct {
+		Code   string `json:"code"`
+		Fields []struct {
+			Field, Code, Message string
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response.Code != codeValidationFailed ||
+		len(response.Fields) != 1 || response.Fields[0].Field != "file" ||
+		response.Fields[0].Message != "must be a compressed Bloom ZIP with Deflate entries" {
+		t.Fatalf("bare JSONL validation response = %+v, %v", response, err)
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
 }
 
 func TestCreateBloomExportAcceptsZipPartWithoutUsingFilename(t *testing.T) {
 	server, manager, _ := importHandlerServer(t)
-	payload := string([]byte{'P', 'K', 0x03, 0x04, 'z', 'i', 'p'})
+	payload := string(httpBloomArchive(t))
 	body, contentType := bloomMultipartWithType(t, payload, "application/zip", "export.data")
 	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
 	request.Body = io.NopCloser(bytes.NewReader(body))
@@ -306,10 +322,13 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	if strings.Join(entries.names, ",") != "manifest.json,watches.jsonl,imports.jsonl,summary.json" {
 		t.Fatalf("zip entries = %v", entries.names)
 	}
-	if entries.methods["watches.jsonl"] != zip.Store || entries.flags["watches.jsonl"]&0x8 == 0 {
-		t.Fatalf("watches.jsonl method=%d flags=%#x, want stored data descriptor",
-			entries.methods["watches.jsonl"], entries.flags["watches.jsonl"])
+	for _, name := range entries.names {
+		if entries.methods[name] != zip.Deflate || entries.flags[name]&0x8 == 0 {
+			t.Fatalf("%s method=%d flags=%#x, want Deflate data descriptor",
+				name, entries.methods[name], entries.flags[name])
+		}
 	}
+	assertExportAcceptedByImporter(t, recorder.Body.Bytes())
 	document := loadOpenAPI(t)
 	assertJSONContract(t, document, "#/components/schemas/WatchExportManifest", entries.data["manifest.json"])
 	watchLine := bytes.TrimSpace(entries.data["watches.jsonl"])
@@ -329,6 +348,448 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	if event.Actor != testRequestAccountID || event.Action != "watch.export" || event.Resource != "watches" ||
 		event.Result != telemetry.AuditSuccess || event.RequestID != "request-1" || event.Source == "" {
 		t.Fatalf("export audit = %+v", event)
+	}
+}
+
+func TestHighlyRepetitiveWatchExportImports(t *testing.T) {
+	const records = 2_000
+	server, _, _ := importHandlerServer(t)
+	server.playbackReader = &repetitiveExportPlaybackReader{
+		records: records, first: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
+	}
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
+	recorder := httptest.NewRecorder()
+	server.handleExportWatches(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("export = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	ratio := exportEntryCompressionRatio(t, recorder.Body.Bytes(), "watches.jsonl")
+	if ratio <= 24 {
+		t.Fatalf("repetitive export ratio = %.2f:1, want greater than 24:1", ratio)
+	}
+	assertExportAcceptedByImporter(t, recorder.Body.Bytes())
+	lines := bytes.Split(bytes.TrimSpace(readExportZip(t, recorder.Body.Bytes()).data["watches.jsonl"]), []byte{'\n'})
+	if len(lines) != records {
+		t.Fatalf("importable watch records = %d, want %d", len(lines), records)
+	}
+	for index, line := range lines {
+		if _, err := importer.DecodeWatchJSONL(line); err != nil {
+			t.Fatalf("decode exported watch %d: %v", index, err)
+		}
+	}
+	t.Logf("repetitive exporter-to-importer ratio: %.2f:1", ratio)
+}
+
+type repetitiveExportPlaybackReader struct {
+	records int
+	first   time.Time
+}
+
+func (*repetitiveExportPlaybackReader) GetWatch(context.Context, string) (core.PlaybackWatch, error) {
+	return core.PlaybackWatch{}, core.ErrNotFound
+}
+
+func (*repetitiveExportPlaybackReader) ListWatchPositions(
+	context.Context, string,
+) ([]core.PlaybackPosition, error) {
+	return nil, nil
+}
+
+func (r *repetitiveExportPlaybackReader) ListWatches(
+	ctx context.Context, query core.PlaybackQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	start := 0
+	if !query.BeforeStartedAt.IsZero() {
+		start = int(r.first.Sub(query.BeforeStartedAt)/time.Second) + 1
+	}
+	end := min(start+query.PageSize, r.records)
+	page := make([]core.PlaybackWatch, 0, max(0, end-start))
+	for index := start; index < end; index++ {
+		page = append(page, worstCaseWatch(index, r.first.Add(-time.Duration(index)*time.Second)))
+	}
+	return page, nil
+}
+
+func exportEntryCompressionRatio(t *testing.T, payload []byte, name string) float64 {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatalf("open export: %v", err)
+	}
+	for _, entry := range archive.File {
+		if entry.Name == name {
+			return float64(entry.UncompressedSize64) / float64(entry.CompressedSize64)
+		}
+	}
+	t.Fatalf("export has no %s", name)
+	return 0
+}
+
+func TestMaxImportDecompressionRatioCoversWorstCaseBloomExport(t *testing.T) {
+	const records = 10_000
+	watchesUncompressed, watchesCompressed := measureExportEntryCompression(
+		t, "watches.jsonl", records,
+	)
+	importsUncompressed, importsCompressed := measureExportEntryCompression(
+		t, "imports.jsonl", records,
+	)
+	assertCompressionMargin(t, "watches.jsonl", watchesUncompressed, watchesCompressed)
+	assertCompressionMargin(t, "imports.jsonl", importsUncompressed, importsCompressed)
+}
+
+func measureExportEntryCompression(
+	t *testing.T, name string, records int,
+) (uint64, uint64) {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	entry, err := createZipEntry(archive, name, time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("create %s: %v", name, err)
+	}
+	for index := range records {
+		if encodeErr := encodeMeasuredExportRecord(entry, name, index); encodeErr != nil {
+			t.Fatalf("encode %s record %d: %v", name, index, encodeErr)
+		}
+	}
+	if closeErr := archive.Close(); closeErr != nil {
+		t.Fatalf("close %s measurement: %v", name, closeErr)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(output.Bytes()), int64(output.Len()))
+	if err != nil || len(reader.File) != 1 {
+		t.Fatalf("open %s measurement: entries %d, %v", name, len(reader.File), err)
+	}
+	return reader.File[0].UncompressedSize64, reader.File[0].CompressedSize64
+}
+
+func encodeMeasuredExportRecord(writer io.Writer, name string, index int) error {
+	switch name {
+	case "watches.jsonl":
+		return encodeWorstCaseWatch(writer, index)
+	case "imports.jsonl":
+		return encodeWorstCaseImport(writer, index)
+	default:
+		return fmt.Errorf("unsupported measured export entry %q", name)
+	}
+}
+
+func assertCompressionMargin(t *testing.T, name string, uncompressed, compressed uint64) {
+	t.Helper()
+	if compressed == 0 {
+		t.Fatalf("%s compressed to zero bytes", name)
+	}
+	t.Logf("%s worst-case export ratio: %.2f:1 (%d/%d)",
+		name, float64(uncompressed)/float64(compressed), uncompressed, compressed)
+	if uncompressed*4 > compressed*uint64(core.MaxImportDecompressionRatio) {
+		t.Fatalf("%s ratio lacks 4x margin under limit %d:1", name, core.MaxImportDecompressionRatio)
+	}
+	if core.MaxImportDecompressionRatio > 1000 {
+		t.Fatalf("decompression ratio limit = %d, want no more than 1000", core.MaxImportDecompressionRatio)
+	}
+}
+
+func encodeWorstCaseWatch(writer io.Writer, index int) error {
+	started := time.Date(2026, 9, 25, 12, 0, 0, index*1000, time.UTC)
+	return importer.EncodeWatchJSONL(writer, worstCaseWatch(index, started))
+}
+
+func worstCaseWatch(index int, started time.Time) core.PlaybackWatch {
+	ended := started.Add(45 * time.Minute)
+	runtime := 50 * time.Minute
+	season, episode := int32(1), int32(1)
+	direct := true
+	return core.PlaybackWatch{
+		ID: fmt.Sprintf("33333333-3333-4333-8333-%012d", index), MediaServerID: importTestServerID,
+		MediaServerName: "Repeated Jellyfin", MediaUserID: "repeated-user", Username: "Repeated User",
+		DeviceID: "repeated-device", DeviceName: "Repeated Device", Client: "Repeated Client",
+		ItemID: "repeated-item", ItemName: "Repeated Item", ItemType: "Episode",
+		SeriesID: "44444444-4444-4444-8444-444444444444", SeriesName: "Repeated Series",
+		LibraryID: "55555555-5555-4555-8555-555555555555", LibraryName: "Repeated Library",
+		SeasonNumber: &season, EpisodeNumber: &episode, PlayMethod: core.PlayMethodTranscode,
+		Stream: &core.StreamDetails{
+			Container: "mkv", VideoCodec: "hevc", AudioCodec: "truehd", Bitrate: 12_000_000,
+			Width: 3840, Height: 2160, Framerate: 23.98, AudioChannels: 8,
+			IsVideoDirect: &direct, IsAudioDirect: &direct,
+			TranscodeReasons: []string{"ContainerNotSupported", "AudioCodecNotSupported"},
+		},
+		State: core.WatchStopped, StartedAt: started, LastSeenAt: ended, EndedAt: &ended,
+		ActiveTime: 45 * time.Minute, LastPosition: 45 * time.Minute, Runtime: &runtime,
+		Source: core.WatchSourceImport, ImportSource: core.ImportSourceJellystat,
+		ImportRecordID:       fmt.Sprintf("repeated-import-%012d", index),
+		ImportOriginRecordID: fmt.Sprintf("origin-%012d", index),
+	}
+}
+
+func encodeWorstCaseImport(writer io.Writer, index int) error {
+	created := time.Date(2026, 9, 25, 12, 0, 0, index*1000, time.UTC)
+	started, finished := created.Add(time.Second), created.Add(2*time.Second)
+	job := core.ImportJob{
+		ID: fmt.Sprintf("66666666-6666-4666-8666-%012d", index), MediaServerID: importTestServerID,
+		RequestedBy: testRequestAccountID, Source: core.ImportSourcePlaybackReporting,
+		State: core.ImportCompleted, Read: 500, Imported: 500,
+		CreatedAt: created, UpdatedAt: finished, StartedAt: &started, FinishedAt: &finished,
+	}
+	return encodeImportJSONL(writer, job)
+}
+
+func TestWatchExportFullRouteRefreshesSessionAndSetsStreamingHeaders(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	harness.playback.watches = []core.PlaybackWatch{
+		exportHTTPWatch(time.Date(2026, 9, 25, 12, 1, 0, 0, time.UTC)),
+	}
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	response := harness.request(t, http.MethodGet, "/api/v1/exports/watches", "", cookie)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("full-route export = %d %q: %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if response.Header().Get("Set-Cookie") == "" || !strings.Contains(response.Header().Get("Vary"), "Cookie") {
+		t.Fatalf("session headers = Set-Cookie %q Vary %q", response.Header().Get("Set-Cookie"), response.Header().Get("Vary"))
+	}
+	refreshed := sessionCookie(t, response)
+	if refreshed.Value != cookie.Value || !refreshed.Secure || !refreshed.HttpOnly || refreshed.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("refreshed session cookie = %+v", refreshed)
+	}
+	assertExportSecurityHeaders(t, response)
+	readExportZip(t, response.Body.Bytes())
+}
+
+func TestWatchExportFullRouteRejectsMalformedAndRevokedSessions(t *testing.T) {
+	tests := map[string]func(*testing.T, authHarness) *http.Cookie{
+		"malformed": malformedExportSession,
+		"revoked":   revokedExportSession,
+	}
+	for name, session := range tests {
+		t.Run(name, func(t *testing.T) {
+			harness := newAuthHarness(t, nil)
+			response := harness.request(t, http.MethodGet, "/api/v1/exports/watches", "", session(t, harness))
+			if response.Code != http.StatusUnauthorized ||
+				!strings.HasPrefix(response.Header().Get("Content-Type"), "application/json") {
+				t.Fatalf("%s session = %d %q: %s", name, response.Code, response.Header().Get("Content-Type"), response.Body.String())
+			}
+			if response.Header().Get("Set-Cookie") == "" || !strings.Contains(response.Header().Get("Vary"), "Cookie") {
+				t.Fatalf("%s session headers = %v", name, response.Header())
+			}
+			if cleared := sessionCookie(t, response); cleared.MaxAge >= 0 {
+				t.Fatalf("%s session cookie was not expired: %+v", name, cleared)
+			}
+			assertExportSecurityHeaders(t, response)
+		})
+	}
+}
+
+func TestWatchExportFullRouteRejectsMissingPermissionBeforeStreaming(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	harness.authorization.mu.Lock()
+	harness.authorization.permissions[testRequestAccountID] = nil
+	harness.authorization.mu.Unlock()
+	response := harness.request(t, http.MethodGet, "/api/v1/exports/watches", "", cookie)
+	if response.Code != http.StatusForbidden ||
+		!strings.HasPrefix(response.Header().Get("Content-Type"), "application/json") ||
+		strings.Contains(response.Body.String(), "PK") {
+		t.Fatalf("authorization failure = %d %q: %s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	assertExportSecurityHeaders(t, response)
+}
+
+func TestWatchExportFullRouteReturnsJSONWhenSessionCommitFails(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	harness.sessionStore.mu.Lock()
+	harness.sessionStore.commitErr = errors.New("session store unavailable")
+	harness.sessionStore.mu.Unlock()
+	request := exportRouteRequest(cookie)
+	recorder := httptest.NewRecorder()
+	recovered := capturePanic(func() { harness.h.ServeHTTP(recorder, request) })
+	if recovered != nil || recorder.Code != http.StatusInternalServerError ||
+		!strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("session commit failure = panic %v status %d type %q body %s",
+			recovered, recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
+	assertExportSecurityHeaders(t, recorder)
+	if event := harness.audit.last(t); event.Action != "watch.export" || event.Result != telemetry.AuditFailure {
+		t.Fatalf("session commit failure audit = %+v", event)
+	}
+}
+
+func TestWatchExportFullRouteAbortsUnexpectedPanicAfterCommit(t *testing.T) {
+	harness := newAuthHarness(t, nil)
+	harness.server.playbackReader = &panicAfterCommittedExportReader{watches: exportTimeoutWatches(exportBatchSize + 1)}
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	recorder := httptest.NewRecorder()
+	recovered := capturePanic(func() { harness.h.ServeHTTP(recorder, exportRouteRequest(cookie)) })
+	abortErr, ok := recovered.(error)
+	if !ok || !errors.Is(abortErr, http.ErrAbortHandler) || recorder.Code != http.StatusOK ||
+		strings.Contains(recorder.Body.String(), `"code":"internal_error"`) {
+		t.Fatalf("post-commit panic = %v status %d body bytes %d", recovered, recorder.Code, recorder.Body.Len())
+	}
+	if _, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len())); err == nil {
+		t.Fatal("post-commit panic produced a readable ZIP archive")
+	}
+	if !strings.Contains(harness.logs.String(), "panic after response committed") ||
+		strings.Contains(harness.logs.String(), "secret-export-panic") {
+		t.Fatalf("post-commit panic log = %q", harness.logs.String())
+	}
+}
+
+func malformedExportSession(t *testing.T, harness authHarness) *http.Cookie {
+	t.Helper()
+	token := "malformed-export-session"
+	if err := harness.sessions.Store.Commit(hashedSessionToken(token), []byte("bad"), futureSessionInstant()); err != nil {
+		t.Fatalf("seed malformed export session: %v", err)
+	}
+	return &http.Cookie{Name: sessionCookieName, Value: token}
+}
+
+func revokedExportSession(t *testing.T, harness authHarness) *http.Cookie {
+	t.Helper()
+	cookie := sessionCookie(t, harness.login(t, "alice", "secret-password"))
+	if err := harness.sessions.Store.Delete(hashedSessionToken(cookie.Value)); err != nil {
+		t.Fatalf("revoke export session: %v", err)
+	}
+	return cookie
+}
+
+func exportRouteRequest(cookie *http.Cookie) *http.Request {
+	request := httptest.NewRequest(http.MethodGet, "https://bloom.test/api/v1/exports/watches", nil)
+	request.RemoteAddr = "192.0.2.10:4321"
+	request.Header.Set("X-Request-ID", "request-1")
+	request.AddCookie(cookie)
+	return request
+}
+
+func assertExportSecurityHeaders(t *testing.T, response interface{ Header() http.Header }) {
+	t.Helper()
+	header := response.Header()
+	if header.Get("X-Content-Type-Options") != "nosniff" || header.Get("X-Frame-Options") != "DENY" ||
+		header.Get("Referrer-Policy") == "" || header.Get("Content-Security-Policy") == "" ||
+		header.Get("Cache-Control") != "no-store" || header.Get("X-Request-ID") == "" {
+		t.Fatalf("security headers = %v", header)
+	}
+}
+
+type panicAfterCommittedExportReader struct {
+	watches []core.PlaybackWatch
+	calls   int
+}
+
+func (*panicAfterCommittedExportReader) GetWatch(context.Context, string) (core.PlaybackWatch, error) {
+	return core.PlaybackWatch{}, core.ErrNotFound
+}
+
+func (r *panicAfterCommittedExportReader) ListWatches(context.Context, core.PlaybackQuery) ([]core.PlaybackWatch, error) {
+	r.calls++
+	if r.calls > 1 {
+		panic("secret-export-panic")
+	}
+	return r.watches, nil
+}
+
+func (*panicAfterCommittedExportReader) ListWatchPositions(context.Context, string) ([]core.PlaybackPosition, error) {
+	return nil, nil
+}
+
+type exportImportStore struct {
+	chunks map[int64][]byte
+	info   core.ImportUploadInfo
+	job    core.ImportJob
+}
+
+func (*exportImportStore) CreateImport(context.Context, core.ImportJob) error { return nil }
+
+func (s *exportImportStore) CreateUploadedImport(_ context.Context, job core.ImportJob, _ string) error {
+	s.job = job
+	return nil
+}
+
+func (*exportImportStore) ListImports(context.Context, core.ImportListQuery) ([]core.ImportJob, error) {
+	return nil, nil
+}
+
+func (*exportImportStore) GetImport(context.Context, string) (core.ImportJob, error) {
+	return core.ImportJob{}, core.ErrNotFound
+}
+
+func (*exportImportStore) CancelImport(context.Context, string, time.Time) (core.ImportJob, error) {
+	return core.ImportJob{}, core.ErrNotFound
+}
+
+func (*exportImportStore) ClaimImport(context.Context, core.ImportLease, time.Time) (core.ImportJob, error) {
+	return core.ImportJob{}, core.ErrNotFound
+}
+
+func (*exportImportStore) RenewImportLease(context.Context, string, core.ImportLease, time.Time) error {
+	return core.ErrNotFound
+}
+
+func (*exportImportStore) CommitImportBatch(context.Context, core.ImportBatch) (core.ImportBatchResult, error) {
+	return core.ImportBatchResult{}, core.ErrNotFound
+}
+
+func (*exportImportStore) FinishImport(context.Context, string, string, core.ImportState, string, time.Time) error {
+	return core.ErrNotFound
+}
+
+func (s *exportImportStore) WriteImportUploadChunks(_ context.Context, chunks []core.ImportUploadChunk) error {
+	for _, chunk := range chunks {
+		s.info.ID = chunk.ID
+		s.info.Size += int64(len(chunk.Bytes))
+		s.info.ChunkCount++
+		s.chunks[chunk.Index] = bytes.Clone(chunk.Bytes)
+	}
+	return nil
+}
+
+func (s *exportImportStore) ImportUploadInfo(context.Context, string) (core.ImportUploadInfo, error) {
+	return s.info, nil
+}
+
+func (s *exportImportStore) ReadImportUploadChunk(_ context.Context, _ string, index int64) ([]byte, error) {
+	return bytes.Clone(s.chunks[index]), nil
+}
+
+func (s *exportImportStore) DeleteImportUpload(context.Context, string) error { return nil }
+
+func (*exportImportStore) DeleteOrphanImportUploads(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+type exportImportClock struct{ now time.Time }
+
+func (c exportImportClock) Now() time.Time { return c.now }
+
+type exportImportServer struct{}
+
+func (exportImportServer) Get(context.Context, string) (core.MediaServerConnection, error) {
+	return core.MediaServerConnection{}, nil
+}
+
+func assertExportAcceptedByImporter(t *testing.T, payload []byte) {
+	t.Helper()
+	store := &exportImportStore{chunks: make(map[int64][]byte)}
+	staging, err := importer.NewStaging(store, time.Minute)
+	if err != nil {
+		t.Fatalf("NewStaging: %v", err)
+	}
+	service, err := importer.NewService(
+		store, exportImportServer{}, exportImportClock{
+			now: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
+		}, staging, slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	id, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	job, err := service.CreateBloomExport(t.Context(), importTestServerID, testRequestAccountID, id)
+	if err != nil || job.ID == "" || store.job.ID != job.ID {
+		t.Fatalf("CreateBloomExport = %+v, stored %+v, %v", job, store.job, err)
 	}
 }
 
@@ -355,7 +816,8 @@ func TestWatchExportOpenAPIOnlyDocumentsMediaServerFilter(t *testing.T) {
 		t.Fatalf("export parameters = %+v, want only media_server_id", operation.Parameters)
 	}
 	response := operation.Responses.Value("200").Value
-	if response.Content.Get("application/zip") == nil || response.Headers["X-Next-Cursor"] != nil {
+	if response.Content.Get("application/zip") == nil || response.Headers["X-Next-Cursor"] != nil ||
+		response.Headers["Set-Cookie"] == nil || response.Headers["Vary"] == nil {
 		t.Fatalf("export response does not match ZIP contract: %+v", response)
 	}
 }
@@ -820,6 +1282,30 @@ func importHandlerServer(t *testing.T) (*Server, *fakeImportManager, *recordingA
 func bloomMultipart(t *testing.T, payload string) ([]byte, string) {
 	t.Helper()
 	return bloomMultipartWithExtra(t, payload, "")
+}
+
+func httpBloomArchive(t *testing.T) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	entries := map[string]string{
+		"manifest.json": `{"format_version":1,"bloom_version":"test","exported_at":"2026-09-25T12:00:00Z"}`,
+		"watches.jsonl": `{}` + "\n",
+		"summary.json":  `{"watch_records":1,"import_records":0,"watches_bytes":3,"imports_bytes":0}`,
+	}
+	for _, name := range []string{"manifest.json", "watches.jsonl", "summary.json"} {
+		entry, err := archive.Create(name)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if _, err := io.WriteString(entry, entries[name]); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close Bloom archive: %v", err)
+	}
+	return output.Bytes()
 }
 
 func bloomMultipartWithExtra(t *testing.T, payload, extraName string) ([]byte, string) {

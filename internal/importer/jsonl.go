@@ -19,16 +19,23 @@ import (
 	"github.com/BonzTM/bloom/internal/core"
 )
 
-const maxJSONLLineBytes = 64 << 10
+const (
+	maxJSONLLineBytes       = 64 << 10
+	discardUploadBlockBytes = 64 << 10
+)
 
 const (
-	maxImportArchiveEntries        = 16
-	maxImportMetadataBytes         = 1 << 20
-	maxImportCentralDirectoryBytes = 64 << 10
-	zipEndRecordBytes              = 22
-	zip64LocatorBytes              = 20
-	zip64EndRecordBytes            = 56
-	zipDirectoryHeaderBytes        = 46
+	maxImportArchiveEntries = 16
+	maxImportMetadataBytes  = 1 << 20
+	// maxImportArchiveMetadataBytes reserves the per-entry limit for the
+	// manifest and summary that every Bloom export writes.
+	maxImportArchiveMetadataBytes     = 2 * maxImportMetadataBytes
+	maxImportArchiveUncompressedBytes = core.MaxImportArchiveEntryBytes + maxImportArchiveMetadataBytes
+	maxImportCentralDirectoryBytes    = 64 << 10
+	zipEndRecordBytes                 = 22
+	zip64LocatorBytes                 = 20
+	zip64EndRecordBytes               = 56
+	zipDirectoryHeaderBytes           = 46
 )
 
 const (
@@ -38,7 +45,10 @@ const (
 	zip64EndSignature           = 0x06064b50
 )
 
-var errImportArchiveDirectoryBounds = errors.New("import archive central directory exceeds limits")
+var (
+	errImportArchiveDirectoryBounds = errors.New("import archive central directory exceeds limits")
+	errImportArchiveAggregateSize   = errors.New("import archive exceeds aggregate uncompressed size limit")
+)
 
 var zipSignature = []byte{'P', 'K', 0x03, 0x04}
 
@@ -96,9 +106,16 @@ type streamJSONLWire struct {
 
 type bloomExportSummary struct {
 	WatchRecords  *int64 `json:"watch_records"`
-	ImportRecords int64  `json:"import_records"`
-	WatchesBytes  int64  `json:"watches_bytes"`
-	ImportsBytes  int64  `json:"imports_bytes"`
+	ImportRecords *int64 `json:"import_records"`
+	WatchesBytes  *int64 `json:"watches_bytes"`
+	ImportsBytes  *int64 `json:"imports_bytes"`
+}
+
+type bloomExportManifest struct {
+	FormatVersion *int       `json:"format_version"`
+	BloomVersion  *string    `json:"bloom_version"`
+	ExportedAt    *time.Time `json:"exported_at"`
+	MediaServerID *string    `json:"media_server_id"`
 }
 
 // EncodeWatchJSONL writes one contract record and a newline.
@@ -147,12 +164,21 @@ func streamWire(stream *core.StreamDetails) *streamJSONLWire {
 }
 
 type fileCursor struct {
-	ID     string `json:"id"`
-	Offset int64  `json:"offset"`
+	ID           string
+	Offset       int64
+	Records      int64
+	recordsKnown bool
+}
+
+type fileCursorWire struct {
+	ID      string `json:"id"`
+	Offset  int64  `json:"offset"`
+	Records *int64 `json:"records,omitempty"`
 }
 
 func encodeFileCursor(cursor fileCursor) (string, error) {
-	data, err := json.Marshal(cursor)
+	records := cursor.Records
+	data, err := json.Marshal(fileCursorWire{ID: cursor.ID, Offset: cursor.Offset, Records: &records})
 	if err != nil || len(data) > core.MaxImportCursorBytes {
 		return "", fmt.Errorf("encode import file cursor: %w", errors.Join(err, core.ErrInvalidArgument))
 	}
@@ -160,20 +186,25 @@ func encodeFileCursor(cursor fileCursor) (string, error) {
 }
 
 func decodeFileCursor(value string) (fileCursor, error) {
-	var cursor fileCursor
+	var wire fileCursorWire
 	decoder := json.NewDecoder(bytes.NewBufferString(value))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || !core.ValidID(cursor.ID) || cursor.Offset < 0 {
+	if err := decoder.Decode(&wire); err != nil || !core.ValidID(wire.ID) || wire.Offset < 0 ||
+		wire.Records != nil && *wire.Records < 0 {
 		return fileCursor{}, fmt.Errorf("decode import file cursor: %w", core.ErrInvalidArgument)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return fileCursor{}, fmt.Errorf("decode import file cursor: %w", core.ErrInvalidArgument)
 	}
+	cursor := fileCursor{ID: wire.ID, Offset: wire.Offset}
+	if wire.Records != nil {
+		cursor.Records, cursor.recordsKnown = *wire.Records, true
+	}
 	return cursor, nil
 }
 
-type watchOpener func(*UploadReader, int64) (io.ReadCloser, error)
+type watchOpener func(context.Context, *UploadReader, int64) (io.ReadCloser, error)
 
 type jsonlReader struct {
 	staging         *Staging
@@ -199,7 +230,9 @@ func (s *jsonlReader) ReadImportBatch(
 		if openErr := s.open(ctx, cursor); openErr != nil {
 			return nil, "", 0, openErr
 		}
-		s.recordsRead = job.Read - job.Skipped
+		if countErr := s.initializeRecordCount(cursor); countErr != nil {
+			return nil, "", 0, countErr
+		}
 		if countErr := s.validateRecordCount(false); countErr != nil {
 			return nil, "", 0, countErr
 		}
@@ -215,8 +248,23 @@ func (s *jsonlReader) ReadImportBatch(
 		return nil, "", 0, countErr
 	}
 	s.offset = offset
-	next, err := encodeFileCursor(fileCursor{ID: cursor.ID, Offset: offset})
+	next, err := encodeFileCursor(fileCursor{ID: cursor.ID, Offset: offset, Records: s.recordsRead})
 	return records, next, skipped, err
+}
+
+func (s *jsonlReader) initializeRecordCount(cursor fileCursor) error {
+	stream, ok := s.stream.(*bloomWatchStream)
+	if !ok {
+		if cursor.recordsKnown {
+			s.recordsRead = cursor.Records
+		}
+		return nil
+	}
+	if cursor.recordsKnown && cursor.Records != stream.prefixRecords {
+		return fmt.Errorf("validate import cursor record count: %w", core.ErrInvalidArgument)
+	}
+	s.recordsRead = stream.prefixRecords
+	return nil
 }
 
 func (s *jsonlReader) validateRecordCount(complete bool) error {
@@ -238,7 +286,7 @@ func (s *jsonlReader) open(ctx context.Context, cursor fileCursor) error {
 	if opener == nil {
 		opener = openWatchUpload
 	}
-	stream, err := opener(upload, cursor.Offset)
+	stream, err := opener(ctx, upload, cursor.Offset)
 	if err != nil {
 		return err
 	}
@@ -259,45 +307,29 @@ func (s *jsonlReader) Close() error {
 	return err
 }
 
-func openWatchUpload(upload *UploadReader, offset int64) (io.ReadCloser, error) {
-	return openWatchUploadWith(upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
+func openWatchUpload(ctx context.Context, upload *UploadReader, offset int64) (io.ReadCloser, error) {
+	return openWatchUploadWith(ctx, upload, offset, func(entry *zip.File) (io.ReadCloser, error) {
 		return entry.Open()
 	})
 }
 
 func openWatchUploadWith(
-	upload *UploadReader, offset int64, openEntry func(*zip.File) (io.ReadCloser, error),
+	ctx context.Context, upload *UploadReader, offset int64, openEntry func(*zip.File) (io.ReadCloser, error),
 ) (io.ReadCloser, error) {
-	header := make([]byte, len(zipSignature))
-	_, readErr := upload.ReadAt(header, 0)
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return nil, fmt.Errorf("detect import upload: %w", readErr)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("open import upload: %w", err)
 	}
-	if !bytes.Equal(header, zipSignature) {
-		if offset > upload.Size() {
-			return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
-		}
-		return io.NopCloser(io.NewSectionReader(upload, offset, upload.Size()-offset)), nil
-	}
-	archiveReader := io.NewSectionReader(upload, 0, upload.Size())
-	if validationErr := validateZipDirectory(archiveReader, archiveReader.Size()); validationErr != nil {
-		return nil, fmt.Errorf("validate import archive directory: %w", validationErr)
-	}
-	archive, err := zip.NewReader(archiveReader, archiveReader.Size())
+	archive, err := openImportArchive(upload)
 	if err != nil {
-		return nil, fmt.Errorf("open import archive: %w", err)
+		return nil, err
 	}
 	watches, expectedRecords, err := validateImportArchive(archive)
 	if err != nil {
 		return nil, err
 	}
 	watchesSize := int64(watches.UncompressedSize64) //nolint:gosec // Archive validation caps this below MaxInt64.
-	if offset > watchesSize {
+	if offset < 0 || offset > watchesSize {
 		return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
-	}
-	if watches.Method == zip.Store {
-		reader, openErr := openStoredWatchEntry(upload, watches, offset, watchesSize)
-		return wrapBloomWatchStream(reader, expectedRecords, openErr)
 	}
 	reader, err := openEntry(watches)
 	if err != nil {
@@ -307,42 +339,39 @@ func openWatchUploadWith(
 	if err != nil {
 		return nil, err
 	}
-	if err := discardUploadPrefix(validated, offset); err != nil {
+	prefixRecords, err := discardUploadPrefix(ctx, validated, offset)
+	if err != nil {
 		return nil, errors.Join(err, validated.Close())
 	}
-	return &bloomWatchStream{ReadCloser: validated, expectedRecords: expectedRecords}, nil
+	return &bloomWatchStream{
+		ReadCloser: validated, expectedRecords: expectedRecords, prefixRecords: prefixRecords,
+	}, nil
 }
 
 type bloomWatchStream struct {
 	io.ReadCloser
 	expectedRecords int64
+	prefixRecords   int64
 }
 
-func wrapBloomWatchStream(reader io.ReadCloser, expectedRecords int64, err error) (io.ReadCloser, error) {
-	if err != nil {
-		return nil, err
-	}
-	return &bloomWatchStream{ReadCloser: reader, expectedRecords: expectedRecords}, nil
-}
-
-func openStoredWatchEntry(
-	upload *UploadReader, watches *zip.File, offset, size int64,
-) (io.ReadCloser, error) {
-	dataOffset, err := watches.DataOffset()
-	if err != nil {
-		return nil, fmt.Errorf("locate watches.jsonl: %w", err)
-	}
+func openImportArchive(upload *UploadReader) (*zip.Reader, error) {
 	header := make([]byte, len(zipSignature))
-	entry := io.NewSectionReader(upload, dataOffset, size)
-	count, readErr := io.ReadFull(entry, header)
-	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		return nil, fmt.Errorf("inspect watches.jsonl: %w", readErr)
+	_, err := upload.ReadAt(header, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("detect import upload: %w", err)
 	}
-	header = header[:count]
-	if hasNestedZipSignature(header) {
-		return nil, errors.New("nested import archives are not allowed")
+	if !bytes.Equal(header, zipSignature) {
+		return nil, errors.New("bloom export must be a ZIP archive")
 	}
-	return io.NopCloser(io.NewSectionReader(upload, dataOffset+offset, size-offset)), nil
+	reader := io.NewSectionReader(upload, 0, upload.Size())
+	if validationErr := validateZipDirectory(reader, reader.Size()); validationErr != nil {
+		return nil, fmt.Errorf("validate import archive directory: %w", validationErr)
+	}
+	archive, err := zip.NewReader(reader, reader.Size())
+	if err != nil {
+		return nil, fmt.Errorf("open import archive: %w", err)
+	}
+	return archive, nil
 }
 
 type prefixedReadCloser struct {
@@ -577,11 +606,11 @@ func validateImportArchive(archive *zip.Reader) (*zip.File, int64, error) {
 	if len(archive.File) == 0 || len(archive.File) > maxImportArchiveEntries {
 		return nil, 0, errors.New("import archive has an invalid entry count")
 	}
+	if err := validateImportArchiveHeaders(archive.File); err != nil {
+		return nil, 0, err
+	}
 	var watches, manifest, summary *zip.File
 	for _, entry := range archive.File {
-		if entry.UncompressedSize64 > importArchiveEntryLimit(entry.Name) {
-			return nil, 0, errors.New("import archive entry exceeds size limit")
-		}
 		if entry.Name != "watches.jsonl" {
 			if err := validateImportArchiveEntry(entry); err != nil {
 				return nil, 0, err
@@ -608,31 +637,90 @@ func validateImportArchive(archive *zip.Reader) (*zip.File, int64, error) {
 	if watches == nil || manifest == nil || summary == nil {
 		return nil, 0, errors.New("import archive requires manifest.json, watches.jsonl, and summary.json")
 	}
+	if err := readBloomExportManifest(manifest); err != nil {
+		return nil, 0, err
+	}
 	expectedRecords, err := readBloomExportSummary(summary)
 	return watches, expectedRecords, err
 }
 
-func readBloomExportSummary(entry *zip.File) (records int64, result error) {
-	reader, err := entry.Open()
-	if err != nil {
-		return 0, fmt.Errorf("open summary.json: %w", err)
+func validateImportArchiveHeaders(entries []*zip.File) error {
+	var uncompressed uint64
+	for _, entry := range entries {
+		if err := validateImportArchiveHeader(entry); err != nil {
+			return err
+		}
+		if entry.UncompressedSize64 > uint64(maxImportArchiveUncompressedBytes)-uncompressed {
+			return errImportArchiveAggregateSize
+		}
+		uncompressed += entry.UncompressedSize64
 	}
-	defer func() { result = errors.Join(result, reader.Close()) }()
+	return nil
+}
+
+func validateImportArchiveHeader(entry *zip.File) error {
+	if entry.Method != zip.Deflate {
+		return errors.New("import archive entries must use Deflate compression")
+	}
+	if entry.UncompressedSize64 > importArchiveEntryLimit(entry.Name) {
+		return errors.New("import archive entry exceeds size limit")
+	}
+	ratio := uint64(core.MaxImportDecompressionRatio)
+	minimumCompressed := (entry.UncompressedSize64 + ratio - 1) / ratio
+	if entry.CompressedSize64 < minimumCompressed {
+		return errors.New("import archive entry exceeds decompression ratio limit")
+	}
+	return nil
+}
+
+func readBloomExportManifest(entry *zip.File) error {
+	var manifest bloomExportManifest
+	if err := decodeBloomExportMetadata(entry, "manifest.json", &manifest); err != nil {
+		return err
+	}
+	if manifest.FormatVersion == nil || *manifest.FormatVersion != core.BloomExportFormatVersion ||
+		manifest.BloomVersion == nil || *manifest.BloomVersion == "" ||
+		manifest.ExportedAt == nil || manifest.ExportedAt.IsZero() ||
+		manifest.MediaServerID != nil && !core.ValidID(*manifest.MediaServerID) {
+		return errors.New("manifest.json contains missing or invalid fields")
+	}
+	return nil
+}
+
+func readBloomExportSummary(entry *zip.File) (int64, error) {
 	var summary bloomExportSummary
-	decoder := json.NewDecoder(io.LimitReader(reader, maxImportMetadataBytes+1))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&summary); err != nil {
-		return 0, fmt.Errorf("decode summary.json: %w", err)
+	if err := decodeBloomExportMetadata(entry, "summary.json", &summary); err != nil {
+		return 0, err
 	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return 0, errors.New("decode summary.json: trailing data")
-	}
-	if summary.WatchRecords == nil || *summary.WatchRecords < 0 || summary.ImportRecords < 0 ||
-		summary.WatchesBytes < 0 || summary.ImportsBytes < 0 {
+	if !validBloomExportSummary(summary) {
 		return 0, errors.New("summary.json contains missing or negative counters")
 	}
 	return *summary.WatchRecords, nil
+}
+
+func decodeBloomExportMetadata(entry *zip.File, name string, destination any) (result error) {
+	reader, err := entry.Open()
+	if err != nil {
+		return fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { result = errors.Join(result, reader.Close()) }()
+	decoder := json.NewDecoder(io.LimitReader(reader, maxImportMetadataBytes+1))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return fmt.Errorf("decode %s: %w", name, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode %s: trailing data", name)
+	}
+	return nil
+}
+
+func validBloomExportSummary(summary bloomExportSummary) bool {
+	return summary.WatchRecords != nil && *summary.WatchRecords >= 0 &&
+		summary.ImportRecords != nil && *summary.ImportRecords >= 0 &&
+		summary.WatchesBytes != nil && *summary.WatchesBytes >= 0 &&
+		summary.ImportsBytes != nil && *summary.ImportsBytes >= 0
 }
 
 func validateImportArchiveEntry(entry *zip.File) error {
@@ -669,20 +757,96 @@ func hasNestedZipSignature(header []byte) bool {
 
 func importArchiveEntryLimit(name string) uint64 {
 	if name == "watches.jsonl" || name == "imports.jsonl" {
-		return core.MaxImportUploadBytes
+		return core.MaxImportArchiveEntryBytes
 	}
 	return maxImportMetadataBytes
 }
 
-func discardUploadPrefix(reader io.Reader, offset int64) error {
-	if offset == 0 {
-		return nil
+func discardUploadPrefix(ctx context.Context, reader io.Reader, offset int64) (int64, error) {
+	if offset < 0 || offset > core.MaxImportArchiveEntryBytes {
+		return 0, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
 	}
-	written, err := io.CopyN(io.Discard, reader, offset)
-	if err != nil || written != offset {
-		return fmt.Errorf("seek import upload: %w", errors.Join(err, core.ErrInvalidArgument))
+	if offset == 0 {
+		return 0, nil
+	}
+	counter := prefixRecordCounter{line: make([]byte, 0, maxJSONLLineBytes)}
+	buffer := make([]byte, discardUploadBlockBytes)
+	remaining := offset
+	for range int64(core.MaxImportArchiveEntryBytes/discardUploadBlockBytes) + 1 {
+		if remaining == 0 {
+			return counter.finish()
+		}
+		if err := ctx.Err(); err != nil {
+			return 0, fmt.Errorf("seek import upload: %w", err)
+		}
+		readSize := min(int64(len(buffer)), remaining)
+		read, err := io.ReadFull(contextReader{ctx: ctx, reader: reader}, buffer[:readSize])
+		if countErr := counter.consume(buffer[:read]); countErr != nil {
+			return 0, countErr
+		}
+		remaining -= int64(read)
+		if err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return 0, fmt.Errorf("seek import upload: %w", contextErr)
+			}
+			return 0, fmt.Errorf("seek import upload: %w", errors.Join(err, core.ErrInvalidArgument))
+		}
+	}
+	return 0, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(destination []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(destination)
+}
+
+type prefixRecordCounter struct {
+	line    []byte
+	records int64
+}
+
+func (c *prefixRecordCounter) consume(data []byte) error {
+	for len(data) > 0 {
+		lineEnd := bytes.IndexByte(data, '\n')
+		if lineEnd < 0 {
+			return c.appendLine(data)
+		}
+		if err := c.appendLine(data[:lineEnd+1]); err != nil {
+			return err
+		}
+		c.finishLine()
+		data = data[lineEnd+1:]
 	}
 	return nil
+}
+
+func (c *prefixRecordCounter) appendLine(data []byte) error {
+	if len(c.line)+len(data) > maxJSONLLineBytes {
+		return errors.New("JSONL line exceeds size limit")
+	}
+	c.line = append(c.line, data...)
+	return nil
+}
+
+func (c *prefixRecordCounter) finishLine() {
+	if len(bytes.TrimSpace(c.line)) > 0 {
+		c.records++
+	}
+	c.line = c.line[:0]
+}
+
+func (c *prefixRecordCounter) finish() (int64, error) {
+	if len(c.line) > 0 {
+		c.finishLine()
+	}
+	return c.records, nil
 }
 
 func readJSONLLines(

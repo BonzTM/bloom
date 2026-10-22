@@ -94,9 +94,9 @@ func TestReadJSONLLinesCountsBlankLinesWithoutEndingBatch(t *testing.T) {
 func TestBloomUploadImportsValidThreeEntryExport(t *testing.T) {
 	staging := newJSONLTestStaging(t)
 	payload := zipFixture(t, map[string]string{
-		"manifest.json": `{}`,
+		"manifest.json": validManifestFixture(),
 		"watches.jsonl": validJSONLFixture() + "\n",
-		"summary.json":  `{"watch_records":1,"import_records":0}`,
+		"summary.json":  validSummaryFixture(1),
 	})
 	id, err := staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
 	if err != nil {
@@ -112,6 +112,12 @@ func TestBloomUploadImportsValidThreeEntryExport(t *testing.T) {
 	}
 }
 
+func TestBloomUploadRejectsBareJSONL(t *testing.T) {
+	if err := openStagedWatch(t, []byte(validJSONLFixture()+"\n")); err == nil {
+		t.Fatal("openWatchUpload accepted bare JSONL")
+	}
+}
+
 func TestBloomUploadRejectsUnderdeclaredCentralDirectory(t *testing.T) {
 	if err := openStagedWatch(t, underdeclaredCentralDirectoryFixture()); err == nil {
 		t.Fatal("openWatchUpload accepted an underdeclared central directory")
@@ -120,12 +126,12 @@ func TestBloomUploadRejectsUnderdeclaredCentralDirectory(t *testing.T) {
 
 func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 	tests := map[string][]byte{
-		"missing watches": zipFixture(t, map[string]string{"manifest.json": `{}`}),
+		"missing watches": zipFixture(t, map[string]string{"manifest.json": validManifestFixture()}),
 		"missing manifest": zipFixture(t, map[string]string{
-			"watches.jsonl": validJSONLFixture() + "\n", "summary.json": `{"watch_records":1}`,
+			"watches.jsonl": validJSONLFixture() + "\n", "summary.json": validSummaryFixture(1),
 		}),
 		"missing summary": zipFixture(t, map[string]string{
-			"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
+			"manifest.json": validManifestFixture(), "watches.jsonl": validJSONLFixture() + "\n",
 		}),
 		"nested archive": zipFixture(t, map[string]string{
 			"watches.jsonl": validJSONLFixture() + "\n",
@@ -136,6 +142,8 @@ func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 			"nested.bin":    string(zipFixture(t, map[string]string{})),
 		}),
 		"too many entries": tooManyZipEntries(t),
+		"stored entry":     bloomArchiveWithMethod(t, zip.Store),
+		"excessive ratio":  excessiveRatioArchive(t),
 		"oversized entry":  oversizedZipEntry(t),
 	}
 	for name, payload := range tests {
@@ -158,10 +166,46 @@ func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 	}
 }
 
+func TestBloomUploadRejectsInvalidManifestAndSummary(t *testing.T) {
+	validManifest := validManifestFixture()
+	validSummary := validSummaryFixture(1)
+	tests := map[string]map[string]string{
+		"arbitrary text manifest": bloomArchiveEntries("not JSON", validSummary),
+		"unknown manifest field": bloomArchiveEntries(
+			strings.TrimSuffix(validManifest, "}")+`,"unknown":true}`, validSummary,
+		),
+		"wrong manifest version": bloomArchiveEntries(
+			strings.Replace(validManifest, `"format_version":1`, `"format_version":2`, 1), validSummary,
+		),
+		"missing manifest field": bloomArchiveEntries(
+			`{"format_version":1,"bloom_version":"test"}`, validSummary,
+		),
+		"summary with only watch records": bloomArchiveEntries(validManifest, `{"watch_records":1}`),
+		"negative summary counter": bloomArchiveEntries(
+			validManifest, `{"watch_records":1,"import_records":-1,"watches_bytes":1,"imports_bytes":0}`,
+		),
+	}
+	for name, entries := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := openStagedWatch(t, zipFixture(t, entries)); err == nil {
+				t.Fatal("openWatchUpload accepted invalid export metadata")
+			}
+		})
+	}
+}
+
+func bloomArchiveEntries(manifest, summary string) map[string]string {
+	return map[string]string{
+		"manifest.json": manifest,
+		"watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json":  summary,
+	}
+}
+
 func TestBloomUploadBoundsCentralDirectoryBeforeZipReader(t *testing.T) {
 	fixture := zipFixture(t, map[string]string{
-		"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
-		"summary.json": `{"watch_records":1}`,
+		"manifest.json": validManifestFixture(), "watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json": validSummaryFixture(1),
 	})
 	tests := []struct {
 		name          string
@@ -203,8 +247,31 @@ func openStagedWatch(t *testing.T, payload []byte) error {
 	if err != nil {
 		t.Fatalf("open staged zip: %v", err)
 	}
-	_, err = openWatchUpload(upload, 0)
+	_, err = openWatchUpload(t.Context(), upload, 0)
 	return err
+}
+
+func TestDiscardUploadPrefixStopsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	reader := &cancelAfterFirstRead{cancel: cancel}
+	_, err := discardUploadPrefix(ctx, reader, 2*discardUploadBlockBytes)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, core.ErrInvalidArgument) || reader.reads != 1 {
+		t.Fatalf("discardUploadPrefix = reads %d, error %v", reader.reads, err)
+	}
+}
+
+type cancelAfterFirstRead struct {
+	cancel context.CancelFunc
+	reads  int
+}
+
+func (r *cancelAfterFirstRead) Read(destination []byte) (int, error) {
+	r.reads++
+	clear(destination)
+	if r.reads == 1 {
+		r.cancel()
+	}
+	return len(destination), nil
 }
 
 func TestBloomUploadRejectsMalformedAndOversizedZip64Records(t *testing.T) {
@@ -245,8 +312,8 @@ func underdeclaredCentralDirectoryFixture() []byte {
 func bogusZip64DirectoryFixture(t *testing.T) []byte {
 	t.Helper()
 	payload := zipFixture(t, map[string]string{
-		"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
-		"summary.json": `{"watch_records":1}`,
+		"manifest.json": validManifestFixture(), "watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json": validSummaryFixture(1),
 	})
 	end := bytes.LastIndex(payload, []byte{'P', 'K', 0x05, 0x06})
 	if end < 0 {
@@ -313,16 +380,30 @@ func tooManyZipEntries(t *testing.T) []byte {
 
 func oversizedZipEntry(t *testing.T) []byte {
 	t.Helper()
+	return rawZipEntry(t, "watches.jsonl", core.MaxImportArchiveEntryBytes+1, 1)
+}
+
+func excessiveRatioArchive(t *testing.T) []byte {
+	t.Helper()
+	return rawZipEntry(t, "watches.jsonl", core.MaxImportDecompressionRatio+1, 1)
+}
+
+func rawZipEntry(t *testing.T, name string, uncompressed, compressed uint64) []byte {
+	t.Helper()
 	var output bytes.Buffer
 	writer := zip.NewWriter(&output)
-	header := &zip.FileHeader{Name: "watches.jsonl", Method: zip.Store}
-	header.UncompressedSize64 = core.MaxImportUploadBytes + 1
-	header.CompressedSize64 = header.UncompressedSize64
-	if _, err := writer.CreateRaw(header); err != nil {
-		t.Fatalf("create oversized raw entry: %v", err)
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	header.UncompressedSize64 = uncompressed
+	header.CompressedSize64 = compressed
+	entry, err := writer.CreateRaw(header)
+	if err != nil {
+		t.Fatalf("create raw entry: %v", err)
+	}
+	if _, err := entry.Write(make([]byte, int(compressed))); err != nil {
+		t.Fatalf("write raw entry: %v", err)
 	}
 	if err := writer.Close(); err != nil {
-		t.Fatalf("close oversized archive: %v", err)
+		t.Fatalf("close raw archive: %v", err)
 	}
 	return output.Bytes()
 }
@@ -363,4 +444,15 @@ func validJSONLFixture() string {
 		`"library_id":"","library_name":"","season_number":null,"episode_number":null,` +
 		`"position_ms":0,"runtime_ms":null,"paused":false,"play_method":"direct_play","source":"poll",` +
 		`"active_seconds":60,"started_at":"2026-09-25T12:00:00Z","ended_at":"2026-09-25T12:01:00Z"}`
+}
+
+func validManifestFixture() string {
+	return `{"format_version":1,"bloom_version":"test","exported_at":"2026-09-25T12:00:00Z"}`
+}
+
+func validSummaryFixture(records int) string {
+	return fmt.Sprintf(
+		`{"watch_records":%d,"import_records":0,"watches_bytes":1,"imports_bytes":0}`,
+		records,
+	)
 }

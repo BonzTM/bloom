@@ -595,6 +595,13 @@ func (s *Server) sessionHandler(handler http.Handler, accountRequired bool) http
 	return s.loadAndSaveSessions(handler)
 }
 
+func (s *Server) streamingSessionHandler(handler http.Handler, accountRequired bool) http.Handler {
+	if accountRequired {
+		handler = s.sessionAccountMiddleware(handler)
+	}
+	return s.loadAndStreamSessions(handler)
+}
+
 func (s *Server) handleCSRFRejected(w http.ResponseWriter, r *http.Request) {
 	s.metrics.IncCSRFRejection()
 	s.emitAuthAudit(r, "anonymous", "auth.csrf", csrfAuditResource(r.URL.Path), telemetry.AuditFailure, "cross_origin", clientIP(r, s.trustedProxyCIDRs))

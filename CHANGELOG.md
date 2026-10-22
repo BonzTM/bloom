@@ -21,6 +21,9 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Watch exports compress every ZIP entry. The `bloom_export` import accepts only
+  a compressed Bloom ZIP whose entries use Deflate, so archives written before
+  this change and bare JSONL files must be exported again.
 - The sidebar lists each area once: Home, Discover, Requests, Playback,
   Statistics, Libraries, Users, Settings, and About. An area with several
   pages shows them as tabs above the page, such as Media servers, Download
@@ -55,6 +58,8 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Large watch histories can be re-imported when the compressed archive remains
+  within the upload limit.
 - A request for a series or movie that Sonarr or Radarr already manages
   keeps that title's quality profile, root folder, path, existing tags, and
   every field Bloom does not model; Bloom only turns on monitoring, monitors
@@ -484,12 +489,9 @@ contracts) gets an entry here.
   ranked poster tiles; the statistics page adds most-popular rows ranked by
   how many different people watched; most active people and libraries are
   cards instead of bar charts.
-- Watch exports are now one streamed ZIP download containing a manifest, every
+- Watch exports are one streamed ZIP download containing a manifest, every
   watch, import-job provenance, and a trailing summary with record counts and
-  entry byte sizes. Bloom export imports accept that ZIP by content while
-  retaining JSONL compatibility. An export larger than the 256 MiB browser
-  upload cap cannot be re-imported through the browser yet; inspect
-  `summary.json` before attempting the round trip.
+  entry byte sizes. Bloom export imports accept that compressed ZIP only.
 - Import uploads now stream into fixed-size database chunks. Terminal job
   transitions delete linked chunks in the same transaction, and worker scans
   delete bounded batches of expired orphan uploads.

@@ -140,8 +140,8 @@ it("uploads a Bloom export as multipart and shows the new job", async () => {
     );
     await user.upload(
       within(form).getByLabelText("Export file"),
-      new File(['{"id":"x"}\n'], "watches.jsonl", {
-        type: "application/x-ndjson",
+      new File(["PK\u0003\u0004"], "bloom-export.zip", {
+        type: "application/zip",
       }),
     );
     await user.click(
@@ -175,7 +175,9 @@ it("explains a conflicting import and keeps the form", async () => {
   );
   await user.upload(
     within(form).getByLabelText("Export file"),
-    new File(["{}\n"], "watches.jsonl", { type: "application/x-ndjson" }),
+    new File(["PK\u0003\u0004"], "bloom-export.zip", {
+      type: "application/zip",
+    }),
   );
   server.use(
     http.post(
@@ -228,4 +230,54 @@ it("offers a Jellystat backup as a source and asks for its file", async () => {
   expect(
     within(form).getByLabelText("Backup file"),
   ).toHaveAccessibleDescription(/Choose the export file\./);
+});
+
+it("explains a refused archive and points to a fresh export", async () => {
+  const user = userEvent.setup();
+  await openImports();
+  const form = screen.getByRole("form", { name: "Start an import" });
+  await user.selectOptions(within(form).getByLabelText("Server"), "Cabin");
+  await user.click(
+    within(form).getByLabelText("A Bloom export file for that server"),
+  );
+  await user.upload(
+    within(form).getByLabelText("Export file"),
+    new File(["PK\u0003\u0004"], "old-export.zip", { type: "application/zip" }),
+  );
+  server.use(
+    http.post(
+      "*/api/v1/imports",
+      jsonApi(() =>
+        envelope(422, "validation_failed", "must be a compressed Bloom ZIP"),
+      ),
+    ),
+  );
+  await user.click(within(form).getByRole("button", { name: "Start import" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "A Bloom import takes the .zip another Bloom exported",
+  );
+});
+
+it("gives a refused Jellystat backup its own advice", async () => {
+  const user = userEvent.setup();
+  await openImports();
+  const form = screen.getByRole("form", { name: "Start an import" });
+  await user.selectOptions(within(form).getByLabelText("Server"), "Cabin");
+  await user.click(
+    within(form).getByLabelText("A Jellystat backup file for that server"),
+  );
+  await user.upload(
+    within(form).getByLabelText("Backup file"),
+    new File(["{}\n"], "backup.jsonl", { type: "application/x-ndjson" }),
+  );
+  server.use(
+    http.post(
+      "*/api/v1/imports",
+      jsonApi(() => envelope(422, "validation_failed", "bad backup")),
+    ),
+  );
+  await user.click(within(form).getByRole("button", { name: "Start import" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("A Jellystat import takes the .jsonl backup");
+  expect(alert).not.toHaveTextContent(".zip");
 });

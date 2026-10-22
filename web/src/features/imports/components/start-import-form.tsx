@@ -23,6 +23,9 @@ type StartImportFormProps = Readonly<{
   servers: readonly ServerOption[];
   pending: boolean;
   serverError: unknown;
+  // The source of the submit the error answers; the form remounts on each
+  // submit, so its own choice starts over.
+  submittedSource: ImportSource | undefined;
   onSubmit: (input: StartImportInput) => void;
 }>;
 
@@ -35,13 +38,14 @@ export function StartImportForm({
   servers,
   pending,
   serverError,
+  submittedSource,
   onSubmit,
 }: StartImportFormProps): ReactNode {
   const formId = useId();
   const summaryRef = useRef<HTMLParagraphElement>(null);
   const [source, setSource] = useState<ImportSource>("playback_reporting");
   const [errors, setErrors] = useState<FieldErrors>({});
-  const summary = describeImportError(serverError);
+  const summary = describeImportError(serverError, submittedSource);
 
   useEffect(() => {
     if (summary !== undefined) {
@@ -147,7 +151,7 @@ export function StartImportForm({
             accept={
               source === "jellystat"
                 ? ".jsonl,application/x-ndjson"
-                : ".zip,.jsonl,application/zip,application/x-ndjson"
+                : ".zip,application/zip"
             }
             aria-describedby={`${fieldErrorId(formId, "file")} ${formId}-file-hint`}
             aria-invalid={errors.file !== undefined}
@@ -155,7 +159,7 @@ export function StartImportForm({
           <p id={`${formId}-file-hint`} className="field-hint">
             {source === "jellystat"
               ? "The .jsonl Jellystat writes under Settings, Backup, at most 256 MiB."
-              : "The zip another Bloom exported (or an older JSON Lines export), at most 256 MiB."}
+              : "The .zip another Bloom exported, at most 256 MiB. Exports are compressed, so this holds millions of watches."}
           </p>
           <FieldError formId={formId} field="file" message={errors.file} />
         </div>

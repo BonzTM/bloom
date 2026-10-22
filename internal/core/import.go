@@ -20,12 +20,22 @@ const (
 	MaxImportErrorBytes = 512
 	// MaxImportUploadBytes bounds one Bloom export upload.
 	MaxImportUploadBytes = 256 << 20
+	// MaxImportArchiveEntryBytes bounds uncompressed Bloom JSONL entries.
+	MaxImportArchiveEntryBytes = 4 << 30
+	// MaxImportDecompressionRatio bounds ZIP expansion. A 10,000-record test of
+	// Bloom's production encoders measured 55.33:1 for maximally repetitive
+	// watches.jsonl and 29.95:1 for imports.jsonl. The 256:1 limit retains more
+	// than four times the measured worst case while remaining below Deflate's
+	// practical ceiling.
+	MaxImportDecompressionRatio = 256
+	// BloomExportFormatVersion is the ZIP manifest version Bloom writes and accepts.
+	BloomExportFormatVersion = 1
 	// MaxImportPlaybackSeconds is the plausible bound for one playback activity
 	// across the Playback Reporting and Jellystat importers.
 	MaxImportPlaybackSeconds = int64(604_800)
 	// ImportUploadChunkBytes is the fixed database chunk size.
 	ImportUploadChunkBytes = 1 << 20
-	// MaxImportUploadWriteChunks bounds one upload transaction.
+	// MaxImportUploadWriteChunks bounds one upload transaction to eight 1 MiB chunks (8 MiB).
 	MaxImportUploadWriteChunks = 8
 	// MaxOrphanImportUploadChunks bounds one worker cleanup transaction.
 	MaxOrphanImportUploadChunks = 256
@@ -37,7 +47,7 @@ type ImportSource string
 const (
 	// ImportSourcePlaybackReporting reads the Jellyfin Playback Reporting plugin.
 	ImportSourcePlaybackReporting ImportSource = "playback_reporting"
-	// ImportSourceBloomExport reads Bloom's JSONL watch export.
+	// ImportSourceBloomExport reads a compressed Bloom export ZIP.
 	ImportSourceBloomExport ImportSource = "bloom_export"
 	// ImportSourceJellyfinUserData reads coarse per-user item play state.
 	ImportSourceJellyfinUserData ImportSource = "jellyfin_userdata"

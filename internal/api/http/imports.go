@@ -428,16 +428,27 @@ func (s *Server) handleExportWatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	exportedAt := core.NormalizeTime(time.Now().UTC())
+	if !s.commitWatchExportResponse(w, r, exportedAt) {
+		return
+	}
+	if err := s.streamWatchExportZip(exportCtx, w, query, start, exportedAt); err != nil {
+		s.abortWatchExport(r, err)
+	}
+	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
+}
+
+func (s *Server) commitWatchExportResponse(w http.ResponseWriter, r *http.Request, exportedAt time.Time) bool {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(
 		`attachment; filename="bloom-export-%s.zip"`, exportedAt.Format(time.DateOnly),
 	))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	if err := s.streamWatchExportZip(exportCtx, w, query, start, exportedAt); err != nil {
-		s.abortWatchExport(r, err)
+	if streamingSessionCommitFailed(w) {
+		s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditFailure, "failed")
+		return false
 	}
-	s.emitImportAudit(r, "watch.export", "watches", telemetry.AuditSuccess, "exported")
+	return true
 }
 
 func (s *Server) failWatchExport(w http.ResponseWriter, r *http.Request, err error) {
@@ -492,7 +503,7 @@ func (s *Server) streamWatchExportZip(
 ) error {
 	archive := zip.NewWriter(w)
 	manifest := watchExportManifest{
-		FormatVersion: 1, BloomVersion: buildinfo.Version, ExportedAt: exportedAt,
+		FormatVersion: core.BloomExportFormatVersion, BloomVersion: buildinfo.Version, ExportedAt: exportedAt,
 		MediaServerID: query.MediaServerID,
 	}
 	if err := writeZipJSON(archive, "manifest.json", manifest, exportedAt); err != nil {
@@ -522,7 +533,7 @@ func (s *Server) writeWatchExportEntry(
 	ctx context.Context, archive *zip.Writer, query core.PlaybackQuery,
 	start watchExportStart, modified time.Time,
 ) (int64, int64, error) {
-	entry, err := createZipEntryWithMethod(archive, "watches.jsonl", modified, zip.Store)
+	entry, err := createZipEntry(archive, "watches.jsonl", modified)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -564,8 +575,8 @@ func (s *Server) writeImportExportEntry(
 	var count int64
 	for range maxExportPages {
 		for _, job := range page {
-			if encodeErr := json.NewEncoder(counted).Encode(importDTO(job)); encodeErr != nil {
-				return 0, 0, fmt.Errorf("encode import export record: %w", encodeErr)
+			if encodeErr := encodeImportJSONL(counted, job); encodeErr != nil {
+				return 0, 0, encodeErr
 			}
 			count++
 		}
@@ -580,6 +591,13 @@ func (s *Server) writeImportExportEntry(
 		}
 	}
 	return 0, 0, errors.New("import export exceeded page safety bound")
+}
+
+func encodeImportJSONL(writer io.Writer, job core.ImportJob) error {
+	if err := json.NewEncoder(writer).Encode(importDTO(job)); err != nil {
+		return fmt.Errorf("encode import export record: %w", err)
+	}
+	return nil
 }
 
 type countingWriter struct {
@@ -620,13 +638,7 @@ func writeZipJSON(archive *zip.Writer, name string, value any, modified time.Tim
 }
 
 func createZipEntry(archive *zip.Writer, name string, modified time.Time) (io.Writer, error) {
-	return createZipEntryWithMethod(archive, name, modified, zip.Deflate)
-}
-
-func createZipEntryWithMethod(
-	archive *zip.Writer, name string, modified time.Time, method uint16,
-) (io.Writer, error) {
-	header := &zip.FileHeader{Name: name, Method: method, Modified: modified}
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: modified}
 	entry, err := archive.CreateHeader(header)
 	if err != nil {
 		return nil, fmt.Errorf("create export entry %s: %w", name, err)
