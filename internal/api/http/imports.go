@@ -503,7 +503,7 @@ func (s *Server) streamWatchExportZip(
 ) error {
 	archive := zip.NewWriter(w)
 	manifest := watchExportManifest{
-		FormatVersion: 1, BloomVersion: buildinfo.Version, ExportedAt: exportedAt,
+		FormatVersion: core.BloomExportFormatVersion, BloomVersion: buildinfo.Version, ExportedAt: exportedAt,
 		MediaServerID: query.MediaServerID,
 	}
 	if err := writeZipJSON(archive, "manifest.json", manifest, exportedAt); err != nil {
@@ -575,8 +575,8 @@ func (s *Server) writeImportExportEntry(
 	var count int64
 	for range maxExportPages {
 		for _, job := range page {
-			if encodeErr := json.NewEncoder(counted).Encode(importDTO(job)); encodeErr != nil {
-				return 0, 0, fmt.Errorf("encode import export record: %w", encodeErr)
+			if encodeErr := encodeImportJSONL(counted, job); encodeErr != nil {
+				return 0, 0, encodeErr
 			}
 			count++
 		}
@@ -591,6 +591,13 @@ func (s *Server) writeImportExportEntry(
 		}
 	}
 	return 0, 0, errors.New("import export exceeded page safety bound")
+}
+
+func encodeImportJSONL(writer io.Writer, job core.ImportJob) error {
+	if err := json.NewEncoder(writer).Encode(importDTO(job)); err != nil {
+		return fmt.Errorf("encode import export record: %w", err)
+	}
+	return nil
 }
 
 type countingWriter struct {

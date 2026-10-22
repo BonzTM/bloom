@@ -430,7 +430,7 @@ func writeCompressedWatchArchive(output io.Writer, records int) error {
 	if err != nil {
 		return fmt.Errorf("create manifest.json: %w", err)
 	}
-	if _, writeErr := io.WriteString(manifest, `{}`); writeErr != nil {
+	if _, writeErr := io.WriteString(manifest, validManifestFixture()); writeErr != nil {
 		return fmt.Errorf("write manifest.json: %w", writeErr)
 	}
 	entry, err := archive.Create("watches.jsonl")
@@ -450,7 +450,7 @@ func writeCompressedWatchArchive(output io.Writer, records int) error {
 	if err != nil {
 		return fmt.Errorf("create summary.json: %w", err)
 	}
-	if _, err := fmt.Fprintf(summary, `{"watch_records":%d}`, records); err != nil {
+	if _, err := io.WriteString(summary, validSummaryFixture(records)); err != nil {
 		return fmt.Errorf("write summary.json: %w", err)
 	}
 	if err := archive.Close(); err != nil {
@@ -539,9 +539,9 @@ func TestWorkerFailsBloomImportWhenSummaryCountDoesNotMatch(t *testing.T) {
 	store := workerStore{job: job}
 	worker := newTestWorker(t, &store, reportingStub{})
 	payload := zipFixture(t, map[string]string{
-		"manifest.json": `{}`,
+		"manifest.json": validManifestFixture(),
 		"watches.jsonl": validJSONLFixture() + "\n",
-		"summary.json":  `{"watch_records":2}`,
+		"summary.json":  validSummaryFixture(2),
 	})
 	id, err := worker.deps.Staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
 	if err != nil {

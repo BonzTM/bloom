@@ -1,7 +1,9 @@
 package http
 
 import (
+	"archive/zip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -57,7 +59,12 @@ func measureWatchExportHeap(t *testing.T, records int) uint64 {
 	request.RemoteAddr = "192.0.2.10:4321"
 	request.Header.Set("X-Request-ID", "memory-export")
 	request.AddCookie(cookie)
-	response := newDiscardResponseWriter()
+	file, err := os.CreateTemp(t.TempDir(), "bloom-memory-export-*.zip")
+	if err != nil {
+		t.Fatalf("create export target: %v", err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	response := newArchiveResponseWriter(file)
 	peak, err := testutil.PeakHeapGrowth(func() error {
 		harness.h.ServeHTTP(response, request)
 		return nil
@@ -68,34 +75,72 @@ func measureWatchExportHeap(t *testing.T, records int) uint64 {
 	if response.status != http.StatusOK {
 		t.Fatalf("stream %d-record export status = %d, want %d; logs: %s", records, response.status, http.StatusOK, harness.logs.String())
 	}
+	assertExportSummaryRecords(t, file, response.written, records)
 	t.Logf("streamed %d-record export: %d ZIP bytes", records, response.written)
 	return peak
 }
 
-type discardResponseWriter struct {
+type archiveResponseWriter struct {
 	header  http.Header
+	file    *os.File
 	status  int
 	written int64
 }
 
-func newDiscardResponseWriter() *discardResponseWriter {
-	return &discardResponseWriter{header: make(http.Header)}
+func newArchiveResponseWriter(file *os.File) *archiveResponseWriter {
+	return &archiveResponseWriter{header: make(http.Header), file: file}
 }
 
-func (w *discardResponseWriter) Header() http.Header { return w.header }
+func (w *archiveResponseWriter) Header() http.Header { return w.header }
 
-func (w *discardResponseWriter) WriteHeader(status int) {
+func (w *archiveResponseWriter) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
 	}
 }
 
-func (w *discardResponseWriter) Write(data []byte) (int, error) {
+func (w *archiveResponseWriter) Write(data []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
 	}
-	w.written += int64(len(data))
-	return len(data), nil
+	written, err := w.file.Write(data)
+	w.written += int64(written)
+	return written, err
+}
+
+func assertExportSummaryRecords(t *testing.T, file *os.File, size int64, want int) {
+	t.Helper()
+	archive, err := zip.NewReader(file, size)
+	if err != nil {
+		t.Fatalf("open %d-record export: %v", want, err)
+	}
+	for _, entry := range archive.File {
+		if entry.Name == "summary.json" {
+			assertSummaryRecordCount(t, entry, int64(want))
+			return
+		}
+	}
+	t.Fatalf("%d-record export has no summary.json", want)
+}
+
+func assertSummaryRecordCount(t *testing.T, entry *zip.File, want int64) {
+	t.Helper()
+	reader, err := entry.Open()
+	if err != nil {
+		t.Fatalf("open summary.json: %v", err)
+	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close summary.json: %v", err)
+		}
+	}()
+	var summary watchExportSummary
+	if err := json.NewDecoder(reader).Decode(&summary); err != nil {
+		t.Fatalf("decode summary.json: %v", err)
+	}
+	if summary.WatchRecords != want {
+		t.Fatalf("summary watch_records = %d, want %d", summary.WatchRecords, want)
+	}
 }
 
 type generatedExportPlaybackReader struct {

@@ -257,3 +257,27 @@ it("explains a refused archive and points to a fresh export", async () => {
     "A Bloom import takes the .zip another Bloom exported",
   );
 });
+
+it("gives a refused Jellystat backup its own advice", async () => {
+  const user = userEvent.setup();
+  await openImports();
+  const form = screen.getByRole("form", { name: "Start an import" });
+  await user.selectOptions(within(form).getByLabelText("Server"), "Cabin");
+  await user.click(
+    within(form).getByLabelText("A Jellystat backup file for that server"),
+  );
+  await user.upload(
+    within(form).getByLabelText("Backup file"),
+    new File(["{}\n"], "backup.jsonl", { type: "application/x-ndjson" }),
+  );
+  server.use(
+    http.post(
+      "*/api/v1/imports",
+      jsonApi(() => envelope(422, "validation_failed", "bad backup")),
+    ),
+  );
+  await user.click(within(form).getByRole("button", { name: "Start import" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("A Jellystat import takes the .jsonl backup");
+  expect(alert).not.toHaveTextContent(".zip");
+});

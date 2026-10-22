@@ -25,13 +25,17 @@ const (
 )
 
 const (
-	maxImportArchiveEntries        = 16
-	maxImportMetadataBytes         = 1 << 20
-	maxImportCentralDirectoryBytes = 64 << 10
-	zipEndRecordBytes              = 22
-	zip64LocatorBytes              = 20
-	zip64EndRecordBytes            = 56
-	zipDirectoryHeaderBytes        = 46
+	maxImportArchiveEntries = 16
+	maxImportMetadataBytes  = 1 << 20
+	// maxImportArchiveMetadataBytes reserves the per-entry limit for the
+	// manifest and summary that every Bloom export writes.
+	maxImportArchiveMetadataBytes     = 2 * maxImportMetadataBytes
+	maxImportArchiveUncompressedBytes = core.MaxImportArchiveEntryBytes + maxImportArchiveMetadataBytes
+	maxImportCentralDirectoryBytes    = 64 << 10
+	zipEndRecordBytes                 = 22
+	zip64LocatorBytes                 = 20
+	zip64EndRecordBytes               = 56
+	zipDirectoryHeaderBytes           = 46
 )
 
 const (
@@ -41,7 +45,10 @@ const (
 	zip64EndSignature           = 0x06064b50
 )
 
-var errImportArchiveDirectoryBounds = errors.New("import archive central directory exceeds limits")
+var (
+	errImportArchiveDirectoryBounds = errors.New("import archive central directory exceeds limits")
+	errImportArchiveAggregateSize   = errors.New("import archive exceeds aggregate uncompressed size limit")
+)
 
 var zipSignature = []byte{'P', 'K', 0x03, 0x04}
 
@@ -99,9 +106,16 @@ type streamJSONLWire struct {
 
 type bloomExportSummary struct {
 	WatchRecords  *int64 `json:"watch_records"`
-	ImportRecords int64  `json:"import_records"`
-	WatchesBytes  int64  `json:"watches_bytes"`
-	ImportsBytes  int64  `json:"imports_bytes"`
+	ImportRecords *int64 `json:"import_records"`
+	WatchesBytes  *int64 `json:"watches_bytes"`
+	ImportsBytes  *int64 `json:"imports_bytes"`
+}
+
+type bloomExportManifest struct {
+	FormatVersion *int       `json:"format_version"`
+	BloomVersion  *string    `json:"bloom_version"`
+	ExportedAt    *time.Time `json:"exported_at"`
+	MediaServerID *string    `json:"media_server_id"`
 }
 
 // EncodeWatchJSONL writes one contract record and a newline.
@@ -592,10 +606,8 @@ func validateImportArchive(archive *zip.Reader) (*zip.File, int64, error) {
 	if len(archive.File) == 0 || len(archive.File) > maxImportArchiveEntries {
 		return nil, 0, errors.New("import archive has an invalid entry count")
 	}
-	for _, entry := range archive.File {
-		if err := validateImportArchiveHeader(entry); err != nil {
-			return nil, 0, err
-		}
+	if err := validateImportArchiveHeaders(archive.File); err != nil {
+		return nil, 0, err
 	}
 	var watches, manifest, summary *zip.File
 	for _, entry := range archive.File {
@@ -625,8 +637,25 @@ func validateImportArchive(archive *zip.Reader) (*zip.File, int64, error) {
 	if watches == nil || manifest == nil || summary == nil {
 		return nil, 0, errors.New("import archive requires manifest.json, watches.jsonl, and summary.json")
 	}
+	if err := readBloomExportManifest(manifest); err != nil {
+		return nil, 0, err
+	}
 	expectedRecords, err := readBloomExportSummary(summary)
 	return watches, expectedRecords, err
+}
+
+func validateImportArchiveHeaders(entries []*zip.File) error {
+	var uncompressed uint64
+	for _, entry := range entries {
+		if err := validateImportArchiveHeader(entry); err != nil {
+			return err
+		}
+		if entry.UncompressedSize64 > uint64(maxImportArchiveUncompressedBytes)-uncompressed {
+			return errImportArchiveAggregateSize
+		}
+		uncompressed += entry.UncompressedSize64
+	}
+	return nil
 }
 
 func validateImportArchiveHeader(entry *zip.File) error {
@@ -644,27 +673,54 @@ func validateImportArchiveHeader(entry *zip.File) error {
 	return nil
 }
 
-func readBloomExportSummary(entry *zip.File) (records int64, result error) {
-	reader, err := entry.Open()
-	if err != nil {
-		return 0, fmt.Errorf("open summary.json: %w", err)
+func readBloomExportManifest(entry *zip.File) error {
+	var manifest bloomExportManifest
+	if err := decodeBloomExportMetadata(entry, "manifest.json", &manifest); err != nil {
+		return err
 	}
-	defer func() { result = errors.Join(result, reader.Close()) }()
+	if manifest.FormatVersion == nil || *manifest.FormatVersion != core.BloomExportFormatVersion ||
+		manifest.BloomVersion == nil || *manifest.BloomVersion == "" ||
+		manifest.ExportedAt == nil || manifest.ExportedAt.IsZero() ||
+		manifest.MediaServerID != nil && !core.ValidID(*manifest.MediaServerID) {
+		return errors.New("manifest.json contains missing or invalid fields")
+	}
+	return nil
+}
+
+func readBloomExportSummary(entry *zip.File) (int64, error) {
 	var summary bloomExportSummary
-	decoder := json.NewDecoder(io.LimitReader(reader, maxImportMetadataBytes+1))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&summary); err != nil {
-		return 0, fmt.Errorf("decode summary.json: %w", err)
+	if err := decodeBloomExportMetadata(entry, "summary.json", &summary); err != nil {
+		return 0, err
 	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return 0, errors.New("decode summary.json: trailing data")
-	}
-	if summary.WatchRecords == nil || *summary.WatchRecords < 0 || summary.ImportRecords < 0 ||
-		summary.WatchesBytes < 0 || summary.ImportsBytes < 0 {
+	if !validBloomExportSummary(summary) {
 		return 0, errors.New("summary.json contains missing or negative counters")
 	}
 	return *summary.WatchRecords, nil
+}
+
+func decodeBloomExportMetadata(entry *zip.File, name string, destination any) (result error) {
+	reader, err := entry.Open()
+	if err != nil {
+		return fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { result = errors.Join(result, reader.Close()) }()
+	decoder := json.NewDecoder(io.LimitReader(reader, maxImportMetadataBytes+1))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return fmt.Errorf("decode %s: %w", name, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode %s: trailing data", name)
+	}
+	return nil
+}
+
+func validBloomExportSummary(summary bloomExportSummary) bool {
+	return summary.WatchRecords != nil && *summary.WatchRecords >= 0 &&
+		summary.ImportRecords != nil && *summary.ImportRecords >= 0 &&
+		summary.WatchesBytes != nil && *summary.WatchesBytes >= 0 &&
+		summary.ImportsBytes != nil && *summary.ImportsBytes >= 0
 }
 
 func validateImportArchiveEntry(entry *zip.File) error {

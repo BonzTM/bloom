@@ -351,6 +351,190 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	}
 }
 
+func TestHighlyRepetitiveWatchExportImports(t *testing.T) {
+	const records = 2_000
+	server, _, _ := importHandlerServer(t)
+	server.playbackReader = &repetitiveExportPlaybackReader{
+		records: records, first: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
+	}
+	request := requestWithAccount(t, http.MethodGet, "/api/v1/exports/watches", "", core.PermissionAdminSettings)
+	recorder := httptest.NewRecorder()
+	server.handleExportWatches(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("export = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	ratio := exportEntryCompressionRatio(t, recorder.Body.Bytes(), "watches.jsonl")
+	if ratio <= 24 {
+		t.Fatalf("repetitive export ratio = %.2f:1, want greater than 24:1", ratio)
+	}
+	assertExportAcceptedByImporter(t, recorder.Body.Bytes())
+	lines := bytes.Split(bytes.TrimSpace(readExportZip(t, recorder.Body.Bytes()).data["watches.jsonl"]), []byte{'\n'})
+	if len(lines) != records {
+		t.Fatalf("importable watch records = %d, want %d", len(lines), records)
+	}
+	for index, line := range lines {
+		if _, err := importer.DecodeWatchJSONL(line); err != nil {
+			t.Fatalf("decode exported watch %d: %v", index, err)
+		}
+	}
+	t.Logf("repetitive exporter-to-importer ratio: %.2f:1", ratio)
+}
+
+type repetitiveExportPlaybackReader struct {
+	records int
+	first   time.Time
+}
+
+func (*repetitiveExportPlaybackReader) GetWatch(context.Context, string) (core.PlaybackWatch, error) {
+	return core.PlaybackWatch{}, core.ErrNotFound
+}
+
+func (*repetitiveExportPlaybackReader) ListWatchPositions(
+	context.Context, string,
+) ([]core.PlaybackPosition, error) {
+	return nil, nil
+}
+
+func (r *repetitiveExportPlaybackReader) ListWatches(
+	ctx context.Context, query core.PlaybackQuery,
+) ([]core.PlaybackWatch, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	start := 0
+	if !query.BeforeStartedAt.IsZero() {
+		start = int(r.first.Sub(query.BeforeStartedAt)/time.Second) + 1
+	}
+	end := min(start+query.PageSize, r.records)
+	page := make([]core.PlaybackWatch, 0, max(0, end-start))
+	for index := start; index < end; index++ {
+		page = append(page, worstCaseWatch(index, r.first.Add(-time.Duration(index)*time.Second)))
+	}
+	return page, nil
+}
+
+func exportEntryCompressionRatio(t *testing.T, payload []byte, name string) float64 {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatalf("open export: %v", err)
+	}
+	for _, entry := range archive.File {
+		if entry.Name == name {
+			return float64(entry.UncompressedSize64) / float64(entry.CompressedSize64)
+		}
+	}
+	t.Fatalf("export has no %s", name)
+	return 0
+}
+
+func TestMaxImportDecompressionRatioCoversWorstCaseBloomExport(t *testing.T) {
+	const records = 10_000
+	watchesUncompressed, watchesCompressed := measureExportEntryCompression(
+		t, "watches.jsonl", records,
+	)
+	importsUncompressed, importsCompressed := measureExportEntryCompression(
+		t, "imports.jsonl", records,
+	)
+	assertCompressionMargin(t, "watches.jsonl", watchesUncompressed, watchesCompressed)
+	assertCompressionMargin(t, "imports.jsonl", importsUncompressed, importsCompressed)
+}
+
+func measureExportEntryCompression(
+	t *testing.T, name string, records int,
+) (uint64, uint64) {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	entry, err := createZipEntry(archive, name, time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("create %s: %v", name, err)
+	}
+	for index := range records {
+		if encodeErr := encodeMeasuredExportRecord(entry, name, index); encodeErr != nil {
+			t.Fatalf("encode %s record %d: %v", name, index, encodeErr)
+		}
+	}
+	if closeErr := archive.Close(); closeErr != nil {
+		t.Fatalf("close %s measurement: %v", name, closeErr)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(output.Bytes()), int64(output.Len()))
+	if err != nil || len(reader.File) != 1 {
+		t.Fatalf("open %s measurement: entries %d, %v", name, len(reader.File), err)
+	}
+	return reader.File[0].UncompressedSize64, reader.File[0].CompressedSize64
+}
+
+func encodeMeasuredExportRecord(writer io.Writer, name string, index int) error {
+	switch name {
+	case "watches.jsonl":
+		return encodeWorstCaseWatch(writer, index)
+	case "imports.jsonl":
+		return encodeWorstCaseImport(writer, index)
+	default:
+		return fmt.Errorf("unsupported measured export entry %q", name)
+	}
+}
+
+func assertCompressionMargin(t *testing.T, name string, uncompressed, compressed uint64) {
+	t.Helper()
+	if compressed == 0 {
+		t.Fatalf("%s compressed to zero bytes", name)
+	}
+	t.Logf("%s worst-case export ratio: %.2f:1 (%d/%d)",
+		name, float64(uncompressed)/float64(compressed), uncompressed, compressed)
+	if uncompressed*4 > compressed*uint64(core.MaxImportDecompressionRatio) {
+		t.Fatalf("%s ratio lacks 4x margin under limit %d:1", name, core.MaxImportDecompressionRatio)
+	}
+	if core.MaxImportDecompressionRatio > 1000 {
+		t.Fatalf("decompression ratio limit = %d, want no more than 1000", core.MaxImportDecompressionRatio)
+	}
+}
+
+func encodeWorstCaseWatch(writer io.Writer, index int) error {
+	started := time.Date(2026, 9, 25, 12, 0, 0, index*1000, time.UTC)
+	return importer.EncodeWatchJSONL(writer, worstCaseWatch(index, started))
+}
+
+func worstCaseWatch(index int, started time.Time) core.PlaybackWatch {
+	ended := started.Add(45 * time.Minute)
+	runtime := 50 * time.Minute
+	season, episode := int32(1), int32(1)
+	direct := true
+	return core.PlaybackWatch{
+		ID: fmt.Sprintf("33333333-3333-4333-8333-%012d", index), MediaServerID: importTestServerID,
+		MediaServerName: "Repeated Jellyfin", MediaUserID: "repeated-user", Username: "Repeated User",
+		DeviceID: "repeated-device", DeviceName: "Repeated Device", Client: "Repeated Client",
+		ItemID: "repeated-item", ItemName: "Repeated Item", ItemType: "Episode",
+		SeriesID: "44444444-4444-4444-8444-444444444444", SeriesName: "Repeated Series",
+		LibraryID: "55555555-5555-4555-8555-555555555555", LibraryName: "Repeated Library",
+		SeasonNumber: &season, EpisodeNumber: &episode, PlayMethod: core.PlayMethodTranscode,
+		Stream: &core.StreamDetails{
+			Container: "mkv", VideoCodec: "hevc", AudioCodec: "truehd", Bitrate: 12_000_000,
+			Width: 3840, Height: 2160, Framerate: 23.98, AudioChannels: 8,
+			IsVideoDirect: &direct, IsAudioDirect: &direct,
+			TranscodeReasons: []string{"ContainerNotSupported", "AudioCodecNotSupported"},
+		},
+		State: core.WatchStopped, StartedAt: started, LastSeenAt: ended, EndedAt: &ended,
+		ActiveTime: 45 * time.Minute, LastPosition: 45 * time.Minute, Runtime: &runtime,
+		Source: core.WatchSourceImport, ImportSource: core.ImportSourceJellystat,
+		ImportRecordID:       fmt.Sprintf("repeated-import-%012d", index),
+		ImportOriginRecordID: fmt.Sprintf("origin-%012d", index),
+	}
+}
+
+func encodeWorstCaseImport(writer io.Writer, index int) error {
+	created := time.Date(2026, 9, 25, 12, 0, 0, index*1000, time.UTC)
+	started, finished := created.Add(time.Second), created.Add(2*time.Second)
+	job := core.ImportJob{
+		ID: fmt.Sprintf("66666666-6666-4666-8666-%012d", index), MediaServerID: importTestServerID,
+		RequestedBy: testRequestAccountID, Source: core.ImportSourcePlaybackReporting,
+		State: core.ImportCompleted, Read: 500, Imported: 500,
+		CreatedAt: created, UpdatedAt: finished, StartedAt: &started, FinishedAt: &finished,
+	}
+	return encodeImportJSONL(writer, job)
+}
+
 func TestWatchExportFullRouteRefreshesSessionAndSetsStreamingHeaders(t *testing.T) {
 	harness := newAuthHarness(t, nil)
 	harness.playback.watches = []core.PlaybackWatch{
@@ -1105,9 +1289,9 @@ func httpBloomArchive(t *testing.T) []byte {
 	var output bytes.Buffer
 	archive := zip.NewWriter(&output)
 	entries := map[string]string{
-		"manifest.json": `{}`,
+		"manifest.json": `{"format_version":1,"bloom_version":"test","exported_at":"2026-09-25T12:00:00Z"}`,
 		"watches.jsonl": `{}` + "\n",
-		"summary.json":  `{"watch_records":1}`,
+		"summary.json":  `{"watch_records":1,"import_records":0,"watches_bytes":3,"imports_bytes":0}`,
 	}
 	for _, name := range []string{"manifest.json", "watches.jsonl", "summary.json"} {
 		entry, err := archive.Create(name)

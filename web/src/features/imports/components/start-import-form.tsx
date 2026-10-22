@@ -23,6 +23,9 @@ type StartImportFormProps = Readonly<{
   servers: readonly ServerOption[];
   pending: boolean;
   serverError: unknown;
+  // The source of the submit the error answers; the form remounts on each
+  // submit, so its own choice starts over.
+  submittedSource: ImportSource | undefined;
   onSubmit: (input: StartImportInput) => void;
 }>;
 
@@ -35,13 +38,14 @@ export function StartImportForm({
   servers,
   pending,
   serverError,
+  submittedSource,
   onSubmit,
 }: StartImportFormProps): ReactNode {
   const formId = useId();
   const summaryRef = useRef<HTMLParagraphElement>(null);
   const [source, setSource] = useState<ImportSource>("playback_reporting");
   const [errors, setErrors] = useState<FieldErrors>({});
-  const summary = describeImportError(serverError);
+  const summary = describeImportError(serverError, submittedSource);
 
   useEffect(() => {
     if (summary !== undefined) {

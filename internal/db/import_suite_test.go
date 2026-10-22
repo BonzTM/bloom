@@ -383,7 +383,9 @@ func databaseImportZIP(t *testing.T, fixture importFixture, pad bool) []byte {
 	if err != nil {
 		t.Fatalf("create manifest.json: %v", err)
 	}
-	if _, writeErr := manifest.Write([]byte(`{}`)); writeErr != nil {
+	if _, writeErr := manifest.Write([]byte(
+		`{"format_version":1,"bloom_version":"test","exported_at":"2026-09-25T12:00:00Z"}`,
+	)); writeErr != nil {
 		t.Fatalf("write manifest.json: %v", writeErr)
 	}
 	entry, err := archive.Create("watches.jsonl")
@@ -397,7 +399,9 @@ func databaseImportZIP(t *testing.T, fixture importFixture, pad bool) []byte {
 	if err != nil {
 		t.Fatalf("create summary.json: %v", err)
 	}
-	if _, writeErr := summary.Write([]byte(`{"watch_records":1}`)); writeErr != nil {
+	if _, writeErr := summary.Write([]byte(
+		`{"watch_records":1,"import_records":0,"watches_bytes":1,"imports_bytes":0}`,
+	)); writeErr != nil {
 		t.Fatalf("write summary.json: %v", writeErr)
 	}
 	if pad {

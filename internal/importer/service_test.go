@@ -170,13 +170,34 @@ func TestCreateBloomExportRejectsInvalidArchiveBeforeCreatingJob(t *testing.T) {
 	}
 }
 
+func TestCreateBloomExportRejectsAggregateSizeBeforeCreatingJob(t *testing.T) {
+	payload := aggregateOversizedArchive(t)
+	if err := openStagedWatch(t, payload); !errors.Is(err, errImportArchiveAggregateSize) {
+		t.Fatalf("openWatchUpload = %v, want aggregate size limit", err)
+	}
+	store := newServiceStore()
+	service, staging := newService(t, store)
+	stagingID, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	_, err = service.CreateBloomExport(t.Context(), importServiceServerID, importServiceAccountID, stagingID)
+	var invalid *core.InvalidArgumentError
+	if !errors.As(err, &invalid) || invalid.Field != "file" || store.job.ID != "" {
+		t.Fatalf("CreateBloomExport = %v, job %+v", err, store.job)
+	}
+	if _, openErr := staging.open(t.Context(), stagingID); !errors.Is(openErr, core.ErrNotFound) {
+		t.Fatalf("rejected upload remains: %v", openErr)
+	}
+}
+
 func TestCreateBloomExportAcceptsCompressedEntryLargerThanUploadCap(t *testing.T) {
 	store := newServiceStore()
 	service, staging := newService(t, store)
 	watches := strings.Repeat(validJSONLFixture()+"\n", 8)
 	payload := zipFixture(t, map[string]string{
-		"manifest.json": `{}`, "watches.jsonl": watches,
-		"summary.json": `{"watch_records":8}`,
+		"manifest.json": validManifestFixture(), "watches.jsonl": watches,
+		"summary.json": validSummaryFixture(8),
 	})
 	if len(payload) >= len(watches) {
 		t.Fatalf("fixture did not compress: archive %d, watches %d", len(payload), len(watches))
@@ -200,8 +221,8 @@ func TestCreateBloomExportAcceptsCompressedEntryLargerThanUploadCap(t *testing.T
 func validBloomUpload(t *testing.T) []byte {
 	t.Helper()
 	return zipFixture(t, map[string]string{
-		"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
-		"summary.json": `{"watch_records":1}`,
+		"manifest.json": validManifestFixture(), "watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json": validSummaryFixture(1),
 	})
 }
 
@@ -210,8 +231,8 @@ func bloomArchiveWithMethod(t *testing.T, method uint16) []byte {
 	var output bytes.Buffer
 	archive := zip.NewWriter(&output)
 	entries := map[string]string{
-		"manifest.json": `{}`, "watches.jsonl": validJSONLFixture() + "\n",
-		"summary.json": `{"watch_records":1}`,
+		"manifest.json": validManifestFixture(), "watches.jsonl": validJSONLFixture() + "\n",
+		"summary.json": validSummaryFixture(1),
 	}
 	for _, name := range []string{"manifest.json", "watches.jsonl", "summary.json"} {
 		header := &zip.FileHeader{Name: name, Method: zip.Deflate}
@@ -228,6 +249,50 @@ func bloomArchiveWithMethod(t *testing.T, method uint16) []byte {
 	}
 	if err := archive.Close(); err != nil {
 		t.Fatalf("close Bloom archive: %v", err)
+	}
+	return output.Bytes()
+}
+
+func aggregateOversizedArchive(t *testing.T) []byte {
+	t.Helper()
+	metadataSize := uint64(maxImportMetadataBytes)
+	jsonlSize := uint64(core.MaxImportArchiveEntryBytes / 2)
+	return rawZipEntries(t, []rawZipFixture{
+		{name: "manifest.json", uncompressed: metadataSize, compressed: compressedAtLimit(metadataSize)},
+		{name: "watches.jsonl", uncompressed: jsonlSize, compressed: compressedAtLimit(jsonlSize)},
+		{name: "imports.jsonl", uncompressed: jsonlSize + 1, compressed: compressedAtLimit(jsonlSize + 1)},
+		{name: "summary.json", uncompressed: metadataSize, compressed: compressedAtLimit(metadataSize)},
+	})
+}
+
+type rawZipFixture struct {
+	name                     string
+	uncompressed, compressed uint64
+}
+
+func compressedAtLimit(uncompressed uint64) uint64 {
+	ratio := uint64(core.MaxImportDecompressionRatio)
+	return (uncompressed + ratio - 1) / ratio
+}
+
+func rawZipEntries(t *testing.T, entries []rawZipFixture) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	for _, fixture := range entries {
+		header := &zip.FileHeader{Name: fixture.name, Method: zip.Deflate}
+		header.UncompressedSize64 = fixture.uncompressed
+		header.CompressedSize64 = fixture.compressed
+		entry, err := archive.CreateRaw(header)
+		if err != nil {
+			t.Fatalf("create raw %s: %v", fixture.name, err)
+		}
+		if _, err := entry.Write(make([]byte, int(fixture.compressed))); err != nil {
+			t.Fatalf("write raw %s: %v", fixture.name, err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close raw archive: %v", err)
 	}
 	return output.Bytes()
 }

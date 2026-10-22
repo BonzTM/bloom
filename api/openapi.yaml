@@ -3846,7 +3846,7 @@ components:
       properties:
         media_server_id: { type: string, format: uuid }
         source: { type: string, const: bloom_export }
-        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom export ZIP limited to 256 MiB of compressed upload data. Every entry must use Deflate compression. Declared uncompressed watches.jsonl and imports.jsonl entries are each limited to 4 GiB, metadata entries to 1 MiB, and every entry to a 100:1 decompression ratio. Bare JSONL and ZIP entries using another method fail with validation_failed on the file field." }
+        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom export ZIP limited to 256 MiB of compressed upload data. Every entry must use Deflate compression. Declared uncompressed watches.jsonl and imports.jsonl entries are each limited to 4 GiB. The sum of all declared uncompressed entry sizes is limited to 4 GiB + 2 MiB, metadata entries are limited to 1 MiB, and every entry is limited to a 256:1 decompression ratio. Bare JSONL and ZIP entries using another method fail with validation_failed on the file field." }
     CreateJellystatImportRequest:
       type: object
       required: [media_server_id, source, file]
