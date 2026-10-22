@@ -522,7 +522,7 @@ func (s *Server) writeWatchExportEntry(
 	ctx context.Context, archive *zip.Writer, query core.PlaybackQuery,
 	start watchExportStart, modified time.Time,
 ) (int64, int64, error) {
-	entry, err := createZipEntryWithMethod(archive, "watches.jsonl", modified, zip.Store)
+	entry, err := createZipEntry(archive, "watches.jsonl", modified)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -620,13 +620,7 @@ func writeZipJSON(archive *zip.Writer, name string, value any, modified time.Tim
 }
 
 func createZipEntry(archive *zip.Writer, name string, modified time.Time) (io.Writer, error) {
-	return createZipEntryWithMethod(archive, name, modified, zip.Deflate)
-}
-
-func createZipEntryWithMethod(
-	archive *zip.Writer, name string, modified time.Time, method uint16,
-) (io.Writer, error) {
-	header := &zip.FileHeader{Name: name, Method: method, Modified: modified}
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: modified}
 	entry, err := archive.CreateHeader(header)
 	if err != nil {
 		return nil, fmt.Errorf("create export entry %s: %w", name, err)

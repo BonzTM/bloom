@@ -46,8 +46,8 @@ export class ImportsApi {
     const form = new FormData();
     form.set("media_server_id", mediaServerId);
     form.set("source", input.source);
-    // A Bloom export is a zip; an older export is JSON Lines. The server
-    // detects the shape by content, so the file goes with the type the
+    // The server checks the file by content (a compressed Bloom zip or a
+    // Jellystat JSON Lines backup), so the file goes with the type the
     // browser gave it, re-wrapped so the form owns a File of its own realm.
     form.set(
       "file",

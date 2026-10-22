@@ -1895,7 +1895,7 @@ paths:
       tags: [imports]
       operationId: exportWatches
       summary: Stream all matching watches and import provenance as one ZIP archive.
-      description: The archive contains `manifest.json`, uncompressed newest-first `watches.jsonl`, newest-first `imports.jsonl`, and trailing `summary.json` with record counts and uncompressed entry sizes. The response is streamed directly from bounded database pages and must be retried if the connection ends before a complete ZIP central directory is received.
+      description: The archive contains Deflate-compressed `manifest.json`, newest-first `watches.jsonl`, newest-first `imports.jsonl`, and trailing `summary.json`. The summary reports record counts and uncompressed JSONL entry sizes. The response is streamed directly from bounded database pages and must be retried if the connection ends before a complete ZIP central directory is received.
       security: [{ sessionCookie: [] }]
       parameters:
         - { name: media_server_id, in: query, schema: { type: string, format: uuid } }
@@ -1910,7 +1910,7 @@ paths:
               schema: { type: string }
           content:
             application/zip:
-              schema: { type: string, format: binary, description: A streamed ZIP with data descriptors and no temporary file. }
+              schema: { type: string, format: binary, description: "A streamed ZIP whose entries use Deflate compression and data descriptors, with no temporary file." }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -1920,7 +1920,7 @@ paths:
     post:
       tags: [imports]
       operationId: createImport
-      summary: Create a Playback Reporting, Jellyfin user-data, Jellystat JSONL, Bloom JSONL, or Bloom ZIP import job.
+      summary: Create a Playback Reporting, Jellyfin user-data, Jellystat JSONL, or compressed Bloom ZIP import job.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -3844,7 +3844,7 @@ components:
       properties:
         media_server_id: { type: string, format: uuid }
         source: { type: string, const: bloom_export }
-        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom watch export as JSONL or ZIP, detected by content and limited to 256 MiB." }
+        file: { type: string, format: binary, x-max-bytes: 268435456, description: "A Bloom export ZIP limited to 256 MiB of compressed upload data. Every entry must use Deflate compression. Declared uncompressed watches.jsonl and imports.jsonl entries are each limited to 4 GiB, metadata entries to 1 MiB, and every entry to a 100:1 decompression ratio. Bare JSONL and ZIP entries using another method fail with validation_failed on the file field." }
     CreateJellystatImportRequest:
       type: object
       required: [media_server_id, source, file]

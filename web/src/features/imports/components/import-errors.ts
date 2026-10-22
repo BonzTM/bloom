@@ -7,8 +7,10 @@ const messages: Readonly<Record<number, string>> = {
   404: "That import no longer exists.",
   409: "An import for that server and source is already waiting or running.",
   413: "The file is larger than 256 MiB.",
-  415: "The file must be Bloom JSON Lines.",
-  422: "Check the fields and try again.",
+  415: "The file is not a format Bloom imports.",
+  // A refused file is the usual cause: a Bloom import takes only the
+  // compressed .zip Bloom exports, so an older export must be made again.
+  422: "Check the server and the file. A Bloom import takes the .zip another Bloom exported; export an older or uncompressed archive again.",
 };
 
 export function describeImportError(error: unknown): string | undefined {

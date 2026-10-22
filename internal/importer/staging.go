@@ -60,10 +60,16 @@ func (s *Staging) stage(ctx context.Context, upload io.Reader, clock core.Clock)
 func (s *Staging) write(ctx context.Context, id string, upload io.Reader, clock core.Clock) error {
 	reader := io.LimitReader(upload, s.maxBytes+1)
 	chunks := make([]core.ImportUploadChunk, 0, core.MaxImportUploadWriteChunks)
+	// Keep one reusable buffer per chunk in the fixed-size transaction window.
+	buffers := make([][]byte, core.MaxImportUploadWriteChunks)
 	var total int64
 	maxChunks := int(s.maxBytes/int64(core.ImportUploadChunkBytes)) + 2
 	for index := range maxChunks {
-		data, done, err := readUploadChunk(reader)
+		bufferIndex := len(chunks)
+		if buffers[bufferIndex] == nil {
+			buffers[bufferIndex] = make([]byte, core.ImportUploadChunkBytes)
+		}
+		data, done, err := readUploadChunk(reader, buffers[bufferIndex])
 		if err != nil {
 			return err
 		}
@@ -90,8 +96,10 @@ func (s *Staging) write(ctx context.Context, id string, upload io.Reader, clock 
 	return fmt.Errorf("upload exceeds chunk bound: %w", core.ErrInvalidArgument)
 }
 
-func readUploadChunk(reader io.Reader) ([]byte, bool, error) {
-	buffer := make([]byte, core.ImportUploadChunkBytes)
+func readUploadChunk(reader io.Reader, buffer []byte) ([]byte, bool, error) {
+	if len(buffer) != core.ImportUploadChunkBytes {
+		return nil, false, core.ErrInvalidArgument
+	}
 	count, err := io.ReadFull(reader, buffer)
 	switch {
 	case err == nil:

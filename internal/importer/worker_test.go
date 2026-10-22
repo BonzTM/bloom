@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -267,7 +268,7 @@ func TestBloomJobReadsDatabaseStagingAndCompletes(t *testing.T) {
 	store := workerStore{job: job}
 	worker := newTestWorker(t, &store, reportingStub{})
 	id, err := worker.deps.Staging.stage(
-		t.Context(), strings.NewReader(validJSONLFixture()+"\n"), staticClock{time.Now()},
+		t.Context(), bytes.NewReader(compressedWatchArchive(t, 1)), staticClock{time.Now()},
 	)
 	if err != nil {
 		t.Fatalf("stage upload: %v", err)
@@ -278,6 +279,40 @@ func TestBloomJobReadsDatabaseStagingAndCompletes(t *testing.T) {
 	}
 	if err := worker.runOnce(t.Context()); err != nil || store.finished != core.ImportCompleted || store.result.Imported != 1 {
 		t.Fatalf("database upload run = %v, state %q, counters %+v", err, store.finished, store.result)
+	}
+}
+
+func TestCompressedBloomImportResumesFromCursorExactlyOnce(t *testing.T) {
+	const recordCount = core.ImportBatchSize + 3
+	staging := newJSONLTestStaging(t)
+	id, err := staging.stage(
+		t.Context(), bytes.NewReader(compressedWatchArchive(t, recordCount)), staticClock{time.Now()},
+	)
+	if err != nil {
+		t.Fatalf("stage compressed archive: %v", err)
+	}
+	cursor, err := encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	firstReader := &jsonlReader{staging: staging}
+	first, cursor, _, err := firstReader.ReadImportBatch(t.Context(), core.ImportJob{Cursor: cursor})
+	if closeErr := firstReader.Close(); err != nil || closeErr != nil {
+		t.Fatalf("read first batch: %v; close: %v", err, closeErr)
+	}
+	secondReader := &jsonlReader{staging: staging}
+	second, _, _, err := secondReader.ReadImportBatch(t.Context(), core.ImportJob{
+		Cursor: cursor, Read: int64(len(first)),
+	})
+	if closeErr := secondReader.Close(); err != nil || closeErr != nil {
+		t.Fatalf("read resumed batch: %v; close: %v", err, closeErr)
+	}
+	seen := make(map[string]struct{}, recordCount)
+	for _, record := range append(first, second...) {
+		seen[record.RecordID] = struct{}{}
+	}
+	if len(first) != core.ImportBatchSize || len(second) != 3 || len(seen) != recordCount {
+		t.Fatalf("resumed records = first %d second %d unique %d", len(first), len(second), len(seen))
 	}
 }
 
@@ -329,32 +364,78 @@ func TestWorkerKeepsCompressedWatchEntryOpenAcrossBatches(t *testing.T) {
 func compressedWatchArchive(t *testing.T, records int) []byte {
 	t.Helper()
 	var output bytes.Buffer
-	archive := zip.NewWriter(&output)
+	if err := writeCompressedWatchArchive(&output, records); err != nil {
+		t.Fatalf("write compressed archive: %v", err)
+	}
+	return output.Bytes()
+}
+
+func writeCompressedWatchArchive(output io.Writer, records int) error {
+	archive := zip.NewWriter(output)
 	manifest, err := archive.Create("manifest.json")
 	if err != nil {
-		t.Fatalf("create manifest.json: %v", err)
+		return fmt.Errorf("create manifest.json: %w", err)
 	}
 	if _, writeErr := io.WriteString(manifest, `{}`); writeErr != nil {
-		t.Fatalf("write manifest.json: %v", writeErr)
+		return fmt.Errorf("write manifest.json: %w", writeErr)
 	}
 	entry, err := archive.Create("watches.jsonl")
 	if err != nil {
-		t.Fatalf("create compressed watches.jsonl: %v", err)
+		return fmt.Errorf("create compressed watches.jsonl: %w", err)
 	}
-	if _, writeErr := io.WriteString(entry, strings.Repeat(validJSONLFixture()+"\n", records)); writeErr != nil {
-		t.Fatalf("write compressed watches.jsonl: %v", writeErr)
+	for index := range records {
+		line := strings.Replace(
+			validJSONLFixture(), "11111111-1111-4111-8111-111111111111",
+			fmt.Sprintf("11111111-1111-4111-8111-%012d", index), 1,
+		)
+		if _, writeErr := io.WriteString(entry, line+"\n"); writeErr != nil {
+			return fmt.Errorf("write compressed watches.jsonl: %w", writeErr)
+		}
 	}
 	summary, err := archive.Create("summary.json")
 	if err != nil {
-		t.Fatalf("create summary.json: %v", err)
+		return fmt.Errorf("create summary.json: %w", err)
 	}
 	if _, err := fmt.Fprintf(summary, `{"watch_records":%d}`, records); err != nil {
-		t.Fatalf("write summary.json: %v", err)
+		return fmt.Errorf("write summary.json: %w", err)
 	}
 	if err := archive.Close(); err != nil {
-		t.Fatalf("close compressed archive: %v", err)
+		return fmt.Errorf("close compressed archive: %w", err)
 	}
-	return output.Bytes()
+	return nil
+}
+
+func TestWorkerFailsCleanlyWhenWatchHeaderUnderstatesUncompressedSize(t *testing.T) {
+	job := pendingWorkerJob(t)
+	job.Source = core.ImportSourceBloomExport
+	store := workerStore{job: job}
+	worker := newTestWorker(t, &store, reportingStub{})
+	payload := understatedWatchArchive(t)
+	id, err := worker.deps.Staging.stage(t.Context(), bytes.NewReader(payload), staticClock{time.Now()})
+	if err != nil {
+		t.Fatalf("stage archive: %v", err)
+	}
+	store.uploadStore().linkUpload(id)
+	store.job.Cursor, err = encodeFileCursor(fileCursor{ID: id})
+	if err != nil {
+		t.Fatalf("encode cursor: %v", err)
+	}
+	err = worker.runOnce(t.Context())
+	if !errors.Is(err, zip.ErrFormat) || store.finished != core.ImportFailed || store.result.Imported != 0 {
+		t.Fatalf("understated archive = %v, state %q, imported %d", err, store.finished, store.result.Imported)
+	}
+}
+
+func understatedWatchArchive(t *testing.T) []byte {
+	t.Helper()
+	payload := compressedWatchArchive(t, 1)
+	nameIndex := bytes.LastIndex(payload, []byte("watches.jsonl"))
+	headerIndex := nameIndex - zipDirectoryHeaderBytes
+	if headerIndex < 0 || binary.LittleEndian.Uint32(payload[headerIndex:headerIndex+4]) != zipDirectoryHeaderSignature {
+		t.Fatal("fixture does not contain the watches.jsonl central-directory header")
+	}
+	binary.LittleEndian.PutUint32(payload[headerIndex+24:headerIndex+28], 1)
+	return payload
 }
 
 func TestWorkerTimesOutStalledUploadInfo(t *testing.T) {

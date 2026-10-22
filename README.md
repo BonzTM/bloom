@@ -381,16 +381,15 @@ Unknown users and items are retained with their source IDs as display names.
 Playback Reporting and Jellystat activity durations share a plausible maximum
 of seven days per playback activity; longer rows are skipped.
 
-The `bloom_export` source accepts a multipart
-`file` part containing either a Bloom `.zip` export or the previous JSONL shape,
-plus `media_server_id` and `source: bloom_export` fields. Bloom detects ZIP by
-content rather than filename. Uploads are limited to 256 MiB, and only one
+The `bloom_export` source accepts a multipart `file` part containing a compressed
+Bloom `.zip` export, plus `media_server_id` and `source: bloom_export` fields.
+Bloom detects ZIP by content rather than filename. Bare JSONL and archives with
+an entry that does not use Deflate compression are validation failures. The
+256 MiB upload limit measures compressed bytes. The declared uncompressed size
+limit is 4 GiB each for `watches.jsonl` and `imports.jsonl`, and 1 MiB for each
+metadata entry. An entry's declared uncompressed size cannot exceed 100 times
+its compressed size. The 64 KiB JSONL line limit remains in effect. Only one
 upload is staged at a time per process.
-
-An export archive larger than the 256 MiB upload cap cannot be re-imported
-through the browser yet. Its trailing `summary.json` reports the uncompressed
-`watches.jsonl` and `imports.jsonl` byte sizes so an operator can check the
-payload size before attempting an import.
 
 Uploads are held in the database as fixed 1 MiB chunks until the job completes,
 fails, or is cancelled. The terminal state change and chunk deletion use the
@@ -403,11 +402,11 @@ from bounded database pages. The optional `media_server_id` filter remains;
 there are no `cursor` or `limit` parameters. The archive contains
 `manifest.json`, every watch in newest-first `(started_at, id)` order as
 `watches.jsonl`, import-job provenance as `imports.jsonl`, and record counts and
-entry byte sizes in the trailing `summary.json`. Import that ZIP on another
-Bloom instance to move watch history between SQLite and PostgreSQL. Bloom ZIP
-imports require both `manifest.json` and `summary.json`. The importer verifies
-that the number of watch records read matches the count in `summary.json`. The
-previous JSONL shape remains accepted for compatibility. Re-import is idempotent
+uncompressed entry byte sizes in the trailing `summary.json`. Every archive
+entry uses Deflate compression. Import that ZIP on another Bloom instance to
+move watch history between SQLite and PostgreSQL. Bloom ZIP imports require both
+`manifest.json` and `summary.json`. The importer verifies that the number of
+watch records read matches the count in `summary.json`. Re-import is idempotent
 because the original watch ID is the source record ID. Each watch line includes
 `import_origin_record_id` when upstream provenance is present; imports also
 accept older watch lines without it. A transfer that does not

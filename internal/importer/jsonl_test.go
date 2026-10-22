@@ -112,6 +112,12 @@ func TestBloomUploadImportsValidThreeEntryExport(t *testing.T) {
 	}
 }
 
+func TestBloomUploadRejectsBareJSONL(t *testing.T) {
+	if err := openStagedWatch(t, []byte(validJSONLFixture()+"\n")); err == nil {
+		t.Fatal("openWatchUpload accepted bare JSONL")
+	}
+}
+
 func TestBloomUploadRejectsUnderdeclaredCentralDirectory(t *testing.T) {
 	if err := openStagedWatch(t, underdeclaredCentralDirectoryFixture()); err == nil {
 		t.Fatal("openWatchUpload accepted an underdeclared central directory")
@@ -136,6 +142,8 @@ func TestBloomUploadRejectsUnsafeZipShapes(t *testing.T) {
 			"nested.bin":    string(zipFixture(t, map[string]string{})),
 		}),
 		"too many entries": tooManyZipEntries(t),
+		"stored entry":     bloomArchiveWithMethod(t, zip.Store),
+		"excessive ratio":  excessiveRatioArchive(t),
 		"oversized entry":  oversizedZipEntry(t),
 	}
 	for name, payload := range tests {
@@ -313,16 +321,30 @@ func tooManyZipEntries(t *testing.T) []byte {
 
 func oversizedZipEntry(t *testing.T) []byte {
 	t.Helper()
+	return rawZipEntry(t, "watches.jsonl", core.MaxImportArchiveEntryBytes+1, 1)
+}
+
+func excessiveRatioArchive(t *testing.T) []byte {
+	t.Helper()
+	return rawZipEntry(t, "watches.jsonl", core.MaxImportDecompressionRatio+1, 1)
+}
+
+func rawZipEntry(t *testing.T, name string, uncompressed, compressed uint64) []byte {
+	t.Helper()
 	var output bytes.Buffer
 	writer := zip.NewWriter(&output)
-	header := &zip.FileHeader{Name: "watches.jsonl", Method: zip.Store}
-	header.UncompressedSize64 = core.MaxImportUploadBytes + 1
-	header.CompressedSize64 = header.UncompressedSize64
-	if _, err := writer.CreateRaw(header); err != nil {
-		t.Fatalf("create oversized raw entry: %v", err)
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	header.UncompressedSize64 = uncompressed
+	header.CompressedSize64 = compressed
+	entry, err := writer.CreateRaw(header)
+	if err != nil {
+		t.Fatalf("create raw entry: %v", err)
+	}
+	if _, err := entry.Write(make([]byte, int(compressed))); err != nil {
+		t.Fatalf("write raw entry: %v", err)
 	}
 	if err := writer.Close(); err != nil {
-		t.Fatalf("close oversized archive: %v", err)
+		t.Fatalf("close raw archive: %v", err)
 	}
 	return output.Bytes()
 }

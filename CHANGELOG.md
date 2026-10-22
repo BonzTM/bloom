@@ -21,6 +21,9 @@ contracts) gets an entry here.
 
 ### Changed
 
+- Watch exports compress every ZIP entry. The `bloom_export` import accepts only
+  a compressed Bloom ZIP whose entries use Deflate, so archives written before
+  this change and bare JSONL files must be exported again.
 - The sidebar lists each area once: Home, Discover, Requests, Playback,
   Statistics, Libraries, Users, Settings, and About. An area with several
   pages shows them as tabs above the page, such as Media servers, Download
@@ -55,6 +58,8 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- Large watch histories can be re-imported when the compressed archive remains
+  within the upload limit.
 - A request for a series or movie that Sonarr or Radarr already manages
   keeps that title's quality profile, root folder, path, existing tags, and
   every field Bloom does not model; Bloom only turns on monitoring, monitors

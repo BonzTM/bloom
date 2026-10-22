@@ -107,8 +107,11 @@ func TestCreatePlaybackReportingImportMatchesOpenAPI(t *testing.T) {
 	}
 }
 
-func TestCreateBloomExportAcceptsBoundedNDJSONPart(t *testing.T) {
+func TestCreateBloomExportRejectsBareJSONLAsDocumentedValidationFailure(t *testing.T) {
 	server, manager, _ := importHandlerServer(t)
+	manager.err = &core.InvalidArgumentError{
+		Field: "file", Code: "invalid", Message: "must be a compressed Bloom ZIP with Deflate entries",
+	}
 	payload := "{\"id\":\"watch\"}\n"
 	body, contentType := bloomMultipart(t, payload)
 	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
@@ -117,14 +120,27 @@ func TestCreateBloomExportAcceptsBoundedNDJSONPart(t *testing.T) {
 	request.Header.Set("Content-Type", contentType)
 	recorder := httptest.NewRecorder()
 	server.handleCreateImport(recorder, request)
-	if recorder.Code != http.StatusCreated || manager.upload != payload || !manager.stageHasDeadline {
+	if recorder.Code != http.StatusUnprocessableEntity || manager.upload != payload || !manager.stageHasDeadline ||
+		manager.discarded != manager.stagingID {
 		t.Fatalf("multipart import = %d upload %q: %s", recorder.Code, manager.upload, recorder.Body.String())
 	}
+	var response struct {
+		Code   string `json:"code"`
+		Fields []struct {
+			Field, Code, Message string
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response.Code != codeValidationFailed ||
+		len(response.Fields) != 1 || response.Fields[0].Field != "file" ||
+		response.Fields[0].Message != "must be a compressed Bloom ZIP with Deflate entries" {
+		t.Fatalf("bare JSONL validation response = %+v, %v", response, err)
+	}
+	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/ErrorResponse")
 }
 
 func TestCreateBloomExportAcceptsZipPartWithoutUsingFilename(t *testing.T) {
 	server, manager, _ := importHandlerServer(t)
-	payload := string([]byte{'P', 'K', 0x03, 0x04, 'z', 'i', 'p'})
+	payload := string(httpBloomArchive(t))
 	body, contentType := bloomMultipartWithType(t, payload, "application/zip", "export.data")
 	request := requestWithAccount(t, http.MethodPost, "/api/v1/imports", "", core.PermissionAdminSettings)
 	request.Body = io.NopCloser(bytes.NewReader(body))
@@ -306,10 +322,13 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	if strings.Join(entries.names, ",") != "manifest.json,watches.jsonl,imports.jsonl,summary.json" {
 		t.Fatalf("zip entries = %v", entries.names)
 	}
-	if entries.methods["watches.jsonl"] != zip.Store || entries.flags["watches.jsonl"]&0x8 == 0 {
-		t.Fatalf("watches.jsonl method=%d flags=%#x, want stored data descriptor",
-			entries.methods["watches.jsonl"], entries.flags["watches.jsonl"])
+	for _, name := range entries.names {
+		if entries.methods[name] != zip.Deflate || entries.flags[name]&0x8 == 0 {
+			t.Fatalf("%s method=%d flags=%#x, want Deflate data descriptor",
+				name, entries.methods[name], entries.flags[name])
+		}
 	}
+	assertExportAcceptedByImporter(t, recorder.Body.Bytes())
 	document := loadOpenAPI(t)
 	assertJSONContract(t, document, "#/components/schemas/WatchExportManifest", entries.data["manifest.json"])
 	watchLine := bytes.TrimSpace(entries.data["watches.jsonl"])
@@ -329,6 +348,106 @@ func TestWatchExportZipMatchesContractAndImportCodec(t *testing.T) {
 	if event.Actor != testRequestAccountID || event.Action != "watch.export" || event.Resource != "watches" ||
 		event.Result != telemetry.AuditSuccess || event.RequestID != "request-1" || event.Source == "" {
 		t.Fatalf("export audit = %+v", event)
+	}
+}
+
+type exportImportStore struct {
+	chunks map[int64][]byte
+	info   core.ImportUploadInfo
+	job    core.ImportJob
+}
+
+func (*exportImportStore) CreateImport(context.Context, core.ImportJob) error { return nil }
+
+func (s *exportImportStore) CreateUploadedImport(_ context.Context, job core.ImportJob, _ string) error {
+	s.job = job
+	return nil
+}
+
+func (*exportImportStore) ListImports(context.Context, core.ImportListQuery) ([]core.ImportJob, error) {
+	return nil, nil
+}
+
+func (*exportImportStore) GetImport(context.Context, string) (core.ImportJob, error) {
+	return core.ImportJob{}, core.ErrNotFound
+}
+
+func (*exportImportStore) CancelImport(context.Context, string, time.Time) (core.ImportJob, error) {
+	return core.ImportJob{}, core.ErrNotFound
+}
+
+func (*exportImportStore) ClaimImport(context.Context, core.ImportLease, time.Time) (core.ImportJob, error) {
+	return core.ImportJob{}, core.ErrNotFound
+}
+
+func (*exportImportStore) RenewImportLease(context.Context, string, core.ImportLease, time.Time) error {
+	return core.ErrNotFound
+}
+
+func (*exportImportStore) CommitImportBatch(context.Context, core.ImportBatch) (core.ImportBatchResult, error) {
+	return core.ImportBatchResult{}, core.ErrNotFound
+}
+
+func (*exportImportStore) FinishImport(context.Context, string, string, core.ImportState, string, time.Time) error {
+	return core.ErrNotFound
+}
+
+func (s *exportImportStore) WriteImportUploadChunks(_ context.Context, chunks []core.ImportUploadChunk) error {
+	for _, chunk := range chunks {
+		s.info.ID = chunk.ID
+		s.info.Size += int64(len(chunk.Bytes))
+		s.info.ChunkCount++
+		s.chunks[chunk.Index] = bytes.Clone(chunk.Bytes)
+	}
+	return nil
+}
+
+func (s *exportImportStore) ImportUploadInfo(context.Context, string) (core.ImportUploadInfo, error) {
+	return s.info, nil
+}
+
+func (s *exportImportStore) ReadImportUploadChunk(_ context.Context, _ string, index int64) ([]byte, error) {
+	return bytes.Clone(s.chunks[index]), nil
+}
+
+func (s *exportImportStore) DeleteImportUpload(context.Context, string) error { return nil }
+
+func (*exportImportStore) DeleteOrphanImportUploads(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
+type exportImportClock struct{ now time.Time }
+
+func (c exportImportClock) Now() time.Time { return c.now }
+
+type exportImportServer struct{}
+
+func (exportImportServer) Get(context.Context, string) (core.MediaServerConnection, error) {
+	return core.MediaServerConnection{}, nil
+}
+
+func assertExportAcceptedByImporter(t *testing.T, payload []byte) {
+	t.Helper()
+	store := &exportImportStore{chunks: make(map[int64][]byte)}
+	staging, err := importer.NewStaging(store, time.Minute)
+	if err != nil {
+		t.Fatalf("NewStaging: %v", err)
+	}
+	service, err := importer.NewService(
+		store, exportImportServer{}, exportImportClock{
+			now: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
+		}, staging, slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	id, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("StageBloomExport: %v", err)
+	}
+	job, err := service.CreateBloomExport(t.Context(), importTestServerID, testRequestAccountID, id)
+	if err != nil || job.ID == "" || store.job.ID != job.ID {
+		t.Fatalf("CreateBloomExport = %+v, stored %+v, %v", job, store.job, err)
 	}
 }
 
@@ -820,6 +939,30 @@ func importHandlerServer(t *testing.T) (*Server, *fakeImportManager, *recordingA
 func bloomMultipart(t *testing.T, payload string) ([]byte, string) {
 	t.Helper()
 	return bloomMultipartWithExtra(t, payload, "")
+}
+
+func httpBloomArchive(t *testing.T) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	entries := map[string]string{
+		"manifest.json": `{}`,
+		"watches.jsonl": `{}` + "\n",
+		"summary.json":  `{"watch_records":1}`,
+	}
+	for _, name := range []string{"manifest.json", "watches.jsonl", "summary.json"} {
+		entry, err := archive.Create(name)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if _, err := io.WriteString(entry, entries[name]); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatalf("close Bloom archive: %v", err)
+	}
+	return output.Bytes()
 }
 
 func bloomMultipartWithExtra(t *testing.T, payload, extraName string) ([]byte, string) {

@@ -268,24 +268,9 @@ func openWatchUpload(upload *UploadReader, offset int64) (io.ReadCloser, error) 
 func openWatchUploadWith(
 	upload *UploadReader, offset int64, openEntry func(*zip.File) (io.ReadCloser, error),
 ) (io.ReadCloser, error) {
-	header := make([]byte, len(zipSignature))
-	_, readErr := upload.ReadAt(header, 0)
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return nil, fmt.Errorf("detect import upload: %w", readErr)
-	}
-	if !bytes.Equal(header, zipSignature) {
-		if offset > upload.Size() {
-			return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
-		}
-		return io.NopCloser(io.NewSectionReader(upload, offset, upload.Size()-offset)), nil
-	}
-	archiveReader := io.NewSectionReader(upload, 0, upload.Size())
-	if validationErr := validateZipDirectory(archiveReader, archiveReader.Size()); validationErr != nil {
-		return nil, fmt.Errorf("validate import archive directory: %w", validationErr)
-	}
-	archive, err := zip.NewReader(archiveReader, archiveReader.Size())
+	archive, err := openImportArchive(upload)
 	if err != nil {
-		return nil, fmt.Errorf("open import archive: %w", err)
+		return nil, err
 	}
 	watches, expectedRecords, err := validateImportArchive(archive)
 	if err != nil {
@@ -294,10 +279,6 @@ func openWatchUploadWith(
 	watchesSize := int64(watches.UncompressedSize64) //nolint:gosec // Archive validation caps this below MaxInt64.
 	if offset > watchesSize {
 		return nil, fmt.Errorf("seek import upload: %w", core.ErrInvalidArgument)
-	}
-	if watches.Method == zip.Store {
-		reader, openErr := openStoredWatchEntry(upload, watches, offset, watchesSize)
-		return wrapBloomWatchStream(reader, expectedRecords, openErr)
 	}
 	reader, err := openEntry(watches)
 	if err != nil {
@@ -318,31 +299,24 @@ type bloomWatchStream struct {
 	expectedRecords int64
 }
 
-func wrapBloomWatchStream(reader io.ReadCloser, expectedRecords int64, err error) (io.ReadCloser, error) {
-	if err != nil {
-		return nil, err
-	}
-	return &bloomWatchStream{ReadCloser: reader, expectedRecords: expectedRecords}, nil
-}
-
-func openStoredWatchEntry(
-	upload *UploadReader, watches *zip.File, offset, size int64,
-) (io.ReadCloser, error) {
-	dataOffset, err := watches.DataOffset()
-	if err != nil {
-		return nil, fmt.Errorf("locate watches.jsonl: %w", err)
-	}
+func openImportArchive(upload *UploadReader) (*zip.Reader, error) {
 	header := make([]byte, len(zipSignature))
-	entry := io.NewSectionReader(upload, dataOffset, size)
-	count, readErr := io.ReadFull(entry, header)
-	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		return nil, fmt.Errorf("inspect watches.jsonl: %w", readErr)
+	_, err := upload.ReadAt(header, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("detect import upload: %w", err)
 	}
-	header = header[:count]
-	if hasNestedZipSignature(header) {
-		return nil, errors.New("nested import archives are not allowed")
+	if !bytes.Equal(header, zipSignature) {
+		return nil, errors.New("bloom export must be a ZIP archive")
 	}
-	return io.NopCloser(io.NewSectionReader(upload, dataOffset+offset, size-offset)), nil
+	reader := io.NewSectionReader(upload, 0, upload.Size())
+	if validationErr := validateZipDirectory(reader, reader.Size()); validationErr != nil {
+		return nil, fmt.Errorf("validate import archive directory: %w", validationErr)
+	}
+	archive, err := zip.NewReader(reader, reader.Size())
+	if err != nil {
+		return nil, fmt.Errorf("open import archive: %w", err)
+	}
+	return archive, nil
 }
 
 type prefixedReadCloser struct {
@@ -577,11 +551,13 @@ func validateImportArchive(archive *zip.Reader) (*zip.File, int64, error) {
 	if len(archive.File) == 0 || len(archive.File) > maxImportArchiveEntries {
 		return nil, 0, errors.New("import archive has an invalid entry count")
 	}
+	for _, entry := range archive.File {
+		if err := validateImportArchiveHeader(entry); err != nil {
+			return nil, 0, err
+		}
+	}
 	var watches, manifest, summary *zip.File
 	for _, entry := range archive.File {
-		if entry.UncompressedSize64 > importArchiveEntryLimit(entry.Name) {
-			return nil, 0, errors.New("import archive entry exceeds size limit")
-		}
 		if entry.Name != "watches.jsonl" {
 			if err := validateImportArchiveEntry(entry); err != nil {
 				return nil, 0, err
@@ -610,6 +586,21 @@ func validateImportArchive(archive *zip.Reader) (*zip.File, int64, error) {
 	}
 	expectedRecords, err := readBloomExportSummary(summary)
 	return watches, expectedRecords, err
+}
+
+func validateImportArchiveHeader(entry *zip.File) error {
+	if entry.Method != zip.Deflate {
+		return errors.New("import archive entries must use Deflate compression")
+	}
+	if entry.UncompressedSize64 > importArchiveEntryLimit(entry.Name) {
+		return errors.New("import archive entry exceeds size limit")
+	}
+	ratio := uint64(core.MaxImportDecompressionRatio)
+	minimumCompressed := (entry.UncompressedSize64 + ratio - 1) / ratio
+	if entry.CompressedSize64 < minimumCompressed {
+		return errors.New("import archive entry exceeds decompression ratio limit")
+	}
+	return nil
 }
 
 func readBloomExportSummary(entry *zip.File) (records int64, result error) {
@@ -669,7 +660,7 @@ func hasNestedZipSignature(header []byte) bool {
 
 func importArchiveEntryLimit(name string) uint64 {
 	if name == "watches.jsonl" || name == "imports.jsonl" {
-		return core.MaxImportUploadBytes
+		return core.MaxImportArchiveEntryBytes
 	}
 	return maxImportMetadataBytes
 }

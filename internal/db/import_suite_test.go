@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -304,17 +305,15 @@ func (importFixtureReporting) PlaybackReporting(
 
 func testDatabaseUploadLifecycle(t *testing.T, fixture importFixture) {
 	t.Helper()
-	payload := make([]byte, 3*core.ImportUploadChunkBytes+17)
-	for index := range payload {
-		payload[index] = byte(index % 251)
-	}
+	payload := databaseImportZIP(t, fixture, true)
 	service := newDatabaseImportService(t, fixture, fixture.now)
 	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("StageBloomExport: %v", err)
 	}
 	info, err := fixture.store.ImportUploadInfo(t.Context(), uploadID)
-	if err != nil || info.Size != int64(len(payload)) || info.ChunkCount != 4 {
+	wantChunks := (int64(len(payload)) + core.ImportUploadChunkBytes - 1) / core.ImportUploadChunkBytes
+	if err != nil || info.Size != int64(len(payload)) || info.ChunkCount != wantChunks || wantChunks < 4 {
 		t.Fatalf("ImportUploadInfo = %+v, %v", info, err)
 	}
 	chunk, err := fixture.store.ReadImportUploadChunk(t.Context(), uploadID, 2)
@@ -342,7 +341,7 @@ func testDatabaseZIPUploadRoundTrip(
 	t *testing.T, pool *sql.DB, driver config.Driver, fixture importFixture,
 ) {
 	t.Helper()
-	payload := databaseImportZIP(t, fixture)
+	payload := databaseImportZIP(t, fixture, false)
 	service, staging := newDatabaseImportDependencies(t, fixture, fixture.now)
 	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader(payload))
 	if err != nil {
@@ -371,7 +370,7 @@ func testDatabaseZIPUploadRoundTrip(
 	}
 }
 
-func databaseImportZIP(t *testing.T, fixture importFixture) []byte {
+func databaseImportZIP(t *testing.T, fixture importFixture, pad bool) []byte {
 	t.Helper()
 	watch := playbackStoreWatch(t, fixture.serverID, fixture.now)
 	watch.MediaServerName = "Round-trip source"
@@ -387,7 +386,7 @@ func databaseImportZIP(t *testing.T, fixture importFixture) []byte {
 	if _, writeErr := manifest.Write([]byte(`{}`)); writeErr != nil {
 		t.Fatalf("write manifest.json: %v", writeErr)
 	}
-	entry, err := archive.CreateHeader(&zip.FileHeader{Name: "watches.jsonl", Method: zip.Store})
+	entry, err := archive.Create("watches.jsonl")
 	if err != nil {
 		t.Fatalf("create watches.jsonl: %v", err)
 	}
@@ -401,10 +400,31 @@ func databaseImportZIP(t *testing.T, fixture importFixture) []byte {
 	if _, writeErr := summary.Write([]byte(`{"watch_records":1}`)); writeErr != nil {
 		t.Fatalf("write summary.json: %v", writeErr)
 	}
+	if pad {
+		writeDatabaseImportPadding(t, archive)
+	}
 	if closeErr := archive.Close(); closeErr != nil {
 		t.Fatalf("close import ZIP: %v", closeErr)
 	}
 	return payload.Bytes()
+}
+
+func writeDatabaseImportPadding(t *testing.T, archive *zip.Writer) {
+	t.Helper()
+	data := make([]byte, core.ImportUploadChunkBytes)
+	for _, name := range []string{"padding-a.bin", "padding-b.bin", "padding-c.bin"} {
+		if _, err := rand.Read(data); err != nil {
+			t.Fatalf("generate import padding: %v", err)
+		}
+		copy(data[:4], "bloo")
+		entry, err := archive.Create(name)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if _, err := entry.Write(data); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
 }
 
 func runDatabaseImportWorker(t *testing.T, fixture importFixture, staging *importer.Staging) {
@@ -432,7 +452,9 @@ func runDatabaseImportWorker(t *testing.T, fixture importFixture, staging *impor
 func testCancelledUploadCleanup(t *testing.T, fixture importFixture) {
 	t.Helper()
 	service := newDatabaseImportService(t, fixture, fixture.now)
-	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader([]byte("upload")))
+	uploadID, err := service.StageBloomExport(
+		t.Context(), bytes.NewReader(databaseImportZIP(t, fixture, false)),
+	)
 	if err != nil {
 		t.Fatalf("StageBloomExport: %v", err)
 	}
@@ -451,7 +473,9 @@ func testCancelledUploadCleanup(t *testing.T, fixture importFixture) {
 func testFailedUploadCleanup(t *testing.T, fixture importFixture) {
 	t.Helper()
 	service := newDatabaseImportService(t, fixture, fixture.now)
-	uploadID, err := service.StageBloomExport(t.Context(), bytes.NewReader([]byte("invalid")))
+	uploadID, err := service.StageBloomExport(
+		t.Context(), bytes.NewReader(databaseImportZIP(t, fixture, false)),
+	)
 	if err != nil {
 		t.Fatalf("StageBloomExport: %v", err)
 	}
@@ -477,7 +501,9 @@ func testOrphanUploadCleanup(t *testing.T, fixture importFixture) {
 	if err != nil {
 		t.Fatalf("stage old orphan: %v", err)
 	}
-	linkedID, err := oldService.StageBloomExport(t.Context(), bytes.NewReader([]byte("linked")))
+	linkedID, err := oldService.StageBloomExport(
+		t.Context(), bytes.NewReader(databaseImportZIP(t, fixture, false)),
+	)
 	if err != nil {
 		t.Fatalf("stage linked upload: %v", err)
 	}

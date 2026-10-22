@@ -33,6 +33,7 @@ type apiRoute struct {
 	snapshot        bool
 	oidc            bool
 	optionalAccount bool
+	streaming       bool
 	handler         apiHandler
 }
 
@@ -94,7 +95,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users/{media_user_id}/timeline", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleTimeline},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/exclusions", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetExclusions},
 	{method: http.MethodPut, path: "/api/v1/media-servers/{id}/exclusions", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handlePutExclusions},
-	{method: http.MethodGet, path: "/api/v1/exports/watches", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleExportWatches},
+	{method: http.MethodGet, path: "/api/v1/exports/watches", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, streaming: true, handler: (*Server).handleExportWatches},
 	{method: http.MethodPost, path: "/api/v1/imports", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateImport},
 	{method: http.MethodGet, path: "/api/v1/imports", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleListImports},
 	{method: http.MethodGet, path: "/api/v1/imports/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleGetImport},
@@ -182,6 +183,9 @@ func (r apiRoute) validate() (core.CatalogPermission, error) {
 	}
 	if r.snapshot && !r.usesSessionAccount() {
 		return core.CatalogPermission{}, fmt.Errorf("permission-loading route %q is not authenticated", r.path)
+	}
+	if r.streaming && !r.usesSessionAccount() {
+		return core.CatalogPermission{}, fmt.Errorf("streaming route %q is not authenticated", r.path)
 	}
 	if r.access == routeAuthenticated && !r.authRequired {
 		return core.CatalogPermission{}, fmt.Errorf("authenticated route %q is not auth-enabled", r.path)
@@ -302,7 +306,11 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 		handler = s.authorizationSnapshotMiddleware(handler)
 	}
 	if route.usesSessionAccount() {
-		handler = s.sessionHandler(handler, true)
+		if route.streaming {
+			handler = s.streamingSessionHandler(handler, true)
+		} else {
+			handler = s.sessionHandler(handler, true)
+		}
 	} else if route.sessions {
 		if route.optionalAccount {
 			handler = s.optionalSessionAccountMiddleware(handler)

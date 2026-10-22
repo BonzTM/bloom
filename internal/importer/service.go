@@ -92,6 +92,9 @@ func (s *Service) CreateBloomExport(
 	if !core.ValidID(stagingID) {
 		return job, core.ErrInvalidArgument
 	}
+	if err := validateBloomExportUpload(ctx, s.staging, stagingID); err != nil {
+		return job, err
+	}
 	cursor, err := encodeFileCursor(fileCursor{ID: stagingID})
 	if err != nil {
 		return job, err
@@ -104,6 +107,31 @@ func (s *Service) CreateBloomExport(
 		return core.ImportJob{}, err
 	}
 	return job, nil
+}
+
+func validateBloomExportUpload(ctx context.Context, staging *Staging, id string) error {
+	upload, err := staging.open(ctx, id)
+	if err != nil {
+		return fmt.Errorf("open Bloom export upload: %w", err)
+	}
+	archive, err := openImportArchive(upload)
+	if err == nil {
+		_, _, err = validateImportArchive(archive)
+	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, core.ErrImportStore) || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return invalidBloomExport()
+}
+
+func invalidBloomExport() error {
+	return &core.InvalidArgumentError{
+		Field: "file", Code: "invalid", Message: "must be a compressed Bloom ZIP with Deflate entries",
+	}
 }
 
 // CreateJellystat validates a staged Jellystat backup and creates its job.

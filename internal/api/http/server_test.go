@@ -292,7 +292,7 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users/{media_user_id}/timeline", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/exclusions", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodPut, path: "/api/v1/media-servers/{id}/exclusions", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
-		{method: http.MethodGet, path: "/api/v1/exports/watches", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/exports/watches", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, streaming: true},
 		{method: http.MethodPost, path: "/api/v1/imports", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/imports", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/imports/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
@@ -358,7 +358,7 @@ func TestAPIRouteInventoryIsCompleteAndDefaultDeny(t *testing.T) {
 		if got.method != expected.method || got.path != expected.path || got.access != expected.access ||
 			got.permission != expected.permission || !slices.Equal(got.anyPermissions, expected.anyPermissions) || got.sessions != expected.sessions ||
 			got.authRequired != expected.authRequired || got.snapshot != expected.snapshot || got.oidc != expected.oidc ||
-			got.optionalAccount != expected.optionalAccount {
+			got.optionalAccount != expected.optionalAccount || got.streaming != expected.streaming {
 			t.Errorf("route %d = %+v, want %+v", index, got, expected)
 		}
 		if got.access != routePublic && !got.usesSessionAccount() {
@@ -386,6 +386,17 @@ func TestSessionRouteRequiresAuthDependencies(t *testing.T) {
 	}
 	if _, err := h.server.routeHandler(route); err == nil {
 		t.Fatal("session route without auth dependencies was accepted")
+	}
+}
+
+func TestStreamingRouteRequiresSessionAccount(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := apiRoute{
+		method: http.MethodGet, path: "/api/v1/stream", access: routePublic,
+		streaming: true, handler: (*Server).handleVersion,
+	}
+	if _, err := h.server.routeHandler(route); err == nil {
+		t.Fatal("streaming route without a session account was accepted")
 	}
 }
 

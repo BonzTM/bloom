@@ -82,6 +82,91 @@ func (s *Server) loadAndSaveSessions(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) loadAndStreamSessions(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSessionResponseHeaders(w.Header())
+		ctx, state, ok := s.loadSession(w, r)
+		if !ok {
+			return
+		}
+		response := newStreamingSessionResponse(s, w, r.WithContext(ctx), state)
+		next.ServeHTTP(response, r.WithContext(ctx))
+		response.finish()
+	})
+}
+
+// streamingSessionResponse commits session headers before forwarding the body.
+type streamingSessionResponse struct {
+	server      *Server
+	destination http.ResponseWriter
+	request     *http.Request
+	state       *sessionRequestState
+	header      http.Header
+	status      int
+	wroteHeader bool
+	committed   bool
+	failed      bool
+}
+
+func newStreamingSessionResponse(
+	server *Server, destination http.ResponseWriter, request *http.Request, state *sessionRequestState,
+) *streamingSessionResponse {
+	header := make(http.Header)
+	setSessionResponseHeaders(header)
+	return &streamingSessionResponse{
+		server: server, destination: destination, request: request, state: state, header: header,
+	}
+}
+
+func (w *streamingSessionResponse) Header() http.Header { return w.header }
+
+func (w *streamingSessionResponse) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.status, w.wroteHeader = status, true
+	if !w.commit() {
+		return
+	}
+}
+
+func (w *streamingSessionResponse) Write(data []byte) (int, error) {
+	if !w.wroteHeader {
+		w.status, w.wroteHeader = http.StatusOK, true
+	}
+	if !w.commit() {
+		return 0, errors.New("commit session before streaming response")
+	}
+	return w.destination.Write(data)
+}
+
+func (w *streamingSessionResponse) Unwrap() http.ResponseWriter { return w.destination }
+
+func (w *streamingSessionResponse) finish() {
+	if !w.wroteHeader {
+		w.status, w.wroteHeader = http.StatusOK, true
+	}
+	if !w.commit() {
+		return
+	}
+}
+
+func (w *streamingSessionResponse) commit() bool {
+	if w.committed {
+		return !w.failed
+	}
+	w.committed = true
+	ctx, cancel := w.state.contextForCommit(w.request.Context())
+	defer cancel()
+	if !w.server.commitSession(w.destination, w, w.request.WithContext(ctx), w.state) {
+		w.failed = true
+		return false
+	}
+	maps.Copy(w.destination.Header(), w.header)
+	w.destination.WriteHeader(w.status)
+	return true
+}
+
 func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (context.Context, *sessionRequestState, bool) {
 	cookie, cookieErr := r.Cookie(s.sessions.Cookie.Name)
 	inbound := cookieErr == nil || rawCookieNamePresent(r.Header, s.sessions.Cookie.Name)
@@ -163,10 +248,12 @@ func setSessionResponseHeaders(header http.Header) {
 	header.Add("Vary", "Cookie")
 }
 
-func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, r *http.Request, state *sessionRequestState) bool {
+func (s *Server) commitSession(
+	w, sessionWriter http.ResponseWriter, r *http.Request, state *sessionRequestState,
+) bool {
 	if state.clearCookie && !state.replacementReady {
-		s.sessions.WriteSessionCookie(r.Context(), buffer, "", time.Time{})
-		buffer.Header().Set("Cache-Control", "no-store")
+		s.sessions.WriteSessionCookie(r.Context(), sessionWriter, "", time.Time{})
+		sessionWriter.Header().Set("Cache-Control", "no-store")
 		return true
 	}
 	switch s.sessions.Status(r.Context()) {
@@ -183,13 +270,13 @@ func (s *Server) commitSession(w http.ResponseWriter, buffer *bufferedResponse, 
 			writeError(w, r, s.logger, err)
 			return false
 		}
-		s.sessions.WriteSessionCookie(r.Context(), buffer, token, expiry)
+		s.sessions.WriteSessionCookie(r.Context(), sessionWriter, token, expiry)
 	case scs.Destroyed:
-		s.sessions.WriteSessionCookie(r.Context(), buffer, "", time.Time{})
+		s.sessions.WriteSessionCookie(r.Context(), sessionWriter, "", time.Time{})
 	case scs.Unmodified:
 	}
 	if !state.privateImageCache {
-		buffer.Header().Set("Cache-Control", "no-store")
+		sessionWriter.Header().Set("Cache-Control", "no-store")
 	}
 	if state.afterCommit != nil {
 		state.afterCommit()
