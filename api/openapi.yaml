@@ -3270,7 +3270,8 @@ components:
       description: >-
         The rich detail a title page shows, from one bounded TMDB call. Certification,
         release dates, and watch providers are for the US. A movie has no `series`;
-        a series has zero budget, revenue, and release dates.
+        a series has zero budget, revenue, and release dates. Recommended and
+        similar titles carry an empty overview.
       required: [tagline, status, certification, runtime_minutes, vote_average, vote_count, original_language, imdb_id, trailer_youtube_key, budget, revenue, genres, keywords, production_countries, studios, release_dates, watch_providers, cast, crew, recommendations, similar]
       additionalProperties: false
       properties:

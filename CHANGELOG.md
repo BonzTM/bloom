@@ -87,6 +87,15 @@ contracts) gets an entry here.
 
 ### Added
 
+- A title page shows what Seerr's does: the certification, runtime, and
+  genres under the title; Watch trailer and Request actions; the tagline,
+  key crew, and keywords; a facts card with the TMDB score, status, US
+  release dates, revenue, budget, language, country, studios, streaming
+  providers, and IMDb link; the cast; and Recommendations and Similar titles
+  rows marked with the caller's request state. A series adds its creators,
+  networks, season and episode counts, air dates, and next episode.
+  `GET /api/v1/metadata/movies/{id}` and `/series/{id}` carry this in a new
+  `details` object, from one TMDB call using `append_to_response`.
 - `GET /api/v1/playback/watches/{id}`, guarded by `stats.read.all`, returns one
   visible open or finished watch and conceals excluded users and libraries as
   `404 not_found`.

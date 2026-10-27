@@ -7,6 +7,7 @@ import {
 } from "../features/auth/hooks/auth-queries.js";
 import {
   PROVIDER_ID_PATTERN,
+  type MetadataDetails,
   type MetadataSeason,
   type MetadataTitle,
 } from "../features/requests/api/metadata-schemas.js";
@@ -14,9 +15,19 @@ import type {
   MediaKind,
   MediaRequest,
 } from "../features/requests/api/requests-schemas.js";
-import { backdropUrl, Poster } from "../features/requests/components/poster.js";
+import { RelatedRow } from "../features/requests/components/related-row.js";
 import { describeSearchError } from "../features/requests/components/request-errors.js";
 import { RequestForm } from "../features/requests/components/request-form.js";
+import {
+  CastRow,
+  CrewGrid,
+  KeywordChips,
+} from "../features/requests/components/title-credits.js";
+import { TitleFacts } from "../features/requests/components/title-facts.js";
+import {
+  TitleHero,
+  TrailerLink,
+} from "../features/requests/components/title-hero.js";
 import {
   kindLabel,
   statusLabel,
@@ -85,6 +96,7 @@ function TitlePage({
   const title = kind === "movie" ? movie : series;
   const profiles = useRequestProfiles(accountId);
   const create = useCreateRequest(accountId);
+  const requestRef = useRef<HTMLDivElement>(null);
   usePageTitle(pageTitle(title.data?.title ?? kindLabel(kind)));
   const denial =
     accessDenial(title.error) ??
@@ -105,54 +117,79 @@ function TitlePage({
   }
   const seasons: readonly MetadataSeason[] | undefined =
     kind === "series" ? series.data?.seasons : undefined;
-  const backdrop = backdropUrl(title.data.backdrop_path);
+  const detail = title.data;
   return (
     <article className="title-page">
-      <header
-        className={
-          backdrop === undefined ? "title-hero" : "title-hero has-backdrop"
-        }
-        style={
-          backdrop === undefined
-            ? undefined
-            : { backgroundImage: `url("${backdrop}")` }
-        }
-      >
-        <div className="title-hero-inner">
-          <div className="title-poster">
-            <Poster
-              posterPath={title.data.poster_path}
-              title={title.data.title}
-              size="w500"
-            />
-          </div>
-          <div className="title-heading">
-            <p>
-              <Link to="/requests">Back to discover</Link>
-            </p>
-            <h1>{titleWithYear(title.data)}</h1>
-            <p className="badge badge-neutral">{kindLabel(kind)}</p>
-            <Overview title={title.data} />
+      <TitleHero
+        title={detail}
+        details={detail.details}
+        actions={
+          <>
             {canFollow ? (
               <NotifyMe
                 accountId={accountId}
                 providerId={providerId}
-                title={titleWithYear(title.data)}
-                subscribed={title.data.subscribed}
+                title={titleWithYear(detail)}
+                subscribed={detail.subscribed}
               />
             ) : null}
-          </div>
-        </div>
-      </header>
-      <div className="title-body">
+            <TrailerLink trailerKey={detail.details.trailer_youtube_key} />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                // Focusing the request panel also scrolls it into view.
+                requestRef.current?.focus();
+              }}
+            >
+              Request<span className="visually-hidden"> {detail.title}</span>
+            </button>
+          </>
+        }
+      />
+      <div className="title-content">
+        <TitleSummary title={detail} details={detail.details} />
+        <TitleFacts title={detail} details={detail.details} />
+      </div>
+      <div className="title-body" ref={requestRef} tabIndex={-1}>
         <RequestSection
-          title={title.data}
+          title={detail}
           seasons={seasons}
           profiles={profiles}
           create={create}
         />
       </div>
+      <CastRow cast={detail.details.cast} />
+      <RelatedRow
+        title="Recommendations"
+        items={detail.details.recommendations}
+      />
+      <RelatedRow title="Similar titles" items={detail.details.similar} />
     </article>
+  );
+}
+
+type TitleSummaryProps = Readonly<{
+  title: MetadataTitle;
+  details: MetadataDetails;
+}>;
+
+// The tagline, overview, key crew, and keywords beside the facts card. A
+// series names its creators first, the way Seerr does.
+function TitleSummary({ title, details }: TitleSummaryProps): ReactNode {
+  const creators = details.series?.creators ?? [];
+  return (
+    <div className="title-main">
+      {details.tagline === "" ? null : (
+        <p className="title-tagline">{details.tagline}</p>
+      )}
+      <section aria-labelledby="overview-heading">
+        <h2 id="overview-heading">Overview</h2>
+        <Overview title={title} />
+      </section>
+      <CrewGrid crew={[...creators, ...details.crew]} title={title} />
+      <KeywordChips keywords={details.keywords} />
+    </div>
   );
 }
 

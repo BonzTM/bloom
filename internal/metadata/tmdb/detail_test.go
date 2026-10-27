@@ -43,7 +43,7 @@ const movieDetailFixture = `{"id":1084242,"title":"The Dog Stars","release_date"
   {"certification":"R","release_date":"2026-10-30T00:00:00.000Z","type":4},
   {"certification":"","release_date":"not a date","type":1}]}]},
 "recommendations":{"page":1,"results":[
- {"id":41,"media_type":"movie","title":"I Am Legend","release_date":"2007-12-14","poster_path":"/legend.jpg"},
+ {"id":41,"media_type":"movie","title":"I Am Legend","release_date":"2007-12-14","poster_path":"/legend.jpg","overview":"Long"},
  {"id":42,"media_type":"tv","name":"The Last of Us","first_air_date":"2023-01-15"},
  {"id":43,"media_type":"person","name":"Someone"}]},
 "similar":{"page":1,"results":[{"id":51,"title":"The Road","release_date":"2009-11-25"},{"title":"No ID"}]},
@@ -135,7 +135,7 @@ func assertMovieLists(t *testing.T, details core.MetadataDetails) {
 func assertMovieRelated(t *testing.T, details core.MetadataDetails) {
 	t.Helper()
 	if len(details.Recommendations) != 2 || details.Recommendations[1].Kind != core.MediaKindSeries ||
-		details.Recommendations[0].RequestState != core.MetadataRequestNone {
+		details.Recommendations[0].RequestState != core.MetadataRequestNone || details.Recommendations[0].Overview != "" {
 		t.Fatalf("recommendations = %+v", details.Recommendations)
 	}
 	if len(details.Similar) != 1 || details.Similar[0].Kind != core.MediaKindMovie || details.Similar[0].Year != 2009 {

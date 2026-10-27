@@ -37,6 +37,8 @@ import {
 import {
   createMediaRequestSchema,
   type MetadataSeries,
+  type MetadataDetails,
+  type MetadataRequestState,
   type MetadataTitle,
 } from "../features/requests/api/metadata-schemas.js";
 import {
@@ -1558,6 +1560,106 @@ function searchTitles(url: URL) {
   });
 }
 
+// A title page's rich detail: a cast member without a photo, related titles
+// in both states, and the series facts only a series has.
+function mockTitleDetails(
+  kind: "movie" | "series",
+  id: string,
+): MetadataDetails {
+  const related = (
+    wanted: "movie" | "series",
+    states: readonly MetadataRequestState[],
+  ) =>
+    mockCatalogue
+      .filter((title) => title.kind === wanted && title.provider_id !== id)
+      .slice(0, states.length)
+      .map((title, index) => ({
+        ...title,
+        request_state: states[index] ?? "none",
+      }));
+  const movie = kind === "movie";
+  return {
+    tagline: movie ? "Beyond fear, destiny awaits." : "",
+    status: movie ? "Released" : "Returning Series",
+    certification: movie ? "PG-13" : "TV-MA",
+    runtime_minutes: movie ? 155 : 52,
+    vote_average: 7.8,
+    vote_count: 12_000,
+    original_language: "en",
+    imdb_id: movie ? "tt1160419" : "",
+    trailer_youtube_key: movie ? "n9xhJrPXop4" : "",
+    budget: movie ? 165_000_000 : 0,
+    revenue: movie ? 402_027_830 : 0,
+    genres: ["Science Fiction", "Adventure"],
+    keywords: ["desert", "based on novel or book"],
+    production_countries: [{ code: "US", name: "United States of America" }],
+    studios: [
+      { id: 923, name: "Legendary Pictures", logo_path: "/legendary.png" },
+    ],
+    release_dates: movie
+      ? [
+          { type: "theatrical", date: "2021-10-22T00:00:00Z" },
+          { type: "digital", date: "2021-12-03T00:00:00Z" },
+        ]
+      : [],
+    watch_providers: [{ id: 1899, name: "Max", logo_path: "/max.jpg" }],
+    cast: [
+      {
+        person_id: 1,
+        name: "Timothée Chalamet",
+        role: "Paul",
+        profile_path: "/chalamet.jpg",
+      },
+      {
+        person_id: 2,
+        name: "Unpictured Actor",
+        role: "Fremen",
+        profile_path: "",
+      },
+    ],
+    crew: [
+      {
+        person_id: 10,
+        name: "Denis Villeneuve",
+        role: "Director",
+        profile_path: "",
+      },
+      {
+        person_id: 11,
+        name: "Jon Spaihts",
+        role: "Screenplay",
+        profile_path: "",
+      },
+    ],
+    recommendations: related("movie", ["available", "none"]),
+    similar: related("series", ["pending"]),
+    series: movie
+      ? undefined
+      : {
+          creators: [
+            {
+              person_id: 20,
+              name: "Ada Creator",
+              role: "Creator",
+              profile_path: "",
+            },
+          ],
+          networks: [{ id: 49, name: "HBO", logo_path: "/hbo.png" }],
+          first_air_date: "2021-03-01T00:00:00Z",
+          last_air_date: "2023-03-01T00:00:00Z",
+          next_episode: {
+            season: 4,
+            episode: 1,
+            name: "Return",
+            air_date: "2027-01-02T00:00:00Z",
+          },
+          season_count: 3,
+          episode_count: 26,
+          in_production: true,
+        },
+  };
+}
+
 function titleDetail(
   kind: "movie" | "series",
   id: string | readonly string[] | undefined,
@@ -1574,8 +1676,13 @@ function titleDetail(
   const subscribed = subscriptions.has(title.provider_id);
   return HttpResponse.json(
     kind === "series"
-      ? { ...title, subscribed, seasons: mockSeasons }
-      : { ...title, subscribed },
+      ? {
+          ...title,
+          subscribed,
+          seasons: mockSeasons,
+          details: mockTitleDetails(kind, id),
+        }
+      : { ...title, subscribed, details: mockTitleDetails(kind, id) },
   );
 }
 

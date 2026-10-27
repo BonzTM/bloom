@@ -180,6 +180,9 @@ func relatedTitle(parent core.MediaKind) func(rawTitle) (core.MetadataDiscoverIt
 			}
 		}
 		title, ok := mapSearchTitle(raw, kind)
+		// A related poster never shows its overview; dropping it keeps a
+		// cached detail small.
+		title.Overview = ""
 		return core.MetadataDiscoverItem{MetadataTitle: title, RequestState: core.MetadataRequestNone}, ok
 	}
 }

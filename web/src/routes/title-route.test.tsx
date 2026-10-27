@@ -144,3 +144,105 @@ it("rejects an address that is not a title", async () => {
     await screen.findByRole("heading", { name: /not found/i }),
   ).toBeVisible();
 });
+
+it("shows a movie's rich detail the way Seerr does", async () => {
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  await screen.findByRole("heading", { name: "Dune (2021)", level: 1 });
+  expect(screen.getByText("Rated")).toBeInTheDocument();
+  expect(screen.getByText("155 minutes")).toBeVisible();
+  expect(screen.getByText("Science Fiction, Adventure")).toBeVisible();
+  expect(screen.getByText("Beyond fear, destiny awaits.")).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: "Watch trailer on YouTube" }),
+  ).toHaveAttribute("href", "https://www.youtube.com/watch?v=n9xhJrPXop4");
+  expect(screen.getByText("Director").nextElementSibling).toHaveTextContent(
+    "Denis Villeneuve",
+  );
+  expect(
+    screen.getByRole("link", { name: "View full crew on TMDB" }),
+  ).toHaveAttribute("href", "https://www.themoviedb.org/movie/438631/cast");
+  const keywords = screen.getByRole("list", { name: "Keywords" });
+  expect(within(keywords).getAllByRole("listitem")).toHaveLength(2);
+});
+
+it("lists a movie's facts in the side card", async () => {
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  const facts = await screen.findByRole("complementary", { name: "Facts" });
+  expect(within(facts).getByText("78%")).toBeVisible();
+  const fact = (label: string) =>
+    within(facts).getByText(label).nextElementSibling;
+  expect(fact("Status")).toHaveTextContent("Released");
+  expect(fact("Release dates")).toHaveTextContent(
+    "October 22, 2021 (Theatrical)December 3, 2021 (Digital)",
+  );
+  expect(fact("Revenue")).toHaveTextContent("$402,027,830");
+  expect(fact("Budget")).toHaveTextContent("$165,000,000");
+  expect(fact("Original language")).toHaveTextContent("English");
+  expect(fact("Production country")).toHaveTextContent(
+    "United States of America",
+  );
+  expect(fact("Studios")).toHaveTextContent("Legendary Pictures");
+  expect(within(facts).getByRole("img", { name: "Max" })).toHaveAttribute(
+    "src",
+    "https://image.tmdb.org/t/p/w92/max.jpg",
+  );
+  expect(within(facts).getByRole("link", { name: "IMDb" })).toHaveAttribute(
+    "href",
+    "https://www.imdb.com/title/tt1160419/",
+  );
+  expect(within(facts).queryByText("Networks")).not.toBeInTheDocument();
+});
+
+it("shows the cast and related titles with their state", async () => {
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  const cast = await screen.findByRole("list", { name: "Cast" });
+  const members = within(cast).getAllByRole("figure");
+  expect(members[0]).toHaveTextContent("Timothée ChalametPaul");
+  expect(members[1]?.querySelector(".cast-photo-placeholder")).not.toBeNull();
+  const recommended = screen.getByRole("list", { name: "Recommendations" });
+  const heat = within(recommended).getByRole("link", { name: /Heat \(1995\)/ });
+  expect(heat).toHaveAttribute("href", "/requests/movies/949");
+  expect(within(heat).getByText("Available")).toHaveClass("visually-hidden");
+  const similar = screen.getByRole("list", { name: "Similar titles" });
+  const arrival = within(similar).getByRole("link", { name: /The Arrival/ });
+  expect(arrival).toHaveTextContent("Requested");
+  expect(arrival).toHaveAttribute("href", "/requests/series/1396");
+});
+
+it("jumps to the request panel from the header", async () => {
+  const user = userEvent.setup();
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  const request = await screen.findByRole("button", { name: "Request Dune" });
+  await user.click(request);
+  const panel = screen
+    .getByRole("form", { name: "Request Dune" })
+    .closest(".title-body");
+  expect(panel).toHaveFocus();
+});
+
+it("shows a series' creators, networks, and air dates", async () => {
+  signInMockSession();
+  renderApp("/requests/series/1396");
+  await screen.findByRole("heading", { name: "The Arrival (2021)", level: 1 });
+  expect(screen.getByText("Creator").nextElementSibling).toHaveTextContent(
+    "Ada Creator",
+  );
+  const facts = screen.getByRole("complementary", { name: "Facts" });
+  const fact = (label: string) =>
+    within(facts).getByText(label).nextElementSibling;
+  expect(fact("Seasons")).toHaveTextContent("3");
+  expect(fact("Episodes")).toHaveTextContent("26");
+  expect(fact("First aired")).toHaveTextContent("March 1, 2021");
+  expect(fact("Next episode")).toHaveTextContent(
+    "S4 E1 “Return”, January 2, 2027",
+  );
+  expect(fact("Networks")).toHaveTextContent("HBO");
+  expect(within(facts).queryByText("Budget")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: /Watch trailer/ }),
+  ).not.toBeInTheDocument();
+});
