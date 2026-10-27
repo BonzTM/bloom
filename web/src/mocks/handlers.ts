@@ -1,4 +1,9 @@
-import { http, HttpResponse, type HttpResponseResolver } from "msw";
+import {
+  http,
+  HttpResponse,
+  type HttpResponseResolver,
+  type PathParams,
+} from "msw";
 import { z } from "zod/v4";
 import type { NotificationPreference } from "../features/notifications/api/notification-schemas.js";
 import type { ProbeFailureReason } from "../lib/api/errors.js";
@@ -2871,20 +2876,28 @@ function discoverPage(url: URL, kind: "movie" | "series" | undefined) {
     return envelope(422, "validation_failed", "invalid cursor");
   }
   const page = cursor === null ? 1 : Number(cursor);
-  // The catalogue plus a title this account has requested, so a row can
-  // show a request state.
+  // The catalogue plus titles this account has requested, declined,
+  // processing, and available, so a row can show each request state.
+  const requested = (
+    providerId: string,
+    title: string,
+    year: number,
+    posterPath: string,
+  ) => ({
+    kind: "movie" as const,
+    provider: "tmdb" as const,
+    provider_id: providerId,
+    title,
+    year,
+    overview: "",
+    poster_path: posterPath,
+    backdrop_path: "/backdrop.jpg",
+  });
   const pool = [
     ...mockCatalogue,
-    {
-      kind: "movie" as const,
-      provider: "tmdb" as const,
-      provider_id: "1124",
-      title: "The Prestige",
-      year: 2006,
-      overview: "Two rival stage magicians engage in a bitter battle.",
-      poster_path: "",
-      backdrop_path: "/backdrop.jpg",
-    },
+    requested("1124", "The Prestige", 2006, ""),
+    requested("603", "The Matrix", 1999, "/matrix.jpg"),
+    requested("27205", "Inception", 2010, "/inception.jpg"),
   ].filter((title) => kind === undefined || title.kind === kind);
   // Repeat the small catalogue so rows have enough tiles to scroll and page.
   const items = Array.from({ length: DISCOVER_PAGE_SIZE }, (_, index) => {
@@ -2909,7 +2922,79 @@ function discoverPage(url: URL, kind: "movie" | "series" | undefined) {
   });
 }
 
+const MOCK_MOVIE_GENRES = [
+  { id: 28, name: "Action" },
+  { id: 12, name: "Adventure" },
+  { id: 16, name: "Animation" },
+  { id: 35, name: "Comedy" },
+  { id: 80, name: "Crime" },
+  { id: 99, name: "Documentary" },
+  { id: 18, name: "Drama" },
+  { id: 10751, name: "Family" },
+  { id: 14, name: "Fantasy" },
+  { id: 27, name: "Horror" },
+  { id: 878, name: "Science Fiction" },
+  { id: 53, name: "Thriller" },
+];
+
+const MOCK_SERIES_GENRES = [
+  { id: 10759, name: "Action & Adventure" },
+  { id: 16, name: "Animation" },
+  { id: 35, name: "Comedy" },
+  { id: 80, name: "Crime" },
+  { id: 99, name: "Documentary" },
+  { id: 18, name: "Drama" },
+  { id: 10762, name: "Kids" },
+  { id: 9648, name: "Mystery" },
+  { id: 10765, name: "Sci-Fi & Fantasy" },
+  { id: 37, name: "Western" },
+];
+
+// The filtered rows: a genre of either kind, a studio's movies, or a
+// network's series, each with a canonical decimal identifier.
+const FILTERED_DISCOVER_KINDS: Readonly<Record<string, "movie" | "series">> = {
+  "movies/genres": "movie",
+  "series/genres": "series",
+  "movies/studios": "movie",
+  "series/networks": "series",
+};
+
+function filteredDiscoverPage(request: Request, params: PathParams) {
+  const kind =
+    FILTERED_DISCOVER_KINDS[`${String(params.kind)}/${String(params.filter)}`];
+  if (kind === undefined) {
+    return envelope(404, "not_found", "route not found");
+  }
+  if (!/^[1-9][0-9]{0,9}$/.test(String(params.id))) {
+    return envelope(422, "validation_failed", "invalid id");
+  }
+  return discoverPage(new URL(request.url), kind);
+}
+
 const discoverHandlers = [
+  http.get(
+    "*/api/v1/metadata/discover/:kind/:filter/:id",
+    jsonApi(
+      ({ request, params }) =>
+        discoverDenial() ?? filteredDiscoverPage(request, params),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/genres",
+    jsonApi(({ request }) => {
+      const denial = discoverDenial();
+      if (denial !== undefined) {
+        return denial;
+      }
+      const kind = new URL(request.url).searchParams.get("kind");
+      if (kind !== "movie" && kind !== "series") {
+        return envelope(422, "validation_failed", "invalid kind");
+      }
+      return HttpResponse.json({
+        items: kind === "movie" ? MOCK_MOVIE_GENRES : MOCK_SERIES_GENRES,
+      });
+    }),
+  ),
   http.get(
     "*/api/v1/metadata/discover/trending",
     jsonApi(
@@ -3330,6 +3415,78 @@ export function resetMockCatalog(): void {
   catalogSyncQueued = false;
 }
 
+// ---- recently added (requests.create or requests.read.own)
+
+// The library's newest movies and series: the catalog's own, then enough
+// more for the home page's row to scroll.
+const MOCK_RECENT_EXTRAS: readonly (readonly [
+  string,
+  "movie" | "series",
+  number,
+])[] = [
+  ["Arrival", "movie", 2016],
+  ["Severance", "series", 2022],
+  ["Oppenheimer", "movie", 2023],
+  ["Andor", "series", 2022],
+  ["Past Lives", "movie", 2023],
+  ["The Bear", "series", 2022],
+  ["Blade Runner 2049", "movie", 2017],
+  ["Shōgun", "series", 2024],
+  ["Sicario", "movie", 2015],
+  ["Slow Horses", "series", 2022],
+  ["Prisoners", "movie", 2013],
+  ["Dark", "series", 2017],
+];
+
+export const mockRecentlyAdded = [
+  ...mockCatalogItems
+    .filter(
+      (item) =>
+        !item.archived &&
+        (item.item_type === "Movie" || item.item_type === "Series") &&
+        item.date_created !== undefined,
+    )
+    .map((item) => ({
+      media_server_id: item.media_server_id,
+      item_id: item.item_id,
+      kind:
+        item.item_type === "Movie" ? ("movie" as const) : ("series" as const),
+      title: item.name,
+      year: item.production_year ?? 0,
+      added_at: item.date_created ?? "",
+    })),
+  ...MOCK_RECENT_EXTRAS.map(([title, kind, year], index) => ({
+    media_server_id: CABIN,
+    item_id: `ra-${String(index + 1)}`,
+    kind,
+    title,
+    year,
+    added_at: `2026-08-${String(28 - index).padStart(2, "0")}T10:00:00Z`,
+  })),
+].sort((left, right) => right.added_at.localeCompare(left.added_at));
+
+const recentlyAddedHandlers = [
+  http.get(
+    "*/api/v1/library/recently-added",
+    jsonApi(({ request }) => {
+      const denial = anyPermissionDenial([
+        "requests.create",
+        "requests.read.own",
+      ]);
+      if (denial !== undefined) {
+        return denial;
+      }
+      const raw = new URL(request.url).searchParams.get("limit") ?? "20";
+      if (!/^([1-9]|[1-3][0-9]|40)$/.test(raw)) {
+        return envelope(422, "validation_failed", "invalid limit");
+      }
+      return HttpResponse.json({
+        items: mockRecentlyAdded.slice(0, Number(raw)),
+      });
+    }),
+  ),
+];
+
 const catalogHandlers = [
   http.get(
     "*/api/v1/media-servers/:id/libraries",
@@ -3621,6 +3778,7 @@ const accountHandlers = [
 export const handlers = [
   ...accountHandlers,
   ...catalogHandlers,
+  ...recentlyAddedHandlers,
   ...discoverHandlers,
   ...importHandlers,
   ...notificationHandlers,
@@ -3673,15 +3831,27 @@ export const handlers = [
   http.get(
     "*/api/v1/media-servers/:serverId/items/:itemId/image",
     ({ params, request }) => {
-      if (playbackDenial() !== undefined) {
-        return new HttpResponse(null, { status: 403 });
+      const denial = anyPermissionDenial([
+        "stats.read.all",
+        "stats.read.own",
+        "requests.read.own",
+        "requests.create",
+      ]);
+      if (denial !== undefined) {
+        return new HttpResponse(null, { status: denial.status });
       }
       const itemId = String(params.itemId);
       const wide = new URL(request.url).searchParams.get("max_width") === "640";
       const known = [...mockNowPlaying, ...mockPlaybackHistory].find(
         (candidate) => candidate.item_id === itemId,
       );
-      const label = mockImageLabel(known, itemId);
+      const recent = mockRecentlyAdded.find(
+        (candidate) => candidate.item_id === itemId,
+      );
+      const label =
+        known === undefined && recent !== undefined
+          ? recent.title.slice(0, 12)
+          : mockImageLabel(known, itemId);
       let hue = 0;
       for (let index = 0; index < itemId.length; index += 1) {
         hue = (hue + itemId.charCodeAt(index)) % 360;

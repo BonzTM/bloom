@@ -24,7 +24,10 @@ export type IconName =
   | "clock"
   | "menu"
   | "logout"
-  | "chevron";
+  | "chevron"
+  | "chevron-left"
+  | "chevron-right"
+  | "check";
 
 const PATHS: Readonly<Record<IconName, string>> = {
   home: "M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10",
@@ -49,6 +52,9 @@ const PATHS: Readonly<Record<IconName, string>> = {
   menu: "M4 7h16M4 12h16M4 17h16",
   logout: "M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5m5 5H3",
   chevron: "m6 9 6 6 6-6",
+  "chevron-left": "m15 6-6 6 6 6",
+  "chevron-right": "m9 6 6 6-6 6",
+  check: "m5 12.5 4.5 4.5L19 7.5",
 };
 
 export function NavIcon({ name }: IconProps): ReactNode {

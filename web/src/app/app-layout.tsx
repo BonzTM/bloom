@@ -24,6 +24,7 @@ import { VersionBadge } from "../features/system/components/version-badge.js";
 import { NavIcon, type IconName } from "./nav-icons.js";
 import {
   groupFor,
+  isHomeArea,
   NAV_GROUPS,
   normalizePath,
   pageFor,
@@ -116,7 +117,7 @@ function Sidebar({
         <SidebarLink
           to="/"
           icon="home"
-          current={pathname === "/"}
+          current={isHomeArea(pathname)}
           onNavigate={onNavigate}
         >
           Home
@@ -240,7 +241,7 @@ function tabCurrent(
   return pathname === page.to ? "page" : "location";
 }
 
-// One search box for the whole app: it lands on the requests page with the
+// One search box for the whole app: it lands on the search page with the
 // query, which owns the results and their states.
 function GlobalSearch(): ReactNode {
   const navigate = useNavigate();
@@ -252,7 +253,7 @@ function GlobalSearch(): ReactNode {
     if (query === "") {
       return;
     }
-    void navigate(`/requests?q=${encodeURIComponent(query)}`);
+    void navigate(`/search?q=${encodeURIComponent(query)}`);
   }
   return (
     <form role="search" className="global-search" onSubmit={handleSubmit}>

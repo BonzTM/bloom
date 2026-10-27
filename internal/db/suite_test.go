@@ -61,6 +61,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runImportEngineTests(t, pool, driver)
 	runStatsEngineTests(t, pool, driver)
 	runCatalogEngineTests(t, pool, driver)
+	runRecentlyAddedEngineTests(t, pool, driver)
 	runAdditiveColumnCompatibilityTests(t, pool, driver)
 	runDownloadManagerEngineTests(t, pool, driver)
 	runMetadataProviderEngineTests(t, pool, driver)

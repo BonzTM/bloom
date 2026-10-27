@@ -95,6 +95,56 @@ export const discoverListSchema = z.enum([
 
 export type DiscoverList = z.output<typeof discoverListSchema>;
 
+// Rows narrowed to one TMDB genre, production company, or network, with
+// their API paths.
+export const filteredDiscoverListSchema = z.enum([
+  "movies/genres",
+  "series/genres",
+  "movies/studios",
+  "series/networks",
+]);
+
+export type FilteredDiscoverList = z.output<typeof filteredDiscoverListSchema>;
+
+// The largest genre, company, or network identifier the server accepts.
+export const MAX_DISCOVER_FILTER_ID = 1_000_000_000;
+
+export const discoverFilterIdSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(MAX_DISCOVER_FILTER_ID);
+
+// Where one row's titles come from: a curated list, or a filtered one.
+export type DiscoverSource =
+  DiscoverList | Readonly<{ list: FilteredDiscoverList; id: number }>;
+
+// The path under /metadata/discover/ for a source, validated so nothing
+// unexpected reaches the URL.
+export function discoverSourcePath(source: DiscoverSource): string {
+  if (typeof source === "string") {
+    return discoverListSchema.parse(source);
+  }
+  const list = filteredDiscoverListSchema.parse(source.list);
+  return `${list}/${String(discoverFilterIdSchema.parse(source.id))}`;
+}
+
+// Wire contract for `/api/v1/metadata/genres`, mirroring
+// `MetadataGenresResponse` in api/openapi.yaml.
+const MAX_GENRES = 100;
+const MAX_GENRE_NAME_BYTES = 100;
+
+export const metadataGenreSchema = z.object({
+  id: discoverFilterIdSchema,
+  name: z.string().min(1).pipe(boundedBytes(MAX_GENRE_NAME_BYTES)),
+});
+
+export type MetadataGenre = z.output<typeof metadataGenreSchema>;
+
+export const metadataGenresResponseSchema = z.object({
+  items: z.array(metadataGenreSchema).max(MAX_GENRES),
+});
+
 export const metadataSearchResponseSchema = z.object({
   items: z.array(metadataTitleSchema).max(MAX_RESULTS),
 });

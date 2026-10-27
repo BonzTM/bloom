@@ -15,6 +15,7 @@ import {
   librariesResponseSchema,
   libraryIdSchema,
   mediaServerIdSchema,
+  recentlyAddedResponseSchema,
   type CatalogGenreSummary,
   type CatalogHistoryPage,
   type CatalogItem,
@@ -23,9 +24,11 @@ import {
   type CatalogItemsParams,
   type CatalogLibrarySummary,
   type Library,
+  type RecentlyAddedTitle,
 } from "./catalog-schemas.js";
 
 const SERVERS_PATH = "api/v1/media-servers";
+const RECENTLY_ADDED_PATH = "api/v1/library/recently-added";
 
 export class CatalogApi {
   readonly #client: ApiClient;
@@ -175,6 +178,16 @@ export class CatalogApi {
   }
 
   // Asks for a full walk now; 409 means one is already running.
+  // The newest movies and series across every media server, for the home
+  // page; the server's default count fills one row.
+  recentlyAdded(signal: AbortSignal): Promise<readonly RecentlyAddedTitle[]> {
+    return this.#client
+      .requestJson(RECENTLY_ADDED_PATH, recentlyAddedResponseSchema, {
+        signal,
+      })
+      .then((response) => response.items);
+  }
+
   sync(serverId: string): Promise<void> {
     return this.#client
       .requestJson(

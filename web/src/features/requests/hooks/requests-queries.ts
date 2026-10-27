@@ -12,7 +12,7 @@ import type {
 } from "../api/download-manager-schemas.js";
 import type {
   CreateMediaRequest,
-  DiscoverList,
+  DiscoverSource,
   MetadataDiscoverResponse,
 } from "../api/metadata-schemas.js";
 import type { RequestsFilter } from "../api/requests-api.js";
@@ -48,8 +48,10 @@ export const requestsKeys = {
     ["requests", "progress", accountId, requestId] as const,
   search: (accountId: string, query: string, kind: MediaKind | undefined) =>
     ["requests", "search", accountId, query, kind ?? ""] as const,
-  discover: (accountId: string, list: DiscoverList) =>
-    ["requests", "discover", accountId, list] as const,
+  discover: (accountId: string, source: DiscoverSource) =>
+    ["requests", "discover", accountId, source] as const,
+  genres: (accountId: string, kind: MediaKind) =>
+    ["requests", "genres", accountId, kind] as const,
   title: (accountId: string, kind: MediaKind, providerId: string) =>
     ["requests", "title", accountId, kind, providerId] as const,
 };
@@ -346,18 +348,34 @@ const firstDiscoverPage: string | undefined = undefined;
 // each title is the caller's own, so the key carries the account.
 export function useDiscover(
   accountId: string,
-  list: DiscoverList,
+  source: DiscoverSource,
   enabled: boolean,
 ) {
   const api = useRequestsApi();
   return useInfiniteQuery({
-    queryKey: requestsKeys.discover(accountId, list),
-    queryFn: ({ pageParam, signal }) => api.discover(list, pageParam, signal),
+    queryKey: requestsKeys.discover(accountId, source),
+    queryFn: ({ pageParam, signal }) => api.discover(source, pageParam, signal),
     initialPageParam: firstDiscoverPage,
     getNextPageParam: (page: MetadataDiscoverResponse) =>
       page.next_cursor === "" ? undefined : page.next_cursor,
     enabled,
     staleTime: 5 * 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+// TMDB's genres change rarely; the server caches them for a day.
+export function useGenres(
+  accountId: string,
+  kind: MediaKind,
+  enabled: boolean,
+) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.genres(accountId, kind),
+    queryFn: ({ signal }) => api.genres(kind, signal),
+    enabled,
+    staleTime: 60 * 60_000,
     meta: { sessionScoped: true },
   });
 }

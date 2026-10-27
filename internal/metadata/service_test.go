@@ -301,6 +301,21 @@ func TestDiscoverCachesProviderPageAndIsolatesCallerState(t *testing.T) {
 	}
 }
 
+func TestDiscoverCachesEachFilterSeparately(t *testing.T) {
+	provider := &serviceTestProvider{}
+	service := newCachingServiceTestService(t, provider)
+	const account = "11111111-1111-4111-8111-111111111111"
+	for _, filter := range []int{28, 28, 35} {
+		input := core.MetadataDiscover{List: core.MetadataMoviesGenre, Page: 1, FilterID: filter}
+		if _, err := service.Discover(t.Context(), account, input); err != nil {
+			t.Fatalf("Discover(genre %d) error = %v", filter, err)
+		}
+	}
+	if provider.discoverCalls.Load() != 2 {
+		t.Fatalf("discovery provider calls = %d, want one per genre", provider.discoverCalls.Load())
+	}
+}
+
 func TestGenresCachesProviderList(t *testing.T) {
 	provider := &serviceTestProvider{}
 	store := &serviceTestStore{record: core.MetadataProviderRecord{

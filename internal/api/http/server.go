@@ -206,6 +206,7 @@ type Server struct {
 	exclusions             exclusionManager
 	imports                importManager
 	catalog                catalogReader
+	recentlyAdded          recentlyAddedReader
 	statsReader            core.StatsReader
 	metadataReader         metadataReader
 	metadataDiscovery      metadataDiscoveryReader
@@ -273,6 +274,8 @@ type Deps struct {
 	Imports importManager
 	// Catalog supplies library sync commands and type-agnostic reads.
 	Catalog catalogReader
+	// RecentlyAdded supplies the newest movies and series across media servers.
+	RecentlyAdded recentlyAddedReader
 	// StatsReader supplies cached statistics dashboard reports.
 	StatsReader core.StatsReader
 	// MetadataReader supplies provider-backed search and detail reads.
@@ -424,6 +427,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		exclusions:             deps.Exclusions,
 		imports:                deps.Imports,
 		catalog:                deps.Catalog,
+		recentlyAdded:          deps.RecentlyAdded,
 		statsReader:            deps.StatsReader,
 		metadataReader:         deps.MetadataReader,
 		metadataDiscovery:      deps.MetadataDiscovery,

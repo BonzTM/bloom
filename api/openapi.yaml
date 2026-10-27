@@ -1445,6 +1445,25 @@ paths:
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/library/recently-added:
+    get:
+      tags: [catalog]
+      operationId: listRecentlyAddedTitles
+      summary: List the newest movies and series in the synced library catalog.
+      description: >-
+        Active catalog movies and series across every media server, newest first by the media
+        server's creation time. Libraries an operator excluded are left out. Artwork comes from
+        the media-server item image route.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: limit, in: query, description: "Titles to return; defaults to 20.", schema: { type: integer, minimum: 1, maximum: 40 } }
+      responses:
+        "200": { description: The newest titles., content: { application/json: { schema: { $ref: "#/components/schemas/RecentlyAddedResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/metadata/discover/trending:
     get:
       tags: [metadata]
@@ -1514,6 +1533,78 @@ paths:
       parameters: [{ $ref: "#/components/parameters/MetadataCursor" }]
       responses:
         "200": { description: On-the-air series with the caller's request state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataDiscoverResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/discover/movies/genres/{id}:
+    get:
+      tags: [metadata]
+      operationId: discoverMoviesByGenre
+      description: Popular movies in one TMDB genre, from TMDB's movie discovery sorted by popularity without adult titles.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, description: Canonical decimal TMDB genre identifier., schema: { type: string, pattern: "^[1-9][0-9]{0,9}$" } }
+        - { $ref: "#/components/parameters/MetadataCursor" }
+      responses:
+        "200": { description: Movies in the genre with the caller's request state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataDiscoverResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/discover/series/genres/{id}:
+    get:
+      tags: [metadata]
+      operationId: discoverSeriesByGenre
+      description: Popular series in one TMDB genre, from TMDB's TV discovery sorted by popularity without adult titles.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, description: Canonical decimal TMDB genre identifier., schema: { type: string, pattern: "^[1-9][0-9]{0,9}$" } }
+        - { $ref: "#/components/parameters/MetadataCursor" }
+      responses:
+        "200": { description: Series in the genre with the caller's request state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataDiscoverResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/discover/movies/studios/{id}:
+    get:
+      tags: [metadata]
+      operationId: discoverMoviesByStudio
+      description: Popular movies from one TMDB production company, sorted by popularity without adult titles.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, description: Canonical decimal TMDB production company identifier., schema: { type: string, pattern: "^[1-9][0-9]{0,9}$" } }
+        - { $ref: "#/components/parameters/MetadataCursor" }
+      responses:
+        "200": { description: Movies from the studio with the caller's request state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataDiscoverResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/discover/series/networks/{id}:
+    get:
+      tags: [metadata]
+      operationId: discoverSeriesByNetwork
+      description: Popular series from one TMDB network, sorted by popularity without adult titles.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, description: Canonical decimal TMDB network identifier., schema: { type: string, pattern: "^[1-9][0-9]{0,9}$" } }
+        - { $ref: "#/components/parameters/MetadataCursor" }
+      responses:
+        "200": { description: Series from the network with the caller's request state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataDiscoverResponse" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -3227,6 +3318,26 @@ components:
       properties:
         id: { type: integer, minimum: 1 }
         name: { type: string, minLength: 1, x-max-bytes: 100 }
+    RecentlyAddedTitle:
+      type: object
+      required: [media_server_id, item_id, kind, title, year, added_at]
+      additionalProperties: false
+      properties:
+        media_server_id: { type: string, format: uuid }
+        item_id: { type: string, minLength: 1, maxLength: 128 }
+        kind: { $ref: "#/components/schemas/MediaKind" }
+        title: { type: string, minLength: 1, maxLength: 500 }
+        year: { type: integer, minimum: 0, maximum: 9999, description: "Production year, or 0 when the media server has none." }
+        added_at: { type: string, format: date-time }
+    RecentlyAddedResponse:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 40
+          items: { $ref: "#/components/schemas/RecentlyAddedTitle" }
     MetadataGenresResponse:
       type: object
       required: [items]

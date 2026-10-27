@@ -23,7 +23,6 @@ async function signInFromLoginPage(user: ReturnType<typeof userEvent.setup>) {
 
 // Every area that needs a permission this test's accounts lack.
 const SIGNED_IN_AREAS = [
-  "Discover",
   "Requests",
   "Playback",
   "Statistics",

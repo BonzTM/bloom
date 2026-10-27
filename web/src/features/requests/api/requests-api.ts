@@ -18,8 +18,9 @@ import {
 import {
   createMediaRequestSchema,
   discoverCursorSchema,
-  discoverListSchema,
+  discoverSourcePath,
   metadataDiscoverResponseSchema,
+  metadataGenresResponseSchema,
   metadataSearchResponseSchema,
   metadataSeriesSchema,
   metadataTitleDetailSchema,
@@ -29,8 +30,9 @@ import {
   type MetadataSeries,
   type MetadataTitle,
   type MetadataTitleDetail,
-  type DiscoverList,
+  type DiscoverSource,
   type MetadataDiscoverResponse,
+  type MetadataGenre,
 } from "./metadata-schemas.js";
 import {
   mediaKindSchema,
@@ -190,7 +192,7 @@ export class RequestsApi {
   // One page of a discover row; `cursor` is the previous page's
   // `next_cursor`, omitted for the first page.
   discover(
-    list: DiscoverList,
+    source: DiscoverSource,
     cursor: string | undefined,
     signal: AbortSignal,
   ): Promise<MetadataDiscoverResponse> {
@@ -200,10 +202,22 @@ export class RequestsApi {
     }
     const query = params.size === 0 ? "" : `?${params.toString()}`;
     return this.#client.requestJson(
-      `${METADATA_PATH}/discover/${discoverListSchema.parse(list)}${query}`,
+      `${METADATA_PATH}/discover/${discoverSourcePath(source)}${query}`,
       metadataDiscoverResponseSchema,
       { signal },
     );
+  }
+
+  // TMDB's genres for one kind, for the home page's genre tiles.
+  genres(kind: MediaKind, signal: AbortSignal): Promise<MetadataGenre[]> {
+    const params = new URLSearchParams({ kind: mediaKindSchema.parse(kind) });
+    return this.#client
+      .requestJson(
+        `${METADATA_PATH}/genres?${params.toString()}`,
+        metadataGenresResponseSchema,
+        { signal },
+      )
+      .then((response) => response.items);
   }
 
   movie(providerId: string, signal: AbortSignal): Promise<MetadataTitleDetail> {

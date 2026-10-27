@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,6 +76,62 @@ func TestClientDiscoverLists(t *testing.T) {
 			t.Fatalf("Discover(%s) backdrop = %q", list, page.Items[0].BackdropPath)
 		}
 	}
+}
+
+func TestClientDiscoverFilteredLists(t *testing.T) {
+	tests := []struct {
+		list      core.MetadataDiscoverList
+		path      string
+		filterKey string
+		kind      core.MediaKind
+	}{
+		{list: core.MetadataMoviesGenre, path: "/3/discover/movie", filterKey: "with_genres", kind: core.MediaKindMovie},
+		{list: core.MetadataMoviesStudio, path: "/3/discover/movie", filterKey: "with_companies", kind: core.MediaKindMovie},
+		{list: core.MetadataSeriesGenre, path: "/3/discover/tv", filterKey: "with_genres", kind: core.MediaKindSeries},
+		{list: core.MetadataSeriesNetwork, path: "/3/discover/tv", filterKey: "with_networks", kind: core.MediaKindSeries},
+	}
+	for _, testCase := range tests {
+		t.Run(string(testCase.list), func(t *testing.T) {
+			var query url.Values
+			client := newRecordingDiscoverClient(t, testCase.path, &query)
+			page, err := client.Discover(t.Context(), core.MetadataDiscover{List: testCase.list, Page: 2, FilterID: 213})
+			if err != nil || len(page.Items) != 1 || page.Items[0].Kind != testCase.kind {
+				t.Fatalf("Discover(%s) = %+v, %v", testCase.list, page, err)
+			}
+			want := url.Values{
+				"page": {"2"}, "sort_by": {"popularity.desc"}, "include_adult": {"false"}, testCase.filterKey: {"213"},
+			}
+			if query.Encode() != want.Encode() {
+				t.Fatalf("Discover(%s) query = %q, want %q", testCase.list, query.Encode(), want.Encode())
+			}
+		})
+	}
+}
+
+func newRecordingDiscoverClient(t *testing.T, path string, query *url.Values) *Client {
+	t.Helper()
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != path {
+			t.Errorf("path = %q, want %q", r.URL.Path, path)
+		}
+		*query = r.URL.Query()
+		body := discoverMovieFixture
+		if path == "/3/discover/tv" {
+			body = discoverSeriesFixture
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(body)), Request: r,
+		}, nil
+	})
+	clock := testutil.NewFakeClock(time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC))
+	client, err := New(testReadAccessToken, Dependencies{
+		BaseURL: "https://tmdb.test", Clock: clock, HTTPClient: &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return client
 }
 
 func TestClientAcceptsRealShapedResponses(t *testing.T) {

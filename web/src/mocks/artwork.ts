@@ -35,8 +35,24 @@ function artwork(seed: string, wide: boolean): HttpResponse<string> {
   });
 }
 
+// Studio and network logos are white wordmarks on a clear background, the
+// way TMDB's duotone filter returns them.
+function logo(seed: string): HttpResponse<string> {
+  const label = seed
+    .replace(/\.png$/i, "")
+    .replace(/[^a-z0-9]+/gi, "")
+    .slice(0, 6)
+    .toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="200" viewBox="0 0 500 200"><text x="50%" y="62%" fill="#ffffff" font-family="sans-serif" font-size="88" font-weight="800" text-anchor="middle">${label}</text></svg>`;
+  return new HttpResponse(svg, {
+    headers: { "Content-Type": "image/svg+xml" },
+  });
+}
+
 export const artworkHandlers = [
   http.get("https://image.tmdb.org/t/p/:size/:file", ({ params }) =>
-    artwork(String(params.file), params.size === "w1280"),
+    String(params.size).includes("_filter(")
+      ? logo(String(params.file))
+      : artwork(String(params.file), params.size === "w1280"),
   ),
 ];

@@ -83,9 +83,39 @@ func (c *Client) callDiscover(ctx context.Context, input core.MetadataDiscover) 
 		return c.api.MovieUpcomingList(ctx, &tmdbapi.MovieUpcomingListParams{Page: &page})
 	case core.MetadataSeriesUpcoming:
 		return c.api.TvSeriesOnTheAirList(ctx, &tmdbapi.TvSeriesOnTheAirListParams{Page: &page})
+	case core.MetadataMoviesGenre, core.MetadataMoviesStudio:
+		return c.api.DiscoverMovie(ctx, discoverMovieParams(input, page))
+	case core.MetadataSeriesGenre, core.MetadataSeriesNetwork:
+		return c.api.DiscoverTv(ctx, discoverSeriesParams(input, page))
 	default:
 		return nil, core.ErrInvalidArgument
 	}
+}
+
+// Filtered rows sort by popularity and leave adult titles out, the way
+// TMDB's own popular lists do.
+func discoverMovieParams(input core.MetadataDiscover, page int32) *tmdbapi.DiscoverMovieParams {
+	sort, adult, filter := tmdbapi.DiscoverMovieParamsSortByPopularityDesc, false, strconv.Itoa(input.FilterID)
+	params := &tmdbapi.DiscoverMovieParams{Page: &page, SortBy: &sort, IncludeAdult: &adult}
+	if input.List == core.MetadataMoviesStudio {
+		params.WithCompanies = &filter
+	} else {
+		params.WithGenres = &filter
+	}
+	return params
+}
+
+func discoverSeriesParams(input core.MetadataDiscover, page int32) *tmdbapi.DiscoverTvParams {
+	sort, adult := tmdbapi.DiscoverTvParamsSortByPopularityDesc, false
+	params := &tmdbapi.DiscoverTvParams{Page: &page, SortBy: &sort, IncludeAdult: &adult}
+	if input.List == core.MetadataSeriesNetwork {
+		network := int32(input.FilterID) //nolint:gosec // ValidateMetadataDiscover bounds this value below MaxInt32.
+		params.WithNetworks = &network
+	} else {
+		filter := strconv.Itoa(input.FilterID)
+		params.WithGenres = &filter
+	}
+	return params
 }
 
 func withPage(page int32) tmdbapi.RequestEditorFn {
@@ -152,9 +182,9 @@ func mapDiscoverTitle(raw rawDiscoverTitle, list core.MetadataDiscoverList) (cor
 
 func discoverKind(list core.MetadataDiscoverList, mediaType string) (core.MediaKind, bool) {
 	switch list {
-	case core.MetadataMoviesPopular, core.MetadataMoviesUpcoming:
+	case core.MetadataMoviesPopular, core.MetadataMoviesUpcoming, core.MetadataMoviesGenre, core.MetadataMoviesStudio:
 		return core.MediaKindMovie, true
-	case core.MetadataSeriesPopular, core.MetadataSeriesUpcoming:
+	case core.MetadataSeriesPopular, core.MetadataSeriesUpcoming, core.MetadataSeriesGenre, core.MetadataSeriesNetwork:
 		return core.MediaKindSeries, true
 	case core.MetadataTrending:
 		return resultKind(mediaType)

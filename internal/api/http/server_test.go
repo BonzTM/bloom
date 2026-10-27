@@ -252,7 +252,7 @@ func expectedAPIRoutes() []apiRoute {
 		{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
-		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn, core.PermissionRequestsCreate}, authRequired: true},
 		{method: http.MethodPost, path: "/api/v1/media-servers/{id}/catalog/sync", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/catalog", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/items", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true},
@@ -315,12 +315,17 @@ func expectedAPIRoutes() []apiRoute {
 
 func expectedRequestAPIRoutes() []apiRoute {
 	return []apiRoute{
+		{method: http.MethodGet, path: "/api/v1/library/recently-added", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/discover/trending", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/discover/series/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/discover/series/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/genres/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/series/genres/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/studios/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
+		{method: http.MethodGet, path: "/api/v1/metadata/discover/series/networks/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/genres", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},
 		{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true},

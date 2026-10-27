@@ -4,6 +4,7 @@ import {
   metadataSeriesSchema,
   providerIdSchema,
   searchQuerySchema,
+  discoverSourcePath,
 } from "./metadata-schemas.js";
 
 describe("createMediaRequestSchema", () => {
@@ -87,5 +88,29 @@ describe("metadataSeriesSchema", () => {
       seasons: [{ number: 0, name: "Specials", episode_count: 2 }],
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("discoverSourcePath", () => {
+  it("passes curated and filtered lists through", () => {
+    expect(discoverSourcePath("movies/popular")).toBe("movies/popular");
+    expect(discoverSourcePath({ list: "series/networks", id: 213 })).toBe(
+      "series/networks/213",
+    );
+  });
+
+  it("refuses anything the server would not accept", () => {
+    expect(() =>
+      discoverSourcePath({ list: "movies/genres", id: 0 }),
+    ).toThrow();
+    expect(() =>
+      discoverSourcePath({ list: "movies/genres", id: 1.5 }),
+    ).toThrow();
+    expect(() =>
+      discoverSourcePath({ list: "movies/genres", id: 1_000_000_001 }),
+    ).toThrow();
+    expect(() =>
+      discoverSourcePath("movies/../../admin" as "trending"),
+    ).toThrow();
   });
 });
