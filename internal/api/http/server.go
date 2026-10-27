@@ -122,8 +122,8 @@ type catalogReader interface {
 
 type metadataReader interface {
 	Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error)
-	Movie(context.Context, string) (core.MetadataTitle, error)
-	Series(context.Context, string, bool) (core.MetadataSeries, error)
+	MovieDetail(ctx context.Context, accountID, providerID string) (core.MetadataMovieDetail, error)
+	SeriesDetail(ctx context.Context, accountID, providerID string, includeSpecials bool) (core.MetadataSeriesDetail, error)
 }
 
 type metadataDiscoveryReader interface {

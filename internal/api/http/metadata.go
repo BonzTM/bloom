@@ -28,7 +28,8 @@ type metadataSearchResponse struct {
 
 type metadataTitleDetailResponse struct {
 	metadataTitleResponse
-	Subscribed bool `json:"subscribed"`
+	Subscribed bool                    `json:"subscribed"`
+	Details    metadataDetailsResponse `json:"details"`
 }
 
 type metadataSeasonResponse struct {
@@ -42,6 +43,7 @@ type metadataSeriesResponse struct {
 	metadataTitleResponse
 	Subscribed bool                     `json:"subscribed"`
 	Seasons    []metadataSeasonResponse `json:"seasons"`
+	Details    metadataDetailsResponse  `json:"details"`
 }
 
 type (
@@ -83,37 +85,40 @@ func (s *Server) handleMetadataMovie(w http.ResponseWriter, r *http.Request) {
 		s.writeRequestError(w, r, core.ErrInvalidArgument)
 		return
 	}
-	title, err := s.metadataReader.Movie(r.Context(), id)
+	account, ok := accountFrom(r.Context())
+	if !ok {
+		writeError(w, r, s.logger, errAuthenticationRequired)
+		return
+	}
+	movie, err := s.metadataReader.MovieDetail(r.Context(), account.ID, id)
 	if err != nil {
 		writeError(w, r, s.logger, err)
 		return
 	}
-	subscribed, err := s.titleSubscribed(r, title.Provider, title.ProviderID)
+	subscribed, err := s.titleSubscribed(r, movie.Provider, movie.ProviderID)
 	if err != nil {
 		writeError(w, r, s.logger, err)
 		return
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, metadataTitleDetailResponse{
-		metadataTitleResponse: metadataTitleDTO(title), Subscribed: subscribed,
+		metadataTitleResponse: metadataTitleDTO(movie.MetadataTitle), Subscribed: subscribed,
+		Details: metadataDetailsDTO(movie.Details, core.MediaKindMovie),
 	})
 }
 
 func (s *Server) handleMetadataSeries(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if core.ValidateProviderID(id) != nil {
+	includeSpecials, err := parseIncludeSpecials(r.URL.Query().Get("include_specials"))
+	if core.ValidateProviderID(id) != nil || err != nil {
 		s.writeRequestError(w, r, core.ErrInvalidArgument)
 		return
 	}
-	includeSpecials := false
-	if raw := r.URL.Query().Get("include_specials"); raw != "" {
-		var err error
-		includeSpecials, err = strconv.ParseBool(raw)
-		if err != nil {
-			s.writeRequestError(w, r, core.ErrInvalidArgument)
-			return
-		}
+	account, ok := accountFrom(r.Context())
+	if !ok {
+		writeError(w, r, s.logger, errAuthenticationRequired)
+		return
 	}
-	series, err := s.metadataReader.Series(r.Context(), id, includeSpecials)
+	series, err := s.metadataReader.SeriesDetail(r.Context(), account.ID, id, includeSpecials)
 	if err != nil {
 		writeError(w, r, s.logger, err)
 		return
@@ -123,14 +128,23 @@ func (s *Server) handleMetadataSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, s.logger, err)
 		return
 	}
-	response := metadataSeriesResponse{
+	writeJSON(w, r, s.logger, http.StatusOK, metadataSeriesResponse{
 		metadataTitleResponse: metadataTitleDTO(series.MetadataTitle), Subscribed: subscribed,
-		Seasons: make([]metadataSeasonResponse, 0, len(series.Seasons)),
+		Seasons: mapDTOs(series.Seasons, metadataSeasonDTO), Details: metadataDetailsDTO(series.Details, core.MediaKindSeries),
+	})
+}
+
+func parseIncludeSpecials(raw string) (bool, error) {
+	if raw == "" {
+		return false, nil
 	}
-	for _, season := range series.Seasons {
-		response.Seasons = append(response.Seasons, metadataSeasonResponse{Number: season.Number, Name: season.Name, EpisodeCount: season.EpisodeCount, AirDate: season.AirDate})
+	return strconv.ParseBool(raw)
+}
+
+func metadataSeasonDTO(season core.MetadataSeason) metadataSeasonResponse {
+	return metadataSeasonResponse{
+		Number: season.Number, Name: season.Name, EpisodeCount: season.EpisodeCount, AirDate: season.AirDate,
 	}
-	writeJSON(w, r, s.logger, http.StatusOK, response)
 }
 
 func (s *Server) titleSubscribed(

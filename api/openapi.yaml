@@ -1561,7 +1561,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: "#/components/parameters/ProviderID" }]
       responses:
-        "200": { description: Movie details with the signed-in account's subscription state., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataTitleDetail" } } } }
+        "200": { description: Movie details with the signed-in account's subscription state and rich detail., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataTitleDetail" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1579,7 +1579,7 @@ paths:
         - { $ref: "#/components/parameters/ProviderID" }
         - { name: include_specials, in: query, schema: { type: boolean, default: false } }
       responses:
-        "200": { description: Series details with seasons., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataSeries" } } } }
+        "200": { description: Series details with seasons and rich detail., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataSeries" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3172,7 +3172,7 @@ components:
         backdrop_path: { type: string, x-max-bytes: 500 }
     MetadataTitleDetail:
       type: object
-      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, subscribed]
+      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, subscribed, details]
       additionalProperties: false
       properties:
         kind: { $ref: "#/components/schemas/MediaKind" }
@@ -3184,6 +3184,7 @@ components:
         poster_path: { type: string, x-max-bytes: 500 }
         backdrop_path: { type: string, x-max-bytes: 500 }
         subscribed: { type: boolean }
+        details: { $ref: "#/components/schemas/MetadataDetails" }
     MetadataSearchResponse:
       type: object
       required: [items]
@@ -3247,7 +3248,7 @@ components:
         air_date: { type: string, format: date-time }
     MetadataSeries:
       type: object
-      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, subscribed, seasons]
+      required: [kind, provider, provider_id, title, year, overview, poster_path, backdrop_path, subscribed, seasons, details]
       additionalProperties: false
       properties:
         kind: { $ref: "#/components/schemas/MediaKind" }
@@ -3263,6 +3264,99 @@ components:
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/MetadataSeason" }
+        details: { $ref: "#/components/schemas/MetadataDetails" }
+    MetadataDetails:
+      type: object
+      description: >-
+        The rich detail a title page shows, from one bounded TMDB call. Certification,
+        release dates, and watch providers are for the US. A movie has no `series`;
+        a series has zero budget, revenue, and release dates.
+      required: [tagline, status, certification, runtime_minutes, vote_average, vote_count, original_language, imdb_id, trailer_youtube_key, budget, revenue, genres, keywords, production_countries, studios, release_dates, watch_providers, cast, crew, recommendations, similar]
+      additionalProperties: false
+      properties:
+        tagline: { type: string, x-max-bytes: 500 }
+        status: { type: string, x-max-bytes: 100 }
+        certification: { type: string, x-max-bytes: 20 }
+        runtime_minutes: { type: integer, minimum: 0, maximum: 10000, description: "Movie runtime, or a series' typical episode runtime; zero when unknown." }
+        vote_average: { type: number, minimum: 0, maximum: 10 }
+        vote_count: { type: integer, minimum: 0 }
+        original_language: { type: string, pattern: "^([a-z]{2,3})?$", description: "ISO 639-1 code, or empty." }
+        imdb_id: { type: string, pattern: "^(tt[0-9]{1,12})?$" }
+        trailer_youtube_key: { type: string, pattern: "^[A-Za-z0-9_-]{0,32}$", description: "YouTube video key of the best trailer, or empty." }
+        budget: { type: integer, format: int64, minimum: 0 }
+        revenue: { type: integer, format: int64, minimum: 0 }
+        genres: { type: array, maxItems: 10, items: { type: string, minLength: 1, x-max-bytes: 100 } }
+        keywords: { type: array, maxItems: 40, items: { type: string, minLength: 1, x-max-bytes: 500 } }
+        production_countries: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/MetadataCountry" } }
+        studios: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/MetadataCompany" } }
+        release_dates: { type: array, maxItems: 6, items: { $ref: "#/components/schemas/MetadataReleaseDate" } }
+        watch_providers: { type: array, maxItems: 12, items: { $ref: "#/components/schemas/MetadataWatchProvider" } }
+        cast: { type: array, maxItems: 30, items: { $ref: "#/components/schemas/MetadataCredit" } }
+        crew: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/MetadataCredit" } }
+        recommendations: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/MetadataDiscoverTitle" } }
+        similar: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/MetadataDiscoverTitle" } }
+        series: { $ref: "#/components/schemas/MetadataSeriesFacts" }
+    MetadataCredit:
+      type: object
+      required: [person_id, name, role, profile_path]
+      additionalProperties: false
+      properties:
+        person_id: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, x-max-bytes: 500 }
+        role: { type: string, x-max-bytes: 500, description: "The character for cast, the job for crew." }
+        profile_path: { type: string, x-max-bytes: 500 }
+    MetadataCompany:
+      type: object
+      required: [id, name, logo_path]
+      additionalProperties: false
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, x-max-bytes: 500 }
+        logo_path: { type: string, x-max-bytes: 500 }
+    MetadataCountry:
+      type: object
+      required: [code, name]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z]{2}$" }
+        name: { type: string, minLength: 1, x-max-bytes: 500 }
+    MetadataReleaseDate:
+      type: object
+      required: [type, date]
+      additionalProperties: false
+      properties:
+        type: { type: string, enum: [premiere, theatrical_limited, theatrical, digital, physical, tv] }
+        date: { type: string, format: date-time }
+    MetadataWatchProvider:
+      type: object
+      required: [id, name, logo_path]
+      additionalProperties: false
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string, minLength: 1, x-max-bytes: 500 }
+        logo_path: { type: string, x-max-bytes: 500 }
+    MetadataSeriesFacts:
+      type: object
+      required: [creators, networks, season_count, episode_count, in_production]
+      additionalProperties: false
+      properties:
+        creators: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/MetadataCredit" } }
+        networks: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/MetadataCompany" } }
+        first_air_date: { type: string, format: date-time }
+        last_air_date: { type: string, format: date-time }
+        next_episode: { $ref: "#/components/schemas/MetadataEpisode" }
+        season_count: { type: integer, minimum: 0, maximum: 999 }
+        episode_count: { type: integer, minimum: 0, maximum: 99999 }
+        in_production: { type: boolean }
+    MetadataEpisode:
+      type: object
+      required: [season, episode, name]
+      additionalProperties: false
+      properties:
+        season: { type: integer, minimum: 0, maximum: 999 }
+        episode: { type: integer, minimum: 0, maximum: 99999 }
+        name: { type: string, x-max-bytes: 500 }
+        air_date: { type: string, format: date-time }
     MetadataKeyRequest:
       type: object
       required: [api_key]

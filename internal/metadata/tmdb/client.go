@@ -323,22 +323,14 @@ func (c *Client) Movie(ctx context.Context, providerID string) (core.MetadataTit
 	if err != nil {
 		return core.MetadataTitle{}, err
 	}
-	ctx, cancel := c.operationContext(ctx)
-	defer cancel()
-	started := c.clock.Now()
-	httpResponse, callErr := c.api.MovieDetails(ctx, id, nil) //nolint:bodyclose // readProviderResponse closes every returned body.
-	response, err := readProviderResponse(httpResponse, callErr)
-	status := response.StatusCode()
+	fetched, err := c.fetchTitle(ctx, "movie", func(ctx context.Context) (*http.Response, error) {
+		return c.api.MovieDetails(ctx, id, nil)
+	})
 	if err != nil {
-		c.observe("movie", started, status, err)
-		return core.MetadataTitle{}, classifyCallError("movie", err)
+		return core.MetadataTitle{}, err
 	}
-	if statusErr := validateStatus("movie", response.StatusCode()); statusErr != nil {
-		c.observe("movie", started, status, statusErr)
-		return core.MetadataTitle{}, statusErr
-	}
-	title, err := decodeMovieResponse(response.GetBody(), status)
-	c.observe("movie", started, status, err)
+	title, err := decodeMovieResponse(fetched.body, fetched.status)
+	c.observe("movie", fetched.started, fetched.status, err)
 	return title, err
 }
 
@@ -348,24 +340,45 @@ func (c *Client) Series(ctx context.Context, providerID string, includeSpecials 
 	if err != nil {
 		return core.MetadataSeries{}, err
 	}
+	fetched, err := c.fetchTitle(ctx, "series", func(ctx context.Context) (*http.Response, error) {
+		return c.api.TvSeriesDetails(ctx, id, nil)
+	})
+	if err != nil {
+		return core.MetadataSeries{}, err
+	}
+	series, skipped, err := decodeSeriesResponse(fetched.body, fetched.status, includeSpecials)
+	c.observe("series", fetched.started, fetched.status, err)
+	c.observeSkipped("series", skipped)
+	return series, err
+}
+
+// fetchedTitle is one successful title response awaiting decoding.
+type fetchedTitle struct {
+	body    []byte
+	status  int
+	started time.Time
+}
+
+// fetchTitle runs one bounded title call and validates its status. A failure
+// is observed here; a success is observed by the caller once decoded.
+func (c *Client) fetchTitle(
+	ctx context.Context, operation string, call func(context.Context) (*http.Response, error),
+) (fetchedTitle, error) {
 	ctx, cancel := c.operationContext(ctx)
 	defer cancel()
 	started := c.clock.Now()
-	httpResponse, callErr := c.api.TvSeriesDetails(ctx, id, nil) //nolint:bodyclose // readProviderResponse closes every returned body.
+	httpResponse, callErr := call(ctx) //nolint:bodyclose // readProviderResponse closes every returned body.
 	response, err := readProviderResponse(httpResponse, callErr)
 	status := response.StatusCode()
 	if err != nil {
-		c.observe("series", started, status, err)
-		return core.MetadataSeries{}, classifyCallError("series", err)
+		c.observe(operation, started, status, err)
+		return fetchedTitle{}, classifyCallError(operation, err)
 	}
-	if statusErr := validateStatus("series", response.StatusCode()); statusErr != nil {
-		c.observe("series", started, status, statusErr)
-		return core.MetadataSeries{}, statusErr
+	if statusErr := validateStatus(operation, status); statusErr != nil {
+		c.observe(operation, started, status, statusErr)
+		return fetchedTitle{}, statusErr
 	}
-	series, skipped, err := decodeSeriesResponse(response.GetBody(), status, includeSpecials)
-	c.observe("series", started, status, err)
-	c.observeSkipped("series", skipped)
-	return series, err
+	return fetchedTitle{body: response.GetBody(), status: status, started: started}, nil
 }
 
 func (c *Client) observe(operation string, started time.Time, status int, err error) {
