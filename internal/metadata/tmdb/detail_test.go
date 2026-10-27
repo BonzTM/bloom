@@ -13,7 +13,7 @@ import (
 	"github.com/BonzTM/bloom/internal/testutil"
 )
 
-// Trimmed from a real /3/movie/{id}?append_to_response=... answer, with one
+// Shaped like a /3/movie/{id}?append_to_response=... answer, with one
 // malformed item in each list to prove it is dropped and counted.
 const movieDetailFixture = `{"id":1084242,"title":"The Dog Stars","release_date":"2026-08-28",
 "overview":"After the pandemic.","poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg",
