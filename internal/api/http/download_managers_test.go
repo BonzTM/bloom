@@ -110,6 +110,45 @@ func TestDownloadManagerRoutesAndCredentialSecrecy(t *testing.T) {
 	}
 }
 
+func TestCreateDownloadManagerResponseMatchesContract(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	create := h.requestWithContentType(t, http.MethodPost, "/api/v1/download-managers",
+		`{"kind":"radarr","name":"Main Radarr","base_url":"https://radarr.example.test","api_key":"key","allow_insecure":false}`,
+		cookie, "application/json")
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", create.Code, create.Body.String())
+	}
+	var body struct {
+		Info struct {
+			Name         string                     `json:"name"`
+			Version      string                     `json:"version"`
+			Capabilities map[string]json.RawMessage `json:"capabilities"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if len(body.Info.Capabilities) != 1 || string(body.Info.Capabilities["kinds"]) != `["movie"]` {
+		t.Fatalf("capabilities = %s, want only kinds [\"movie\"]", create.Body.String())
+	}
+}
+
+func TestDownloadManagerOptionsResponseMatchesContract(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	options := h.request(t, http.MethodGet,
+		"/api/v1/download-managers/33333333-3333-4333-8333-333333333333/options", "", cookie)
+	if options.Code != http.StatusOK {
+		t.Fatalf("options = %d %s", options.Code, options.Body.String())
+	}
+	want := `{"quality_profiles":[{"id":"1","name":"HD"}],"root_folders":[{"id":"/movies","name":"/movies"}],` +
+		`"tags":[{"id":"2","name":"requested"}]}`
+	if got := strings.TrimSpace(options.Body.String()); got != want {
+		t.Fatalf("options body = %s, want %s", got, want)
+	}
+}
+
 func TestDownloadManagerRoutesRejectInvalidAndUpstreamFailures(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))

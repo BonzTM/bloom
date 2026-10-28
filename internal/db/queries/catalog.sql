@@ -117,12 +117,14 @@ WHERE library_item_genres.media_server_id = sqlc.arg(target_media_server_id)
       SELECT li.item_id FROM library_items li
       WHERE li.media_server_id = sqlc.arg(target_media_server_id) AND li.archived = TRUE);
 
+-- The library pair is left to BackfillWatchLibrary, which writes ID and name
+-- together; a watch with only one of them fails playback validation.
 -- name: BackfillWatchCatalogItem :execrows
 UPDATE watches
 SET item_name = sqlc.arg(item_name), series_id = sqlc.narg(series_id),
-    series_name = sqlc.arg(series_name), library_id = sqlc.arg(library_id)
+    series_name = sqlc.arg(series_name)
 WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id)
-  AND (series_id IS NULL OR series_id = '' OR library_id = '');
+  AND (series_id IS NULL OR series_id = '');
 
 -- name: RebuildLibraryItemRollup :exec
 UPDATE library_items
