@@ -17,7 +17,7 @@ import (
 type ratingsManagerStub struct {
 	ratings  core.TitleRatings
 	err      error
-	imdbIDs  []string
+	titles   []core.RatedTitle
 	key      string
 	removed  bool
 	present  bool
@@ -39,8 +39,8 @@ func (s *ratingsManagerStub) RemoveKey(context.Context) error {
 	return nil
 }
 
-func (s *ratingsManagerStub) Ratings(_ context.Context, imdbID string) (core.TitleRatings, error) {
-	s.imdbIDs = append(s.imdbIDs, imdbID)
+func (s *ratingsManagerStub) Ratings(_ context.Context, title core.RatedTitle) (core.TitleRatings, error) {
+	s.titles = append(s.titles, title)
 	return s.ratings, s.err
 }
 
@@ -76,29 +76,36 @@ func TestMovieRatingsReturnExactWireShape(t *testing.T) {
 	}
 	assertCompactJSON(t, recorder.Body.Bytes(), movieRatingsWire)
 	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/TitleRatings")
-	if len(manager.imdbIDs) != 1 || manager.imdbIDs[0] != "tt0133093" || reader.accountID != testRequestAccountID {
-		t.Fatalf("ratings read for %v by account %q", manager.imdbIDs, reader.accountID)
+	want := core.RatedTitle{Kind: core.MediaKindMovie, TMDBID: "603", IMDbID: "tt0133093", Title: "The Matrix"}
+	if len(manager.titles) != 1 || manager.titles[0] != want || reader.accountID != testRequestAccountID {
+		t.Fatalf("ratings read for %+v by account %q", manager.titles, reader.accountID)
 	}
 }
 
 func TestSeriesRatingsUseTheSeriesIMDbID(t *testing.T) {
-	reader := &metadataReaderStub{series: core.MetadataSeriesDetail{Details: core.MetadataDetails{IMDbID: "tt0944947"}}}
+	reader := &metadataReaderStub{series: core.MetadataSeriesDetail{
+		MetadataSeries: core.MetadataSeries{MetadataTitle: detailTestTitle(core.MediaKindSeries, "1399", "Game of Thrones")},
+		Details:        core.MetadataDetails{IMDbID: "tt0944947"},
+	}}
 	manager := &ratingsManagerStub{ratings: core.TitleRatings{
 		IMDb: &core.TitleRating{Score: 9.2, Votes: 2_400_000, Source: core.RatingSourceOMDb},
 	}}
 	recorder := serveRatings(t, reader, manager, "/api/v1/metadata/series/1399/ratings", "1399", (*Server).handleSeriesRatings)
 	assertCompactJSON(t, recorder.Body.Bytes(), `{"imdb":{"score":9.2,"votes":2400000,"source":"omdb"}}`)
-	if len(manager.imdbIDs) != 1 || manager.imdbIDs[0] != "tt0944947" {
-		t.Fatalf("ratings read for %v", manager.imdbIDs)
+	want := core.RatedTitle{Kind: core.MediaKindSeries, TMDBID: "1399", IMDbID: "tt0944947", Title: "Game of Thrones"}
+	if len(manager.titles) != 1 || manager.titles[0] != want {
+		t.Fatalf("ratings read for %+v", manager.titles)
 	}
 }
 
-func TestRatingsWithoutAnIMDbIDAreEmpty(t *testing.T) {
-	reader := &metadataReaderStub{movie: core.MetadataMovieDetail{Details: core.MetadataDetails{IMDbID: ""}}}
+func TestRatingsDropAnInvalidIMDbIDAndStillAsk(t *testing.T) {
+	reader := &metadataReaderStub{movie: core.MetadataMovieDetail{
+		MetadataTitle: detailTestTitle(core.MediaKindMovie, "7", "Film"), Details: core.MetadataDetails{IMDbID: "nm0000206"},
+	}}
 	manager := &ratingsManagerStub{}
 	recorder := serveRatings(t, reader, manager, "/api/v1/metadata/movies/7/ratings", "7", (*Server).handleMovieRatings)
-	if recorder.Code != http.StatusOK || len(manager.imdbIDs) != 0 {
-		t.Fatalf("status = %d, ratings calls = %v", recorder.Code, manager.imdbIDs)
+	if recorder.Code != http.StatusOK || len(manager.titles) != 1 || manager.titles[0].IMDbID != "" {
+		t.Fatalf("status = %d, ratings calls = %+v", recorder.Code, manager.titles)
 	}
 	assertCompactJSON(t, recorder.Body.Bytes(), `{}`)
 	assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/TitleRatings")

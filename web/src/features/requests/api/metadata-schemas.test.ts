@@ -222,6 +222,14 @@ describe("titleRatingsSchema", () => {
     expect(titleRatingsSchema.parse(full)).toEqual(full);
   });
 
+  it("accepts scores Radarr and Jellyfin keep", () => {
+    const owned = {
+      imdb: { score: 8.8, votes: 10, source: "radarr" },
+      rotten_tomatoes: { score: 90, votes: 0, source: "jellyfin" },
+    };
+    expect(titleRatingsSchema.parse(owned)).toEqual(owned);
+  });
+
   it("rejects scores off their scale and unknown sources", () => {
     const rating = { score: 8.7, votes: 10, source: "omdb" };
     expect(

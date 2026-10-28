@@ -239,7 +239,9 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	ratingsService, err := buildRatingsService(pool, cfg, metrics, deps.Clock, logger)
+	// Radarr and Jellyfin answer for titles the operator holds; OMDb fills in.
+	owned := []core.OwnedRatingsSource{downloadManagers, mediaServers}
+	ratingsService, err := buildRatingsService(pool, cfg, metrics, deps.Clock, owned, logger)
 	if err != nil {
 		return serviceWiring{}, err
 	}
@@ -723,7 +725,8 @@ func buildMetadataService(
 }
 
 func buildRatingsService(
-	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock, logger *slog.Logger,
+	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock,
+	owned []core.OwnedRatingsSource, logger *slog.Logger,
 ) (*ratings.Service, error) {
 	cipher, err := secrets.New(cfg.SecretKey.Bytes())
 	if err != nil {
@@ -734,7 +737,7 @@ func buildRatingsService(
 		return nil, fmt.Errorf("build ratings provider stores: %w", err)
 	}
 	factory := ratings.NewOMDbFactory(omdb.Dependencies{Metrics: metrics, Clock: clock})
-	service, err := ratings.NewService(reader, writer, cipher, factory, clock, logger)
+	service, err := ratings.NewService(reader, writer, cipher, factory, owned, clock, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build ratings service: %w", err)
 	}

@@ -1686,7 +1686,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: "#/components/parameters/ProviderID" }]
       responses:
-        "200": { description: "Outside scores for the movie. Empty when no OMDb key is stored or the movie has no IMDb ID.", content: { application/json: { schema: { $ref: "#/components/schemas/TitleRatings" } } } }
+        "200": { description: "Outside scores for the movie: Radarr's and Jellyfin's for a movie they hold, then OMDb for any score still missing. Empty when no source knows the movie.", content: { application/json: { schema: { $ref: "#/components/schemas/TitleRatings" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1702,7 +1702,7 @@ paths:
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: "#/components/parameters/ProviderID" }]
       responses:
-        "200": { description: "Outside scores for the series. Empty when no OMDb key is stored or the series has no IMDb ID.", content: { application/json: { schema: { $ref: "#/components/schemas/TitleRatings" } } } }
+        "200": { description: "Outside scores for the series: Jellyfin's critics score for a series it holds, then OMDb for any score still missing. Empty when no source knows the series.", content: { application/json: { schema: { $ref: "#/components/schemas/TitleRatings" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3583,7 +3583,7 @@ components:
       properties:
         score: { type: number, minimum: 0, maximum: 10 }
         votes: { type: integer, minimum: 0, maximum: 100000000 }
-        source: { type: string, enum: [omdb] }
+        source: { type: string, enum: [radarr, jellyfin, omdb], description: "Radarr and Jellyfin keep scores for titles they hold; OMDb fills the rest." }
     TitleRatingPercent:
       type: object
       required: [score, votes, source]
@@ -3592,7 +3592,7 @@ components:
       properties:
         score: { type: number, minimum: 0, maximum: 100 }
         votes: { type: integer, minimum: 0, maximum: 100000000 }
-        source: { type: string, enum: [omdb] }
+        source: { type: string, enum: [radarr, jellyfin, omdb], description: "Radarr and Jellyfin keep scores for titles they hold; OMDb fills the rest." }
     MetadataKeyPresence:
       type: object
       required: [configured]
