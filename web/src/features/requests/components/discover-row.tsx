@@ -94,22 +94,46 @@ function RowBody({ title, query }: DiscoverRowProps): ReactNode {
   );
 }
 
-function DiscoverCard({
+// One poster card, the way Seerr draws it: the kind in the top corner, the
+// caller's own request state in the other, and a check once it is available.
+export function DiscoverCard({
   item,
 }: Readonly<{ item: MetadataDiscoverTitle }>): ReactNode {
-  const badge = requestStateBadge(item.request_state);
   return (
     <Link to={titlePath(item)} className="poster-card discover-card">
       <span className="discover-card-art">
         <Poster posterPath={item.poster_path} title={item.title} size="w342" />
-        {badge === undefined ? null : (
-          <span className={`${badge.className} discover-card-state`}>
-            {badge.label}
-          </span>
-        )}
+        <span className="discover-card-kind" aria-hidden="true">
+          {kindLabel(item.kind)}
+        </span>
+        <RequestStateMark state={item.request_state} />
       </span>
       <span className="poster-card-title">{titleWithYear(item)}</span>
       <span className="poster-card-kind">{kindLabel(item.kind)}</span>
     </Link>
+  );
+}
+
+function RequestStateMark({
+  state,
+}: Readonly<{ state: MetadataDiscoverTitle["request_state"] }>): ReactNode {
+  const badge = requestStateBadge(state);
+  if (badge === undefined) {
+    return null;
+  }
+  if (state === "available") {
+    return (
+      <span className="discover-card-state discover-card-available">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="m6 12.5 4 4 8-9" />
+        </svg>
+        <span className="visually-hidden">{badge.label}</span>
+      </span>
+    );
+  }
+  return (
+    <span className={`${badge.className} discover-card-state`}>
+      {badge.label}
+    </span>
   );
 }

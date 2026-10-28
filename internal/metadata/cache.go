@@ -15,10 +15,12 @@ type cacheKey struct {
 }
 
 type cacheValue struct {
-	title  core.MetadataTitle
-	series core.MetadataSeries
-	page   core.MetadataPage
-	genres []core.MetadataGenre
+	title        core.MetadataTitle
+	series       core.MetadataSeries
+	page         core.MetadataPage
+	genres       []core.MetadataGenre
+	movie        core.MetadataMovieDetail
+	seriesDetail core.MetadataSeriesDetail
 }
 
 type cacheEntry struct {
@@ -125,5 +127,8 @@ func cloneCacheValue(value cacheValue) cacheValue {
 	value.series.Seasons = append([]core.MetadataSeason(nil), value.series.Seasons...)
 	value.page.Items = append([]core.MetadataTitle(nil), value.page.Items...)
 	value.genres = append([]core.MetadataGenre(nil), value.genres...)
+	value.movie.Details = cloneDetails(value.movie.Details)
+	value.seriesDetail.Seasons = append([]core.MetadataSeason(nil), value.seriesDetail.Seasons...)
+	value.seriesDetail.Details = cloneDetails(value.seriesDetail.Details)
 	return value
 }

@@ -1961,6 +1961,43 @@ progress::-moz-progress-bar {
   z-index: 1;
 }
 
+.discover-card-kind {
+  background: color-mix(in srgb, var(--accent-strong) 85%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--accent-contrast);
+  font-size: 0.625rem;
+  font-weight: 700;
+  left: var(--space-2);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  position: absolute;
+  text-transform: uppercase;
+  top: var(--space-2);
+  z-index: 1;
+}
+
+.discover-card-available {
+  align-items: center;
+  background: #16a34a;
+  border-radius: 50%;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  height: 1.25rem;
+  justify-content: center;
+  width: 1.25rem;
+}
+
+.discover-card-available svg {
+  fill: none;
+  height: 0.875rem;
+  stroke: #ffffff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  width: 0.875rem;
+}
+
 .poster-grid {
   display: grid;
   gap: var(--space-5) var(--space-4);
@@ -2161,8 +2198,8 @@ form[role="search"]:not(.global-search) {
 .title-hero-inner {
   align-items: end;
   display: grid;
-  gap: var(--space-6);
-  grid-template-columns: minmax(9rem, 14rem) 1fr;
+  gap: var(--space-4) var(--space-6);
+  grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr) auto;
   padding: var(--space-8) var(--gutter) var(--space-4);
   position: relative;
 }
@@ -2184,13 +2221,315 @@ form[role="search"]:not(.global-search) {
   .title-hero-inner {
     align-items: start;
     gap: var(--space-4);
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding-top: var(--space-6);
   }
 
   .title-poster {
     max-width: 10rem;
   }
+}
+
+.title-heading h1 .title-year {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* "R | 119 minutes" with the rating boxed, then the genres on their own
+   line so a narrow screen never starts a line with a rule. */
+.title-meta,
+.title-genres {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.title-genres {
+  margin-top: var(--space-2);
+}
+
+.title-meta > span + span::before {
+  border-left: 1px solid var(--border-strong);
+  content: "";
+  margin-right: var(--space-2);
+}
+
+.title-certification {
+  border: 1px solid var(--text-muted);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+}
+
+.title-actions {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* The follow control sits in the row of actions; its status line wraps
+   under them and only takes room when it has something to say. */
+.title-actions .notify-me {
+  display: contents;
+}
+
+.title-actions .notify-me > p {
+  color: var(--text-muted);
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+  margin: 0;
+  order: 1;
+  text-align: right;
+}
+
+.title-actions .notify-me > p:empty {
+  display: none;
+}
+
+@media (max-width: 48rem) {
+  .title-actions {
+    justify-content: flex-start;
+  }
+
+  .title-actions .notify-me > p {
+    text-align: left;
+  }
+}
+
+/* The summary and the facts card side by side, the facts card stacking
+   under the summary on a narrow screen. */
+.title-content {
+  align-items: start;
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+}
+
+@media (max-width: 64rem) {
+  .title-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.title-main {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.title-main h2 {
+  font-size: 1.25rem;
+  margin-bottom: var(--space-2);
+}
+
+.title-tagline {
+  color: var(--text-muted);
+  font-size: 1.125rem;
+  font-style: italic;
+  margin: 0;
+}
+
+.title-crew dl {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  margin: 0;
+}
+
+.title-crew dt {
+  font-weight: 700;
+}
+
+.title-crew dd {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.title-crew-more {
+  display: inline-block;
+  font-size: 0.875rem;
+  margin-top: var(--space-3);
+}
+
+.title-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.title-keywords > li {
+  background: var(--bg-control);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  padding: 0.2rem 0.65rem;
+}
+
+.title-facts {
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+  font-size: 0.875rem;
+  margin: 0;
+  padding: var(--space-4);
+}
+
+.title-score {
+  color: var(--text-muted);
+  margin: 0 0 var(--space-3);
+}
+
+.title-score-value {
+  color: var(--success);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.title-facts dl {
+  margin: 0;
+}
+
+.title-fact {
+  border-top: 1px solid var(--divider);
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+  padding-block: var(--space-2);
+}
+
+.title-fact dt {
+  font-weight: 600;
+}
+
+.title-fact dd {
+  color: var(--text-muted);
+  margin: 0;
+  text-align: right;
+}
+
+.title-fact-line {
+  display: block;
+}
+
+.title-fact-note {
+  font-size: 0.75rem;
+}
+
+.title-providers {
+  border-top: 1px solid var(--divider);
+  padding-top: var(--space-3);
+}
+
+.title-providers h2 {
+  font-size: 0.875rem;
+  margin-bottom: var(--space-2);
+}
+
+.title-providers ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.title-providers img {
+  border-radius: var(--radius-md);
+  display: block;
+  height: 2.5rem;
+  width: 2.5rem;
+}
+
+.title-links {
+  border-top: 1px solid var(--divider);
+  display: flex;
+  gap: var(--space-4);
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+}
+
+/* The request panel is focused by the hero's Request action, which also
+   scrolls it into view clear of the top bar. */
+.title-body {
+  scroll-margin-top: var(--space-8);
+}
+
+.title-body:focus {
+  outline: none;
+}
+
+/* The page's own gap spaces its rows. */
+.title-page > .discover-row {
+  margin-bottom: 0;
+}
+
+.cast-list > li {
+  flex-basis: 8.5rem;
+}
+
+.cast-card {
+  background: var(--surface);
+  border: 1px solid var(--ring);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: var(--space-2);
+  height: 100%;
+  justify-items: center;
+  margin: 0;
+  padding: var(--space-3) var(--space-2);
+  text-align: center;
+}
+
+.cast-photo {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: block;
+  object-fit: cover;
+  width: 6rem;
+}
+
+.cast-photo-placeholder {
+  align-items: center;
+  background: var(--bg-control);
+  color: var(--text-muted);
+  display: flex;
+  justify-content: center;
+}
+
+.cast-photo-placeholder svg {
+  fill: none;
+  height: 60%;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  width: 60%;
+}
+
+.cast-card figcaption {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.cast-card-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.cast-card-role {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .title-overview {

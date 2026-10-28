@@ -261,8 +261,8 @@ func newQuotaHandlerService(t *testing.T, store *requestHandlerStore) *requestap
 func TestMalformedTMDBTitleReturnsOpaqueProviderFailure(t *testing.T) {
 	client := malformedTMDBClient(t)
 	t.Run("detail route", func(t *testing.T) {
-		server := &Server{logger: slog.New(slog.DiscardHandler), metadataReader: client}
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/metadata/movies/11", nil)
+		server := &Server{logger: slog.New(slog.DiscardHandler), metadataReader: tmdbDetailReader{client}}
+		request := requestWithAccount(t, http.MethodGet, "/api/v1/metadata/movies/11", "", core.PermissionRequestsReadOwn)
 		request.SetPathValue("id", "11")
 		recorder := httptest.NewRecorder()
 		server.handleMetadataMovie(recorder, request)
@@ -277,6 +277,19 @@ func TestMalformedTMDBTitleReturnsOpaqueProviderFailure(t *testing.T) {
 		server.handleCreateRequest(recorder, request)
 		assertMetadataFailure(t, recorder)
 	})
+}
+
+// tmdbDetailReader serves the title routes straight from a TMDB client.
+type tmdbDetailReader struct{ *tmdb.Client }
+
+func (r tmdbDetailReader) MovieDetail(ctx context.Context, _, providerID string) (core.MetadataMovieDetail, error) {
+	return r.Client.MovieDetail(ctx, providerID)
+}
+
+func (r tmdbDetailReader) SeriesDetail(
+	ctx context.Context, _, providerID string, includeSpecials bool,
+) (core.MetadataSeriesDetail, error) {
+	return r.Client.SeriesDetail(ctx, providerID, includeSpecials)
 }
 
 func malformedTMDBClient(t *testing.T) *tmdb.Client {

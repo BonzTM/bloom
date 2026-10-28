@@ -39,13 +39,6 @@ export const metadataTitleSchema = z.object({
 
 export type MetadataTitle = z.output<typeof metadataTitleSchema>;
 
-// A title page's answer always says whether the caller follows the title.
-export const metadataTitleDetailSchema = metadataTitleSchema.extend({
-  subscribed: z.boolean(),
-});
-
-export type MetadataTitleDetail = z.output<typeof metadataTitleDetailSchema>;
-
 // The caller's own request for a title, or none.
 export const metadataRequestStateSchema = z.enum([
   "none",
@@ -94,6 +87,101 @@ export const discoverListSchema = z.enum([
 ]);
 
 export type DiscoverList = z.output<typeof discoverListSchema>;
+
+// The rich detail on a title page, mirroring `MetadataDetails` and its
+// parts in api/openapi.yaml.
+const MAX_SHORT_TEXT_BYTES = 500;
+const shortText = boundedBytes(MAX_SHORT_TEXT_BYTES);
+const namedText = z.string().min(1).pipe(shortText);
+const isoDateTime = z.iso.datetime({ offset: true });
+
+export const metadataCreditSchema = z.object({
+  person_id: z.number().int().min(1),
+  name: namedText,
+  role: shortText,
+  profile_path: shortText,
+});
+
+export type MetadataCredit = z.output<typeof metadataCreditSchema>;
+
+export const metadataCompanySchema = z.object({
+  id: z.number().int().min(1),
+  name: namedText,
+  logo_path: shortText,
+});
+
+export type MetadataCompany = z.output<typeof metadataCompanySchema>;
+
+export const metadataReleaseTypeSchema = z.enum([
+  "premiere",
+  "theatrical_limited",
+  "theatrical",
+  "digital",
+  "physical",
+  "tv",
+]);
+
+export type MetadataReleaseType = z.output<typeof metadataReleaseTypeSchema>;
+
+export const metadataSeriesFactsSchema = z.object({
+  creators: z.array(metadataCreditSchema).max(10),
+  networks: z.array(metadataCompanySchema).max(10),
+  first_air_date: isoDateTime.optional(),
+  last_air_date: isoDateTime.optional(),
+  next_episode: z
+    .object({
+      season: z.number().int().min(0).max(MAX_SEASON_NUMBER),
+      episode: z.number().int().min(0).max(99_999),
+      name: shortText,
+      air_date: isoDateTime.optional(),
+    })
+    .optional(),
+  season_count: z.number().int().min(0).max(MAX_SEASON_NUMBER),
+  episode_count: z.number().int().min(0).max(99_999),
+  in_production: z.boolean(),
+});
+
+export type MetadataSeriesFacts = z.output<typeof metadataSeriesFactsSchema>;
+
+export const metadataDetailsSchema = z.object({
+  tagline: shortText,
+  status: boundedBytes(100),
+  certification: boundedBytes(20),
+  runtime_minutes: z.number().int().min(0).max(10_000),
+  vote_average: z.number().min(0).max(10),
+  vote_count: z.number().int().min(0),
+  original_language: z.string().regex(/^([a-z]{2,3})?$/),
+  imdb_id: z.string().regex(/^(tt[0-9]{1,12})?$/),
+  trailer_youtube_key: z.string().regex(/^[A-Za-z0-9_-]{0,32}$/),
+  budget: z.number().int().min(0),
+  revenue: z.number().int().min(0),
+  genres: z.array(z.string().min(1).pipe(boundedBytes(100))).max(10),
+  keywords: z.array(namedText).max(40),
+  production_countries: z
+    .array(z.object({ code: z.string().regex(/^[A-Z]{2}$/), name: namedText }))
+    .max(10),
+  studios: z.array(metadataCompanySchema).max(10),
+  release_dates: z
+    .array(z.object({ type: metadataReleaseTypeSchema, date: isoDateTime }))
+    .max(6),
+  watch_providers: z.array(metadataCompanySchema).max(12),
+  cast: z.array(metadataCreditSchema).max(30),
+  crew: z.array(metadataCreditSchema).max(8),
+  recommendations: z.array(metadataDiscoverTitleSchema).max(MAX_DISCOVER_PAGE),
+  similar: z.array(metadataDiscoverTitleSchema).max(MAX_DISCOVER_PAGE),
+  series: metadataSeriesFactsSchema.optional(),
+});
+
+export type MetadataDetails = z.output<typeof metadataDetailsSchema>;
+
+// A title page's answer always says whether the caller follows the title,
+// and carries the rich detail the page shows.
+export const metadataTitleDetailSchema = metadataTitleSchema.extend({
+  subscribed: z.boolean(),
+  details: metadataDetailsSchema,
+});
+
+export type MetadataTitleDetail = z.output<typeof metadataTitleDetailSchema>;
 
 export const metadataSearchResponseSchema = z.object({
   items: z.array(metadataTitleSchema).max(MAX_RESULTS),
