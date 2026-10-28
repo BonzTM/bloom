@@ -132,12 +132,7 @@ func metadataFilterID(raw string) (int, error) {
 }
 
 func metadataDiscoverDTO(page core.MetadataDiscoverPage) metadataDiscoverResponse {
-	items := make([]metadataDiscoverItemResponse, 0, len(page.Items))
-	for _, item := range page.Items {
-		items = append(items, metadataDiscoverItemResponse{
-			metadataTitleResponse: metadataTitleDTO(item.MetadataTitle), RequestState: item.RequestState,
-		})
-	}
+	items := mapDTOs(page.Items, metadataDiscoverItemDTO)
 	next := ""
 	if page.Page < page.TotalPages && page.Page < core.MaxMetadataPage {
 		next = base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(page.Page + 1)))

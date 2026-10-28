@@ -24,21 +24,29 @@ type metadataManagerStub struct {
 }
 
 type metadataReaderStub struct {
-	discoverInput core.MetadataDiscover
-	accountID     string
-	discoverErr   error
+	discoverInput   core.MetadataDiscover
+	accountID       string
+	discoverErr     error
+	movie           core.MetadataMovieDetail
+	series          core.MetadataSeriesDetail
+	detailErr       error
+	includeSpecials bool
 }
 
 func (*metadataReaderStub) Search(context.Context, core.MetadataSearch) ([]core.MetadataTitle, error) {
 	return nil, nil
 }
 
-func (*metadataReaderStub) Movie(context.Context, string) (core.MetadataTitle, error) {
-	return core.MetadataTitle{}, nil
+func (s *metadataReaderStub) MovieDetail(_ context.Context, accountID, _ string) (core.MetadataMovieDetail, error) {
+	s.accountID = accountID
+	return s.movie, s.detailErr
 }
 
-func (*metadataReaderStub) Series(context.Context, string, bool) (core.MetadataSeries, error) {
-	return core.MetadataSeries{}, nil
+func (s *metadataReaderStub) SeriesDetail(
+	_ context.Context, accountID, _ string, includeSpecials bool,
+) (core.MetadataSeriesDetail, error) {
+	s.accountID, s.includeSpecials = accountID, includeSpecials
+	return s.series, s.detailErr
 }
 
 func (s *metadataReaderStub) Discover(
