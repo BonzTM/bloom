@@ -50,7 +50,7 @@ it("shows the dashboard to a signed-in administrator", async () => {
     await screen.findByRole("heading", { name: "Playing now", level: 2 }),
   ).toBeVisible();
   expect(
-    screen.getByRole("heading", { name: "Trending this week", level: 2 }),
+    screen.getByRole("heading", { name: "Trending", level: 2 }),
   ).toBeVisible();
   expect(
     screen.getByRole("heading", { name: "My requests", level: 2 }),
@@ -74,7 +74,6 @@ it("shows the dashboard to a signed-in administrator", async () => {
   );
   expect(nav.getAllByRole("link").map((link) => link.textContent)).toEqual([
     "Home",
-    "Discover",
     "Requests",
     "Playback",
     "Statistics",
@@ -94,7 +93,7 @@ it("shows requests but not trending to an account that cannot request", async ()
     await screen.findByRole("heading", { name: "My requests", level: 2 }),
   ).toBeVisible();
   expect(
-    screen.queryByRole("heading", { name: "Trending this week", level: 2 }),
+    screen.queryByRole("heading", { name: "Trending", level: 2 }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("heading", { name: "Playing now", level: 2 }),
@@ -107,7 +106,7 @@ it("shows requests but not trending to an account that cannot request", async ()
     screen.queryByRole("link", { name: "Inception (2010)" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("link", { name: "Request a title" }),
+    screen.queryByRole("link", { name: "Search for a title" }),
   ).not.toBeInTheDocument();
 });
 
@@ -124,7 +123,7 @@ it("shows a viewer only the panels their permissions allow", async () => {
     screen.queryByRole("heading", { name: "Playing now", level: 2 }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("heading", { name: "Trending this week", level: 2 }),
+    screen.queryByRole("heading", { name: "Trending", level: 2 }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("heading", { name: "My requests", level: 2 }),

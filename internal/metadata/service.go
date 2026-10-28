@@ -209,7 +209,8 @@ func (s *Service) Discover(
 
 func (s *Service) discoverPage(ctx context.Context, input core.MetadataDiscover) (core.MetadataPage, error) {
 	key := cacheKey{
-		provider: core.MetadataProviderTMDB, resource: "discover", id: string(input.List) + ":" + strconv.Itoa(input.Page),
+		provider: core.MetadataProviderTMDB, resource: "discover",
+		id: string(input.List) + ":" + strconv.Itoa(input.FilterID) + ":" + strconv.Itoa(input.Page),
 	}
 	value, err := s.cachedLoad(key, cacheTTL, func() (cacheValue, error) {
 		provider, providerErr := s.discoveryProvider(ctx)

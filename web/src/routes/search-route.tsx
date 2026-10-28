@@ -5,125 +5,63 @@ import {
   useSession,
   useSessionRecheck,
 } from "../features/auth/hooks/auth-queries.js";
-import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { searchQuerySchema } from "../features/requests/api/metadata-schemas.js";
 import {
   mediaKindSchema,
   type MediaKind,
 } from "../features/requests/api/requests-schemas.js";
-import { MyRequests } from "../features/requests/components/my-requests.js";
 import { describeSearchError } from "../features/requests/components/request-errors.js";
 import { kindLabel } from "../features/requests/components/request-format.js";
 import { TitleGrid } from "../features/requests/components/title-grid.js";
-import {
-  useDiscover,
-  useRequests,
-  useSearchTitles,
-} from "../features/requests/hooks/requests-queries.js";
-import { DiscoverRow } from "../features/requests/components/discover-row.js";
+import { useSearchTitles } from "../features/requests/hooks/requests-queries.js";
 import { accessDenial } from "../lib/api/errors.js";
 import { AccessDeniedRoute } from "./access-denied-route.js";
 import { pageTitle, usePageTitle } from "./use-page-title.js";
 
-export default function DiscoverRoute(): ReactNode {
-  usePageTitle(pageTitle("Discover"));
+export default function SearchRoute(): ReactNode {
+  usePageTitle(pageTitle("Search"));
   const session = useSession();
   const accountId = session.data?.account.id;
-  const granted = session.data?.permissions ?? [];
   // The route guard only renders this page for a signed-in account. Keying
   // the page on the account remounts it when the principal changes.
   if (accountId === undefined) {
     return null;
   }
-  return (
-    <DiscoverPage
-      key={accountId}
-      accountId={accountId}
-      canSearch={hasPermission(granted, permissions.requestsCreate)}
-      canReadOwn={hasPermission(granted, permissions.requestsReadOwn)}
-    />
-  );
+  return <SearchPage key={accountId} accountId={accountId} />;
 }
 
-type DiscoverPageProps = Readonly<{
-  accountId: string;
-  canSearch: boolean;
-  canReadOwn: boolean;
-}>;
-
-function DiscoverPage({
-  accountId,
-  canSearch,
-  canReadOwn,
-}: DiscoverPageProps): ReactNode {
+// Search results for the query in the address, which the top bar's search
+// box sets. The form here refines the query and the kind.
+function SearchPage({ accountId }: Readonly<{ accountId: string }>): ReactNode {
   const [params, setParams] = useSearchParams();
   const query = readQuery(params.get("q"));
   const kind = readKind(params.get("kind"));
-  const results = useSearchTitles(accountId, canSearch ? query : "", kind);
-  const mine = useRequests(accountId, { requesterId: accountId }, canReadOwn);
-  // Rows load only while no search is showing, and only for an account that
-  // may open a title page, which every poster links to.
-  const browsing = query === "" && canSearch;
-  const trending = useDiscover(accountId, "trending", browsing);
-  const popularMovies = useDiscover(accountId, "movies/popular", browsing);
-  const popularSeries = useDiscover(accountId, "series/popular", browsing);
-  const upcomingMovies = useDiscover(accountId, "movies/upcoming", browsing);
-  const airingSeries = useDiscover(accountId, "series/upcoming", browsing);
-  const denial =
-    accessDenial(results.error) ??
-    accessDenial(mine.error) ??
-    accessDenial(trending.error);
-  useSessionRecheck(
-    denial !== undefined,
-    Math.max(
-      results.errorUpdatedAt,
-      mine.errorUpdatedAt,
-      trending.errorUpdatedAt,
-    ),
-  );
+  const results = useSearchTitles(accountId, query, kind);
+  const denial = accessDenial(results.error);
+  useSessionRecheck(denial !== undefined, results.errorUpdatedAt);
   if (denial === "forbidden") {
     return <AccessDeniedRoute />;
   }
   return (
     <>
-      <h1>Discover</h1>
+      <h1>Search</h1>
       <p className="page-intro">
-        Browse what is trending or search from the bar above, then ask for a
-        movie or series. Requests wait for approval unless your account approves
-        its own, and become available once the download finishes.
+        Find a movie or series on The Movie Database, then open it to ask for
+        it. Requests wait for approval unless your account approves its own.
       </p>
-      {canSearch && query !== "" ? (
-        <section aria-labelledby="search-heading" className="card">
-          <h2 id="search-heading">Search</h2>
-          <SearchForm
-            query={query}
-            kind={kind}
-            onSearch={(next) => {
-              setParams(next, { replace: query !== "" });
-            }}
-          />
-          <SearchResults query={query} results={results} />
-        </section>
-      ) : null}
-      {browsing ? (
-        <>
-          <DiscoverRow title="Trending this week" query={trending} />
-          <DiscoverRow title="Popular movies" query={popularMovies} />
-          <DiscoverRow title="Popular series" query={popularSeries} />
-          <DiscoverRow title="Upcoming movies" query={upcomingMovies} />
-          <DiscoverRow title="Series on the air" query={airingSeries} />
-        </>
-      ) : null}
-      {canReadOwn ? (
-        <section aria-labelledby="my-requests-heading" className="card">
-          <h2 id="my-requests-heading">My requests</h2>
-          <MyRequests
-            query={mine}
-            accountId={accountId}
-            linkTitles={canSearch}
-          />
-        </section>
-      ) : null}
+      <section aria-labelledby="search-heading" className="card">
+        <h2 id="search-heading" className="visually-hidden">
+          Search
+        </h2>
+        <SearchForm
+          query={query}
+          kind={kind}
+          onSearch={(next) => {
+            setParams(next, { replace: query !== "" });
+          }}
+        />
+        <SearchResults query={query} results={results} />
+      </section>
     </>
   );
 }

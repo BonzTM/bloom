@@ -203,13 +203,19 @@ it("shows the cast and related titles with their state", async () => {
   expect(members[0]).toHaveTextContent("Timothée ChalametPaul");
   expect(members[1]?.querySelector(".cast-photo-placeholder")).not.toBeNull();
   const recommended = screen.getByRole("list", { name: "Recommendations" });
-  const heat = within(recommended).getByRole("link", { name: /Heat \(1995\)/ });
+  // Related titles use the home page's poster card and its state marks.
+  const heat = within(recommended).getByRole("link", {
+    name: "Heat (1995) Movie, Available",
+  });
   expect(heat).toHaveAttribute("href", "/requests/movies/949");
-  expect(within(heat).getByText("Available")).toHaveClass("visually-hidden");
   const similar = screen.getByRole("list", { name: "Similar titles" });
-  const arrival = within(similar).getByRole("link", { name: /The Arrival/ });
-  expect(arrival).toHaveTextContent("Requested");
+  const arrival = within(similar).getByRole("link", {
+    name: "The Arrival (2021) Series, Requested",
+  });
   expect(arrival).toHaveAttribute("href", "/requests/series/1396");
+  expect(
+    screen.getByRole("button", { name: "Scroll Similar titles forward" }),
+  ).toBeInTheDocument();
 });
 
 it("jumps to the request panel from the header", async () => {

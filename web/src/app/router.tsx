@@ -13,6 +13,7 @@ import {
 } from "../features/auth/permissions.js";
 import { HomeRoute } from "../routes/home-route.js";
 import { NotFoundRoute } from "../routes/not-found-route.js";
+import { RequestsRedirect } from "../routes/requests-redirect.js";
 import { RequirePermission } from "../routes/require-permission.js";
 import { AppLayout, RouterErrorPage } from "./app-layout.js";
 
@@ -37,7 +38,8 @@ const LazyExclusionsRoute = lazy(() => import("../routes/exclusions-route.js"));
 const LazyRequestsAdminRoute = lazy(
   () => import("../routes/requests-admin-route.js"),
 );
-const LazyDiscoverRoute = lazy(() => import("../routes/discover-route.js"));
+const LazySearchRoute = lazy(() => import("../routes/search-route.js"));
+const LazyBrowseRoute = lazy(() => import("../routes/browse-route.js"));
 const LazyTitleRoute = lazy(() => import("../routes/title-route.js"));
 const LazyDownloadManagersRoute = lazy(
   () => import("../routes/download-managers-route.js"),
@@ -132,12 +134,24 @@ const routes: RouteObject[] = [
       },
       {
         path: "requests",
+        element: <RequestsRedirect />,
+      },
+      {
+        path: "search",
         element: (
-          <RequirePermission
-            anyOf={[permissions.requestsCreate, permissions.requestsReadOwn]}
-          >
-            <LazyPage loading="Loading requests…">
-              <LazyDiscoverRoute />
+          <RequirePermission anyOf={[permissions.requestsCreate]}>
+            <LazyPage loading="Loading search…">
+              <LazySearchRoute />
+            </LazyPage>
+          </RequirePermission>
+        ),
+      },
+      {
+        path: "browse/*",
+        element: (
+          <RequirePermission anyOf={[permissions.requestsCreate]}>
+            <LazyPage loading="Loading titles…">
+              <LazyBrowseRoute />
             </LazyPage>
           </RequirePermission>
         ),

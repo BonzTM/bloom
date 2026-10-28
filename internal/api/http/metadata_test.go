@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -175,6 +176,59 @@ func TestMetadataDiscoverReturnsRequestStateAndCursor(t *testing.T) {
 	if len(response.Items) != 1 || response.Items[0].RequestState != core.MetadataRequestPending ||
 		response.Items[0].BackdropPath != "/backdrop.jpg" || response.NextCursor != "Mw" {
 		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestMetadataFilteredDiscoverPassesFilterAndWireShape(t *testing.T) {
+	tests := []struct {
+		path    string
+		handler func(*Server, http.ResponseWriter, *http.Request)
+		list    core.MetadataDiscoverList
+		filter  int
+	}{
+		{path: "/api/v1/metadata/discover/movies/genres/28", handler: (*Server).handleMetadataMoviesGenre, list: core.MetadataMoviesGenre, filter: 28},
+		{path: "/api/v1/metadata/discover/series/genres/18", handler: (*Server).handleMetadataSeriesGenre, list: core.MetadataSeriesGenre, filter: 18},
+		{path: "/api/v1/metadata/discover/movies/studios/420", handler: (*Server).handleMetadataMoviesStudio, list: core.MetadataMoviesStudio, filter: 420},
+		{path: "/api/v1/metadata/discover/series/networks/213", handler: (*Server).handleMetadataSeriesNetwork, list: core.MetadataSeriesNetwork, filter: 213},
+	}
+	for _, testCase := range tests {
+		t.Run(string(testCase.list), func(t *testing.T) {
+			reader := &metadataReaderStub{}
+			server := &Server{logger: slog.New(slog.DiscardHandler), metadataDiscovery: reader}
+			request := requestWithAccount(t, http.MethodGet, testCase.path+"?cursor=Mg", "", core.PermissionRequestsCreate)
+			request.SetPathValue("id", strconv.Itoa(testCase.filter))
+			recorder := httptest.NewRecorder()
+			testCase.handler(server, recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+			}
+			want := `{"items":[{"kind":"movie","provider":"tmdb","provider_id":"11","title":"Film","year":2026,` +
+				`"overview":"Plot","poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg","request_state":"pending"}],"next_cursor":"Mw"}` + "\n"
+			if recorder.Body.String() != want {
+				t.Fatalf("body = %s, want %s", recorder.Body.String(), want)
+			}
+			assertJSONMatchesSchema(t, loadOpenAPI(t), recorder.Body.Bytes(), "#/components/schemas/MetadataDiscoverResponse")
+			if reader.discoverInput != (core.MetadataDiscover{List: testCase.list, Page: 2, FilterID: testCase.filter}) {
+				t.Fatalf("discover input = %+v", reader.discoverInput)
+			}
+		})
+	}
+}
+
+func TestMetadataFilteredDiscoverRejectsNonCanonicalID(t *testing.T) {
+	for _, id := range []string{"0", "-1", "028", "+28", "1000000001", "abc", "", "99999999999"} {
+		reader := &metadataReaderStub{}
+		server := &Server{logger: slog.New(slog.DiscardHandler), metadataDiscovery: reader}
+		request := requestWithAccount(t, http.MethodGet, "/api/v1/metadata/discover/movies/genres/x", "", core.PermissionRequestsCreate)
+		request.SetPathValue("id", id)
+		recorder := httptest.NewRecorder()
+		server.handleMetadataMoviesGenre(recorder, request)
+		if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), `"field":"id"`) {
+			t.Fatalf("id %q response = %d %s", id, recorder.Code, recorder.Body.String())
+		}
+		if reader.discoverInput != (core.MetadataDiscover{}) {
+			t.Fatalf("id %q reached discovery with %+v", id, reader.discoverInput)
+		}
 	}
 }
 

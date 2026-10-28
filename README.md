@@ -218,8 +218,8 @@ use `GET /api/v1/media-servers/{id}/users` to list a server's users and choose
 one to link to a Bloom account. Deleting a
 registration removes its encrypted credential and its associated playback data.
 
-Signed-in accounts with `stats.read.all`, `stats.read.own`, or
-`requests.read.own` can load registered-server artwork from
+Signed-in accounts with `stats.read.all`, `stats.read.own`,
+`requests.read.own`, or `requests.create` can load registered-server artwork from
 `GET /api/v1/media-servers/{id}/items/{item_id}/image`. The required `type`
 is `Primary`, `Backdrop`, or `Thumb`; `max_width` defaults to 400 and accepts
 64 through 1280. Bloom builds the Jellyfin image URL, keeps the API key on the
@@ -615,7 +615,19 @@ equivalent. Bloom exposes at most 20 TMDB pages with 20 titles per page and
 adds the signed-in account's latest request state to every title. Movie and
 series genre lists are available from `GET /api/v1/metadata/genres?kind=...`
 and are cached for one day; discover pages use the existing metadata cache
-TTL.
+TTL. Four filtered rows narrow TMDB's `/discover/movie` and `/discover/tv` by
+one identifier, sorted by popularity without adult titles:
+`/api/v1/metadata/discover/movies/genres/{id}`,
+`/api/v1/metadata/discover/series/genres/{id}`,
+`/api/v1/metadata/discover/movies/studios/{id}` (a TMDB production company),
+and `/api/v1/metadata/discover/series/networks/{id}`. The identifier is a
+canonical decimal from 1 through 1000000000, and each filter has its own cache
+entry.
+The same accounts can read `GET /api/v1/library/recently-added`: the newest
+active movies and series in the synced library catalog across every media
+server, newest first by the media server's creation time, leaving out
+libraries an operator excluded. `limit` defaults to 20 and accepts 1 through
+40. The list stays empty until a catalog sync has run.
 If a metadata error reports the `unreachable` reason, the Bloom server cannot
 reach `api.themoviedb.org`; a firewall or network policy is the usual cause.
 Accounts with `requests.create` or `requests.read.own` can open movie or series
@@ -744,9 +756,15 @@ The web UI covers the same flow. Administrators register Radarr and Sonarr
 instances under Settings, Download managers, store the TMDB API Read Access
 Token and build profiles from an instance's options under Settings, Request
 settings, and decide pending requests, retry failed ones, and read queue
-progress under Requests. Anyone who may request media searches, browses
-posters, picks seasons, and follows their own requests under Discover. Posters load from `image.tmdb.org`, the only third-party
-origin the page allows for images.
+progress under Requests. The home page works like Seerr's discover page:
+what is playing, what the library recently added, trending titles, popular
+and upcoming movies and series, and genre, studio, and network tiles, then
+the account's own requests. Each row scrolls sideways and opens its full list
+under `/browse/`. Anyone who may request media searches from the top bar,
+browses posters, and picks seasons. The old `/requests` address leads home,
+or to the search page when it carries a query. Posters and studio and network
+logos load from `image.tmdb.org`, the only third-party origin the page allows
+for images.
 Administrators register webhook, Discord, and email channels under
 Settings, Notifications, choose the request events each one receives, send a test
 message, and read each channel's delivery log with its retries and last

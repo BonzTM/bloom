@@ -55,7 +55,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleProbeMediaServer},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerLibraries},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerUsers},
-	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleItemImage},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn, core.PermissionRequestsCreate}, authRequired: true, handler: (*Server).handleItemImage},
 	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/catalog/sync", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCatalogSync},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/catalog", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogLibraries},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/items", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogItems},
@@ -112,12 +112,17 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/accounts/{id}/media-users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleAccountMediaUsers},
 	{method: http.MethodPut, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetAccountMediaUser},
 	{method: http.MethodDelete, path: "/api/v1/accounts/{id}/media-users/{media_server_id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteAccountMediaUser},
+	{method: http.MethodGet, path: "/api/v1/library/recently-added", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleRecentlyAdded},
 	{method: http.MethodGet, path: "/api/v1/metadata/search", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSearch},
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/trending", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataTrending},
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesPopular},
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/popular", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesPopular},
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesUpcoming},
 	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/upcoming", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesUpcoming},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/genres/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesGenre},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/genres/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesGenre},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/movies/studios/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMoviesStudio},
+	{method: http.MethodGet, path: "/api/v1/metadata/discover/series/networks/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeriesNetwork},
 	{method: http.MethodGet, path: "/api/v1/metadata/genres", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataGenres},
 	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMovie},
 	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeries},
@@ -218,6 +223,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			if s.catalog == nil {
 				continue
 			}
+		}
+		if route.path == "/api/v1/library/recently-added" && s.recentlyAdded == nil {
+			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/download-managers") && (s.downloadManagerReader == nil || s.downloadManagerManager == nil) {
 			continue

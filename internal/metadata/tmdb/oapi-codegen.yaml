@@ -18,3 +18,5 @@ output-options:
     - tv-series-on-the-air-list
     - genre-movie-list
     - genre-tv-list
+    - discover-movie
+    - discover-tv

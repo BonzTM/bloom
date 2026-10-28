@@ -211,6 +211,10 @@ type Querier interface {
 	ListPlaybackHistory(ctx context.Context, arg ListPlaybackHistoryParams) ([]ListPlaybackHistoryRow, error)
 	ListRecentCatalogItems(ctx context.Context, arg ListRecentCatalogItemsParams) ([]LibraryItem, error)
 	ListRecentPlaybackWatches(ctx context.Context, arg ListRecentPlaybackWatchesParams) ([]ListRecentPlaybackWatchesRow, error)
+	// Newest active movies and series across every media server, for the home
+	// page's Recently Added row. Libraries an operator excluded stay hidden, the
+	// same as every other catalog read.
+	ListRecentlyAddedTitles(ctx context.Context, rowLimit int64) ([]LibraryItem, error)
 	ListRequestProfileTags(ctx context.Context, profileID string) ([]string, error)
 	ListRequestProfiles(ctx context.Context, arg ListRequestProfilesParams) ([]RequestProfile, error)
 	ListRequestSeasons(ctx context.Context, requestID string) ([]ListRequestSeasonsRow, error)

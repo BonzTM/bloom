@@ -154,3 +154,22 @@ export type CatalogItemsParams = Readonly<{
   sort: CatalogSort;
   order: CatalogOrder;
 }>;
+
+// Wire contract for `/api/v1/library/recently-added`, mirroring
+// `RecentlyAddedResponse` in api/openapi.yaml.
+export const MAX_RECENTLY_ADDED = 40;
+
+export const recentlyAddedTitleSchema = z.object({
+  media_server_id: mediaServerIdSchema,
+  item_id: itemIdSchema,
+  kind: z.enum(["movie", "series"]),
+  title: z.string().min(1).max(500),
+  year: z.number().int().min(0).max(9999),
+  added_at: stamp(),
+});
+
+export type RecentlyAddedTitle = z.output<typeof recentlyAddedTitleSchema>;
+
+export const recentlyAddedResponseSchema = z.object({
+  items: z.array(recentlyAddedTitleSchema).max(MAX_RECENTLY_ADDED),
+});

@@ -42,6 +42,8 @@ export const catalogKeys = {
     ["catalog", "item", accountId, serverId, itemId] as const,
   history: (accountId: string, serverId: string, itemId: string) =>
     ["catalog", "history", accountId, serverId, itemId] as const,
+  recentlyAdded: (accountId: string) =>
+    ["catalog", "recently-added", accountId] as const,
   recent: (accountId: string, serverId: string, libraryId: string) =>
     ["catalog", "recent", accountId, serverId, libraryId] as const,
   genres: (
@@ -60,6 +62,18 @@ export const catalogKeys = {
 };
 
 const STALE_MS = 60_000;
+
+// The library's newest titles for the home page's first row.
+export function useRecentlyAdded(accountId: string, enabled: boolean) {
+  const api = useCatalogApi();
+  return useQuery({
+    queryKey: catalogKeys.recentlyAdded(accountId),
+    queryFn: ({ signal }) => api.recentlyAdded(signal),
+    enabled,
+    staleTime: STALE_MS,
+    meta: { sessionScoped: true },
+  });
+}
 
 export function useLibraries(accountId: string, serverId: string | undefined) {
   const api = useCatalogApi();

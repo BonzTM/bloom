@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 import {
   firstAdminPage,
   groupFor,
+  isHomeArea,
   NAV_GROUPS,
   pageFor,
   visiblePages,
@@ -15,10 +16,28 @@ function group(label: string) {
   return found;
 }
 
+describe("isHomeArea", () => {
+  it.each([
+    "/",
+    "/search",
+    "/SEARCH/",
+    "/browse/trending",
+    "/browse/movies/genres/28",
+    "/requests/movies/949",
+  ])("keeps Home current on %s", (path) => {
+    expect(isHomeArea(path)).toBe(true);
+  });
+
+  it.each(["/about", "/searchx", "/browse", "/requests", "/admin/requests"])(
+    "leaves %s outside Home",
+    (path) => {
+      expect(isHomeArea(path)).toBe(false);
+    },
+  );
+});
+
 describe("groupFor", () => {
   it.each([
-    ["/requests", "Discover"],
-    ["/requests/movies/949", "Discover"],
     ["/admin/requests", "Requests"],
     ["/admin/playback/watches/abc", "Playback"],
     ["/admin/activity", "Playback"],
@@ -33,12 +52,19 @@ describe("groupFor", () => {
     expect(groupFor(path)?.label).toBe(label);
   });
 
-  it.each(["/", "/about", "/login", "/admin", "/requestsx", "/admin/rolesx"])(
-    "leaves %s outside every area",
-    (path) => {
-      expect(groupFor(path)).toBeUndefined();
-    },
-  );
+  it.each([
+    "/",
+    "/about",
+    "/login",
+    "/admin",
+    "/requests",
+    "/requests/movies/949",
+    "/search",
+    "/browse/trending",
+    "/admin/rolesx",
+  ])("leaves %s outside every area", (path) => {
+    expect(groupFor(path)).toBeUndefined();
+  });
 });
 
 describe("pageFor", () => {

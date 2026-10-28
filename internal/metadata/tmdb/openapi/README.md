@@ -8,8 +8,8 @@
 
 The full published document, with the compatibility corrections below, is
 committed so generation is deterministic and works offline. `oapi-codegen.yaml`
-limits generated code to Bloom's search, movie-details, and series-details
-operations. Run `make generate` after changing the pin or generator.
+limits generated code to Bloom's search, detail, curated-list, genre, and
+filtered-discovery operations. Run `make generate` after changing the pin or generator.
 
 Bloom corrects response fields that differ from TMDB's published schema:
 

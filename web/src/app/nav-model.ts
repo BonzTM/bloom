@@ -2,11 +2,7 @@ import type {
   KnownPermission,
   Permission,
 } from "../features/auth/api/auth-schemas.js";
-import {
-  hasAnyPermission,
-  permissions,
-  REQUESTS_PERMISSIONS,
-} from "../features/auth/permissions.js";
+import { hasAnyPermission, permissions } from "../features/auth/permissions.js";
 import type { IconName } from "./nav-icons.js";
 
 // One page a navigation group leads to. Its label is the page's own heading,
@@ -27,15 +23,9 @@ export type NavGroup = Readonly<{
 }>;
 
 // Every signed-in area of the app, in sidebar order. Home and About are not
-// listed: Home is the root and About is open to everyone.
+// listed: Home is the root, where discovery lives, and About is open to
+// everyone.
 export const NAV_GROUPS: readonly NavGroup[] = [
-  {
-    label: "Discover",
-    icon: "compass",
-    pages: [
-      { to: "/requests", label: "Discover", anyOf: REQUESTS_PERMISSIONS },
-    ],
-  },
   {
     label: "Requests",
     icon: "inbox",
@@ -140,6 +130,19 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
 ];
 
+// Home holds discovery, so its link stays current on the pages discovery
+// leads to: search results, a row's full list, and a title's page.
+const HOME_AREA_PREFIXES = ["/browse/", "/requests/"] as const;
+
+export function isHomeArea(pathname: string): boolean {
+  const path = normalizePath(pathname);
+  return (
+    path === "/" ||
+    path === "/search" ||
+    HOME_AREA_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
+}
+
 // The pages of a group the person may open, in order.
 export function visiblePages(
   group: NavGroup,
@@ -157,7 +160,7 @@ export function normalizePath(pathname: string): string {
 }
 
 // True when the path is the page or one of the pages beneath it, such as a
-// title under Discover or a watch under Playback.
+// watch under Playback.
 export function isWithin(pathname: string, page: NavPage): boolean {
   const path = normalizePath(pathname);
   return path === page.to || path.startsWith(`${page.to}/`);

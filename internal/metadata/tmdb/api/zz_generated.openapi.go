@@ -13,7 +13,110 @@ import (
 	"strings"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for DiscoverMovieParamsSortBy.
+const (
+	DiscoverMovieParamsSortByOriginalTitleAsc       DiscoverMovieParamsSortBy = "original_title.asc"
+	DiscoverMovieParamsSortByOriginalTitleDesc      DiscoverMovieParamsSortBy = "original_title.desc"
+	DiscoverMovieParamsSortByPopularityAsc          DiscoverMovieParamsSortBy = "popularity.asc"
+	DiscoverMovieParamsSortByPopularityDesc         DiscoverMovieParamsSortBy = "popularity.desc"
+	DiscoverMovieParamsSortByPrimaryReleaseDateAsc  DiscoverMovieParamsSortBy = "primary_release_date.asc"
+	DiscoverMovieParamsSortByPrimaryReleaseDateDesc DiscoverMovieParamsSortBy = "primary_release_date.desc"
+	DiscoverMovieParamsSortByRevenueAsc             DiscoverMovieParamsSortBy = "revenue.asc"
+	DiscoverMovieParamsSortByRevenueDesc            DiscoverMovieParamsSortBy = "revenue.desc"
+	DiscoverMovieParamsSortByTitleAsc               DiscoverMovieParamsSortBy = "title.asc"
+	DiscoverMovieParamsSortByTitleDesc              DiscoverMovieParamsSortBy = "title.desc"
+	DiscoverMovieParamsSortByVoteAverageAsc         DiscoverMovieParamsSortBy = "vote_average.asc"
+	DiscoverMovieParamsSortByVoteAverageDesc        DiscoverMovieParamsSortBy = "vote_average.desc"
+	DiscoverMovieParamsSortByVoteCountAsc           DiscoverMovieParamsSortBy = "vote_count.asc"
+	DiscoverMovieParamsSortByVoteCountDesc          DiscoverMovieParamsSortBy = "vote_count.desc"
+)
+
+// Valid indicates whether the value is a known member of the DiscoverMovieParamsSortBy enum.
+func (e DiscoverMovieParamsSortBy) Valid() bool {
+	switch e {
+	case DiscoverMovieParamsSortByOriginalTitleAsc:
+		return true
+	case DiscoverMovieParamsSortByOriginalTitleDesc:
+		return true
+	case DiscoverMovieParamsSortByPopularityAsc:
+		return true
+	case DiscoverMovieParamsSortByPopularityDesc:
+		return true
+	case DiscoverMovieParamsSortByPrimaryReleaseDateAsc:
+		return true
+	case DiscoverMovieParamsSortByPrimaryReleaseDateDesc:
+		return true
+	case DiscoverMovieParamsSortByRevenueAsc:
+		return true
+	case DiscoverMovieParamsSortByRevenueDesc:
+		return true
+	case DiscoverMovieParamsSortByTitleAsc:
+		return true
+	case DiscoverMovieParamsSortByTitleDesc:
+		return true
+	case DiscoverMovieParamsSortByVoteAverageAsc:
+		return true
+	case DiscoverMovieParamsSortByVoteAverageDesc:
+		return true
+	case DiscoverMovieParamsSortByVoteCountAsc:
+		return true
+	case DiscoverMovieParamsSortByVoteCountDesc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DiscoverTvParamsSortBy.
+const (
+	DiscoverTvParamsSortByFirstAirDateAsc  DiscoverTvParamsSortBy = "first_air_date.asc"
+	DiscoverTvParamsSortByFirstAirDateDesc DiscoverTvParamsSortBy = "first_air_date.desc"
+	DiscoverTvParamsSortByNameAsc          DiscoverTvParamsSortBy = "name.asc"
+	DiscoverTvParamsSortByNameDesc         DiscoverTvParamsSortBy = "name.desc"
+	DiscoverTvParamsSortByOriginalNameAsc  DiscoverTvParamsSortBy = "original_name.asc"
+	DiscoverTvParamsSortByOriginalNameDesc DiscoverTvParamsSortBy = "original_name.desc"
+	DiscoverTvParamsSortByPopularityAsc    DiscoverTvParamsSortBy = "popularity.asc"
+	DiscoverTvParamsSortByPopularityDesc   DiscoverTvParamsSortBy = "popularity.desc"
+	DiscoverTvParamsSortByVoteAverageAsc   DiscoverTvParamsSortBy = "vote_average.asc"
+	DiscoverTvParamsSortByVoteAverageDesc  DiscoverTvParamsSortBy = "vote_average.desc"
+	DiscoverTvParamsSortByVoteCountAsc     DiscoverTvParamsSortBy = "vote_count.asc"
+	DiscoverTvParamsSortByVoteCountDesc    DiscoverTvParamsSortBy = "vote_count.desc"
+)
+
+// Valid indicates whether the value is a known member of the DiscoverTvParamsSortBy enum.
+func (e DiscoverTvParamsSortBy) Valid() bool {
+	switch e {
+	case DiscoverTvParamsSortByFirstAirDateAsc:
+		return true
+	case DiscoverTvParamsSortByFirstAirDateDesc:
+		return true
+	case DiscoverTvParamsSortByNameAsc:
+		return true
+	case DiscoverTvParamsSortByNameDesc:
+		return true
+	case DiscoverTvParamsSortByOriginalNameAsc:
+		return true
+	case DiscoverTvParamsSortByOriginalNameDesc:
+		return true
+	case DiscoverTvParamsSortByPopularityAsc:
+		return true
+	case DiscoverTvParamsSortByPopularityDesc:
+		return true
+	case DiscoverTvParamsSortByVoteAverageAsc:
+		return true
+	case DiscoverTvParamsSortByVoteAverageDesc:
+		return true
+	case DiscoverTvParamsSortByVoteCountAsc:
+		return true
+	case DiscoverTvParamsSortByVoteCountDesc:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for TrendingAllParamsTimeWindow.
 const (
@@ -32,6 +135,134 @@ func (e TrendingAllParamsTimeWindow) Valid() bool {
 		return false
 	}
 }
+
+// DiscoverMovieParams defines parameters for DiscoverMovie.
+type DiscoverMovieParams struct {
+	// Certification use in conjunction with `region`
+	Certification *string `form:"certification,omitempty" json:"certification,omitempty"`
+
+	// CertificationGte use in conjunction with `region`
+	CertificationGte *string `form:"certification.gte,omitempty" json:"certification.gte,omitempty"`
+
+	// CertificationLte use in conjunction with `region`
+	CertificationLte *string `form:"certification.lte,omitempty" json:"certification.lte,omitempty"`
+
+	// CertificationCountry use in conjunction with the `certification`, `certification.gte` and `certification.lte` filters
+	CertificationCountry  *string                    `form:"certification_country,omitempty" json:"certification_country,omitempty"`
+	IncludeAdult          *bool                      `form:"include_adult,omitempty" json:"include_adult,omitempty"`
+	IncludeVideo          *bool                      `form:"include_video,omitempty" json:"include_video,omitempty"`
+	Language              *string                    `form:"language,omitempty" json:"language,omitempty"`
+	Page                  *int32                     `form:"page,omitempty" json:"page,omitempty"`
+	PrimaryReleaseYear    *int32                     `form:"primary_release_year,omitempty" json:"primary_release_year,omitempty"`
+	PrimaryReleaseDateGte *openapi_types.Date        `form:"primary_release_date.gte,omitempty" json:"primary_release_date.gte,omitempty"`
+	PrimaryReleaseDateLte *openapi_types.Date        `form:"primary_release_date.lte,omitempty" json:"primary_release_date.lte,omitempty"`
+	Region                *string                    `form:"region,omitempty" json:"region,omitempty"`
+	ReleaseDateGte        *openapi_types.Date        `form:"release_date.gte,omitempty" json:"release_date.gte,omitempty"`
+	ReleaseDateLte        *openapi_types.Date        `form:"release_date.lte,omitempty" json:"release_date.lte,omitempty"`
+	SortBy                *DiscoverMovieParamsSortBy `form:"sort_by,omitempty" json:"sort_by,omitempty"`
+	VoteAverageGte        *float32                   `form:"vote_average.gte,omitempty" json:"vote_average.gte,omitempty"`
+	VoteAverageLte        *float32                   `form:"vote_average.lte,omitempty" json:"vote_average.lte,omitempty"`
+	VoteCountGte          *float32                   `form:"vote_count.gte,omitempty" json:"vote_count.gte,omitempty"`
+	VoteCountLte          *float32                   `form:"vote_count.lte,omitempty" json:"vote_count.lte,omitempty"`
+
+	// WatchRegion use in conjunction with `with_watch_monetization_types ` or `with_watch_providers `
+	WatchRegion *string `form:"watch_region,omitempty" json:"watch_region,omitempty"`
+
+	// WithCast can be a comma (`AND`) or pipe (`OR`) separated query
+	WithCast *string `form:"with_cast,omitempty" json:"with_cast,omitempty"`
+
+	// WithCompanies can be a comma (`AND`) or pipe (`OR`) separated query
+	WithCompanies *string `form:"with_companies,omitempty" json:"with_companies,omitempty"`
+
+	// WithCrew can be a comma (`AND`) or pipe (`OR`) separated query
+	WithCrew *string `form:"with_crew,omitempty" json:"with_crew,omitempty"`
+
+	// WithGenres can be a comma (`AND`) or pipe (`OR`) separated query
+	WithGenres *string `form:"with_genres,omitempty" json:"with_genres,omitempty"`
+
+	// WithKeywords can be a comma (`AND`) or pipe (`OR`) separated query
+	WithKeywords         *string `form:"with_keywords,omitempty" json:"with_keywords,omitempty"`
+	WithOriginCountry    *string `form:"with_origin_country,omitempty" json:"with_origin_country,omitempty"`
+	WithOriginalLanguage *string `form:"with_original_language,omitempty" json:"with_original_language,omitempty"`
+
+	// WithPeople can be a comma (`AND`) or pipe (`OR`) separated query
+	WithPeople *string `form:"with_people,omitempty" json:"with_people,omitempty"`
+
+	// WithReleaseType possible values are: [1, 2, 3, 4, 5, 6] can be a comma (`AND`) or pipe (`OR`) separated query, can be used in conjunction with `region`
+	WithReleaseType *int32 `form:"with_release_type,omitempty" json:"with_release_type,omitempty"`
+	WithRuntimeGte  *int32 `form:"with_runtime.gte,omitempty" json:"with_runtime.gte,omitempty"`
+	WithRuntimeLte  *int32 `form:"with_runtime.lte,omitempty" json:"with_runtime.lte,omitempty"`
+
+	// WithWatchMonetizationTypes possible values are: [flatrate, free, ads, rent, buy] use in conjunction with `watch_region`, can be a comma (`AND`) or pipe (`OR`) separated query
+	WithWatchMonetizationTypes *string `form:"with_watch_monetization_types,omitempty" json:"with_watch_monetization_types,omitempty"`
+
+	// WithWatchProviders use in conjunction with `watch_region`, can be a comma (`AND`) or pipe (`OR`) separated query
+	WithWatchProviders    *string `form:"with_watch_providers,omitempty" json:"with_watch_providers,omitempty"`
+	WithoutCompanies      *string `form:"without_companies,omitempty" json:"without_companies,omitempty"`
+	WithoutGenres         *string `form:"without_genres,omitempty" json:"without_genres,omitempty"`
+	WithoutKeywords       *string `form:"without_keywords,omitempty" json:"without_keywords,omitempty"`
+	WithoutWatchProviders *string `form:"without_watch_providers,omitempty" json:"without_watch_providers,omitempty"`
+	Year                  *int32  `form:"year,omitempty" json:"year,omitempty"`
+}
+
+// DiscoverMovieParamsSortBy defines parameters for DiscoverMovie.
+type DiscoverMovieParamsSortBy string
+
+// DiscoverTvParams defines parameters for DiscoverTv.
+type DiscoverTvParams struct {
+	AirDateGte               *openapi_types.Date     `form:"air_date.gte,omitempty" json:"air_date.gte,omitempty"`
+	AirDateLte               *openapi_types.Date     `form:"air_date.lte,omitempty" json:"air_date.lte,omitempty"`
+	FirstAirDateYear         *int32                  `form:"first_air_date_year,omitempty" json:"first_air_date_year,omitempty"`
+	FirstAirDateGte          *openapi_types.Date     `form:"first_air_date.gte,omitempty" json:"first_air_date.gte,omitempty"`
+	FirstAirDateLte          *openapi_types.Date     `form:"first_air_date.lte,omitempty" json:"first_air_date.lte,omitempty"`
+	IncludeAdult             *bool                   `form:"include_adult,omitempty" json:"include_adult,omitempty"`
+	IncludeNullFirstAirDates *bool                   `form:"include_null_first_air_dates,omitempty" json:"include_null_first_air_dates,omitempty"`
+	Language                 *string                 `form:"language,omitempty" json:"language,omitempty"`
+	Page                     *int32                  `form:"page,omitempty" json:"page,omitempty"`
+	ScreenedTheatrically     *bool                   `form:"screened_theatrically,omitempty" json:"screened_theatrically,omitempty"`
+	SortBy                   *DiscoverTvParamsSortBy `form:"sort_by,omitempty" json:"sort_by,omitempty"`
+	Timezone                 *string                 `form:"timezone,omitempty" json:"timezone,omitempty"`
+	VoteAverageGte           *float32                `form:"vote_average.gte,omitempty" json:"vote_average.gte,omitempty"`
+	VoteAverageLte           *float32                `form:"vote_average.lte,omitempty" json:"vote_average.lte,omitempty"`
+	VoteCountGte             *float32                `form:"vote_count.gte,omitempty" json:"vote_count.gte,omitempty"`
+	VoteCountLte             *float32                `form:"vote_count.lte,omitempty" json:"vote_count.lte,omitempty"`
+
+	// WatchRegion use in conjunction with `with_watch_monetization_types ` or `with_watch_providers `
+	WatchRegion *string `form:"watch_region,omitempty" json:"watch_region,omitempty"`
+
+	// WithCompanies can be a comma (`AND`) or pipe (`OR`) separated query
+	WithCompanies *string `form:"with_companies,omitempty" json:"with_companies,omitempty"`
+
+	// WithGenres can be a comma (`AND`) or pipe (`OR`) separated query
+	WithGenres *string `form:"with_genres,omitempty" json:"with_genres,omitempty"`
+
+	// WithKeywords can be a comma (`AND`) or pipe (`OR`) separated query
+	WithKeywords         *string `form:"with_keywords,omitempty" json:"with_keywords,omitempty"`
+	WithNetworks         *int32  `form:"with_networks,omitempty" json:"with_networks,omitempty"`
+	WithOriginCountry    *string `form:"with_origin_country,omitempty" json:"with_origin_country,omitempty"`
+	WithOriginalLanguage *string `form:"with_original_language,omitempty" json:"with_original_language,omitempty"`
+	WithRuntimeGte       *int32  `form:"with_runtime.gte,omitempty" json:"with_runtime.gte,omitempty"`
+	WithRuntimeLte       *int32  `form:"with_runtime.lte,omitempty" json:"with_runtime.lte,omitempty"`
+
+	// WithStatus possible values are: [0, 1, 2, 3, 4, 5], can be a comma (`AND`) or pipe (`OR`) separated query
+	WithStatus *string `form:"with_status,omitempty" json:"with_status,omitempty"`
+
+	// WithWatchMonetizationTypes possible values are: [flatrate, free, ads, rent, buy] use in conjunction with `watch_region`, can be a comma (`AND`) or pipe (`OR`) separated query
+	WithWatchMonetizationTypes *string `form:"with_watch_monetization_types,omitempty" json:"with_watch_monetization_types,omitempty"`
+
+	// WithWatchProviders use in conjunction with `watch_region`, can be a comma (`AND`) or pipe (`OR`) separated query
+	WithWatchProviders    *string `form:"with_watch_providers,omitempty" json:"with_watch_providers,omitempty"`
+	WithoutCompanies      *string `form:"without_companies,omitempty" json:"without_companies,omitempty"`
+	WithoutGenres         *string `form:"without_genres,omitempty" json:"without_genres,omitempty"`
+	WithoutKeywords       *string `form:"without_keywords,omitempty" json:"without_keywords,omitempty"`
+	WithoutWatchProviders *string `form:"without_watch_providers,omitempty" json:"without_watch_providers,omitempty"`
+
+	// WithType possible values are: [0, 1, 2, 3, 4, 5, 6], can be a comma (`AND`) or pipe (`OR`) separated query
+	WithType *string `form:"with_type,omitempty" json:"with_type,omitempty"`
+}
+
+// DiscoverTvParamsSortBy defines parameters for DiscoverTv.
+type DiscoverTvParamsSortBy string
 
 // GenreMovieListParams defines parameters for GenreMovieList.
 type GenreMovieListParams struct {
@@ -211,6 +442,20 @@ type ClientInterface interface {
 	// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
 	AuthenticationValidateKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DiscoverMovie Movie
+	//
+	// Find movies using over 30 filters and sort options.
+	//
+	// Corresponds with GET /3/discover/movie (the `DiscoverMovie` operationId).
+	DiscoverMovie(ctx context.Context, params *DiscoverMovieParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DiscoverTv TV
+	//
+	// Find TV shows using over 30 filters and sort options.
+	//
+	// Corresponds with GET /3/discover/tv (the `DiscoverTv` operationId).
+	DiscoverTv(ctx context.Context, params *DiscoverTvParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GenreMovieList Movie List
 	//
 	// Get the list of official genres for movies.
@@ -303,6 +548,40 @@ type ClientInterface interface {
 // Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
 func (c *Client) AuthenticationValidateKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAuthenticationValidateKeyRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DiscoverMovie Movie
+//
+// Find movies using over 30 filters and sort options.
+//
+// Corresponds with GET /3/discover/movie (the `DiscoverMovie` operationId).
+func (c *Client) DiscoverMovie(ctx context.Context, params *DiscoverMovieParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDiscoverMovieRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DiscoverTv TV
+//
+// Find TV shows using over 30 filters and sort options.
+//
+// Corresponds with GET /3/discover/tv (the `DiscoverTv` operationId).
+func (c *Client) DiscoverTv(ctx context.Context, params *DiscoverTvParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDiscoverTvRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -534,6 +813,942 @@ func NewAuthenticationValidateKeyRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDiscoverMovieRequest constructs an http.Request for the DiscoverMovie method
+func NewDiscoverMovieRequest(server string, params *DiscoverMovieParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/discover/movie")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Certification != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "certification", *params.Certification, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.CertificationGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "certification.gte", *params.CertificationGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.CertificationLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "certification.lte", *params.CertificationLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.CertificationCountry != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "certification_country", *params.CertificationCountry, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IncludeAdult != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "include_adult", *params.IncludeAdult, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IncludeVideo != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "include_video", *params.IncludeVideo, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PrimaryReleaseYear != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "primary_release_year", *params.PrimaryReleaseYear, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PrimaryReleaseDateGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "primary_release_date.gte", *params.PrimaryReleaseDateGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PrimaryReleaseDateLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "primary_release_date.lte", *params.PrimaryReleaseDateLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Region != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "region", *params.Region, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ReleaseDateGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "release_date.gte", *params.ReleaseDateGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ReleaseDateLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "release_date.lte", *params.ReleaseDateLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SortBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sort_by", *params.SortBy, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteAverageGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_average.gte", *params.VoteAverageGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteAverageLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_average.lte", *params.VoteAverageLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteCountGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_count.gte", *params.VoteCountGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteCountLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_count.lte", *params.VoteCountLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WatchRegion != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "watch_region", *params.WatchRegion, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithCast != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_cast", *params.WithCast, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithCompanies != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_companies", *params.WithCompanies, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithCrew != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_crew", *params.WithCrew, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithGenres != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_genres", *params.WithGenres, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithKeywords != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_keywords", *params.WithKeywords, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithOriginCountry != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_origin_country", *params.WithOriginCountry, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithOriginalLanguage != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_original_language", *params.WithOriginalLanguage, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithPeople != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_people", *params.WithPeople, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithReleaseType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_release_type", *params.WithReleaseType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithRuntimeGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_runtime.gte", *params.WithRuntimeGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithRuntimeLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_runtime.lte", *params.WithRuntimeLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithWatchMonetizationTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_watch_monetization_types", *params.WithWatchMonetizationTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithWatchProviders != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_watch_providers", *params.WithWatchProviders, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutCompanies != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_companies", *params.WithoutCompanies, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutGenres != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_genres", *params.WithoutGenres, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutKeywords != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_keywords", *params.WithoutKeywords, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutWatchProviders != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_watch_providers", *params.WithoutWatchProviders, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Year != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "year", *params.Year, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDiscoverTvRequest constructs an http.Request for the DiscoverTv method
+func NewDiscoverTvRequest(server string, params *DiscoverTvParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/3/discover/tv")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.AirDateGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "air_date.gte", *params.AirDateGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AirDateLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "air_date.lte", *params.AirDateLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.FirstAirDateYear != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "first_air_date_year", *params.FirstAirDateYear, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.FirstAirDateGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "first_air_date.gte", *params.FirstAirDateGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.FirstAirDateLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "first_air_date.lte", *params.FirstAirDateLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IncludeAdult != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "include_adult", *params.IncludeAdult, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.IncludeNullFirstAirDates != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "include_null_first_air_dates", *params.IncludeNullFirstAirDates, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Language != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page", *params.Page, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ScreenedTheatrically != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "screened_theatrically", *params.ScreenedTheatrically, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.SortBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sort_by", *params.SortBy, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Timezone != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "timezone", *params.Timezone, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteAverageGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_average.gte", *params.VoteAverageGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteAverageLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_average.lte", *params.VoteAverageLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteCountGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_count.gte", *params.VoteCountGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.VoteCountLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "vote_count.lte", *params.VoteCountLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: "float"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WatchRegion != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "watch_region", *params.WatchRegion, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithCompanies != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_companies", *params.WithCompanies, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithGenres != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_genres", *params.WithGenres, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithKeywords != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_keywords", *params.WithKeywords, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithNetworks != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_networks", *params.WithNetworks, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithOriginCountry != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_origin_country", *params.WithOriginCountry, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithOriginalLanguage != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_original_language", *params.WithOriginalLanguage, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithRuntimeGte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_runtime.gte", *params.WithRuntimeGte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithRuntimeLte != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_runtime.lte", *params.WithRuntimeLte, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int32"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithStatus != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_status", *params.WithStatus, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithWatchMonetizationTypes != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_watch_monetization_types", *params.WithWatchMonetizationTypes, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithWatchProviders != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_watch_providers", *params.WithWatchProviders, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutCompanies != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_companies", *params.WithoutCompanies, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutGenres != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_genres", *params.WithoutGenres, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutKeywords != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_keywords", *params.WithoutKeywords, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithoutWatchProviders != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "without_watch_providers", *params.WithoutWatchProviders, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.WithType != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_type", *params.WithType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -1530,6 +2745,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /3/authentication (the `AuthenticationValidateKey` operationId).
 	AuthenticationValidateKeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AuthenticationValidateKeyResponse, error)
 
+	// DiscoverMovieWithResponse Movie
+	//
+	// Find movies using over 30 filters and sort options.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/discover/movie (the `DiscoverMovie` operationId).
+	DiscoverMovieWithResponse(ctx context.Context, params *DiscoverMovieParams, reqEditors ...RequestEditorFn) (*DiscoverMovieResponse, error)
+
+	// DiscoverTvWithResponse TV
+	//
+	// Find TV shows using over 30 filters and sort options.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /3/discover/tv (the `DiscoverTv` operationId).
+	DiscoverTvWithResponse(ctx context.Context, params *DiscoverTvParams, reqEditors ...RequestEditorFn) (*DiscoverTvResponse, error)
+
 	// GenreMovieListWithResponse Movie List
 	//
 	// Get the list of official genres for movies.
@@ -1697,6 +2930,166 @@ func (r AuthenticationValidateKeyResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r AuthenticationValidateKeyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DiscoverMovieResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			Adult            *bool    `json:"adult,omitempty"`
+			BackdropPath     *string  `json:"backdrop_path,omitempty"`
+			GenreIds         *[]int   `json:"genre_ids,omitempty"`
+			Id               *int     `json:"id,omitempty"`
+			OriginalLanguage *string  `json:"original_language,omitempty"`
+			OriginalTitle    *string  `json:"original_title,omitempty"`
+			Overview         *string  `json:"overview,omitempty"`
+			Popularity       *float32 `json:"popularity,omitempty"`
+			PosterPath       *string  `json:"poster_path,omitempty"`
+			ReleaseDate      *string  `json:"release_date,omitempty"`
+			Title            *string  `json:"title,omitempty"`
+			Video            *bool    `json:"video,omitempty"`
+			VoteAverage      *float32 `json:"vote_average,omitempty"`
+			VoteCount        *int     `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DiscoverMovieResponse) GetJSON200() *struct {
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		Adult            *bool    `json:"adult,omitempty"`
+		BackdropPath     *string  `json:"backdrop_path,omitempty"`
+		GenreIds         *[]int   `json:"genre_ids,omitempty"`
+		Id               *int     `json:"id,omitempty"`
+		OriginalLanguage *string  `json:"original_language,omitempty"`
+		OriginalTitle    *string  `json:"original_title,omitempty"`
+		Overview         *string  `json:"overview,omitempty"`
+		Popularity       *float32 `json:"popularity,omitempty"`
+		PosterPath       *string  `json:"poster_path,omitempty"`
+		ReleaseDate      *string  `json:"release_date,omitempty"`
+		Title            *string  `json:"title,omitempty"`
+		Video            *bool    `json:"video,omitempty"`
+		VoteAverage      *float32 `json:"vote_average,omitempty"`
+		VoteCount        *int     `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r DiscoverMovieResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DiscoverMovieResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DiscoverMovieResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DiscoverMovieResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DiscoverTvResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Page    *int `json:"page,omitempty"`
+		Results *[]struct {
+			BackdropPath     *string   `json:"backdrop_path,omitempty"`
+			FirstAirDate     *string   `json:"first_air_date,omitempty"`
+			GenreIds         *[]int    `json:"genre_ids,omitempty"`
+			Id               *int      `json:"id,omitempty"`
+			Name             *string   `json:"name,omitempty"`
+			OriginCountry    *[]string `json:"origin_country,omitempty"`
+			OriginalLanguage *string   `json:"original_language,omitempty"`
+			OriginalName     *string   `json:"original_name,omitempty"`
+			Overview         *string   `json:"overview,omitempty"`
+			Popularity       *float32  `json:"popularity,omitempty"`
+			PosterPath       *string   `json:"poster_path,omitempty"`
+			VoteAverage      *int      `json:"vote_average,omitempty"`
+			VoteCount        *int      `json:"vote_count,omitempty"`
+		} `json:"results,omitempty"`
+		TotalPages   *int `json:"total_pages,omitempty"`
+		TotalResults *int `json:"total_results,omitempty"`
+	}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DiscoverTvResponse) GetJSON200() *struct {
+	Page    *int `json:"page,omitempty"`
+	Results *[]struct {
+		BackdropPath     *string   `json:"backdrop_path,omitempty"`
+		FirstAirDate     *string   `json:"first_air_date,omitempty"`
+		GenreIds         *[]int    `json:"genre_ids,omitempty"`
+		Id               *int      `json:"id,omitempty"`
+		Name             *string   `json:"name,omitempty"`
+		OriginCountry    *[]string `json:"origin_country,omitempty"`
+		OriginalLanguage *string   `json:"original_language,omitempty"`
+		OriginalName     *string   `json:"original_name,omitempty"`
+		Overview         *string   `json:"overview,omitempty"`
+		Popularity       *float32  `json:"popularity,omitempty"`
+		PosterPath       *string   `json:"poster_path,omitempty"`
+		VoteAverage      *int      `json:"vote_average,omitempty"`
+		VoteCount        *int      `json:"vote_count,omitempty"`
+	} `json:"results,omitempty"`
+	TotalPages   *int `json:"total_pages,omitempty"`
+	TotalResults *int `json:"total_results,omitempty"`
+} {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r DiscoverTvResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DiscoverTvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DiscoverTvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DiscoverTvResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -2818,6 +4211,36 @@ func (c *ClientWithResponses) AuthenticationValidateKeyWithResponse(ctx context.
 	return ParseAuthenticationValidateKeyResponse(rsp)
 }
 
+// DiscoverMovieWithResponse Movie
+//
+// Find movies using over 30 filters and sort options.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/discover/movie (the `DiscoverMovie` operationId).
+func (c *ClientWithResponses) DiscoverMovieWithResponse(ctx context.Context, params *DiscoverMovieParams, reqEditors ...RequestEditorFn) (*DiscoverMovieResponse, error) {
+	rsp, err := c.DiscoverMovie(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDiscoverMovieResponse(rsp)
+}
+
+// DiscoverTvWithResponse TV
+//
+// Find TV shows using over 30 filters and sort options.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /3/discover/tv (the `DiscoverTv` operationId).
+func (c *ClientWithResponses) DiscoverTvWithResponse(ctx context.Context, params *DiscoverTvParams, reqEditors ...RequestEditorFn) (*DiscoverTvResponse, error) {
+	rsp, err := c.DiscoverTv(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDiscoverTvResponse(rsp)
+}
+
 // GenreMovieListWithResponse Movie List
 //
 // Get the list of official genres for movies.
@@ -3033,6 +4456,97 @@ func ParseAuthenticationValidateKeyResponse(rsp *http.Response) (*Authentication
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDiscoverMovieResponse parses an HTTP response from a DiscoverMovieWithResponse call
+func ParseDiscoverMovieResponse(rsp *http.Response) (*DiscoverMovieResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DiscoverMovieResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				Adult            *bool    `json:"adult,omitempty"`
+				BackdropPath     *string  `json:"backdrop_path,omitempty"`
+				GenreIds         *[]int   `json:"genre_ids,omitempty"`
+				Id               *int     `json:"id,omitempty"`
+				OriginalLanguage *string  `json:"original_language,omitempty"`
+				OriginalTitle    *string  `json:"original_title,omitempty"`
+				Overview         *string  `json:"overview,omitempty"`
+				Popularity       *float32 `json:"popularity,omitempty"`
+				PosterPath       *string  `json:"poster_path,omitempty"`
+				ReleaseDate      *string  `json:"release_date,omitempty"`
+				Title            *string  `json:"title,omitempty"`
+				Video            *bool    `json:"video,omitempty"`
+				VoteAverage      *float32 `json:"vote_average,omitempty"`
+				VoteCount        *int     `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDiscoverTvResponse parses an HTTP response from a DiscoverTvWithResponse call
+func ParseDiscoverTvResponse(rsp *http.Response) (*DiscoverTvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DiscoverTvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Page    *int `json:"page,omitempty"`
+			Results *[]struct {
+				BackdropPath     *string   `json:"backdrop_path,omitempty"`
+				FirstAirDate     *string   `json:"first_air_date,omitempty"`
+				GenreIds         *[]int    `json:"genre_ids,omitempty"`
+				Id               *int      `json:"id,omitempty"`
+				Name             *string   `json:"name,omitempty"`
+				OriginCountry    *[]string `json:"origin_country,omitempty"`
+				OriginalLanguage *string   `json:"original_language,omitempty"`
+				OriginalName     *string   `json:"original_name,omitempty"`
+				Overview         *string   `json:"overview,omitempty"`
+				Popularity       *float32  `json:"popularity,omitempty"`
+				PosterPath       *string   `json:"poster_path,omitempty"`
+				VoteAverage      *int      `json:"vote_average,omitempty"`
+				VoteCount        *int      `json:"vote_count,omitempty"`
+			} `json:"results,omitempty"`
+			TotalPages   *int `json:"total_pages,omitempty"`
+			TotalResults *int `json:"total_results,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

@@ -11,8 +11,8 @@ import {
   whereLabel,
 } from "./watch-format.js";
 
-// One card per active session: artwork, who, what, how far along, and one
-// line of where and how. Each card is an article named by the person, so
+// One card per active session, all the same size: a poster, who, what, how
+// far along, and where and how. Each card is an article named by the person, so
 // the list reads as "alice, bob" and each card's details follow. The stream
 // details live on the watch's own page.
 export function SessionCards({
@@ -34,12 +34,8 @@ function SessionCard({ watch }: Readonly<{ watch: Watch }>): ReactNode {
   const id = useId();
   const title = itemTitle(watch);
   const person = watch.username || watch.media_user_id;
-  const episode = watch.item_type === "Episode";
   return (
-    <article
-      className={episode ? "session-card session-card-wide" : "session-card"}
-      aria-labelledby={id}
-    >
+    <article className="session-card" aria-labelledby={id}>
       <Link
         to={watchPath(watch.id)}
         className="session-card-art"
@@ -48,9 +44,9 @@ function SessionCard({ watch }: Readonly<{ watch: Watch }>): ReactNode {
       >
         <ItemImage
           mediaServerId={watch.media_server_id}
-          itemId={watch.item_id}
+          itemId={posterItemId(watch)}
           title={watch.series_name === "" ? watch.item_name : watch.series_name}
-          shape={episode ? "wide" : "poster"}
+          shape="poster"
         />
       </Link>
       <div className="session-card-body">
@@ -79,6 +75,15 @@ function SessionCard({ watch }: Readonly<{ watch: Watch }>): ReactNode {
       </div>
     </article>
   );
+}
+
+// Every card carries a poster so every card is the same size: an episode
+// shows its series' poster, which Jellyfin keeps as the series' primary
+// image, and falls back to its own artwork without a series.
+function posterItemId(watch: Watch): string {
+  return watch.item_type === "Episode" && watch.series_id !== ""
+    ? watch.series_id
+    : watch.item_id;
 }
 
 // The position against the item's length when the server reported one;

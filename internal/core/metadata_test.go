@@ -47,6 +47,12 @@ func TestValidateMetadataDiscoverBoundsTMDBPages(t *testing.T) {
 		{name: "unknown list", input: MetadataDiscover{List: "unknown", Page: 1}},
 		{name: "zero page", input: MetadataDiscover{List: MetadataTrending, Page: 0}},
 		{name: "page above provider bound", input: MetadataDiscover{List: MetadataTrending, Page: MaxMetadataPage + 1}},
+		{name: "genre list with genre", input: MetadataDiscover{List: MetadataMoviesGenre, Page: 1, FilterID: 28}, valid: true},
+		{name: "network list at filter bound", input: MetadataDiscover{List: MetadataSeriesNetwork, Page: 1, FilterID: MaxMetadataFilterID}, valid: true},
+		{name: "studio list without studio", input: MetadataDiscover{List: MetadataMoviesStudio, Page: 1}},
+		{name: "genre list with negative genre", input: MetadataDiscover{List: MetadataSeriesGenre, Page: 1, FilterID: -1}},
+		{name: "filter above bound", input: MetadataDiscover{List: MetadataMoviesGenre, Page: 1, FilterID: MaxMetadataFilterID + 1}},
+		{name: "unfiltered list with filter", input: MetadataDiscover{List: MetadataTrending, Page: 1, FilterID: 28}},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {

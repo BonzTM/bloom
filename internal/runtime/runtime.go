@@ -187,6 +187,7 @@ type serviceWiring struct {
 	importWorker        *importapp.Worker
 	catalog             *catalogapp.Service
 	catalogWorker       *catalogapp.Worker
+	recentlyAdded       *catalogapp.RecentlyAdded
 	playbackStore       runtimePlaybackStore
 	playbackManager     *playback.Manager
 	stats               *statsapp.Service
@@ -281,6 +282,10 @@ func wirePlaybackAndIdentity(
 	if err != nil {
 		return serviceWiring{}, err
 	}
+	recentlyAdded, err := recentlyAddedDependency(pool, cfg)
+	if err != nil {
+		return serviceWiring{}, err
+	}
 	exclusions.AddInvalidator(catalog.Invalidate)
 	exclusions.AddInvalidator(statsService.Invalidate)
 	if roleErr := validateOIDCRoles(ctx, wiring.roles, cfg.OIDC); roleErr != nil {
@@ -292,7 +297,7 @@ func wirePlaybackAndIdentity(
 	}
 	ownership.provider = provider
 	wiring.imports, wiring.importWorker = imports, importWorker
-	wiring.catalog, wiring.catalogWorker = catalog, catalogWorker
+	wiring.catalog, wiring.catalogWorker, wiring.recentlyAdded = catalog, catalogWorker, recentlyAdded
 	wiring.exclusions = exclusions
 	wiring.playbackStore, wiring.playbackManager, wiring.stats = playbackStore, playbackManager, statsService
 	wiring.oidcProvider, wiring.oidcAccounts, wiring.oidcFlows = provider, oidcAccounts, oidcFlows
@@ -338,6 +343,18 @@ func importDependencies(
 		return nil, nil, fmt.Errorf("build import worker: %w", err)
 	}
 	return service, worker, nil
+}
+
+func recentlyAddedDependency(pool *sql.DB, cfg config.Config) (*catalogapp.RecentlyAdded, error) {
+	store, err := db.NewRecentlyAddedStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build recently added store: %w", err)
+	}
+	reader, err := catalogapp.NewRecentlyAdded(store)
+	if err != nil {
+		return nil, fmt.Errorf("build recently added reader: %w", err)
+	}
+	return reader, nil
 }
 
 func catalogDependencies(
@@ -540,6 +557,7 @@ func assembleHTTPServer(
 		InviteManager:          wiring.invites,
 		Imports:                wiring.imports,
 		Catalog:                wiring.catalog,
+		RecentlyAdded:          wiring.recentlyAdded,
 		Exclusions:             wiring.exclusions,
 		AccountMediaUsers:      wiring.accountMediaUsers,
 		PlaybackReader:         wiring.playbackStore,

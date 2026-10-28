@@ -50,16 +50,48 @@ func (s *Server) handleMetadataSeriesUpcoming(w http.ResponseWriter, r *http.Req
 	s.handleMetadataDiscover(w, r, core.MetadataSeriesUpcoming)
 }
 
+func (s *Server) handleMetadataMoviesGenre(w http.ResponseWriter, r *http.Request) {
+	s.handleMetadataFilteredDiscover(w, r, core.MetadataMoviesGenre)
+}
+
+func (s *Server) handleMetadataSeriesGenre(w http.ResponseWriter, r *http.Request) {
+	s.handleMetadataFilteredDiscover(w, r, core.MetadataSeriesGenre)
+}
+
+func (s *Server) handleMetadataMoviesStudio(w http.ResponseWriter, r *http.Request) {
+	s.handleMetadataFilteredDiscover(w, r, core.MetadataMoviesStudio)
+}
+
+func (s *Server) handleMetadataSeriesNetwork(w http.ResponseWriter, r *http.Request) {
+	s.handleMetadataFilteredDiscover(w, r, core.MetadataSeriesNetwork)
+}
+
 func (s *Server) handleMetadataDiscover(
 	w http.ResponseWriter, r *http.Request, list core.MetadataDiscoverList,
 ) {
+	s.discover(w, r, core.MetadataDiscover{List: list})
+}
+
+func (s *Server) handleMetadataFilteredDiscover(
+	w http.ResponseWriter, r *http.Request, list core.MetadataDiscoverList,
+) {
+	filter, err := metadataFilterID(r.PathValue("id"))
+	if err != nil {
+		s.writeValidation(w, r, []httputil.FieldError{{Field: "id", Code: "invalid", Message: "must be a positive TMDB identifier"}})
+		return
+	}
+	s.discover(w, r, core.MetadataDiscover{List: list, FilterID: filter})
+}
+
+func (s *Server) discover(w http.ResponseWriter, r *http.Request, input core.MetadataDiscover) {
 	page, err := metadataPage(r)
 	if err != nil {
 		s.writeValidation(w, r, []httputil.FieldError{{Field: "cursor", Code: "invalid", Message: "must be a valid discovery cursor"}})
 		return
 	}
+	input.Page = page
 	account, _ := accountFrom(r.Context())
-	result, err := s.metadataDiscovery.Discover(r.Context(), account.ID, core.MetadataDiscover{List: list, Page: page})
+	result, err := s.metadataDiscovery.Discover(r.Context(), account.ID, input)
 	if err != nil {
 		writeError(w, r, s.logger, err)
 		return
@@ -84,6 +116,19 @@ func metadataPage(r *http.Request) (int, error) {
 		return 0, core.ErrInvalidArgument
 	}
 	return page, nil
+}
+
+// metadataFilterID accepts only the canonical decimal form of a TMDB genre,
+// company, or network identifier, so one filter has one cache entry.
+func metadataFilterID(raw string) (int, error) {
+	if len(raw) == 0 || len(raw) > len(strconv.Itoa(core.MaxMetadataFilterID)) {
+		return 0, core.ErrInvalidArgument
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id < 1 || id > core.MaxMetadataFilterID || strconv.Itoa(id) != raw {
+		return 0, core.ErrInvalidArgument
+	}
+	return id, nil
 }
 
 func metadataDiscoverDTO(page core.MetadataDiscoverPage) metadataDiscoverResponse {

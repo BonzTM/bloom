@@ -35,6 +35,8 @@ const (
 	MaxMetadataPage = 20
 	// MetadataPageSize is TMDB's fixed discovery page size.
 	MetadataPageSize = 20
+	// MaxMetadataFilterID bounds a TMDB genre, company, or network identifier.
+	MaxMetadataFilterID = 1_000_000_000
 	// MinMetadataCredentialBytes is the shortest accepted TMDB Read Access Token.
 	MinMetadataCredentialBytes = 100
 	// MaxMetadataCredentialBytes bounds a stored TMDB Read Access Token.
@@ -80,12 +82,26 @@ const (
 	MetadataMoviesUpcoming MetadataDiscoverList = "movies_upcoming"
 	// MetadataSeriesUpcoming is TMDB's on-the-air series list.
 	MetadataSeriesUpcoming MetadataDiscoverList = "series_upcoming"
+	// MetadataMoviesGenre is TMDB's popular movies in one genre.
+	MetadataMoviesGenre MetadataDiscoverList = "movies_genre"
+	// MetadataSeriesGenre is TMDB's popular series in one genre.
+	MetadataSeriesGenre MetadataDiscoverList = "series_genre"
+	// MetadataMoviesStudio is TMDB's popular movies from one production company.
+	MetadataMoviesStudio MetadataDiscoverList = "movies_studio"
+	// MetadataSeriesNetwork is TMDB's popular series from one network.
+	MetadataSeriesNetwork MetadataDiscoverList = "series_network"
 )
 
 // Valid reports whether the discovery list is supported.
 func (l MetadataDiscoverList) Valid() bool {
 	return l == MetadataTrending || l == MetadataMoviesPopular || l == MetadataSeriesPopular ||
-		l == MetadataMoviesUpcoming || l == MetadataSeriesUpcoming
+		l == MetadataMoviesUpcoming || l == MetadataSeriesUpcoming || l.Filtered()
+}
+
+// Filtered reports whether the list narrows TMDB discovery by one genre, company, or network.
+func (l MetadataDiscoverList) Filtered() bool {
+	return l == MetadataMoviesGenre || l == MetadataSeriesGenre || l == MetadataMoviesStudio ||
+		l == MetadataSeriesNetwork
 }
 
 // MetadataSearch is a validated provider search request.
@@ -106,10 +122,12 @@ type MetadataTitle struct {
 	BackdropPath string
 }
 
-// MetadataDiscover is a validated provider discovery request.
+// MetadataDiscover is a validated provider discovery request. FilterID is
+// the genre, company, or network of a filtered list and zero otherwise.
 type MetadataDiscover struct {
-	List MetadataDiscoverList
-	Page int
+	List     MetadataDiscoverList
+	Page     int
+	FilterID int
 }
 
 // MetadataPage is one bounded provider discovery page.
@@ -238,6 +256,9 @@ func ValidateMetadataSearch(input MetadataSearch) error {
 // ValidateMetadataDiscover validates a discovery list and TMDB page bound.
 func ValidateMetadataDiscover(input MetadataDiscover) error {
 	if !input.List.Valid() || input.Page < 1 || input.Page > MaxMetadataPage {
+		return ErrInvalidArgument
+	}
+	if input.List.Filtered() != (input.FilterID > 0) || input.FilterID < 0 || input.FilterID > MaxMetadataFilterID {
 		return ErrInvalidArgument
 	}
 	return nil

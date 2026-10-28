@@ -1,4 +1,5 @@
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { MediaRow } from "../../../components/media-row.js";
 import type { MetadataCredit, MetadataTitle } from "../api/metadata-schemas.js";
 import { tmdbCreditsUrl, tmdbImageUrl } from "./detail-format.js";
 
@@ -49,28 +50,22 @@ export function KeywordChips({
   );
 }
 
-// The cast in billing order, scrolling sideways like a discover row.
+// The cast in billing order, in the same sideways row as the posters.
 export function CastRow({
   cast,
 }: Readonly<{ cast: readonly MetadataCredit[] }>): ReactNode {
-  const id = useId();
   if (cast.length === 0) {
     return null;
   }
   return (
-    <section aria-labelledby={id} className="discover-row">
-      <h2 id={id}>Cast</h2>
-      <div className="discover-scroller">
-        <ul className="discover-list cast-list" aria-label="Cast">
-          {/* TMDB may bill one person twice, once per character. */}
-          {cast.map((member, index) => (
-            <li key={`${String(index)}-${String(member.person_id)}`}>
-              <CastCard member={member} />
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
+    <MediaRow title="Cast">
+      {/* TMDB may bill one person twice, once per character. */}
+      {cast.map((member, index) => (
+        <li key={`${String(index)}-${String(member.person_id)}`}>
+          <CastCard member={member} />
+        </li>
+      ))}
+    </MediaRow>
   );
 }
 
