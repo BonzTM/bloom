@@ -251,6 +251,7 @@ func postgresUpsertCatalogItem(ctx context.Context, q *postgres.Queries, item co
 		ProductionYear: postgresNullableInt32(item.ProductionYear), CommunityRating: nullableCatalogFloat(item.CommunityRating),
 		Genres: genres, PrimaryImageTag: item.PrimaryImageTag, DateCreated: nullableTime(item.DateCreated),
 		Archived: item.Archived, FirstSeenAt: core.NormalizeTime(item.FirstSeenAt),
+		TmdbID:     optionalPositiveInt64(item.TMDBID),
 		LastSeenAt: core.NormalizeTime(item.LastSeenAt), UpdatedAt: core.NormalizeTime(item.UpdatedAt),
 	}
 	if _, upsertErr := q.UpsertLibraryItem(ctx, params); upsertErr != nil {

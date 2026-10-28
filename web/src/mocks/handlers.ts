@@ -3545,6 +3545,12 @@ const MOCK_RECENT_EXTRAS: readonly (readonly [
   ["Dark", "series", 2017],
 ];
 
+// TMDB IDs the mock media server reports for its catalog titles. A title
+// without one, like a home movie, falls back to a search or its item page.
+const MOCK_RECENT_TMDB_IDS: Readonly<Record<string, number>> = {
+  "The Arrival": 1396,
+};
+
 export const mockRecentlyAdded = [
   ...mockCatalogItems
     .filter(
@@ -3560,6 +3566,7 @@ export const mockRecentlyAdded = [
         item.item_type === "Movie" ? ("movie" as const) : ("series" as const),
       title: item.name,
       year: item.production_year ?? 0,
+      tmdb_id: MOCK_RECENT_TMDB_IDS[item.name] ?? 0,
       added_at: item.date_created ?? "",
     })),
   ...MOCK_RECENT_EXTRAS.map(([title, kind, year], index) => ({
@@ -3568,6 +3575,7 @@ export const mockRecentlyAdded = [
     kind,
     title,
     year,
+    tmdb_id: 0,
     added_at: `2026-08-${String(28 - index).padStart(2, "0")}T10:00:00Z`,
   })),
 ].sort((left, right) => right.added_at.localeCompare(left.added_at));

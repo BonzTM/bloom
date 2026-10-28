@@ -289,6 +289,7 @@ type storedCatalogItem struct {
 	mediaServerID, itemID, libraryID, parentID, itemType, name string
 	seriesID, seriesName, seasonID, genres, primaryImageTag    string
 	seasonNumber, indexNumber, productionYear                  *int32
+	tmdbID                                                     sql.NullInt64
 	runtime                                                    *time.Duration
 	premiereDate, dateCreated                                  *time.Time
 	communityRating                                            *float64
@@ -308,10 +309,10 @@ func (row storedCatalogItem) domain() (core.LibraryItem, error) {
 		SeasonNumber: row.seasonNumber, IndexNumber: row.indexNumber, Runtime: row.runtime,
 		PremiereDate: row.premiereDate, ProductionYear: row.productionYear,
 		CommunityRating: row.communityRating, Genres: genres, PrimaryImageTag: row.primaryImageTag,
-		DateCreated: row.dateCreated, Archived: row.archived,
+		DateCreated: row.dateCreated, TMDBID: row.tmdbID.Int64, Archived: row.archived,
 		FirstSeenAt: row.firstSeenAt, LastSeenAt: row.lastSeenAt, UpdatedAt: row.updatedAt,
 	}
-	if !item.Valid() {
+	if !item.Valid() || row.tmdbID.Valid && row.tmdbID.Int64 < 1 {
 		return core.LibraryItem{}, errors.New("persisted catalog item is invalid")
 	}
 	return item, nil

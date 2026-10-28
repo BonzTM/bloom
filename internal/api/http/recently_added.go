@@ -20,6 +20,7 @@ type recentlyAddedItemResponse struct {
 	Kind          core.MediaKind `json:"kind"`
 	Title         string         `json:"title"`
 	Year          int            `json:"year"`
+	TMDBID        int64          `json:"tmdb_id"`
 	AddedAt       time.Time      `json:"added_at"`
 }
 
@@ -63,7 +64,7 @@ func recentlyAddedDTO(titles []core.RecentlyAddedTitle) recentlyAddedResponse {
 	for _, title := range titles {
 		items = append(items, recentlyAddedItemResponse{
 			MediaServerID: title.MediaServerID, ItemID: title.ItemID, Kind: title.Kind, Title: title.Title,
-			Year: title.Year, AddedAt: title.AddedAt.UTC(),
+			Year: title.Year, TMDBID: title.TMDBID, AddedAt: title.AddedAt.UTC(),
 		})
 	}
 	return recentlyAddedResponse{Items: items}

@@ -627,7 +627,10 @@ The same accounts can read `GET /api/v1/library/recently-added`: the newest
 active movies and series in the synced library catalog across every media
 server, newest first by the media server's creation time, leaving out
 libraries an operator excluded. `limit` defaults to 20 and accepts 1 through
-40. The list stays empty until a catalog sync has run.
+40. The list stays empty until a catalog sync has run. Each title carries the
+`tmdb_id` the media server reports in its provider IDs, or 0 when it has none;
+the home page opens a title with an ID on its title page. Titles synced before
+this field existed gain it on the next catalog sync.
 If a metadata error reports the `unreachable` reason, the Bloom server cannot
 reach `api.themoviedb.org`; a firewall or network policy is the usual cause.
 Accounts with `requests.create` or `requests.read.own` can open movie or series

@@ -130,7 +130,7 @@ var (
 	expectedWatchSegmentColumns              = []string{"ended_at", "source", "started_at", "watch_id"}
 	expectedWatchPositionColumns             = []string{"is_transition", "observed_at", "paused", "play_method", "position_ms", "source", "stream_audio_channels", "stream_audio_codec", "stream_bitrate", "stream_container", "stream_framerate_hundredths", "stream_height", "stream_is_audio_direct", "stream_is_video_direct", "stream_transcode_reasons", "stream_video_codec", "stream_width", "watch_id"}
 	expectedRequestColumns                   = []string{"created_at", "decided_at", "decided_by_account_id", "decision_reason", "dispatch_lease_expires_at", "dispatch_lease_token", "dispatch_quality_profile", "dispatch_root_folder", "dispatch_tags", "download_manager_id", "download_manager_item_id", "failure_reason", "id", "kind", "last_availability_check_at", "poster_path", "profile_id", "provider", "provider_id", "release_year", "requester_account_id", "status", "title", "updated_at"}
-	expectedLibraryItemColumns               = []string{"archived", "community_rating", "date_created", "first_played_at", "first_seen_at", "genres", "index_number", "item_id", "item_type", "last_played_at", "last_seen_at", "library_id", "media_server_id", "name", "parent_id", "plays", "premiere_date", "primary_image_tag", "production_year", "runtime_ms", "season_id", "season_number", "series_id", "series_name", "unique_users", "updated_at", "watch_seconds"}
+	expectedLibraryItemColumns               = []string{"archived", "community_rating", "date_created", "first_played_at", "first_seen_at", "genres", "index_number", "item_id", "item_type", "last_played_at", "last_seen_at", "library_id", "media_server_id", "name", "parent_id", "plays", "premiere_date", "primary_image_tag", "production_year", "runtime_ms", "season_id", "season_number", "series_id", "series_name", "tmdb_id", "unique_users", "updated_at", "watch_seconds"}
 	expectedLibraryItemGenreColumns          = []string{"genre", "item_id", "media_server_id"}
 	expectedLibrarySyncColumns               = []string{"archived_count", "cursor", "finished_at", "last_error", "lease_expires_at", "lease_token", "media_server_id", "seen_count", "started_at", "state", "upserted_count"}
 	expectedExclusionColumns                 = []string{"external_id", "kind", "media_server_id"}
@@ -150,7 +150,7 @@ var expectedCatalogIndexes = map[string][]string{
 		"library_items_archived_idx", "library_items_date_asc_idx", "library_items_date_desc_idx",
 		"library_items_last_played_asc_idx", "library_items_last_played_desc_idx", "library_items_name_asc_idx",
 		"library_items_name_desc_idx", "library_items_plays_asc_idx", "library_items_plays_desc_idx",
-		"library_items_premiere_asc_idx", "library_items_premiere_desc_idx",
+		"library_items_premiere_asc_idx", "library_items_premiere_desc_idx", "library_items_recently_added_idx",
 		"library_items_season_idx", "library_items_series_idx", "library_items_stale_idx", "library_items_type_date_asc_idx",
 		"library_items_type_date_desc_idx", "library_items_type_last_played_asc_idx",
 		"library_items_type_last_played_desc_idx", "library_items_type_name_asc_idx",

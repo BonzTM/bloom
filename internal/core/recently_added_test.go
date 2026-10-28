@@ -10,7 +10,7 @@ func TestRecentlyAddedFromCatalogMapsMoviesAndSeriesOnly(t *testing.T) {
 	year := int32(2024)
 	base := LibraryItem{
 		MediaServerID: "11111111-1111-4111-8111-111111111111", ItemID: "item", Name: "Title",
-		ProductionYear: &year, DateCreated: &added,
+		ProductionYear: &year, DateCreated: &added, TMDBID: 949,
 	}
 	tests := []struct {
 		itemType string
@@ -35,7 +35,7 @@ func TestRecentlyAddedFromCatalogMapsMoviesAndSeriesOnly(t *testing.T) {
 			t.Fatalf("%s dated=%v ok = %v, want %v", testCase.itemType, testCase.dated, ok, testCase.ok)
 		}
 		want := RecentlyAddedTitle{
-			MediaServerID: base.MediaServerID, ItemID: "item", Kind: testCase.kind, Title: "Title", Year: 2024, AddedAt: added,
+			MediaServerID: base.MediaServerID, ItemID: "item", Kind: testCase.kind, Title: "Title", Year: 2024, TMDBID: 949, AddedAt: added,
 		}
 		if ok && title != want {
 			t.Fatalf("%s title = %+v, want %+v", testCase.itemType, title, want)

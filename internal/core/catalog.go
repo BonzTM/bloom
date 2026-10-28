@@ -32,9 +32,13 @@ const (
 	MaxCatalogReadPageSize = 100
 	// MaxCatalogReadCursorBytes bounds an opaque public catalog cursor.
 	MaxCatalogReadCursorBytes = 2048
+	// MaxCatalogTMDBID bounds a stored TMDB movie or series ID.
+	MaxCatalogTMDBID = 1_000_000_000
 )
 
-// LibraryItem is one type-agnostic media-server catalog row.
+// LibraryItem is one type-agnostic media-server catalog row. TMDBID is the
+// movie or series TMDB ID from the media server's provider IDs, or zero when
+// it is unknown or the item is neither.
 type LibraryItem struct {
 	MediaServerID, ItemID, LibraryID   string
 	ParentID, ItemType, Name           string
@@ -47,6 +51,7 @@ type LibraryItem struct {
 	Genres                             []string
 	PrimaryImageTag                    string
 	DateCreated                        *time.Time
+	TMDBID                             int64
 	Archived                           bool
 	FirstSeenAt, LastSeenAt, UpdatedAt time.Time
 }
@@ -64,6 +69,9 @@ func (i LibraryItem) ValidUpstream() bool {
 		!validCatalogOptionalID(i.SeasonID) || !validCatalogText(i.ItemType, true) ||
 		!validCatalogText(i.Name, true) || !validCatalogText(i.SeriesName, false) ||
 		!validCatalogTextLimit(i.PrimaryImageTag, MaxCatalogImageTagBytes, false) || !validCatalogGenres(i.Genres) {
+		return false
+	}
+	if i.TMDBID < 0 || i.TMDBID > MaxCatalogTMDBID || i.TMDBID != 0 && i.ItemType != "Movie" && i.ItemType != "Series" {
 		return false
 	}
 	if i.Runtime != nil && *i.Runtime < 0 || i.ProductionYear != nil && (*i.ProductionYear < 0 || *i.ProductionYear > 9999) ||

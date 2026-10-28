@@ -251,6 +251,7 @@ func sqliteUpsertCatalogItem(ctx context.Context, q *sqlite.Queries, item core.L
 		ProductionYear: nullableCatalogInt32(item.ProductionYear), CommunityRating: nullableCatalogFloat(item.CommunityRating),
 		Genres: genres, PrimaryImageTag: item.PrimaryImageTag, DateCreated: sqliteNullableTime(item.DateCreated),
 		Archived: boolToInt64(item.Archived), FirstSeenAt: formatSQLiteTime(item.FirstSeenAt),
+		TmdbID:     optionalPositiveInt64(item.TMDBID),
 		LastSeenAt: formatSQLiteTime(item.LastSeenAt), UpdatedAt: formatSQLiteTime(item.UpdatedAt),
 	}
 	if _, upsertErr := q.UpsertLibraryItem(ctx, params); upsertErr != nil {

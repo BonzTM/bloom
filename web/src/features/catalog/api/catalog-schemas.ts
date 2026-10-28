@@ -165,6 +165,8 @@ export const recentlyAddedTitleSchema = z.object({
   kind: z.enum(["movie", "series"]),
   title: z.string().min(1).max(500),
   year: z.number().int().min(0).max(9999),
+  // Zero when the media server has no TMDB ID for the title.
+  tmdb_id: z.number().int().min(0).max(1_000_000_000),
   added_at: stamp(),
 });
 

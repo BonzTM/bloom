@@ -12,7 +12,7 @@ import (
 	jellyfinapi "github.com/BonzTM/bloom/internal/mediaserver/jellyfin/api"
 )
 
-const catalogItemFields = "ParentId,Genres,DateCreated"
+const catalogItemFields = "ParentId,Genres,DateCreated,ProviderIds"
 
 // CatalogItems returns one fixed-size recursive page without filtering item types.
 func (c *Client) CatalogItems(
@@ -126,10 +126,33 @@ func mapCatalogItem(dto jellyfinapi.BaseItemDto, libraryID string) (core.Library
 		CommunityRating: float64Pointer(dto.CommunityRating), Genres: genres,
 		PrimaryImageTag: primaryImageTag(dto.ImageTags), DateCreated: normalizedTime(dto.DateCreated),
 	}
+	if item.ItemType == "Movie" || item.ItemType == "Series" {
+		item.TMDBID = catalogTMDBID(dto.ProviderIds)
+	}
 	if !item.ValidUpstream() {
 		return core.LibraryItem{}, errors.New("catalog item fields exceed bounds")
 	}
 	return item, nil
+}
+
+// catalogTMDBID reads the item's TMDB provider ID. A missing or malformed
+// value is treated as unknown, not as a bad page: operators edit provider IDs
+// by hand, and one typo must not stop the library walk.
+func catalogTMDBID(values *map[string]*string) int64 {
+	if values == nil {
+		return 0
+	}
+	for key, value := range *values {
+		if !strings.EqualFold(key, "tmdb") || value == nil {
+			continue
+		}
+		id, err := strconv.ParseInt(*value, 10, 64)
+		if err != nil || id < 1 || id > core.MaxCatalogTMDBID || strconv.FormatInt(id, 10) != *value {
+			return 0
+		}
+		return id
+	}
+	return 0
 }
 
 // CatalogUserData returns bounded play-state records for one Jellyfin user.

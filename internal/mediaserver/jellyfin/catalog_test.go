@@ -106,3 +106,33 @@ func TestMapCatalogUserDataRejectsUnexpectedItem(t *testing.T) {
 		t.Fatal("mapCatalogUserData accepted an unexpected item")
 	}
 }
+
+func TestCatalogItemsReadsTMDBIDsForMoviesAndSeriesOnly(t *testing.T) {
+	t.Parallel()
+	client := newTransportClient(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if fields := r.URL.Query().Get("fields"); !strings.Contains(fields, "ProviderIds") {
+			t.Fatalf("catalog fields = %q, want ProviderIds", fields)
+		}
+		return jsonResponse(http.StatusOK, `{"Items":[`+
+			`{"Id":"00000000-0000-0000-0000-000000000001","Type":"Movie","Name":"Heat","ProviderIds":{"Tmdb":"949","Imdb":"tt0113277"}},`+
+			`{"Id":"00000000-0000-0000-0000-000000000002","Type":"Series","Name":"Fringe","ProviderIds":{"tmdb":"1705"}},`+
+			`{"Id":"00000000-0000-0000-0000-000000000003","Type":"Episode","Name":"Pilot","ProviderIds":{"Tmdb":"62085"}},`+
+			`{"Id":"00000000-0000-0000-0000-000000000004","Type":"Movie","Name":"Typo","ProviderIds":{"Tmdb":"0949"}},`+
+			`{"Id":"00000000-0000-0000-0000-000000000005","Type":"Movie","Name":"Huge","ProviderIds":{"Tmdb":"1000000001"}},`+
+			`{"Id":"00000000-0000-0000-0000-000000000006","Type":"Movie","Name":"None"}`+
+			`],"TotalRecordCount":6,"StartIndex":0}`), nil
+	}))
+	page, err := client.CatalogItems(t.Context(), "library", 0, core.CatalogPageSize)
+	if err != nil {
+		t.Fatalf("CatalogItems: %v", err)
+	}
+	want := []int64{949, 1705, 0, 0, 0, 0}
+	if len(page.Items) != len(want) {
+		t.Fatalf("items = %d, want %d", len(page.Items), len(want))
+	}
+	for index, item := range page.Items {
+		if item.TMDBID != want[index] {
+			t.Errorf("%s TMDBID = %d, want %d", item.Name, item.TMDBID, want[index])
+		}
+	}
+}

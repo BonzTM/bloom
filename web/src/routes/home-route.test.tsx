@@ -142,11 +142,12 @@ it("shows what the library added, newest first, as available", async () => {
     "href",
     "/admin/libraries/3d7f1a2b-0000-4000-8000-000000000001/items/i-11",
   );
+  // A title the media server knows by TMDB ID opens its title page.
   expect(
     within(recent).getByRole("link", {
       name: "The Arrival (2021) Series, Available",
     }),
-  ).toBeVisible();
+  ).toHaveAttribute("href", "/requests/series/1396");
 });
 
 it("sends a requester from a recently added title to its search", async () => {
@@ -157,6 +158,11 @@ it("sends a requester from a recently added title to its search", async () => {
   expect(
     within(recent).getByRole("link", { name: "Dune (2021) Movie, Available" }),
   ).toHaveAttribute("href", "/search?q=Dune&kind=movie");
+  expect(
+    within(recent).getByRole("link", {
+      name: "The Arrival (2021) Series, Available",
+    }),
+  ).toHaveAttribute("href", "/requests/series/1396");
 });
 
 it("shows recently added titles without links to an account that cannot request", async () => {
@@ -166,6 +172,7 @@ it("shows recently added titles without links to an account that cannot request"
   const recent = await screen.findByRole("list", { name: "Recently added" });
   expect(within(recent).queryByRole("link")).not.toBeInTheDocument();
   expect(within(recent).getByText("Dune (2021)")).toBeVisible();
+  expect(within(recent).getByText("The Arrival (2021)")).toBeVisible();
   // Discovery rows lead to title pages, which need requests.create.
   expect(
     screen.queryByRole("region", { name: "Trending" }),
