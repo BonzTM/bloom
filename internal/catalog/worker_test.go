@@ -179,8 +179,11 @@ func newLeaseBoundaryWorker(
 	t *testing.T, store core.LibraryCatalogStore, source Source, clock core.Clock,
 ) *Worker {
 	t.Helper()
+	// Leases follow the fake clock. The store timeout is wall-clock time for
+	// real SQLite work, which a race-instrumented CI runner can stretch past
+	// a second, so it stays well clear of the lease bound instead.
 	worker, err := NewWorker(WorkerConfig{
-		Interval: time.Hour, StoreTimeout: time.Second, LeaseDuration: 30 * time.Second,
+		Interval: time.Hour, StoreTimeout: 10 * time.Second, LeaseDuration: 30 * time.Second,
 	}, WorkerDependencies{
 		Store: store, Source: source, Clock: clock, Metrics: &fakeCatalogMetrics{},
 		Logger: slog.New(slog.DiscardHandler),
