@@ -20,6 +20,8 @@ type Querier interface {
 	ArchiveLibraryItem(ctx context.Context, arg ArchiveLibraryItemParams) (int64, error)
 	AssignOIDCRoleIDToAccount(ctx context.Context, arg AssignOIDCRoleIDToAccountParams) (int64, error)
 	AssignRoleIDToAccount(ctx context.Context, arg AssignRoleIDToAccountParams) (int64, error)
+	// The library pair is left to BackfillWatchLibrary, which writes ID and name
+	// together; a watch with only one of them fails playback validation.
 	BackfillWatchCatalogItem(ctx context.Context, arg BackfillWatchCatalogItemParams) (int64, error)
 	BackfillWatchLibrary(ctx context.Context, arg BackfillWatchLibraryParams) (int64, error)
 	CancelImport(ctx context.Context, arg CancelImportParams) (int64, error)

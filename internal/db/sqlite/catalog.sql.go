@@ -39,26 +39,26 @@ func (q *Queries) ArchiveLibraryItem(ctx context.Context, arg ArchiveLibraryItem
 const backfillWatchCatalogItem = `-- name: BackfillWatchCatalogItem :execrows
 UPDATE watches
 SET item_name = ?1, series_id = ?2,
-    series_name = ?3, library_id = ?4
-WHERE media_server_id = ?5 AND item_id = ?6
-  AND (series_id IS NULL OR series_id = '' OR library_id = '')
+    series_name = ?3
+WHERE media_server_id = ?4 AND item_id = ?5
+  AND (series_id IS NULL OR series_id = '')
 `
 
 type BackfillWatchCatalogItemParams struct {
 	ItemName      string
 	SeriesID      sql.NullString
 	SeriesName    string
-	LibraryID     string
 	MediaServerID string
 	ItemID        string
 }
 
+// The library pair is left to BackfillWatchLibrary, which writes ID and name
+// together; a watch with only one of them fails playback validation.
 func (q *Queries) BackfillWatchCatalogItem(ctx context.Context, arg BackfillWatchCatalogItemParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, backfillWatchCatalogItem,
 		arg.ItemName,
 		arg.SeriesID,
 		arg.SeriesName,
-		arg.LibraryID,
 		arg.MediaServerID,
 		arg.ItemID,
 	)
