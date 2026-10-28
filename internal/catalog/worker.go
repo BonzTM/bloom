@@ -17,6 +17,10 @@ const (
 	defaultStoreTimeout = 5 * time.Second
 	defaultLease        = 30 * time.Second
 	maxServersPerPass   = 1000
+	// catalogCommitChunk bounds the items one store transaction writes. Each
+	// item rewrites every catalog index, so a full page can outlast the store
+	// deadline on a slow database while a chunk stays well inside it.
+	catalogCommitChunk = 50
 )
 
 // Source supplies libraries and bounded item pages through a registered adapter.
@@ -205,8 +209,7 @@ func (w *Worker) walkLibrary(
 		if err != nil || excluded {
 			return nextIndex, err
 		}
-		cursor := nextCursor(libraries, libraryIndex, next, page.Total)
-		if err := w.commitPage(ctx, sync, library.ID, page.Items, cursor); err != nil {
+		if err := w.commitChunks(ctx, sync, libraries, libraryIndex, start, page); err != nil {
 			return libraryIndex, err
 		}
 		if next >= page.Total {
@@ -255,6 +258,26 @@ func nextVisibleLibrary(exclusions core.MediaServerExclusions, libraries []core.
 		}
 	}
 	return len(libraries)
+}
+
+// commitChunks persists one page in bounded transactions, each checkpointing
+// the cursor just past its last item.
+func (w *Worker) commitChunks(
+	ctx context.Context, sync *core.LibrarySync, libraries []core.Library, libraryIndex, start int,
+	page core.LibraryCatalogPage,
+) error {
+	libraryID := libraries[libraryIndex].ID
+	if len(page.Items) == 0 {
+		return w.commitPage(ctx, sync, libraryID, nil, nextCursor(libraries, libraryIndex, start, page.Total))
+	}
+	for offset := 0; offset < len(page.Items); offset += catalogCommitChunk {
+		end := min(offset+catalogCommitChunk, len(page.Items))
+		cursor := nextCursor(libraries, libraryIndex, start+end, page.Total)
+		if err := w.commitPage(ctx, sync, libraryID, page.Items[offset:end], cursor); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *Worker) commitPage(

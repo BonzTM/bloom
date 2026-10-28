@@ -261,7 +261,7 @@ func postgresUpsertCatalogItem(ctx context.Context, q *postgres.Queries, item co
 	}
 	_, err = q.BackfillWatchCatalogItem(ctx, postgres.BackfillWatchCatalogItemParams{
 		ItemName: item.Name, SeriesID: optionalStreamString(item.SeriesID), SeriesName: item.SeriesName,
-		LibraryID: item.LibraryID, MediaServerID: item.MediaServerID, ItemID: item.ItemID,
+		MediaServerID: item.MediaServerID, ItemID: item.ItemID,
 	})
 	return catalogStoreError("backfill watch catalog fields", err)
 }

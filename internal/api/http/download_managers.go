@@ -29,9 +29,13 @@ type downloadManagerResponse struct {
 }
 
 type downloadManagerInfoResponse struct {
-	Name         string                           `json:"name"`
-	Version      string                           `json:"version"`
-	Capabilities core.DownloadManagerCapabilities `json:"capabilities"`
+	Name         string                              `json:"name"`
+	Version      string                              `json:"version"`
+	Capabilities downloadManagerCapabilitiesResponse `json:"capabilities"`
+}
+
+type downloadManagerCapabilitiesResponse struct {
+	Kinds []core.MediaKind `json:"kinds"`
 }
 
 type createDownloadManagerResponse struct {
@@ -44,10 +48,15 @@ type downloadManagersResponse struct {
 	NextCursor string                    `json:"next_cursor"`
 }
 
+type downloadManagerOptionResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type downloadManagerOptionsResponse struct {
-	QualityProfiles []core.DownloadManagerOption `json:"quality_profiles"`
-	RootFolders     []core.DownloadManagerOption `json:"root_folders"`
-	Tags            []core.DownloadManagerOption `json:"tags"`
+	QualityProfiles []downloadManagerOptionResponse `json:"quality_profiles"`
+	RootFolders     []downloadManagerOptionResponse `json:"root_folders"`
+	Tags            []downloadManagerOptionResponse `json:"tags"`
 }
 
 func (s *Server) handleCreateDownloadManager(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +85,7 @@ func (s *Server) handleCreateDownloadManager(w http.ResponseWriter, r *http.Requ
 	s.emitDownloadManagerAudit(r, "download_manager.create", "download_manager:"+connection.Manager.ID, connection.Manager.Kind, connection.Manager.AllowInsecure, telemetry.AuditSuccess)
 	writeJSON(w, r, s.logger, http.StatusCreated, createDownloadManagerResponse{
 		Manager: downloadManagerDTO(connection.Manager),
-		Info:    downloadManagerInfoResponse{Name: connection.Info.Name, Version: connection.Info.Version, Capabilities: connection.Info.Capabilities},
+		Info:    downloadManagerInfoDTO(connection.Info),
 	})
 }
 
@@ -129,10 +138,19 @@ func (s *Server) handleDownloadManagerOptions(w http.ResponseWriter, r *http.Req
 
 func downloadManagerOptionsDTO(options core.DownloadManagerOptions) downloadManagerOptionsResponse {
 	return downloadManagerOptionsResponse{
-		QualityProfiles: append([]core.DownloadManagerOption{}, options.QualityProfiles...),
-		RootFolders:     append([]core.DownloadManagerOption{}, options.RootFolders...),
-		Tags:            append([]core.DownloadManagerOption{}, options.Tags...),
+		QualityProfiles: downloadManagerOptionDTOs(options.QualityProfiles),
+		RootFolders:     downloadManagerOptionDTOs(options.RootFolders),
+		Tags:            downloadManagerOptionDTOs(options.Tags),
 	}
+}
+
+// downloadManagerOptionDTOs never returns nil, so an empty collection encodes as [].
+func downloadManagerOptionDTOs(options []core.DownloadManagerOption) []downloadManagerOptionResponse {
+	values := make([]downloadManagerOptionResponse, 0, len(options))
+	for _, option := range options {
+		values = append(values, downloadManagerOptionResponse{ID: option.ID, Name: option.Name})
+	}
+	return values
 }
 
 func (s *Server) downloadManagerID(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -173,5 +191,12 @@ func (s *Server) emitDownloadManagerAudit(
 	if err != nil {
 		s.auditFailureMetrics.IncAuditWriteFailure()
 		s.logger.ErrorContext(r.Context(), "write audit event", "error", err, "action", action)
+	}
+}
+
+func downloadManagerInfoDTO(info core.DownloadManagerInfo) downloadManagerInfoResponse {
+	return downloadManagerInfoResponse{
+		Name: info.Name, Version: info.Version,
+		Capabilities: downloadManagerCapabilitiesResponse{Kinds: info.Capabilities.Kinds},
 	}
 }

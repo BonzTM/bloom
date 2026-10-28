@@ -261,7 +261,7 @@ func sqliteUpsertCatalogItem(ctx context.Context, q *sqlite.Queries, item core.L
 	}
 	_, err = q.BackfillWatchCatalogItem(ctx, sqlite.BackfillWatchCatalogItemParams{
 		ItemName: item.Name, SeriesID: optionalStreamString(item.SeriesID), SeriesName: item.SeriesName,
-		LibraryID: item.LibraryID, MediaServerID: item.MediaServerID, ItemID: item.ItemID,
+		MediaServerID: item.MediaServerID, ItemID: item.ItemID,
 	})
 	return catalogStoreError("backfill watch catalog fields", err)
 }

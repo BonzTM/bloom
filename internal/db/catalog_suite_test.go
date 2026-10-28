@@ -49,6 +49,91 @@ func runCatalogEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("sync completion rebuilds catalog rollups", func(t *testing.T) {
 		testCatalogRollupRebuild(t, pool, driver)
 	})
+	t.Run("catalog backfill keeps open watches saveable", func(t *testing.T) {
+		testCatalogBackfillKeepsWatchesValid(t, pool, driver)
+	})
+	t.Run("migration repairs a library ID stored without its name", func(t *testing.T) {
+		testWatchLibraryPairRepair(t, pool, driver)
+	})
+}
+
+func testWatchLibraryPairRepair(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	now := time.Date(2026, 9, 30, 23, 30, 0, 0, time.UTC)
+	serverID := "85000000-0000-4000-8000-000000000003"
+	createCatalogServer(t, pool, driver, serverID, "Library Pair Repair", now)
+	playback := newPlaybackTestStore(t, pool, driver)
+	broken, named := playbackStoreWatch(t, serverID, now), playbackStoreWatch(t, serverID, now)
+	named.ItemID, named.DeviceID, named.LibraryID, named.LibraryName = "named-item", "device-2", "library-2", "Movies"
+	if err := playback.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: broken}, {Watch: named}}); err != nil {
+		t.Fatalf("SaveWatches: %v", err)
+	}
+	if _, err := pool.ExecContext(t.Context(), `UPDATE watches SET library_id = 'library-1' WHERE id = $1`, broken.ID); err != nil {
+		t.Fatalf("store legacy library ID: %v", err)
+	}
+	if err := db.MigrateDownTo(t.Context(), pool, driver, 28); err != nil {
+		t.Fatalf("MigrateDownTo(28): %v", err)
+	}
+	if err := db.Migrate(t.Context(), pool, driver); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	assertWatchLibrary(t, pool, broken.ID, "", "")
+	assertWatchLibrary(t, pool, named.ID, "library-2", "Movies")
+	open, err := playback.LoadOpenWatches(t.Context(), serverID)
+	if err != nil || len(open) != 2 {
+		t.Fatalf("LoadOpenWatches = %d, %v", len(open), err)
+	}
+	if err = playback.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: open[0]}, {Watch: open[1]}}); err != nil {
+		t.Fatalf("SaveWatches(after repair): %v", err)
+	}
+}
+
+func assertWatchLibrary(t *testing.T, pool *sql.DB, watchID, wantID, wantName string) {
+	t.Helper()
+	var libraryID, libraryName string
+	err := pool.QueryRowContext(t.Context(), `SELECT library_id, library_name FROM watches WHERE id = $1`, watchID).
+		Scan(&libraryID, &libraryName)
+	if err != nil || libraryID != wantID || libraryName != wantName {
+		t.Fatalf("watch library = (%q, %q), %v; want (%q, %q)", libraryID, libraryName, err, wantID, wantName)
+	}
+}
+
+// A catalog page names the item's library by ID only. Writing that ID onto a
+// watch without its name left a row the playback poller could never save again.
+func testCatalogBackfillKeepsWatchesValid(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	now := time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC)
+	serverID := "85000000-0000-4000-8000-000000000002"
+	createCatalogServer(t, pool, driver, serverID, "Catalog Backfill", now)
+	playback := newPlaybackTestStore(t, pool, driver)
+	watch := playbackStoreWatch(t, serverID, now)
+	watch.ItemID = "backfill-item"
+	if err := playback.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: watch}}); err != nil {
+		t.Fatalf("SaveWatches(open): %v", err)
+	}
+	store, err := db.NewLibraryCatalogStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	sync := claimCatalogSync(t, store, serverID, now)
+	item := catalogSuiteItem(serverID, watch.ItemID, "Backfilled Name", now)
+	item.SeriesID = "backfill-series"
+	if _, err = store.CommitLibrarySyncPage(t.Context(), sync, []core.LibraryItem{item}, "", now); err != nil {
+		t.Fatalf("CommitLibrarySyncPage: %v", err)
+	}
+	open, err := playback.LoadOpenWatches(t.Context(), serverID)
+	if err != nil || len(open) != 1 {
+		t.Fatalf("LoadOpenWatches = %d, %v", len(open), err)
+	}
+	if open[0].ItemName != "Backfilled Name" || open[0].SeriesID != "backfill-series" {
+		t.Fatalf("backfilled watch = %q, %q", open[0].ItemName, open[0].SeriesID)
+	}
+	stopped := open[0]
+	stopped.State, stopped.LastSeenAt, stopped.UpdatedAt = core.WatchStopped, now.Add(time.Minute), now.Add(time.Minute)
+	stopped.EndedAt = &stopped.LastSeenAt
+	if err = playback.SaveWatches(t.Context(), []core.PlaybackMutation{{Watch: stopped}}); err != nil {
+		t.Fatalf("SaveWatches(stop after catalog backfill): %v", err)
+	}
 }
 
 func testCatalogUpsertArchivePaging(t *testing.T, pool *sql.DB, driver config.Driver) {

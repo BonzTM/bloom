@@ -22,6 +22,7 @@ type fakeCatalogStore struct {
 	sync         core.LibrarySync
 	claimed      bool
 	committed    []core.LibraryItem
+	commitSizes  []int
 	cursor       string
 	cursors      []string
 	finished     bool
@@ -50,6 +51,7 @@ func (f *fakeCatalogStore) CommitLibrarySyncPage(
 	_ context.Context, sync core.LibrarySync, items []core.LibraryItem, cursor string, _ time.Time,
 ) (core.LibrarySync, error) {
 	f.committed = append(f.committed, items...)
+	f.commitSizes = append(f.commitSizes, len(items))
 	f.cursor = cursor
 	f.cursors = append(f.cursors, cursor)
 	sync.Cursor = cursor
@@ -407,6 +409,50 @@ func TestWorkerCompletesFullWalkAndFillsPersistenceFields(t *testing.T) {
 	item := store.committed[0]
 	if item.MediaServerID != catalogWorkerServerID || item.FirstSeenAt != now || !item.Valid() {
 		t.Fatalf("committed item = %+v", item)
+	}
+}
+
+type fullPageCatalogSource struct{ fakeCatalogSource }
+
+func (fullPageCatalogSource) CatalogItems(
+	_ context.Context, _, libraryID string, start, limit int,
+) (core.LibraryCatalogPage, error) {
+	items := make([]core.LibraryItem, 0, limit)
+	for index := range limit {
+		items = append(items, core.LibraryItem{
+			ItemID: fmt.Sprintf("item-%03d", start+index), LibraryID: libraryID,
+			ItemType: "Episode", Name: "Episode", Genres: []string{},
+		})
+	}
+	return core.LibraryCatalogPage{StartIndex: start, Total: core.CatalogPageSize, Items: items}, nil
+}
+
+// A full page is too much work for one store deadline on a slow database, so
+// it commits in bounded chunks, each with its own durable cursor.
+func TestWorkerCommitsFullPageInBoundedChunks(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: fullPageCatalogSource{}, Clock: testutil.NewFakeClock(now),
+		Metrics: &fakeCatalogMetrics{}, Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	wantSizes := []int{catalogCommitChunk, catalogCommitChunk, catalogCommitChunk, catalogCommitChunk}
+	if !slices.Equal(store.commitSizes, wantSizes) || len(store.committed) != core.CatalogPageSize {
+		t.Fatalf("commit sizes = %v (items %d), want %v", store.commitSizes, len(store.committed), wantSizes)
+	}
+	wantCursors := []string{
+		`{"library_id":"library","start":50}`, `{"library_id":"library","start":100}`,
+		`{"library_id":"library","start":150}`, `{"phase":"revalidation"}`,
+	}
+	if !slices.Equal(store.cursors[:len(wantCursors)], wantCursors) || !store.finished {
+		t.Fatalf("cursors = %v, finished = %t", store.cursors, store.finished)
 	}
 }
 
