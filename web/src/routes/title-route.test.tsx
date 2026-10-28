@@ -7,6 +7,7 @@ import {
   jsonApi,
   MISSING_TITLE_ID,
   QUOTA_MOVIE_ID,
+  setMockOmdbKeyConfigured,
   setMockPermissions,
   signInMockSession,
 } from "../mocks/handlers.js";
@@ -193,6 +194,46 @@ it("lists a movie's facts in the side card", async () => {
     "https://www.imdb.com/title/tt1160419/",
   );
   expect(within(facts).queryByText("Networks")).not.toBeInTheDocument();
+});
+
+it("shows IMDb, Rotten Tomatoes, and Metacritic scores beside TMDB's", async () => {
+  setMockOmdbKeyConfigured(true);
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  const scores = await screen.findByRole("list", { name: "Scores" });
+  await within(scores).findByText("IMDb");
+  const items = within(scores)
+    .getAllByRole("listitem")
+    .map((item) => item.textContent);
+  expect(items).toEqual([
+    "78% TMDB user score",
+    "8.0 IMDb 912.3K votes",
+    "83% Rotten Tomatoes critics",
+    "74 Metacritic",
+  ]);
+});
+
+it("shows only TMDB's score when no ratings key is stored", async () => {
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  const scores = await screen.findByRole("list", { name: "Scores" });
+  expect(within(scores).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(scores).queryByText("IMDb")).not.toBeInTheDocument();
+});
+
+it("keeps the title page when the scores fail", async () => {
+  setMockOmdbKeyConfigured(true);
+  server.use(
+    http.get(
+      "*/api/v1/metadata/movies/:id/ratings",
+      jsonApi(() => envelope(503, "metadata_provider_failure", "down")),
+    ),
+  );
+  signInMockSession();
+  renderApp("/requests/movies/438631");
+  const facts = await screen.findByRole("complementary", { name: "Facts" });
+  expect(within(facts).getByText("78%")).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 it("shows the cast and related titles with their state", async () => {

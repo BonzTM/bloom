@@ -38,6 +38,7 @@ import {
   useMovie,
   useRequestProfiles,
   useSeries,
+  useTitleRatings,
 } from "../features/requests/hooks/requests-queries.js";
 import { hasPermission, permissions } from "../features/auth/permissions.js";
 import { NotifyMe } from "../features/notifications/components/notify-me.js";
@@ -94,6 +95,13 @@ function TitlePage({
   const movie = useMovie(accountId, providerId, kind === "movie");
   const series = useSeries(accountId, providerId, kind === "series");
   const title = kind === "movie" ? movie : series;
+  // Outside scores load after the title and never block or fail the page.
+  const ratings = useTitleRatings(
+    accountId,
+    kind,
+    providerId,
+    title.status === "success",
+  );
   const profiles = useRequestProfiles(accountId);
   const create = useCreateRequest(accountId);
   const requestRef = useRef<HTMLDivElement>(null);
@@ -149,7 +157,11 @@ function TitlePage({
       />
       <div className="title-content">
         <TitleSummary title={detail} details={detail.details} />
-        <TitleFacts title={detail} details={detail.details} />
+        <TitleFacts
+          title={detail}
+          details={detail.details}
+          ratings={ratings.data}
+        />
       </div>
       <div className="title-body" ref={requestRef} tabIndex={-1}>
         <RequestSection

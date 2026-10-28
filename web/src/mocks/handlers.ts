@@ -1269,6 +1269,7 @@ export const mockRequests: readonly MediaRequest[] = [
 let requestProfiles: RequestProfile[] = [...mockRequestProfiles];
 let requests: MediaRequest[] = [...mockRequests];
 let tmdbKeyConfigured = false;
+let omdbKeyConfigured = false;
 let createdProfiles = 0;
 
 export function resetMockRequests(): void {
@@ -1276,6 +1277,7 @@ export function resetMockRequests(): void {
   requestProfiles = [...mockRequestProfiles];
   requests = [...mockRequests];
   tmdbKeyConfigured = false;
+  omdbKeyConfigured = false;
   createdProfiles = 0;
   createdRequests = 0;
 }
@@ -1283,6 +1285,13 @@ export function resetMockRequests(): void {
 export function setMockTmdbKeyConfigured(configured: boolean): void {
   tmdbKeyConfigured = configured;
 }
+
+export function setMockOmdbKeyConfigured(configured: boolean): void {
+  omdbKeyConfigured = configured;
+}
+
+// A key OMDb refuses, so the settings page can show the 502 answer.
+export const REJECTED_OMDB_KEY = "rejected0";
 
 const profilesQuerySchema = pageQuerySchema(MAX_PROFILE_CURSOR_LENGTH);
 const requestsQuerySchema = pageQuerySchema(MAX_REQUEST_CURSOR_LENGTH);
@@ -1452,6 +1461,49 @@ async function storeTmdbKey(request: Request) {
   }
   tmdbKeyConfigured = true;
   return HttpResponse.json({ configured: true });
+}
+
+async function storeOmdbKey(request: Request) {
+  if (!sendsJson(request)) {
+    return envelope(415, "unsupported_media_type", "expected JSON");
+  }
+  const input = metadataKeyRequestSchema.safeParse(await request.json());
+  if (!input.success || !/^[A-Za-z0-9]{8,64}$/.test(input.data.api_key)) {
+    return envelope(422, "validation_failed", "invalid api key");
+  }
+  if (input.data.api_key === REJECTED_OMDB_KEY) {
+    return envelope(502, "metadata_provider_failure", "provider failure");
+  }
+  omdbKeyConfigured = true;
+  return HttpResponse.json({ configured: true });
+}
+
+function removeOmdbKey() {
+  if (!omdbKeyConfigured) {
+    return envelope(404, "not_found", "no key stored");
+  }
+  omdbKeyConfigured = false;
+  return new HttpResponse(null, { status: 204 });
+}
+
+// Scores answer only once a key is stored, as the server does. Every mock
+// title shares one set of scores; the series has no Metacritic score.
+function titleRatings(kind: "movie" | "series", id: unknown) {
+  if (!/^[1-9][0-9]{0,19}$/.test(String(id))) {
+    return envelope(422, "validation_failed", "invalid provider id");
+  }
+  if (!omdbKeyConfigured) {
+    return HttpResponse.json({});
+  }
+  const shared = {
+    imdb: { score: 8.0, votes: 912_345, source: "omdb" },
+    rotten_tomatoes: { score: 83, votes: 0, source: "omdb" },
+  };
+  return HttpResponse.json(
+    kind === "movie"
+      ? { ...shared, metacritic: { score: 74, votes: 0, source: "omdb" } }
+      : shared,
+  );
 }
 
 function removeTmdbKey() {
@@ -2124,6 +2176,21 @@ const requestHandlers = [
         permissionDenial("requests.create") ?? titleDetail("series", params.id),
     ),
   ),
+  http.get(
+    "*/api/v1/metadata/movies/:id/ratings",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("requests.create") ?? titleRatings("movie", params.id),
+    ),
+  ),
+  http.get(
+    "*/api/v1/metadata/series/:id/ratings",
+    jsonApi(
+      ({ params }) =>
+        permissionDenial("requests.create") ??
+        titleRatings("series", params.id),
+    ),
+  ),
   http.post(
     "*/api/v1/requests/:id/approve",
     jsonApi(
@@ -2158,6 +2225,25 @@ const requestHandlers = [
   http.delete(
     "*/api/v1/metadata/providers/tmdb/key",
     jsonApi(() => permissionDenial("admin.settings") ?? removeTmdbKey()),
+  ),
+  http.get(
+    "*/api/v1/metadata/providers/omdb/key",
+    jsonApi(
+      () =>
+        permissionDenial("admin.settings") ??
+        HttpResponse.json({ configured: omdbKeyConfigured }),
+    ),
+  ),
+  http.put(
+    "*/api/v1/metadata/providers/omdb/key",
+    jsonApi(
+      async ({ request }) =>
+        permissionDenial("admin.settings") ?? (await storeOmdbKey(request)),
+    ),
+  ),
+  http.delete(
+    "*/api/v1/metadata/providers/omdb/key",
+    jsonApi(() => permissionDenial("admin.settings") ?? removeOmdbKey()),
   ),
 ];
 

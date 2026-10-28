@@ -7,6 +7,7 @@ import {
   providerIdSchema,
   searchQuerySchema,
   discoverSourcePath,
+  titleRatingsSchema,
 } from "./metadata-schemas.js";
 
 describe("createMediaRequestSchema", () => {
@@ -207,5 +208,35 @@ describe("metadataDetailsSchema", () => {
       metadataTitleDetailSchema.safeParse({ ...title, details: emptyDetails })
         .success,
     ).toBe(true);
+  });
+});
+
+describe("titleRatingsSchema", () => {
+  it("accepts no scores and all three scores", () => {
+    expect(titleRatingsSchema.parse({})).toEqual({});
+    const full = {
+      imdb: { score: 8.7, votes: 2123456, source: "omdb" },
+      rotten_tomatoes: { score: 83, votes: 0, source: "omdb" },
+      metacritic: { score: 73, votes: 0, source: "omdb" },
+    };
+    expect(titleRatingsSchema.parse(full)).toEqual(full);
+  });
+
+  it("rejects scores off their scale and unknown sources", () => {
+    const rating = { score: 8.7, votes: 10, source: "omdb" };
+    expect(
+      titleRatingsSchema.safeParse({ imdb: { ...rating, score: 11 } }).success,
+    ).toBe(false);
+    expect(
+      titleRatingsSchema.safeParse({ metacritic: { ...rating, score: 101 } })
+        .success,
+    ).toBe(false);
+    expect(
+      titleRatingsSchema.safeParse({ imdb: { ...rating, source: "imdb" } })
+        .success,
+    ).toBe(false);
+    expect(
+      titleRatingsSchema.safeParse({ imdb: { ...rating, votes: 1.5 } }).success,
+    ).toBe(false);
   });
 });

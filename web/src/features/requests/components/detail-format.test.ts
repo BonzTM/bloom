@@ -5,6 +5,7 @@ import {
   formatMinutes,
   formatReleaseDay,
   formatScore,
+  formatVotes,
   languageName,
   tmdbCreditsUrl,
   youTubeUrl,
@@ -34,5 +35,13 @@ describe("detail formatting", () => {
     expect(tmdbCreditsUrl({ kind: "series", provider_id: "1399" })).toBe(
       "https://www.themoviedb.org/tv/1399/cast",
     );
+  });
+});
+
+describe("formatVotes", () => {
+  it("writes vote counts compactly", () => {
+    expect(formatVotes(912)).toBe("912");
+    expect(formatVotes(912_345)).toBe("912.3K");
+    expect(formatVotes(2_123_456)).toBe("2.1M");
   });
 });

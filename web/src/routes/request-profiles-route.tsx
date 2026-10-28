@@ -15,7 +15,10 @@ import { AsyncStatus } from "../components/async-status.js";
 import { SignInNotConfirmed } from "../features/requests/components/list-states.js";
 import { RequestProfileForm } from "../features/requests/components/request-profile-form.js";
 import { RequestProfilesTable } from "../features/requests/components/request-profiles-table.js";
-import { TmdbKeySection } from "../features/requests/components/tmdb-key-section.js";
+import {
+  OmdbKeySection,
+  TmdbKeySection,
+} from "../features/requests/components/provider-key-section.js";
 import {
   useDownloadManagers,
   useMetadataKeyPresence,
@@ -48,9 +51,12 @@ function RequestProfilesPage({
   const profiles = useRequestProfiles(accountId);
   const save = useSaveProfile(accountId);
   const remove = useRemoveProfile(accountId);
-  const presence = useMetadataKeyPresence(accountId);
-  const setKey = useSetMetadataKey(accountId);
-  const removeKey = useRemoveMetadataKey(accountId);
+  const presence = useMetadataKeyPresence(accountId, "tmdb");
+  const setKey = useSetMetadataKey(accountId, "tmdb");
+  const removeKey = useRemoveMetadataKey(accountId, "tmdb");
+  const omdbPresence = useMetadataKeyPresence(accountId, "omdb");
+  const setOmdbKey = useSetMetadataKey(accountId, "omdb");
+  const removeOmdbKey = useRemoveMetadataKey(accountId, "omdb");
   const managers = useDownloadManagers(accountId);
   const editing = useEditing();
   const denial =
@@ -60,6 +66,9 @@ function RequestProfilesPage({
     accessDenial(presence.error) ??
     accessDenial(setKey.error) ??
     accessDenial(removeKey.error) ??
+    accessDenial(omdbPresence.error) ??
+    accessDenial(setOmdbKey.error) ??
+    accessDenial(removeOmdbKey.error) ??
     accessDenial(managers.error);
   // The server denied something the cached session says is allowed: the
   // session is gone, or a permission was taken away. Re-reading the session
@@ -74,6 +83,9 @@ function RequestProfilesPage({
       remove.submittedAt,
       setKey.submittedAt,
       removeKey.submittedAt,
+      omdbPresence.errorUpdatedAt,
+      setOmdbKey.submittedAt,
+      removeOmdbKey.submittedAt,
     ),
   );
   if (denial === "forbidden") {
@@ -89,6 +101,11 @@ function RequestProfilesPage({
         <Link to="/admin/download-managers">Manage download managers.</Link>
       </p>
       <TmdbKeySection presence={presence} set={setKey} remove={removeKey} />
+      <OmdbKeySection
+        presence={omdbPresence}
+        set={setOmdbKey}
+        remove={removeOmdbKey}
+      />
       <ProfileSection
         accountId={accountId}
         save={save}

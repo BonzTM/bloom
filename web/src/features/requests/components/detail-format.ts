@@ -39,6 +39,16 @@ export function formatScore(voteAverage: number): string {
   return `${String(Math.round(voteAverage * 10))}%`;
 }
 
+const VOTES = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+// A vote count such as 2,123,456 written as "2.1M".
+export function formatVotes(votes: number): string {
+  return VOTES.format(votes);
+}
+
 const DOLLARS = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
