@@ -38,6 +38,8 @@ import (
 	notifyapp "github.com/BonzTM/bloom/internal/notify"
 	oidcadapter "github.com/BonzTM/bloom/internal/oidc"
 	"github.com/BonzTM/bloom/internal/playback"
+	"github.com/BonzTM/bloom/internal/ratings"
+	"github.com/BonzTM/bloom/internal/ratings/omdb"
 	requestapp "github.com/BonzTM/bloom/internal/request"
 	"github.com/BonzTM/bloom/internal/secrets"
 	statsapp "github.com/BonzTM/bloom/internal/stats"
@@ -175,6 +177,7 @@ type serviceWiring struct {
 	sessions            *scs.SessionManager
 	mediaServers        *mediaserver.Service
 	metadata            *metadata.Service
+	ratings             *ratings.Service
 	requests            *requestapp.Service
 	downloadManagers    *downloadmanager.Service
 	fulfilment          *fulfilment.Manager
@@ -236,7 +239,11 @@ func wireServiceDependencies(
 	if err != nil {
 		return serviceWiring{}, err
 	}
-	ownership.media = connectionGroup{mediaServers, metadataService, downloadManagers}
+	ratingsService, err := buildRatingsService(pool, cfg, metrics, deps.Clock, logger)
+	if err != nil {
+		return serviceWiring{}, err
+	}
+	ownership.media = connectionGroup{mediaServers, metadataService, ratingsService, downloadManagers}
 	invites, inviteReconciler, err := inviteDependencies(pool, cfg, mediaServers, deps.Clock, metrics, logger)
 	if err != nil {
 		return serviceWiring{}, err
@@ -245,7 +252,7 @@ func wireServiceDependencies(
 		accounts: accounts, localIdentities: identities, accountAdmin: accountAdmin,
 		authorizer: authorizer, roles: roles,
 		sessions: sessions, mediaServers: mediaServers, accountMediaUsers: accountMediaUsers,
-		metadata: metadataService, requests: requestService, downloadManagers: downloadManagers,
+		metadata: metadataService, ratings: ratingsService, requests: requestService, downloadManagers: downloadManagers,
 		fulfilment: fulfilmentManager, notifications: notifications, notificationRouting: notificationRouting,
 		notificationWorker: notificationWorker,
 		invites:            invites, inviteReconciler: inviteReconciler,
@@ -566,6 +573,7 @@ func assembleHTTPServer(
 		MetadataReader:         wiring.metadata,
 		MetadataDiscovery:      wiring.metadata,
 		MetadataManager:        wiring.metadata,
+		Ratings:                wiring.ratings,
 		RequestService:         wiring.requests,
 		DownloadManagerReader:  wiring.downloadManagers,
 		DownloadManagerManager: wiring.downloadManagers,
@@ -710,6 +718,25 @@ func buildMetadataService(
 	service, err := metadata.NewService(reader, writer, states, cipher, registry, clock, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build metadata service: %w", err)
+	}
+	return service, nil
+}
+
+func buildRatingsService(
+	pool *sql.DB, cfg config.Config, metrics *telemetry.PromMetrics, clock core.Clock, logger *slog.Logger,
+) (*ratings.Service, error) {
+	cipher, err := secrets.New(cfg.SecretKey.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("build ratings credential cipher: %w", err)
+	}
+	reader, writer, err := db.NewMetadataProviderStores(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build ratings provider stores: %w", err)
+	}
+	factory := ratings.NewOMDbFactory(omdb.Dependencies{Metrics: metrics, Clock: clock})
+	service, err := ratings.NewService(reader, writer, cipher, factory, clock, logger)
+	if err != nil {
+		return nil, fmt.Errorf("build ratings service: %w", err)
 	}
 	return service, nil
 }

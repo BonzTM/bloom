@@ -126,11 +126,16 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/metadata/genres", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataGenres},
 	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataMovie},
 	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMetadataSeries},
+	{method: http.MethodGet, path: "/api/v1/metadata/movies/{id}/ratings", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleMovieRatings},
+	{method: http.MethodGet, path: "/api/v1/metadata/series/{id}/ratings", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionRequestsReadOwn}, authRequired: true, handler: (*Server).handleSeriesRatings},
 	{method: http.MethodPost, path: "/api/v1/titles/{provider}/{provider_id}/subscription", access: routePermission, permission: core.PermissionNotificationsManageOwn, authRequired: true, handler: (*Server).handleSubscribeTitle},
 	{method: http.MethodDelete, path: "/api/v1/titles/{provider}/{provider_id}/subscription", access: routePermission, permission: core.PermissionNotificationsManageOwn, authRequired: true, handler: (*Server).handleUnsubscribeTitle},
 	{method: http.MethodGet, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMetadataKeyPresence},
 	{method: http.MethodPut, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetMetadataKey},
 	{method: http.MethodDelete, path: "/api/v1/metadata/providers/tmdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteMetadataKey},
+	{method: http.MethodGet, path: "/api/v1/metadata/providers/omdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleOMDbKeyPresence},
+	{method: http.MethodPut, path: "/api/v1/metadata/providers/omdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleSetOMDbKey},
+	{method: http.MethodDelete, path: "/api/v1/metadata/providers/omdb/key", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleDeleteOMDbKey},
 	{method: http.MethodPost, path: "/api/v1/request-profiles", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCreateRequestProfile},
 	{method: http.MethodGet, path: "/api/v1/request-profiles", access: routePermission, anyPermissions: []core.Permission{core.PermissionRequestsCreate, core.PermissionAdminSettings}, authRequired: true, handler: (*Server).handleListRequestProfiles},
 	{method: http.MethodPut, path: "/api/v1/request-profiles/{id}", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleUpdateRequestProfile},
@@ -252,6 +257,9 @@ func (s *Server) registerAPIRoutes(mux *http.ServeMux) error {
 			continue
 		}
 		if strings.HasPrefix(route.path, "/api/v1/metadata") && (s.metadataReader == nil || s.metadataManager == nil) {
+			continue
+		}
+		if (strings.HasSuffix(route.path, "/ratings") || strings.Contains(route.path, "/omdb/")) && s.ratings == nil {
 			continue
 		}
 		if (strings.HasPrefix(route.path, "/api/v1/metadata/discover/") || route.path == "/api/v1/metadata/genres") &&
