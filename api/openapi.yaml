@@ -1679,6 +1679,38 @@ paths:
         "503": { $ref: "#/components/responses/MetadataNotConfigured" }
         "500": { $ref: "#/components/responses/InternalError" }
         "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/movies/{id}/ratings:
+    get:
+      tags: [metadata]
+      operationId: getMetadataMovieRatings
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProviderID" }]
+      responses:
+        "200": { description: "Outside scores for the movie. Empty when no OMDb key is stored or the movie has no IMDb ID.", content: { application/json: { schema: { $ref: "#/components/schemas/TitleRatings" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/series/{id}/ratings:
+    get:
+      tags: [metadata]
+      operationId: getMetadataSeriesRatings
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/ProviderID" }]
+      responses:
+        "200": { description: "Outside scores for the series. Empty when no OMDb key is stored or the series has no IMDb ID.", content: { application/json: { schema: { $ref: "#/components/schemas/TitleRatings" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
   /api/v1/titles/{provider}/{provider_id}/subscription:
     post:
       tags: [notifications]
@@ -1742,6 +1774,43 @@ paths:
       security: [{ sessionCookie: [] }]
       responses:
         "204": { description: Credential removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+  /api/v1/metadata/providers/omdb/key:
+    get:
+      tags: [metadata]
+      operationId: getOMDbKeyPresence
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Valid OMDb key presence only., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataKeyPresence" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    put:
+      tags: [metadata]
+      operationId: setOMDbKey
+      security: [{ sessionCookie: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/OMDbKeyRequest" } } } }
+      responses:
+        "200": { description: Key checked against OMDb and stored encrypted., content: { application/json: { schema: { $ref: "#/components/schemas/MetadataKeyPresence" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "502": { $ref: "#/components/responses/MetadataProviderFailure" }
+        "503": { $ref: "#/components/responses/MetadataNotConfigured" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "405": { $ref: "#/components/responses/MethodNotAllowed" }
+    delete:
+      tags: [metadata]
+      operationId: deleteOMDbKey
+      security: [{ sessionCookie: [] }]
+      responses:
+        "204": { description: Key removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3484,6 +3553,46 @@ components:
           x-max-bytes: 4096
           writeOnly: true
           description: TMDB v4 API Read Access Token from Settings, API, "API Read Access Token". The field remains `api_key` for client compatibility.
+    OMDbKeyRequest:
+      type: object
+      required: [api_key]
+      additionalProperties: false
+      properties:
+        api_key:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 64
+          pattern: "^[A-Za-z0-9]+$"
+          x-max-bytes: 64
+          writeOnly: true
+          description: OMDb API key from the OMDb account email. Bloom checks it against OMDb before storing it encrypted.
+    TitleRatings:
+      type: object
+      additionalProperties: false
+      description: Outside scores of a title. A missing property is a score no source knows.
+      properties:
+        imdb: { $ref: "#/components/schemas/TitleRatingIMDb" }
+        rotten_tomatoes: { $ref: "#/components/schemas/TitleRatingPercent" }
+        metacritic: { $ref: "#/components/schemas/TitleRatingPercent" }
+    TitleRatingIMDb:
+      type: object
+      required: [score, votes, source]
+      additionalProperties: false
+      description: The IMDb user score out of 10.
+      properties:
+        score: { type: number, minimum: 0, maximum: 10 }
+        votes: { type: integer, minimum: 0, maximum: 100000000 }
+        source: { type: string, enum: [omdb] }
+    TitleRatingPercent:
+      type: object
+      required: [score, votes, source]
+      additionalProperties: false
+      description: A critics score out of 100. Votes is 0 when the source has no count.
+      properties:
+        score: { type: number, minimum: 0, maximum: 100 }
+        votes: { type: integer, minimum: 0, maximum: 100000000 }
+        source: { type: string, enum: [omdb] }
     MetadataKeyPresence:
       type: object
       required: [configured]

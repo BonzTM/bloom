@@ -15,7 +15,10 @@ import type {
   DiscoverSource,
   MetadataDiscoverResponse,
 } from "../api/metadata-schemas.js";
-import type { RequestsFilter } from "../api/requests-api.js";
+import type {
+  MetadataKeyProvider,
+  RequestsFilter,
+} from "../api/requests-api.js";
 import type { MediaKind } from "../api/requests-schemas.js";
 import type {
   MediaRequestsPage,
@@ -40,7 +43,10 @@ export const requestsKeys = {
       filter.status ?? "",
       filter.requesterId ?? "",
     ] as const,
-  key: (accountId: string) => ["requests", "tmdb-key", accountId] as const,
+  key: (accountId: string, provider: MetadataKeyProvider) =>
+    ["requests", `${provider}-key`, accountId] as const,
+  ratings: (accountId: string, kind: MediaKind, providerId: string) =>
+    ["requests", "ratings", accountId, kind, providerId] as const,
   managers: (accountId: string) => ["requests", "managers", accountId] as const,
   managerOptions: (accountId: string, managerId: string) =>
     ["requests", "manager-options", accountId, managerId] as const,
@@ -136,20 +142,26 @@ export function useDecideRequest(accountId: string) {
   });
 }
 
-export function useMetadataKeyPresence(accountId: string) {
+export function useMetadataKeyPresence(
+  accountId: string,
+  provider: MetadataKeyProvider,
+) {
   const api = useRequestsApi();
   return useQuery({
-    queryKey: requestsKeys.key(accountId),
-    queryFn: ({ signal }) => api.keyPresence(signal),
+    queryKey: requestsKeys.key(accountId, provider),
+    queryFn: ({ signal }) => api.keyPresence(provider, signal),
     staleTime: 60_000,
     meta: { sessionScoped: true },
   });
 }
 
-// Store the TMDB key. The key never becomes a mutation variable: it sits in
+// Store a provider key. The key never becomes a mutation variable: it sits in
 // a ref only until the request is built. A second call while one is in
 // flight is dropped.
-export function useSetMetadataKey(accountId: string) {
+export function useSetMetadataKey(
+  accountId: string,
+  provider: MetadataKeyProvider,
+) {
   const api = useRequestsApi();
   const queryClient = useQueryClient();
   const pending = useRef<MetadataKeyRequest | null>(null);
@@ -161,11 +173,11 @@ export function useSetMetadataKey(accountId: string) {
       if (input === null) {
         throw new Error("setKey called without input");
       }
-      return api.setKey(input);
+      return api.setKey(provider, input);
     },
     gcTime: 0,
     onSuccess: (presence) => {
-      queryClient.setQueryData(requestsKeys.key(accountId), presence);
+      queryClient.setQueryData(requestsKeys.key(accountId, provider), presence);
     },
     onSettled: () => {
       pending.current = null;
@@ -200,13 +212,16 @@ export function useSetMetadataKey(accountId: string) {
 
 type SetKeyCallbacks = Readonly<{ onSuccess?: () => void }>;
 
-export function useRemoveMetadataKey(accountId: string) {
+export function useRemoveMetadataKey(
+  accountId: string,
+  provider: MetadataKeyProvider,
+) {
   const api = useRequestsApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.removeKey(),
+    mutationFn: () => api.removeKey(provider),
     onSuccess: () => {
-      queryClient.setQueryData(requestsKeys.key(accountId), {
+      queryClient.setQueryData(requestsKeys.key(accountId, provider), {
         configured: false,
       });
     },
@@ -406,6 +421,25 @@ export function useSeries(
     queryFn: ({ signal }) => api.series(providerId, signal),
     enabled,
     staleTime: 60_000,
+    meta: { sessionScoped: true },
+  });
+}
+
+// The outside scores of a title. They are optional decoration, so a failure
+// is not retried and the page shows the title without them.
+export function useTitleRatings(
+  accountId: string,
+  kind: MediaKind,
+  providerId: string,
+  enabled = true,
+) {
+  const api = useRequestsApi();
+  return useQuery({
+    queryKey: requestsKeys.ratings(accountId, kind, providerId),
+    queryFn: ({ signal }) => api.ratings(kind, providerId, signal),
+    enabled,
+    retry: false,
+    staleTime: 60 * 60_000,
     meta: { sessionScoped: true },
   });
 }

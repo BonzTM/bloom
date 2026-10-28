@@ -26,6 +26,7 @@ import {
   metadataTitleDetailSchema,
   providerIdSchema,
   searchQuerySchema,
+  titleRatingsSchema,
   type CreateMediaRequest,
   type MetadataSeries,
   type MetadataTitle,
@@ -33,6 +34,7 @@ import {
   type DiscoverSource,
   type MetadataDiscoverResponse,
   type MetadataGenre,
+  type TitleRatings,
 } from "./metadata-schemas.js";
 import {
   mediaKindSchema,
@@ -64,7 +66,14 @@ const METADATA_PATH = "api/v1/metadata";
 const MANAGERS_PATH = "api/v1/download-managers";
 const PROFILES_PATH = "api/v1/request-profiles";
 const REQUESTS_PATH = "api/v1/requests";
-const KEY_PATH = "api/v1/metadata/providers/tmdb/key";
+
+// The providers whose key an administrator stores: TMDB for titles, OMDb
+// for outside ratings.
+export type MetadataKeyProvider = "tmdb" | "omdb";
+
+function keyPath(provider: MetadataKeyProvider): string {
+  return `${METADATA_PATH}/providers/${provider}/key`;
+}
 
 export type RequestsFilter = Readonly<{
   status?: RequestStatus;
@@ -236,6 +245,19 @@ export class RequestsApi {
     );
   }
 
+  ratings(
+    kind: MediaKind,
+    providerId: string,
+    signal: AbortSignal,
+  ): Promise<TitleRatings> {
+    const collection = kind === "movie" ? "movies" : "series";
+    return this.#client.requestJson(
+      `${METADATA_PATH}/${collection}/${providerIdSchema.parse(providerId)}/ratings`,
+      titleRatingsSchema,
+      { signal },
+    );
+  }
+
   // ---- requests
 
   create(input: CreateMediaRequest): Promise<MediaRequest> {
@@ -284,24 +306,36 @@ export class RequestsApi {
     );
   }
 
-  // ---- TMDB key (admin.settings); the key travels once and never returns
+  // ---- provider keys (admin.settings); a key travels once and never returns
 
-  keyPresence(signal: AbortSignal): Promise<MetadataKeyPresence> {
-    return this.#client.requestJson(KEY_PATH, metadataKeyPresenceSchema, {
-      signal,
-    });
+  keyPresence(
+    provider: MetadataKeyProvider,
+    signal: AbortSignal,
+  ): Promise<MetadataKeyPresence> {
+    return this.#client.requestJson(
+      keyPath(provider),
+      metadataKeyPresenceSchema,
+      { signal },
+    );
   }
 
-  setKey(input: MetadataKeyRequest): Promise<MetadataKeyPresence> {
-    return this.#client.requestJson(KEY_PATH, metadataKeyPresenceSchema, {
-      method: "PUT",
-      timeoutMs: PROBE_TIMEOUT_MS,
-      body: metadataKeyRequestSchema.parse(input),
-    });
+  setKey(
+    provider: MetadataKeyProvider,
+    input: MetadataKeyRequest,
+  ): Promise<MetadataKeyPresence> {
+    return this.#client.requestJson(
+      keyPath(provider),
+      metadataKeyPresenceSchema,
+      {
+        method: "PUT",
+        timeoutMs: PROBE_TIMEOUT_MS,
+        body: metadataKeyRequestSchema.parse(input),
+      },
+    );
   }
 
-  removeKey(): Promise<void> {
-    return this.#client.requestEmpty(KEY_PATH, { method: "DELETE" });
+  removeKey(provider: MetadataKeyProvider): Promise<void> {
+    return this.#client.requestEmpty(keyPath(provider), { method: "DELETE" });
   }
 }
 

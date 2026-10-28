@@ -211,6 +211,7 @@ type Server struct {
 	metadataReader         metadataReader
 	metadataDiscovery      metadataDiscoveryReader
 	metadataManager        metadataManager
+	ratings                ratingsManager
 	requestService         *requestapp.Service
 	notificationReader     notificationReader
 	notificationManager    notificationManager
@@ -284,6 +285,8 @@ type Deps struct {
 	MetadataDiscovery metadataDiscoveryReader
 	// MetadataManager supplies write-only provider credential administration.
 	MetadataManager metadataManager
+	// Ratings stores the OMDb key and serves title ratings. Nil disables both.
+	Ratings ratingsManager
 	// RequestService supplies request profiles, quotas, and request lifecycle policy.
 	RequestService *requestapp.Service
 	// NotificationReader supplies channel and delivery-log reads.
@@ -432,6 +435,7 @@ func newServerState(cfg config.HTTPConfig, deps Deps) *Server {
 		metadataReader:         deps.MetadataReader,
 		metadataDiscovery:      deps.MetadataDiscovery,
 		metadataManager:        deps.MetadataManager,
+		ratings:                deps.Ratings,
 		requestService:         deps.RequestService,
 		notificationReader:     deps.NotificationReader,
 		notificationManager:    deps.NotificationManager,
@@ -647,7 +651,7 @@ func csrfAuditResource(path string) string {
 		return auditResourceInvitePublic
 	case "/api/v1/accounts/{id}/media-users/{media_server_id}":
 		return auditResourceMediaServers
-	case "/api/v1/metadata/providers/tmdb/key":
+	case "/api/v1/metadata/providers/tmdb/key", "/api/v1/metadata/providers/omdb/key":
 		return auditResourceMetadataSettings
 	case "/api/v1/request-profiles", "/api/v1/request-profiles/{id}":
 		return auditResourceRequestProfiles

@@ -2632,9 +2632,18 @@ form[role="search"]:not(.global-search) {
   padding: var(--space-4);
 }
 
-.title-score {
+.title-scores {
   color: var(--text-muted);
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
   margin: 0 0 var(--space-3);
+  padding: 0;
+}
+
+.title-score-label {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .title-score-value {

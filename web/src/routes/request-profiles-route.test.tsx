@@ -7,6 +7,8 @@ import {
   envelope,
   INVALID_TMDB_KEY,
   jsonApi,
+  REJECTED_OMDB_KEY,
+  setMockOmdbKeyConfigured,
   setMockPermissions,
   setMockTmdbKeyConfigured,
   signInMockSession,
@@ -179,6 +181,78 @@ it("removes a stored key after an in-row confirmation", async () => {
     screen.getByRole("button", { name: "Confirm removing the TMDB token" }),
   );
   expect(await screen.findByText("No token stored")).toBeVisible();
+});
+
+it("stores an OMDb key for outside ratings and forgets it on the client", async () => {
+  const user = userEvent.setup();
+  const { queryClient } = await openSettings();
+  const form = await screen.findByRole("form", { name: "Store the OMDb key" });
+  expect(await screen.findByText("No key stored")).toBeVisible();
+  await user.type(within(form).getByLabelText("OMDb API key"), "a1b2c3d4");
+
+  await user.click(within(form).getByRole("button", { name: "Store key" }));
+
+  expect(await screen.findByText("Key stored")).toBeVisible();
+  expect(screen.getByText("The OMDb key was saved.")).toBeVisible();
+  expect(screen.getByLabelText("New OMDb API key")).toHaveValue("");
+  expect(cachedText(queryClient)).not.toContain("a1b2c3d4");
+  expect(screen.getByText("No token stored")).toBeVisible();
+});
+
+it("refuses an OMDb key with the wrong shape before sending it", async () => {
+  const user = userEvent.setup();
+  let puts = 0;
+  server.use(
+    http.put(
+      "*/api/v1/metadata/providers/omdb/key",
+      jsonApi(() => {
+        puts += 1;
+        return envelope(500, "internal", "boom");
+      }),
+    ),
+  );
+  await openSettings();
+  const form = await screen.findByRole("form", { name: "Store the OMDb key" });
+  await user.type(within(form).getByLabelText("OMDb API key"), "not a key!");
+
+  await user.click(within(form).getByRole("button", { name: "Store key" }));
+
+  expect(
+    within(form).getByLabelText("OMDb API key"),
+  ).toHaveAccessibleDescription(
+    "An OMDb API key is 8 to 64 letters and digits.",
+  );
+  expect(puts).toBe(0);
+});
+
+it("says when OMDb does not accept a key", async () => {
+  const user = userEvent.setup();
+  await openSettings();
+  const form = await screen.findByRole("form", { name: "Store the OMDb key" });
+  await user.type(
+    within(form).getByLabelText("OMDb API key"),
+    REJECTED_OMDB_KEY,
+  );
+
+  await user.click(within(form).getByRole("button", { name: "Store key" }));
+
+  const alert = await within(form).findByRole("alert");
+  expect(alert).toHaveTextContent("OMDb did not accept that key.");
+  expect(alert).toHaveFocus();
+});
+
+it("removes a stored OMDb key without touching the TMDB token", async () => {
+  const user = userEvent.setup();
+  setMockTmdbKeyConfigured(true);
+  setMockOmdbKeyConfigured(true);
+  await openSettings();
+  expect(await screen.findByText("Key stored")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Remove the OMDb key" }));
+  await user.click(
+    screen.getByRole("button", { name: "Confirm removing the OMDb key" }),
+  );
+  expect(await screen.findByText("No key stored")).toBeVisible();
+  expect(screen.getByText("Token stored")).toBeVisible();
 });
 
 it("creates a profile from a registered instance's options", async () => {

@@ -44,6 +44,36 @@ func runMetadataProviderEngineTests(t *testing.T, pool *sql.DB, driver config.Dr
 	t.Run("stored v3 key is not configured", func(t *testing.T) {
 		testStoredV3MetadataKey(t, reader, writer, cipher, legacyKey, now)
 	})
+	t.Run("omdb row sits beside tmdb", func(t *testing.T) {
+		testOMDbProviderRow(t, reader, writer, now)
+	})
+}
+
+func testOMDbProviderRow(
+	t *testing.T, reader core.MetadataProviderReader, writer core.MetadataProviderWriter, now time.Time,
+) {
+	t.Helper()
+	record := core.MetadataProviderRecord{
+		Kind: core.MetadataProviderOMDb, CredentialCiphertext: []byte("sealed"), KeyID: "key-1",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := writer.UpsertMetadataProvider(t.Context(), record); err != nil {
+		t.Fatalf("UpsertMetadataProvider(omdb): %v", err)
+	}
+	got, err := reader.GetMetadataProvider(t.Context(), core.MetadataProviderOMDb)
+	if err != nil || got.Kind != core.MetadataProviderOMDb || string(got.CredentialCiphertext) != "sealed" ||
+		!got.CreatedAt.Equal(now) {
+		t.Fatalf("GetMetadataProvider(omdb) = %+v, %v", got, err)
+	}
+	if err := writer.DeleteMetadataProvider(t.Context(), core.MetadataProviderOMDb); err != nil {
+		t.Fatalf("DeleteMetadataProvider(omdb): %v", err)
+	}
+	if _, err := reader.GetMetadataProvider(t.Context(), core.MetadataProviderTMDB); err != nil {
+		t.Fatalf("tmdb row after omdb delete: %v", err)
+	}
+	if _, err := reader.GetMetadataProvider(t.Context(), "imdb"); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("GetMetadataProvider(imdb) error = %v, want %v", err, core.ErrInvalidArgument)
+	}
 }
 
 func testStoredV3MetadataKey(

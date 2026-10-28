@@ -3,6 +3,7 @@ import {
   CSRF_REJECTED,
   type ProbeFailureReason,
 } from "../../../lib/api/errors.js";
+import type { MetadataKeyProvider } from "../api/requests-api.js";
 
 // The server keeps working after the browser stops waiting, so the outcome
 // is unknown here rather than failed.
@@ -33,11 +34,25 @@ const decisionMessages: Messages = {
   422: "Check the reason and try again.",
 };
 
-const keyMessages: Messages = {
-  401: SIGN_IN_AGAIN,
-  403: "You no longer have permission to change settings.",
-  404: "No TMDB token is stored.",
-  422: "TMDB needs the API Read Access Token, not the v3 API key, without control characters.",
+const keyMessages: Readonly<Record<MetadataKeyProvider, Messages>> = {
+  tmdb: {
+    401: SIGN_IN_AGAIN,
+    403: "You no longer have permission to change settings.",
+    404: "No TMDB token is stored.",
+    422: "TMDB needs the API Read Access Token, not the v3 API key, without control characters.",
+  },
+  omdb: {
+    401: SIGN_IN_AGAIN,
+    403: "You no longer have permission to change settings.",
+    404: "No OMDb key is stored.",
+    422: "An OMDb API key is 8 to 64 letters and digits.",
+    502: "OMDb did not accept that key.",
+  },
+};
+
+const keyFallback: Readonly<Record<MetadataKeyProvider, string>> = {
+  tmdb: "The TMDB token could not be changed.",
+  omdb: "The OMDb key could not be changed.",
 };
 
 const searchMessages: Messages = {
@@ -142,8 +157,11 @@ export function describeDecisionError(error: unknown): string | undefined {
   return describe(error, decisionMessages, "The decision could not be saved.");
 }
 
-export function describeKeyError(error: unknown): string | undefined {
-  return describe(error, keyMessages, "The TMDB token could not be changed.");
+export function describeKeyError(
+  error: unknown,
+  provider: MetadataKeyProvider,
+): string | undefined {
+  return describe(error, keyMessages[provider], keyFallback[provider]);
 }
 
 // One sentence a person can act on. Bloom keeps upstream details to itself,

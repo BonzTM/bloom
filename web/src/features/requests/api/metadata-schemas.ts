@@ -224,6 +224,26 @@ export const metadataDetailsSchema = z.object({
 
 export type MetadataDetails = z.output<typeof metadataDetailsSchema>;
 
+// `/api/v1/metadata/{movies,series}/{id}/ratings`, mirroring `TitleRatings`
+// in api/openapi.yaml. A missing score is one no source knows.
+const MAX_VOTES = 100_000_000;
+const ratingSourceSchema = z.enum(["omdb"]);
+const titleRatingSchema = (maxScore: number) =>
+  z.object({
+    score: z.number().min(0).max(maxScore),
+    votes: z.number().int().min(0).max(MAX_VOTES),
+    source: ratingSourceSchema,
+  });
+
+export const titleRatingsSchema = z.object({
+  imdb: titleRatingSchema(10).optional(),
+  rotten_tomatoes: titleRatingSchema(100).optional(),
+  metacritic: titleRatingSchema(100).optional(),
+});
+
+export type TitleRatings = z.output<typeof titleRatingsSchema>;
+export type TitleRating = NonNullable<TitleRatings["imdb"]>;
+
 // A title page's answer always says whether the caller follows the title,
 // and carries the rich detail the page shows.
 export const metadataTitleDetailSchema = metadataTitleSchema.extend({

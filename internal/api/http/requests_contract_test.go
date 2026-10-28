@@ -77,6 +77,9 @@ func TestRequestSliceOpenAPIDocumentsRequiredFailures(t *testing.T) {
 		"/api/v1/metadata/movies/{id}":                   {"get": {"401", "403", "404", "422", "502", "503"}},
 		"/api/v1/metadata/series/{id}":                   {"get": {"401", "403", "404", "422", "502", "503"}},
 		"/api/v1/metadata/providers/tmdb/key":            {"get": {"401", "403"}, "put": {"401", "403", "415", "422", "502", "503"}, "delete": {"401", "403", "404"}},
+		"/api/v1/metadata/providers/omdb/key":            {"get": {"401", "403"}, "put": {"401", "403", "415", "422", "502", "503"}, "delete": {"401", "403", "404"}},
+		"/api/v1/metadata/movies/{id}/ratings":           {"get": {"401", "403", "404", "422", "502", "503"}},
+		"/api/v1/metadata/series/{id}/ratings":           {"get": {"401", "403", "404", "422", "502", "503"}},
 		"/api/v1/request-profiles":                       {"get": {"401", "403"}, "post": {"401", "403", "409", "415", "422"}},
 		"/api/v1/request-profiles/{id}":                  {"put": {"401", "403", "404", "409", "415", "422"}, "delete": {"401", "403", "404", "409"}},
 		"/api/v1/requests":                               {"get": {"401", "403", "422"}, "post": {"401", "403", "404", "409", "415", "422", "502", "503"}},
@@ -171,7 +174,8 @@ func TestOtherErrorCodesNeverCarryAReason(t *testing.T) {
 func TestRequestStateChangingRoutesHaveCSRFAuditResources(t *testing.T) {
 	patterns := []string{
 		"/api/v1/download-managers", "/api/v1/download-managers/{id}",
-		"/api/v1/metadata/providers/tmdb/key", "/api/v1/request-profiles", "/api/v1/request-profiles/{id}",
+		"/api/v1/metadata/providers/tmdb/key", "/api/v1/metadata/providers/omdb/key",
+		"/api/v1/request-profiles", "/api/v1/request-profiles/{id}",
 		"/api/v1/requests", "/api/v1/requests/{id}/approve", "/api/v1/requests/{id}/decline",
 		"/api/v1/roles/{id}/request-quota", "/api/v1/accounts/{id}/request-quota",
 	}

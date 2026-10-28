@@ -4,37 +4,36 @@ import type {
   MetadataDetails,
   MetadataSeriesFacts,
   MetadataTitle,
+  TitleRatings,
 } from "../api/metadata-schemas.js";
 import {
   countryFlag,
   formatDollars,
   formatReleaseDay,
-  formatScore,
   imdbUrl,
   languageName,
   releaseTypeLabel,
   tmdbImageUrl,
   tmdbUrl,
 } from "./detail-format.js";
+import { TitleScores } from "./title-scores.js";
 
 type TitleFactsProps = Readonly<{
   title: Pick<MetadataTitle, "kind" | "provider_id">;
   details: MetadataDetails;
+  ratings: TitleRatings | undefined;
 }>;
 
-// The side card of facts a Seerr title page shows: the score, then one
+// The side card of facts a Seerr title page shows: the scores, then one
 // row per fact TMDB knows, then where it streams and where to read more.
-export function TitleFacts({ title, details }: TitleFactsProps): ReactNode {
+export function TitleFacts({
+  title,
+  details,
+  ratings,
+}: TitleFactsProps): ReactNode {
   return (
     <aside className="card title-facts" aria-label="Facts">
-      {details.vote_count > 0 ? (
-        <p className="title-score">
-          <span className="title-score-value">
-            {formatScore(details.vote_average)}
-          </span>{" "}
-          TMDB user score
-        </p>
-      ) : null}
+      <TitleScores details={details} ratings={ratings} />
       <dl>
         <Fact label="Status">{details.status}</Fact>
         <MovieFacts details={details} />

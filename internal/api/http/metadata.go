@@ -206,10 +206,16 @@ func (s *Server) handleDeleteMetadataKey(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) emitMetadataAudit(r *http.Request, action string, result telemetry.AuditResult) {
+	s.emitProviderKeyAudit(r, core.MetadataProviderTMDB, action, result)
+}
+
+func (s *Server) emitProviderKeyAudit(
+	r *http.Request, kind core.MetadataProviderKind, action string, result telemetry.AuditResult,
+) {
 	account, _ := accountFrom(r.Context())
 	err := s.audit.Emit(r.Context(), telemetry.AuditEvent{
-		Actor: account.ID, Action: action, Resource: "metadata_provider:tmdb",
-		Kind: "tmdb", Result: result, Source: clientIP(r, s.trustedProxyCIDRs), RequestID: requestIDFrom(r.Context()),
+		Actor: account.ID, Action: action, Resource: "metadata_provider:" + string(kind),
+		Kind: string(kind), Result: result, Source: clientIP(r, s.trustedProxyCIDRs), RequestID: requestIDFrom(r.Context()),
 	})
 	if err != nil {
 		s.auditFailureMetrics.IncAuditWriteFailure()

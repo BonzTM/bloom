@@ -41,7 +41,7 @@ func NewMetadataProviderStores(pool *sql.DB, driver config.Driver) (core.Metadat
 }
 
 func (s *metadataProviders) GetMetadataProvider(ctx context.Context, kind core.MetadataProviderKind) (core.MetadataProviderRecord, error) {
-	if !kind.Valid() {
+	if !kind.StoresCredential() {
 		return core.MetadataProviderRecord{}, core.ErrInvalidArgument
 	}
 	if s.sqlite != nil {
@@ -70,7 +70,7 @@ func (s *metadataProviders) GetMetadataProvider(ctx context.Context, kind core.M
 }
 
 func (s *metadataProviders) UpsertMetadataProvider(ctx context.Context, record core.MetadataProviderRecord) error {
-	if !record.Kind.Valid() || len(record.CredentialCiphertext) == 0 || record.KeyID == "" {
+	if !record.Kind.StoresCredential() || len(record.CredentialCiphertext) == 0 || record.KeyID == "" {
 		return core.ErrInvalidArgument
 	}
 	if s.sqlite != nil {
