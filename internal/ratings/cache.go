@@ -14,12 +14,14 @@ type cacheEntry struct {
 
 // ratingsCache is a bounded TTL map. When it is full, a put first drops
 // expired entries and then, if still full, the entry that expires soonest.
+// Each clear starts a new generation, and a put from an older one is dropped.
 type ratingsCache struct {
 	mu       sync.Mutex
 	clock    core.Clock
 	capacity int
 	ttl      time.Duration
 	entries  map[string]cacheEntry
+	current  uint64
 }
 
 func newRatingsCache(clock core.Clock, capacity int, ttl time.Duration) *ratingsCache {
@@ -40,9 +42,18 @@ func (c *ratingsCache) get(key string) (core.TitleRatings, bool) {
 	return cloneRatings(entry.ratings), true
 }
 
-func (c *ratingsCache) put(key string, ratings core.TitleRatings) {
+func (c *ratingsCache) generation() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.current
+}
+
+func (c *ratingsCache) put(key string, ratings core.TitleRatings, generation uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if generation != c.current {
+		return
+	}
 	now := c.clock.Now()
 	if _, ok := c.entries[key]; !ok && len(c.entries) >= c.capacity {
 		c.evict(now)
@@ -71,6 +82,7 @@ func (c *ratingsCache) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	clear(c.entries)
+	c.current++
 }
 
 func cloneRatings(ratings core.TitleRatings) core.TitleRatings {

@@ -142,10 +142,10 @@ func TestRatingsFailuresAreReturnedAndNotCached(t *testing.T) {
 func TestCacheEvictsTheSoonestExpiryWhenFull(t *testing.T) {
 	clock := testutil.NewFakeClock(time.Unix(0, 0).UTC())
 	cache := newRatingsCache(clock, 2, time.Hour)
-	cache.put("tt0000001", testRatings)
+	cache.put("tt0000001", testRatings, 0)
 	clock.Advance(time.Minute)
-	cache.put("tt0000002", testRatings)
-	cache.put("tt0000003", testRatings)
+	cache.put("tt0000002", testRatings, 0)
+	cache.put("tt0000003", testRatings, 0)
 	if _, ok := cache.get("tt0000001"); ok {
 		t.Fatal("oldest entry survived a full cache")
 	}
@@ -158,7 +158,7 @@ func TestCacheEvictsTheSoonestExpiryWhenFull(t *testing.T) {
 
 func TestCacheReturnsCopies(t *testing.T) {
 	cache := newRatingsCache(testutil.NewFakeClock(time.Unix(0, 0).UTC()), 4, time.Hour)
-	cache.put(testIMDbID, testRatings)
+	cache.put(testIMDbID, testRatings, 0)
 	got, _ := cache.get(testIMDbID)
 	got.IMDb.Score = 1
 	again, _ := cache.get(testIMDbID)
@@ -255,4 +255,18 @@ func (c *fakeClient) closed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.isClosed
+}
+
+func TestCacheDropsAPutFromBeforeAClear(t *testing.T) {
+	cache := newRatingsCache(testutil.NewFakeClock(time.Unix(0, 0).UTC()), 4, time.Hour)
+	generation := cache.generation()
+	cache.clear()
+	cache.put(testIMDbID, testRatings, generation)
+	if _, ok := cache.get(testIMDbID); ok {
+		t.Fatal("a load that began before the key changed was cached")
+	}
+	cache.put(testIMDbID, testRatings, cache.generation())
+	if _, ok := cache.get(testIMDbID); !ok {
+		t.Fatal("a current load was not cached")
+	}
 }

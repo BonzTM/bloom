@@ -141,6 +141,9 @@ func (s *Service) Ratings(ctx context.Context, imdbID string) (core.TitleRatings
 	if ratings, ok := s.cache.get(imdbID); ok {
 		return ratings, nil
 	}
+	// A key change during the load clears the cache; the generation keeps
+	// this load's answer from landing after that.
+	generation := s.cache.generation()
 	client, err := s.loadClient(ctx)
 	if errors.Is(err, core.ErrMetadataNotConfigured) {
 		return core.TitleRatings{}, nil
@@ -158,7 +161,7 @@ func (s *Service) Ratings(ctx context.Context, imdbID string) (core.TitleRatings
 	if !ok {
 		return core.TitleRatings{}, fmt.Errorf("load OMDb ratings: %w", core.ErrMetadataMalformed)
 	}
-	s.cache.put(imdbID, ratings)
+	s.cache.put(imdbID, ratings, generation)
 	return cloneRatings(ratings), nil
 }
 
