@@ -81,9 +81,11 @@ type MovieRatingsLookup interface {
 }
 
 // CriticRatingLookup is an optional media-server adapter capability: the
-// critics score out of 100 the server keeps for a title, by TMDB ID. The
-// title name narrows the server-side search.
+// critics score out of 100 the server keeps for a title, by TMDB ID.
+// ItemCriticRating reads the score from the catalog items known to hold the
+// title. CriticRating finds the title by a server-side search on its name.
 type CriticRatingLookup interface {
+	ItemCriticRating(ctx context.Context, kind MediaKind, tmdbID string, itemIDs []string) (float64, bool, error)
 	CriticRating(ctx context.Context, kind MediaKind, tmdbID, title string) (float64, bool, error)
 }
 

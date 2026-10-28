@@ -88,11 +88,18 @@ type Service struct {
 	adapters          *adapterCache
 	registrationSlots chan struct{}
 	playback          PlaybackLifecycle
+	catalogTitles     core.CatalogTitleItems
 }
 
 // SetPlaybackLifecycle wires the optional collector lifecycle after construction.
 func (s *Service) SetPlaybackLifecycle(lifecycle PlaybackLifecycle) {
 	s.playback = lifecycle
+}
+
+// SetCatalogTitles wires the optional catalog resolver that critic-score
+// lookups read before they fall back to a name search.
+func (s *Service) SetCatalogTitles(titles core.CatalogTitleItems) {
+	s.catalogTitles = titles
 }
 
 // NewService returns a media-server application service.

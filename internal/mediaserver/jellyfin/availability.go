@@ -35,10 +35,7 @@ func (c *Client) HasTitle(
 func (c *Client) findProviderItem(
 	ctx context.Context, kind core.MediaKind, providerID string,
 ) (jellyfinapi.BaseItemDto, bool, error) {
-	itemType := "Movie"
-	if kind == core.MediaKindSeries {
-		itemType = "Series"
-	}
+	itemType := jellyfinItemType(kind)
 	for page := range maxAvailabilityPages {
 		path := "/Items?recursive=true&hasTmdbId=true&fields=ProviderIds&includeItemTypes=" + itemType +
 			"&limit=" + strconv.Itoa(availabilityPageSize) + "&startIndex=" + strconv.Itoa(page*availabilityPageSize)

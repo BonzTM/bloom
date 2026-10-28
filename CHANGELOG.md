@@ -21,6 +21,11 @@ contracts) gets an entry here.
 
 ### Changed
 
+- A media server's Rotten Tomatoes critics score is read from the library
+  catalog's items for the title, by TMDB ID, so a title the media server
+  stores under another name keeps its owned score instead of spending OMDb
+  quota. A title the catalog has not synced yet is still found by name.
+  Migration 00032 adds a partial index on catalog movies and series by TMDB ID.
 - Watch exports compress every ZIP entry. The `bloom_export` import accepts only
   a compressed Bloom ZIP whose entries use Deflate, so archives written before
   this change and bare JSONL files must be exported again.
