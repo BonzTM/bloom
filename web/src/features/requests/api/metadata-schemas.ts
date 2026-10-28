@@ -227,7 +227,7 @@ export type MetadataDetails = z.output<typeof metadataDetailsSchema>;
 // `/api/v1/metadata/{movies,series}/{id}/ratings`, mirroring `TitleRatings`
 // in api/openapi.yaml. A missing score is one no source knows.
 const MAX_VOTES = 100_000_000;
-const ratingSourceSchema = z.enum(["omdb"]);
+const ratingSourceSchema = z.enum(["radarr", "jellyfin", "omdb"]);
 const titleRatingSchema = (maxScore: number) =>
   z.object({
     score: z.number().min(0).max(maxScore),

@@ -88,12 +88,15 @@ contracts) gets an entry here.
 ### Added
 
 - Title pages show IMDb, Rotten Tomatoes critics, and Metacritic scores
-  beside TMDB's when an administrator stores an OMDb API key under Settings,
-  Request settings. Bloom checks the key with OMDb before storing it
-  encrypted. New routes: `GET /api/v1/metadata/{movies,series}/{id}/ratings`
-  and `GET`, `PUT`, `DELETE /api/v1/metadata/providers/omdb/key`. Migration
-  00031 lets `metadata_providers` hold the `omdb` key. Bloom calls
-  `www.omdbapi.com` only while a key is stored and caches scores for 24 hours.
+  beside TMDB's. For a title the operator holds they come from Radarr's library
+  entry and the media server's critics score; OMDb fills the rest when an
+  administrator stores an OMDb API key under Settings, Request settings.
+  Bloom checks the key with OMDb before storing it encrypted. New routes:
+  `GET /api/v1/metadata/{movies,series}/{id}/ratings` and `GET`, `PUT`,
+  `DELETE /api/v1/metadata/providers/omdb/key`. Migration 00031 lets
+  `metadata_providers` hold the `omdb` key. Bloom calls
+  `www.omdbapi.com` only while a key is stored and a score is still missing,
+  and caches scores for 6 hours.
 - A title page shows what Seerr's does: the certification, runtime, and
   genres under the title; Watch trailer and Request actions; the tagline,
   key crew, and keywords; a facts card with the TMDB score, status, US

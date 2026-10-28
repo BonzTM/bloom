@@ -1,4 +1,5 @@
-// Package ratings coordinates the stored OMDb credential and cached title ratings.
+// Package ratings coordinates title scores: first from the services that hold
+// a title (Radarr, Jellyfin), then from OMDb with the stored credential.
 package ratings
 
 import (
@@ -7,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -20,8 +22,9 @@ const (
 	credentialPurpose = "metadata-provider-api-key"
 	omdbBaseURL       = "https://www.omdbapi.com"
 	cacheCapacity     = 1024
-	// Scores move slowly, and an OMDb key has a daily quota.
-	cacheTTL = 24 * time.Hour
+	// Scores move slowly and an OMDb key has a daily quota, but a title that
+	// arrives in the library should show its owned scores the same day.
+	cacheTTL = 6 * time.Hour
 )
 
 type credentialCipher interface {
@@ -48,6 +51,7 @@ type Service struct {
 	writer      core.MetadataProviderWriter
 	cipher      credentialCipher
 	factory     ClientFactory
+	owned       []core.OwnedRatingsSource
 	clock       core.Clock
 	logger      *slog.Logger
 	cache       *ratingsCache
@@ -57,16 +61,19 @@ type Service struct {
 	fingerprint [sha256.Size]byte
 }
 
-// NewService creates a ratings service with explicit storage and clock dependencies.
+// NewService creates a ratings service with explicit storage and clock
+// dependencies. Owned sources are asked in order, before OMDb.
 func NewService(
 	reader core.MetadataProviderReader, writer core.MetadataProviderWriter, cipher credentialCipher,
-	factory ClientFactory, clock core.Clock, logger *slog.Logger,
+	factory ClientFactory, owned []core.OwnedRatingsSource, clock core.Clock, logger *slog.Logger,
 ) (*Service, error) {
-	if reader == nil || writer == nil || cipher == nil || factory == nil || clock == nil || logger == nil {
+	if reader == nil || writer == nil || cipher == nil || factory == nil || clock == nil || logger == nil ||
+		slices.Contains(owned, nil) {
 		return nil, errors.New("ratings service: all dependencies are required")
 	}
 	return &Service{
-		reader: reader, writer: writer, cipher: cipher, factory: factory, clock: clock, logger: logger,
+		reader: reader, writer: writer, cipher: cipher, factory: factory, owned: slices.Clone(owned),
+		clock: clock, logger: logger,
 		cache: newRatingsCache(clock, cacheCapacity, cacheTTL),
 	}, nil
 }
@@ -130,39 +137,6 @@ func (s *Service) RemoveKey(ctx context.Context) error {
 	}
 	s.reset()
 	return nil
-}
-
-// Ratings returns the cached or upstream scores for imdbID. With no key
-// stored it returns no scores and no error, since ratings are optional.
-func (s *Service) Ratings(ctx context.Context, imdbID string) (core.TitleRatings, error) {
-	if !core.ValidIMDbID(imdbID) {
-		return core.TitleRatings{}, core.ErrInvalidArgument
-	}
-	if ratings, ok := s.cache.get(imdbID); ok {
-		return ratings, nil
-	}
-	// A key change during the load clears the cache; the generation keeps
-	// this load's answer from landing after that.
-	generation := s.cache.generation()
-	client, err := s.loadClient(ctx)
-	if errors.Is(err, core.ErrMetadataNotConfigured) {
-		return core.TitleRatings{}, nil
-	}
-	if err != nil {
-		return core.TitleRatings{}, err
-	}
-	value, err, _ := s.loads.Do(imdbID, func() (any, error) {
-		return client.TitleRatings(ctx, imdbID)
-	})
-	if err != nil {
-		return core.TitleRatings{}, fmt.Errorf("load OMDb ratings: %w", err)
-	}
-	ratings, ok := value.(core.TitleRatings)
-	if !ok {
-		return core.TitleRatings{}, fmt.Errorf("load OMDb ratings: %w", core.ErrMetadataMalformed)
-	}
-	s.cache.put(imdbID, ratings, generation)
-	return cloneRatings(ratings), nil
 }
 
 func (s *Service) loadClient(ctx context.Context) (Client, error) {

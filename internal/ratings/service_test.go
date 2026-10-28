@@ -19,6 +19,8 @@ const (
 	testIMDbID = "tt0133093"
 )
 
+var testTitle = core.RatedTitle{Kind: core.MediaKindMovie, TMDBID: "603", IMDbID: testIMDbID, Title: "The Matrix"}
+
 var testRatings = core.TitleRatings{
 	IMDb: &core.TitleRating{Score: 8.7, Votes: 2_000_000, Source: core.RatingSourceOMDb},
 }
@@ -30,7 +32,7 @@ type harness struct {
 	clock   *testutil.FakeClock
 }
 
-func newHarness(t *testing.T) harness {
+func newHarness(t *testing.T, owned ...core.OwnedRatingsSource) harness {
 	t.Helper()
 	cipher, err := secrets.New([]byte("ratings-service-test-master-key"))
 	if err != nil {
@@ -39,7 +41,7 @@ func newHarness(t *testing.T) harness {
 	store := &memoryStore{records: map[core.MetadataProviderKind]core.MetadataProviderRecord{}}
 	factory := &fakeFactory{client: &fakeClient{ratings: testRatings}}
 	clock := testutil.NewFakeClock(time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC))
-	service, err := NewService(store, store, cipher, factory, clock, slog.New(slog.DiscardHandler))
+	service, err := NewService(store, store, cipher, factory, owned, clock, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -48,7 +50,7 @@ func newHarness(t *testing.T) harness {
 
 func TestRatingsWithoutAKeyAreEmpty(t *testing.T) {
 	h := newHarness(t)
-	ratings, err := h.service.Ratings(t.Context(), testIMDbID)
+	ratings, err := h.service.Ratings(t.Context(), testTitle)
 	if err != nil || ratings != (core.TitleRatings{}) {
 		t.Fatalf("Ratings = %+v, %v; want empty, nil", ratings, err)
 	}
@@ -73,7 +75,7 @@ func TestSetKeyStoresItEncryptedAndServesCachedRatings(t *testing.T) {
 		t.Fatalf("HasKey = %t, %v", configured, err)
 	}
 	for range 2 {
-		ratings, err := h.service.Ratings(t.Context(), testIMDbID)
+		ratings, err := h.service.Ratings(t.Context(), testTitle)
 		if err != nil || ratings.IMDb == nil || *ratings.IMDb != *testRatings.IMDb {
 			t.Fatalf("Ratings = %+v, %v", ratings, err)
 		}
@@ -82,7 +84,7 @@ func TestSetKeyStoresItEncryptedAndServesCachedRatings(t *testing.T) {
 		t.Fatalf("upstream rating calls = %d, want 1", calls)
 	}
 	h.clock.Advance(cacheTTL)
-	if _, err := h.service.Ratings(t.Context(), testIMDbID); err != nil || h.factory.client.ratingCalls() != 2 {
+	if _, err := h.service.Ratings(t.Context(), testTitle); err != nil || h.factory.client.ratingCalls() != 2 {
 		t.Fatalf("expired entry was not reloaded: calls %d, %v", h.factory.client.ratingCalls(), err)
 	}
 }
@@ -92,13 +94,13 @@ func TestRemoveKeyForgetsTheKeyAndCachedRatings(t *testing.T) {
 	if err := h.service.SetKey(t.Context(), testKey); err != nil {
 		t.Fatalf("SetKey: %v", err)
 	}
-	if _, err := h.service.Ratings(t.Context(), testIMDbID); err != nil {
+	if _, err := h.service.Ratings(t.Context(), testTitle); err != nil {
 		t.Fatalf("Ratings: %v", err)
 	}
 	if err := h.service.RemoveKey(t.Context()); err != nil {
 		t.Fatalf("RemoveKey: %v", err)
 	}
-	ratings, err := h.service.Ratings(t.Context(), testIMDbID)
+	ratings, err := h.service.Ratings(t.Context(), testTitle)
 	if err != nil || ratings != (core.TitleRatings{}) {
 		t.Fatalf("Ratings after removal = %+v, %v", ratings, err)
 	}
@@ -123,18 +125,20 @@ func TestSetKeyRejectsBadKeysWithoutStoringThem(t *testing.T) {
 
 func TestRatingsFailuresAreReturnedAndNotCached(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.service.Ratings(t.Context(), "nm0000206"); !errors.Is(err, core.ErrInvalidArgument) {
+	person := testTitle
+	person.IMDbID = "nm0000206"
+	if _, err := h.service.Ratings(t.Context(), person); !errors.Is(err, core.ErrInvalidArgument) {
 		t.Fatalf("Ratings(person id) error = %v", err)
 	}
 	if err := h.service.SetKey(t.Context(), testKey); err != nil {
 		t.Fatalf("SetKey: %v", err)
 	}
 	h.factory.client.ratingsErr = core.ErrMetadataUnavailable
-	if _, err := h.service.Ratings(t.Context(), testIMDbID); !errors.Is(err, core.ErrMetadataUnavailable) {
+	if _, err := h.service.Ratings(t.Context(), testTitle); !errors.Is(err, core.ErrMetadataUnavailable) {
 		t.Fatalf("Ratings error = %v", err)
 	}
 	h.factory.client.ratingsErr = nil
-	if ratings, err := h.service.Ratings(t.Context(), testIMDbID); err != nil || ratings.IMDb == nil {
+	if ratings, err := h.service.Ratings(t.Context(), testTitle); err != nil || ratings.IMDb == nil {
 		t.Fatalf("Ratings after recovery = %+v, %v", ratings, err)
 	}
 }

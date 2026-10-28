@@ -590,15 +590,17 @@ is treated as not configured and must be replaced with the API Read Access
 Token. Removing the token disables new metadata searches and returns
 `metadata_not_configured` until another token is stored.
 
-Outside scores are optional. An account with `admin.settings` stores an OMDb
-API key with `PUT /api/v1/metadata/providers/omdb/key`, or under Settings,
-Request settings. Bloom checks the key against OMDb, encrypts it under
-`BLOOM_SECRET_KEY`, and never returns it. While a key is stored,
-`GET /api/v1/metadata/{movies,series}/{id}/ratings` returns the IMDb score and
-votes, the Rotten Tomatoes critics score, and the Metascore for the title's
-IMDb ID, cached for 24 hours. Without a key, or for a title without an IMDb ID,
-the route returns `{}`. The Bloom server must reach `www.omdbapi.com` for
-scores to appear.
+`GET /api/v1/metadata/{movies,series}/{id}/ratings` returns a title's IMDb
+score and votes, Rotten Tomatoes critics score, and Metascore, each marked with
+its source. Titles the operator holds come first from local services: a
+registered Radarr instance's library entry for a movie, then a media server's
+critics score for a movie or series. OMDb fills any score still missing, only
+while an OMDb API key is stored. An account with `admin.settings` stores that key
+with `PUT /api/v1/metadata/providers/omdb/key`, or under Settings, Request
+settings; Bloom checks it against OMDb, encrypts it under `BLOOM_SECRET_KEY`,
+and never returns it. Scores are cached for 6 hours, except when a source
+failed. A title no source knows returns `{}`. The Bloom server must reach
+`www.omdbapi.com` for OMDb scores.
 
 Register each Radarr or Sonarr instance with `POST /api/v1/download-managers`.
 Bloom verifies the API key before storing it encrypted. Use `GET` on that

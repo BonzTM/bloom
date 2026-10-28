@@ -13,7 +13,7 @@ type ratingsManager interface {
 	SetKey(context.Context, string) error
 	HasKey(context.Context) (bool, error)
 	RemoveKey(context.Context) error
-	Ratings(context.Context, string) (core.TitleRatings, error)
+	Ratings(context.Context, core.RatedTitle) (core.TitleRatings, error)
 }
 
 type (
@@ -30,24 +30,34 @@ type (
 )
 
 func (s *Server) handleMovieRatings(w http.ResponseWriter, r *http.Request) {
-	s.writeTitleRatings(w, r, func(accountID, id string) (string, error) {
+	s.writeTitleRatings(w, r, func(accountID, id string) (core.RatedTitle, error) {
 		movie, err := s.metadataReader.MovieDetail(r.Context(), accountID, id)
-		return movie.Details.IMDbID, err
+		return ratedTitle(core.MediaKindMovie, id, movie.Title, movie.Details), err
 	})
 }
 
 func (s *Server) handleSeriesRatings(w http.ResponseWriter, r *http.Request) {
-	s.writeTitleRatings(w, r, func(accountID, id string) (string, error) {
+	s.writeTitleRatings(w, r, func(accountID, id string) (core.RatedTitle, error) {
 		series, err := s.metadataReader.SeriesDetail(r.Context(), accountID, id, false)
-		return series.Details.IMDbID, err
+		return ratedTitle(core.MediaKindSeries, id, series.Title, series.Details), err
 	})
 }
 
-// writeTitleRatings resolves the title's IMDb ID through the cached detail,
-// then answers with whatever scores are known. A title with no IMDb ID, or
-// no OMDb key stored, answers with no scores rather than an error.
+// ratedTitle names the title for the ratings lookup. An IMDb ID the
+// ratings service would refuse is dropped, so owned sources still answer.
+func ratedTitle(kind core.MediaKind, id, name string, details core.MetadataDetails) core.RatedTitle {
+	title := core.RatedTitle{Kind: kind, TMDBID: id, Title: name}
+	if core.ValidIMDbID(details.IMDbID) {
+		title.IMDbID = details.IMDbID
+	}
+	return title
+}
+
+// writeTitleRatings resolves the title through the cached detail, then
+// answers with whatever scores are known. A title no source knows answers
+// with no scores rather than an error.
 func (s *Server) writeTitleRatings(
-	w http.ResponseWriter, r *http.Request, imdbIDFor func(accountID, id string) (string, error),
+	w http.ResponseWriter, r *http.Request, titleFor func(accountID, id string) (core.RatedTitle, error),
 ) {
 	id := r.PathValue("id")
 	if core.ValidateProviderID(id) != nil {
@@ -59,17 +69,15 @@ func (s *Server) writeTitleRatings(
 		writeError(w, r, s.logger, errAuthenticationRequired)
 		return
 	}
-	imdbID, err := imdbIDFor(account.ID, id)
+	title, err := titleFor(account.ID, id)
 	if err != nil {
 		writeError(w, r, s.logger, err)
 		return
 	}
-	var ratings core.TitleRatings
-	if core.ValidIMDbID(imdbID) {
-		if ratings, err = s.ratings.Ratings(r.Context(), imdbID); err != nil {
-			writeError(w, r, s.logger, err)
-			return
-		}
+	ratings, err := s.ratings.Ratings(r.Context(), title)
+	if err != nil {
+		writeError(w, r, s.logger, err)
+		return
 	}
 	writeJSON(w, r, s.logger, http.StatusOK, titleRatingsDTO(ratings))
 }
