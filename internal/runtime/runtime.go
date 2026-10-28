@@ -934,6 +934,11 @@ func mediaServerDependencies(
 	if err != nil {
 		return nil, fmt.Errorf("build media server service: %w", err)
 	}
+	catalogTitles, err := db.NewCatalogTitleStore(pool, cfg.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("build catalog title store: %w", err)
+	}
+	service.SetCatalogTitles(catalogTitles)
 	return service, nil
 }
 

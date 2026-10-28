@@ -62,6 +62,7 @@ func runEngineSuite(t *testing.T, pool *sql.DB, driver config.Driver) {
 	runStatsEngineTests(t, pool, driver)
 	runCatalogEngineTests(t, pool, driver)
 	runRecentlyAddedEngineTests(t, pool, driver)
+	runCatalogTitleEngineTests(t, pool, driver)
 	runAdditiveColumnCompatibilityTests(t, pool, driver)
 	runDownloadManagerEngineTests(t, pool, driver)
 	runMetadataProviderEngineTests(t, pool, driver)
@@ -2168,7 +2169,7 @@ func testUsernameMigrationRoundTrip(t *testing.T, pool *sql.DB, driver config.Dr
 
 func assertCanonicalUsernameMigration(t *testing.T, pool *sql.DB, driver config.Driver, legacy map[string]string) {
 	t.Helper()
-	assertMigrationVersion(t, pool, 31)
+	assertMigrationVersion(t, pool, 32)
 	assertUsernameMigrationVersions(t, pool, 3)
 	for id, original := range legacy {
 		want, err := core.UsernameKey(original)
@@ -2289,7 +2290,7 @@ func testUsernameMigrationVersionFailure(t *testing.T, pool *sql.DB, driver conf
 	if err := db.Migrate(ctx, pool, driver); err != nil {
 		t.Fatalf("migration after removing version failure: %v", err)
 	}
-	assertMigrationVersion(t, pool, 31)
+	assertMigrationVersion(t, pool, 32)
 	if username, key := rawUsernameIdentity(t, pool, id); username != "élodie" || key != "élodie" {
 		t.Fatalf("committed identity = (%q, %q), want (élodie, élodie)", username, key)
 	}

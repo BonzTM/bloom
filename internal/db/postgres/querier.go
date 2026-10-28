@@ -194,6 +194,10 @@ type Querier interface {
 	ListCatalogItemsWatchAscFiltered(ctx context.Context, arg ListCatalogItemsWatchAscFilteredParams) ([]LibraryItem, error)
 	ListCatalogItemsWatchDesc(ctx context.Context, arg ListCatalogItemsWatchDescParams) ([]LibraryItem, error)
 	ListCatalogItemsWatchDescFiltered(ctx context.Context, arg ListCatalogItemsWatchDescFilteredParams) ([]LibraryItem, error)
+	// Active catalog items holding one movie or series on one media server, for
+	// owned-ratings lookups. Exclusions do not apply: the read returns item IDs
+	// only, to ask the media server for its own score of the title.
+	ListCatalogTitleItemIDs(ctx context.Context, arg ListCatalogTitleItemIDsParams) ([]string, error)
 	ListDownloadManagers(ctx context.Context, arg ListDownloadManagersParams) ([]ListDownloadManagersRow, error)
 	ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error)
 	ListInviteLibraries(ctx context.Context, inviteID string) ([]string, error)
