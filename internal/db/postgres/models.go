@@ -182,6 +182,7 @@ type LibraryItem struct {
 	FirstSeenAt     time.Time
 	LastSeenAt      time.Time
 	UpdatedAt       time.Time
+	TmdbID          sql.NullInt64
 }
 
 type LibraryItemGenre struct {

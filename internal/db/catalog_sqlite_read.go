@@ -309,7 +309,7 @@ func sqliteCatalogItem(row sqlite.LibraryItem) (core.LibraryItem, error) {
 		seriesID: row.SeriesID, seriesName: row.SeriesName, seasonID: row.SeasonID,
 		seasonNumber: season, indexNumber: index, productionYear: year, runtime: runtime,
 		premiereDate: premiere, dateCreated: created, communityRating: catalogFloat(row.CommunityRating),
-		genres: row.Genres, primaryImageTag: row.PrimaryImageTag, archived: row.Archived != 0,
+		genres: row.Genres, primaryImageTag: row.PrimaryImageTag, tmdbID: row.TmdbID, archived: row.Archived != 0,
 		firstSeenAt: first, lastSeenAt: last, updatedAt: updated,
 	}).domain()
 }

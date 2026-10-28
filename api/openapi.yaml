@@ -3321,7 +3321,7 @@ components:
         name: { type: string, minLength: 1, x-max-bytes: 100 }
     RecentlyAddedTitle:
       type: object
-      required: [media_server_id, item_id, kind, title, year, added_at]
+      required: [media_server_id, item_id, kind, title, year, tmdb_id, added_at]
       additionalProperties: false
       properties:
         media_server_id: { type: string, format: uuid }
@@ -3329,6 +3329,7 @@ components:
         kind: { $ref: "#/components/schemas/MediaKind" }
         title: { type: string, minLength: 1, maxLength: 500 }
         year: { type: integer, minimum: 0, maximum: 9999, description: "Production year, or 0 when the media server has none." }
+        tmdb_id: { type: integer, minimum: 0, maximum: 1000000000, description: "TMDB ID from the media server's provider IDs, or 0 when it has none." }
         added_at: { type: string, format: date-time }
     RecentlyAddedResponse:
       type: object

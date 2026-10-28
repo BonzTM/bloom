@@ -12,13 +12,15 @@ const (
 	MaxRecentlyAddedLimit = 40
 )
 
-// RecentlyAddedTitle is one movie or series the media server added, newest first.
+// RecentlyAddedTitle is one movie or series the media server added, newest
+// first. TMDBID is zero when the media server has no TMDB ID for it.
 type RecentlyAddedTitle struct {
 	MediaServerID string
 	ItemID        string
 	Kind          MediaKind
 	Title         string
 	Year          int
+	TMDBID        int64
 	AddedAt       time.Time
 }
 
@@ -54,6 +56,6 @@ func RecentlyAddedFromCatalog(item LibraryItem) (RecentlyAddedTitle, bool) {
 	}
 	return RecentlyAddedTitle{
 		MediaServerID: item.MediaServerID, ItemID: item.ItemID, Kind: kind, Title: item.Name, Year: year,
-		AddedAt: *item.DateCreated,
+		TMDBID: item.TMDBID, AddedAt: *item.DateCreated,
 	}, true
 }

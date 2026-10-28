@@ -55,14 +55,15 @@ INSERT INTO library_items (
     media_server_id, item_id, library_id, parent_id, item_type, name,
     series_id, series_name, season_id, season_number, index_number, runtime_ms,
     premiere_date, production_year, community_rating, genres, primary_image_tag,
-    date_created, archived, first_seen_at, last_seen_at, updated_at
+    date_created, archived, first_seen_at, last_seen_at, updated_at, tmdb_id
 ) VALUES (
     sqlc.arg(media_server_id), sqlc.arg(item_id), sqlc.arg(library_id), sqlc.arg(parent_id),
     sqlc.arg(item_type), sqlc.arg(name), sqlc.arg(series_id), sqlc.arg(series_name),
     sqlc.arg(season_id), sqlc.narg(season_number), sqlc.narg(index_number), sqlc.narg(runtime_ms),
     sqlc.narg(premiere_date), sqlc.narg(production_year), sqlc.narg(community_rating),
     sqlc.arg(genres), sqlc.arg(primary_image_tag), sqlc.narg(date_created),
-    sqlc.arg(archived), sqlc.arg(first_seen_at), sqlc.arg(last_seen_at), sqlc.arg(updated_at)
+    sqlc.arg(archived), sqlc.arg(first_seen_at), sqlc.arg(last_seen_at), sqlc.arg(updated_at),
+    sqlc.narg(tmdb_id)
 )
 ON CONFLICT (media_server_id, item_id) DO UPDATE SET
     library_id = excluded.library_id, parent_id = excluded.parent_id,
@@ -73,7 +74,8 @@ ON CONFLICT (media_server_id, item_id) DO UPDATE SET
     production_year = excluded.production_year, community_rating = excluded.community_rating,
     genres = excluded.genres, primary_image_tag = excluded.primary_image_tag,
     date_created = excluded.date_created, archived = excluded.archived,
-    last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at;
+    last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at,
+    tmdb_id = excluded.tmdb_id;
 
 -- name: DeleteLibraryItemGenres :exec
 DELETE FROM library_item_genres
@@ -254,7 +256,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -268,7 +270,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -283,7 +285,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -297,7 +299,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -312,7 +314,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -327,7 +329,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -343,7 +345,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -358,7 +360,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -374,7 +376,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -389,7 +391,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -405,7 +407,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -420,7 +422,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -436,7 +438,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -450,7 +452,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -465,7 +467,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -479,7 +481,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -494,7 +496,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -508,7 +510,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -523,7 +525,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -537,7 +539,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -552,7 +554,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -567,7 +569,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -583,7 +585,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -598,7 +600,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
       AND li.archived = (CAST(sqlc.arg(archived_filter) AS BIGINT) <> 0)
@@ -613,7 +615,7 @@ SELECT media_server_id, item_id, library_id, parent_id, item_type, name, series_
        series_name, season_id, season_number, index_number, runtime_ms, premiere_date,
        production_year, community_rating, genres, primary_image_tag, date_created,
        archived, plays, watch_seconds, unique_users, first_played_at, last_played_at,
-       first_seen_at, last_seen_at, updated_at
+       first_seen_at, last_seen_at, updated_at, tmdb_id
 FROM library_items
 WHERE media_server_id = sqlc.arg(media_server_id) AND item_id = sqlc.arg(item_id);
 
@@ -769,7 +771,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
 WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
   AND li.archived = FALSE
@@ -800,7 +802,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
 WHERE li.media_server_id = sqlc.arg(media_server_id) AND li.library_id = sqlc.arg(library_id)
   AND li.archived = FALSE AND (li.last_played_at IS NULL OR li.last_played_at < sqlc.arg(stale_before))

@@ -12,7 +12,7 @@ import { NowPlaying } from "../features/playback/components/now-playing.js";
 import { useNowPlaying } from "../features/playback/hooks/playback-queries.js";
 import {
   RecentlyAddedRow,
-  type RecentlyAddedLink,
+  type RecentlyAddedAccess,
 } from "../features/catalog/components/recently-added-row.js";
 import { useRecentlyAdded } from "../features/catalog/hooks/catalog-queries.js";
 import { browsePath } from "../features/requests/components/browse-path.js";
@@ -108,7 +108,7 @@ function Dashboard({
       >
         <RecentlyAddedPanel
           accountId={accountId}
-          link={recentlyAddedLink(granted)}
+          access={recentlyAddedAccess(granted)}
         />
       </PermissionGate>
       {/* Posters open a title page, which needs requests.create. */}
@@ -122,11 +122,13 @@ function Dashboard({
   );
 }
 
-function recentlyAddedLink(granted: readonly Permission[]): RecentlyAddedLink {
-  if (hasPermission(granted, permissions.statsReadAll)) {
-    return "item";
-  }
-  return hasPermission(granted, permissions.requestsCreate) ? "search" : "none";
+function recentlyAddedAccess(
+  granted: readonly Permission[],
+): RecentlyAddedAccess {
+  return {
+    titles: hasPermission(granted, permissions.requestsCreate),
+    items: hasPermission(granted, permissions.statsReadAll),
+  };
 }
 
 // Each panel owns its query so the request is only made when the gate
@@ -154,14 +156,14 @@ function NowPlayingPanel({
 
 function RecentlyAddedPanel({
   accountId,
-  link,
-}: Readonly<{ accountId: string; link: RecentlyAddedLink }>): ReactNode {
+  access,
+}: Readonly<{ accountId: string; access: RecentlyAddedAccess }>): ReactNode {
   const query = useRecentlyAdded(accountId, true);
   useSessionRecheck(
     accessDenial(query.error) !== undefined,
     query.errorUpdatedAt,
   );
-  return <RecentlyAddedRow query={query} link={link} />;
+  return <RecentlyAddedRow query={query} access={access} />;
 }
 
 // The discovery rows in Seerr's order: what is trending, then movies and

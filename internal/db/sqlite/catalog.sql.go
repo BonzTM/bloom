@@ -535,7 +535,7 @@ SELECT media_server_id, item_id, library_id, parent_id, item_type, name, series_
        series_name, season_id, season_number, index_number, runtime_ms, premiere_date,
        production_year, community_rating, genres, primary_image_tag, date_created,
        archived, plays, watch_seconds, unique_users, first_played_at, last_played_at,
-       first_seen_at, last_seen_at, updated_at
+       first_seen_at, last_seen_at, updated_at, tmdb_id
 FROM library_items
 WHERE media_server_id = ?1 AND item_id = ?2
 `
@@ -576,6 +576,7 @@ func (q *Queries) GetCatalogItem(ctx context.Context, arg GetCatalogItemParams) 
 		&i.FirstSeenAt,
 		&i.LastSeenAt,
 		&i.UpdatedAt,
+		&i.TmdbID,
 	)
 	return i, err
 }
@@ -989,7 +990,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1054,6 +1055,7 @@ func (q *Queries) ListCatalogItemsDateAsc(ctx context.Context, arg ListCatalogIt
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1074,7 +1076,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1142,6 +1144,7 @@ func (q *Queries) ListCatalogItemsDateAscFiltered(ctx context.Context, arg ListC
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1162,7 +1165,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1227,6 +1230,7 @@ func (q *Queries) ListCatalogItemsDateDesc(ctx context.Context, arg ListCatalogI
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1247,7 +1251,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1315,6 +1319,7 @@ func (q *Queries) ListCatalogItemsDateDescFiltered(ctx context.Context, arg List
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1335,7 +1340,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1400,6 +1405,7 @@ func (q *Queries) ListCatalogItemsLastPlayedAsc(ctx context.Context, arg ListCat
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1420,7 +1426,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1488,6 +1494,7 @@ func (q *Queries) ListCatalogItemsLastPlayedAscFiltered(ctx context.Context, arg
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1508,7 +1515,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1573,6 +1580,7 @@ func (q *Queries) ListCatalogItemsLastPlayedDesc(ctx context.Context, arg ListCa
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1593,7 +1601,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1661,6 +1669,7 @@ func (q *Queries) ListCatalogItemsLastPlayedDescFiltered(ctx context.Context, ar
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1681,7 +1690,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1744,6 +1753,7 @@ func (q *Queries) ListCatalogItemsNameAsc(ctx context.Context, arg ListCatalogIt
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1764,7 +1774,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1829,6 +1839,7 @@ func (q *Queries) ListCatalogItemsNameAscFiltered(ctx context.Context, arg ListC
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1849,7 +1860,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1911,6 +1922,7 @@ func (q *Queries) ListCatalogItemsNameDesc(ctx context.Context, arg ListCatalogI
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -1931,7 +1943,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -1996,6 +2008,7 @@ func (q *Queries) ListCatalogItemsNameDescFiltered(ctx context.Context, arg List
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2016,7 +2029,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2078,6 +2091,7 @@ func (q *Queries) ListCatalogItemsPlaysAsc(ctx context.Context, arg ListCatalogI
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2098,7 +2112,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2163,6 +2177,7 @@ func (q *Queries) ListCatalogItemsPlaysAscFiltered(ctx context.Context, arg List
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2183,7 +2198,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2245,6 +2260,7 @@ func (q *Queries) ListCatalogItemsPlaysDesc(ctx context.Context, arg ListCatalog
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2265,7 +2281,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2330,6 +2346,7 @@ func (q *Queries) ListCatalogItemsPlaysDescFiltered(ctx context.Context, arg Lis
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2350,7 +2367,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2415,6 +2432,7 @@ func (q *Queries) ListCatalogItemsPremiereAsc(ctx context.Context, arg ListCatal
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2435,7 +2453,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2503,6 +2521,7 @@ func (q *Queries) ListCatalogItemsPremiereAscFiltered(ctx context.Context, arg L
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2523,7 +2542,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2588,6 +2607,7 @@ func (q *Queries) ListCatalogItemsPremiereDesc(ctx context.Context, arg ListCata
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2608,7 +2628,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2676,6 +2696,7 @@ func (q *Queries) ListCatalogItemsPremiereDescFiltered(ctx context.Context, arg 
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2696,7 +2717,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2758,6 +2779,7 @@ func (q *Queries) ListCatalogItemsWatchAsc(ctx context.Context, arg ListCatalogI
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2778,7 +2800,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2843,6 +2865,7 @@ func (q *Queries) ListCatalogItemsWatchAscFiltered(ctx context.Context, arg List
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2863,7 +2886,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -2925,6 +2948,7 @@ func (q *Queries) ListCatalogItemsWatchDesc(ctx context.Context, arg ListCatalog
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -2945,7 +2969,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
     WHERE li.media_server_id = ?1 AND li.library_id = ?2
       AND li.archived = (CAST(?3 AS BIGINT) <> 0)
@@ -3010,6 +3034,7 @@ func (q *Queries) ListCatalogItemsWatchDescFiltered(ctx context.Context, arg Lis
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -3072,7 +3097,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
 WHERE li.media_server_id = ?1 AND li.library_id = ?2
   AND li.archived = FALSE
@@ -3123,6 +3148,7 @@ func (q *Queries) ListRecentCatalogItems(ctx context.Context, arg ListRecentCata
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -3143,7 +3169,7 @@ SELECT li.media_server_id, li.item_id, li.library_id, li.parent_id, li.item_type
        li.runtime_ms, li.premiere_date, li.production_year, li.community_rating, li.genres,
        li.primary_image_tag, li.date_created, li.archived, li.plays, li.watch_seconds,
        li.unique_users, li.first_played_at, li.last_played_at, li.first_seen_at,
-       li.last_seen_at, li.updated_at
+       li.last_seen_at, li.updated_at, li.tmdb_id
 FROM library_items li
 WHERE li.media_server_id = ?1 AND li.library_id = ?2
   AND li.archived = FALSE AND (li.last_played_at IS NULL OR li.last_played_at < ?3)
@@ -3217,6 +3243,7 @@ func (q *Queries) ListStaleCatalogItems(ctx context.Context, arg ListStaleCatalo
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.TmdbID,
 		); err != nil {
 			return nil, err
 		}
@@ -3366,14 +3393,15 @@ INSERT INTO library_items (
     media_server_id, item_id, library_id, parent_id, item_type, name,
     series_id, series_name, season_id, season_number, index_number, runtime_ms,
     premiere_date, production_year, community_rating, genres, primary_image_tag,
-    date_created, archived, first_seen_at, last_seen_at, updated_at
+    date_created, archived, first_seen_at, last_seen_at, updated_at, tmdb_id
 ) VALUES (
     ?1, ?2, ?3, ?4,
     ?5, ?6, ?7, ?8,
     ?9, ?10, ?11, ?12,
     ?13, ?14, ?15,
     ?16, ?17, ?18,
-    ?19, ?20, ?21, ?22
+    ?19, ?20, ?21, ?22,
+    ?23
 )
 ON CONFLICT (media_server_id, item_id) DO UPDATE SET
     library_id = excluded.library_id, parent_id = excluded.parent_id,
@@ -3384,7 +3412,8 @@ ON CONFLICT (media_server_id, item_id) DO UPDATE SET
     production_year = excluded.production_year, community_rating = excluded.community_rating,
     genres = excluded.genres, primary_image_tag = excluded.primary_image_tag,
     date_created = excluded.date_created, archived = excluded.archived,
-    last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at
+    last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at,
+    tmdb_id = excluded.tmdb_id
 `
 
 type UpsertLibraryItemParams struct {
@@ -3410,6 +3439,7 @@ type UpsertLibraryItemParams struct {
 	FirstSeenAt     string
 	LastSeenAt      string
 	UpdatedAt       string
+	TmdbID          sql.NullInt64
 }
 
 func (q *Queries) UpsertLibraryItem(ctx context.Context, arg UpsertLibraryItemParams) (int64, error) {
@@ -3436,6 +3466,7 @@ func (q *Queries) UpsertLibraryItem(ctx context.Context, arg UpsertLibraryItemPa
 		arg.FirstSeenAt,
 		arg.LastSeenAt,
 		arg.UpdatedAt,
+		arg.TmdbID,
 	)
 	if err != nil {
 		return 0, err

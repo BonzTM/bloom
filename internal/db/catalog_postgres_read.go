@@ -281,7 +281,7 @@ func postgresCatalogItem(row postgres.LibraryItem) (core.LibraryItem, error) {
 		productionYear: int32FromNull(row.ProductionYear), runtime: runtime,
 		premiereDate: timeFromNull(row.PremiereDate), dateCreated: timeFromNull(row.DateCreated),
 		communityRating: catalogFloat(row.CommunityRating), genres: row.Genres, primaryImageTag: row.PrimaryImageTag,
-		archived: row.Archived, firstSeenAt: core.NormalizeTime(row.FirstSeenAt),
+		tmdbID: row.TmdbID, archived: row.Archived, firstSeenAt: core.NormalizeTime(row.FirstSeenAt),
 		lastSeenAt: core.NormalizeTime(row.LastSeenAt), updatedAt: core.NormalizeTime(row.UpdatedAt),
 	}).domain()
 }

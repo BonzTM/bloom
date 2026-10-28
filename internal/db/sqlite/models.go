@@ -181,6 +181,7 @@ type LibraryItem struct {
 	FirstSeenAt     string
 	LastSeenAt      string
 	UpdatedAt       string
+	TmdbID          sql.NullInt64
 }
 
 type LibraryItemGenre struct {
