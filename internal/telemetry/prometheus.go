@@ -68,6 +68,7 @@ type PromMetrics struct {
 	libraryCatalogSeconds      *prometheus.HistogramVec
 	libraryCatalogItems        prometheus.Counter
 	libraryCatalogArchived     prometheus.Counter
+	libraryCatalogSkipped      prometheus.Counter
 	libraryCatalogRunning      prometheus.Gauge
 }
 
@@ -134,6 +135,8 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		"Total catalog items upserted by full walks.")
 	libraryCatalogArchived := newCounter(namespace, "library_catalog_items_archived_total",
 		"Total catalog items archived after completed full walks.")
+	libraryCatalogSkipped := newCounter(namespace, "library_catalog_items_skipped_total",
+		"Total upstream catalog items skipped because Bloom could not store them.")
 	libraryCatalogRunning := prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "library_catalog_syncs_running",
 		Help: "Current library catalog full walks running in this process.",
@@ -176,6 +179,7 @@ func NewPromMetrics(namespace string) *PromMetrics {
 		importJobs:                 importJobs, importRecords: importRecords, importsRunning: importsRunning,
 		libraryCatalogSyncs: libraryCatalogSyncs, libraryCatalogSeconds: libraryCatalogSeconds,
 		libraryCatalogItems: libraryCatalogItems, libraryCatalogArchived: libraryCatalogArchived,
+		libraryCatalogSkipped: libraryCatalogSkipped,
 		libraryCatalogRunning: libraryCatalogRunning,
 	}
 	metrics.registerApplicationCollectors()
@@ -423,6 +427,7 @@ func (m *PromMetrics) registerApplicationCollectors() {
 		m.libraryCatalogSeconds,
 		m.libraryCatalogItems,
 		m.libraryCatalogArchived,
+		m.libraryCatalogSkipped,
 		m.libraryCatalogRunning,
 	)
 }
@@ -476,6 +481,13 @@ func (m *PromMetrics) AddLibraryCatalogItems(count int64) {
 func (m *PromMetrics) AddLibraryCatalogArchived(count int64) {
 	if count > 0 {
 		m.libraryCatalogArchived.Add(float64(count))
+	}
+}
+
+// AddLibraryCatalogSkipped records upstream items a walk could not store.
+func (m *PromMetrics) AddLibraryCatalogSkipped(count int64) {
+	if count > 0 {
+		m.libraryCatalogSkipped.Add(float64(count))
 	}
 }
 

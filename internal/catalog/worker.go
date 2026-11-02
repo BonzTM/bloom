@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type Metrics interface {
 	ObserveLibraryCatalogSync(outcome string, seconds float64)
 	AddLibraryCatalogItems(count int64)
 	AddLibraryCatalogArchived(count int64)
+	AddLibraryCatalogSkipped(count int64)
 	SetLibraryCatalogRunning(count int)
 }
 
@@ -204,7 +206,8 @@ func (w *Worker) walkLibrary(
 		if err != nil {
 			return libraryIndex, err
 		}
-		next := start + len(page.Items)
+		w.reportRejected(sync.MediaServerID, library.ID, page.Rejected)
+		next := start + page.Consumed()
 		nextIndex, excluded, err = w.stopExcludedLibrary(ctx, sync, libraries, libraryIndex)
 		if err != nil || excluded {
 			return nextIndex, err
@@ -272,12 +275,34 @@ func (w *Worker) commitChunks(
 	}
 	for offset := 0; offset < len(page.Items); offset += catalogCommitChunk {
 		end := min(offset+catalogCommitChunk, len(page.Items))
-		cursor := nextCursor(libraries, libraryIndex, start+end, page.Total)
+		cursor := nextCursor(libraries, libraryIndex, chunkCursorStart(page, start, end), page.Total)
 		if err := w.commitPage(ctx, sync, libraryID, page.Items[offset:end], cursor); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// chunkCursorStart is the upstream position to resume from after the chunk
+// ending at item offset end. Rejected items are absent from Items, so an inner
+// chunk's offset can trail its real position; resuming there only replays
+// idempotent upserts. The last chunk resumes past the whole page.
+func chunkCursorStart(page core.LibraryCatalogPage, start, end int) int {
+	if end == len(page.Items) {
+		return start + page.Consumed()
+	}
+	return start + end
+}
+
+// reportRejected logs each item Bloom skipped, with why, so the operator can
+// fix it on the media server; one bad item never stops the walk.
+func (w *Worker) reportRejected(serverID, libraryID string, rejected []core.LibraryItemRejection) {
+	for _, item := range rejected {
+		w.deps.Logger.Warn("library catalog item skipped", "media_server_id", serverID, "library_id", libraryID,
+			"item_id", item.ItemID, "item_type", item.ItemType, "name", strconv.QuoteToASCII(item.Name),
+			"series_name", strconv.QuoteToASCII(item.SeriesName), "reason", item.Reason)
+	}
+	w.deps.Metrics.AddLibraryCatalogSkipped(int64(len(rejected)))
 }
 
 func (w *Worker) commitPage(
@@ -462,9 +487,9 @@ func nextCursor(libraries []core.Library, index, next, total int) syncCursor {
 }
 
 func validatePage(page core.LibraryCatalogPage, start int) error {
+	consumed := page.Consumed()
 	if page.StartIndex != start || page.Total < 0 || page.Total > core.MaxCatalogPagesPerLibrary*core.CatalogPageSize ||
-		len(page.Items) > core.CatalogPageSize || start+len(page.Items) > page.Total ||
-		(len(page.Items) == 0 && start < page.Total) {
+		consumed > core.CatalogPageSize || start+consumed > page.Total || (consumed == 0 && start < page.Total) {
 		return errors.New("catalog page metadata is invalid")
 	}
 	for _, item := range page.Items {
