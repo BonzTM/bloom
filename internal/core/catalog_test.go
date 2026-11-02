@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestLibraryItemTMDBIDBelongsToMoviesAndSeries(t *testing.T) {
@@ -61,12 +62,18 @@ func TestLibraryItemUpstreamProblemNamesTheField(t *testing.T) {
 }
 
 func TestRejectLibraryItemBoundsWhatTheServerSent(t *testing.T) {
-	long := strings.Repeat("é", MaxCatalogRejectionTextBytes)
-	rejection := RejectLibraryItem(LibraryItem{ItemID: "item", Name: long + "\xff"}, "name exceeds 500 bytes")
-	if len(rejection.Name) > MaxCatalogRejectionTextBytes+len("\uFFFD") || !strings.HasPrefix(long, strings.TrimSuffix(rejection.Name, "\uFFFD")) {
-		t.Fatalf("name = %q (%d bytes)", rejection.Name, len(rejection.Name))
+	names := []string{
+		strings.Repeat("é", MaxCatalogRejectionTextBytes),
+		strings.Repeat("a", MaxCatalogRejectionTextBytes-1) + "😀",
+		strings.Repeat("\xff", 100) + "a",
 	}
-	if rejection.ItemID != "item" || rejection.Reason != "name exceeds 500 bytes" {
-		t.Fatalf("rejection = %+v", rejection)
+	for _, name := range names {
+		rejection := RejectLibraryItem(LibraryItem{ItemID: "item", Name: name}, "name exceeds 500 bytes")
+		if len(rejection.Name) > MaxCatalogRejectionTextBytes || !utf8.ValidString(rejection.Name) || rejection.Name == "" {
+			t.Errorf("name = %q (%d bytes)", rejection.Name, len(rejection.Name))
+		}
+		if rejection.ItemID != "item" || rejection.Reason != "name exceeds 500 bytes" {
+			t.Errorf("rejection = %+v", rejection)
+		}
 	}
 }

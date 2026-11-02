@@ -271,7 +271,7 @@ func (w *Worker) commitChunks(
 ) error {
 	libraryID := libraries[libraryIndex].ID
 	if len(page.Items) == 0 {
-		return w.commitPage(ctx, sync, libraryID, nil, nextCursor(libraries, libraryIndex, start, page.Total))
+		return w.commitPage(ctx, sync, libraryID, nil, nextCursor(libraries, libraryIndex, start+page.Consumed(), page.Total))
 	}
 	for offset := 0; offset < len(page.Items); offset += catalogCommitChunk {
 		end := min(offset+catalogCommitChunk, len(page.Items))

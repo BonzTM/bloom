@@ -266,11 +266,18 @@ func RejectLibraryItem(item LibraryItem, reason string) LibraryItemRejection {
 	}
 }
 
+// boundedRejectionText repairs invalid UTF-8 first, because repair can grow
+// the text, then cuts it to the bound on a rune boundary.
 func boundedRejectionText(value string) string {
-	if len(value) > MaxCatalogRejectionTextBytes {
-		value = value[:MaxCatalogRejectionTextBytes]
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= MaxCatalogRejectionTextBytes {
+		return value
 	}
-	return strings.ToValidUTF8(value, "\uFFFD")
+	cut := MaxCatalogRejectionTextBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut]
 }
 
 // LibraryUserData is per-user play state for one catalog item.

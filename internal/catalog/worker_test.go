@@ -512,6 +512,40 @@ func TestWorkerSkipsAndReportsRejectedItem(t *testing.T) {
 	}
 }
 
+type allRejectedCatalogSource struct{ fakeCatalogSource }
+
+func (allRejectedCatalogSource) CatalogItems(
+	_ context.Context, _, _ string, start, _ int,
+) (core.LibraryCatalogPage, error) {
+	rejected := make([]core.LibraryItemRejection, 3)
+	for index := range rejected {
+		rejected[index] = core.LibraryItemRejection{ItemID: fmt.Sprintf("item-%d", index), Reason: "name is empty"}
+	}
+	return core.LibraryCatalogPage{StartIndex: start, Total: len(rejected), Rejected: rejected}, nil
+}
+
+// A last page holding only rejected items still checkpoints past the library,
+// so a restart does not replay it.
+func TestWorkerCheckpointsPastAllRejectedPage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	metrics := &fakeCatalogMetrics{}
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: allRejectedCatalogSource{}, Clock: testutil.NewFakeClock(now),
+		Metrics: metrics, Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if len(store.cursors) == 0 || store.cursors[0] != `{"phase":"revalidation"}` || metrics.skipped != 3 {
+		t.Fatalf("cursors = %v, skipped = %d", store.cursors, metrics.skipped)
+	}
+}
+
 func TestWorkerDoesNotWalkExcludedLibrary(t *testing.T) {
 	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 	store := catalogWorkerStore(now)
