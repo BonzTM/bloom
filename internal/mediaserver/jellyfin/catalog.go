@@ -22,9 +22,11 @@ func (c *Client) CatalogItems(
 		startIndex > core.MaxCatalogPagesPerLibrary*core.CatalogPageSize || limit != core.CatalogPageSize {
 		return core.LibraryCatalogPage{}, core.ErrInvalidArgument
 	}
+	// Jellyfin hides a movie that belongs to a box set behind that box set
+	// unless asked not to, so a collapsed walk never sees those movies.
 	values := url.Values{
-		"parentId": {libraryID}, "recursive": {"true"}, "fields": {catalogItemFields},
-		"startIndex": {strconv.Itoa(startIndex)}, "limit": {strconv.Itoa(limit)},
+		"parentId": {libraryID}, "recursive": {"true"}, "collapseBoxSetItems": {"false"},
+		"fields": {catalogItemFields}, "startIndex": {strconv.Itoa(startIndex)}, "limit": {strconv.Itoa(limit)},
 		"sortBy": {"SortName,DateCreated"}, "sortOrder": {"Ascending"},
 	}
 	var dto jellyfinapi.BaseItemDtoQueryResult

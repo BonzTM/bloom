@@ -155,8 +155,11 @@ func (w *Worker) walk(ctx context.Context, sync core.LibrarySync) error {
 	}
 	finished, err := w.finish(ctx, sync)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		w.deps.Metrics.ObserveLibraryCatalogSync("failed", time.Since(started).Seconds())
-		return err
+		return w.fail(ctx, sync, err)
 	}
 	w.deps.Metrics.AddLibraryCatalogArchived(finished.Archived)
 	w.deps.Metrics.ObserveLibraryCatalogSync("completed", time.Since(started).Seconds())
@@ -338,7 +341,10 @@ func (w *Worker) finish(ctx context.Context, sync core.LibrarySync) (core.Librar
 		return core.LibrarySync{}, err
 	}
 	now := core.NormalizeTime(w.deps.Clock.Now())
-	storeCtx, cancel := context.WithTimeout(ctx, w.config.StoreTimeout)
+	// Completion rebuilds every watched item's rollup in one transaction, so
+	// its cost grows with watch history rather than with one chunk. The lease
+	// the last revalidation checkpoint renewed bounds it instead.
+	storeCtx, cancel := context.WithTimeout(ctx, w.config.LeaseDuration)
 	defer cancel()
 	return w.deps.Store.FinishLibrarySync(storeCtx, updated, now)
 }

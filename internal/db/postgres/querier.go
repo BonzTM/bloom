@@ -257,6 +257,10 @@ type Querier interface {
 	PruneNotificationEvents(ctx context.Context, arg PruneNotificationEventsParams) (int64, error)
 	PruneNotificationOutbox(ctx context.Context, arg PruneNotificationOutboxParams) (int64, error)
 	RebuildLibraryItemRollup(ctx context.Context, arg RebuildLibraryItemRollupParams) error
+	// Only items with a watch or a nonzero rollup can change: every other item
+	// already holds the zero rollup. Rewriting all of them costs one write per
+	// catalog index per item, and the planner's estimate for a full rewrite pays
+	// for JIT compilation as well.
 	RebuildLibraryItemRollups(ctx context.Context, mediaServerID string) error
 	RecordNotificationChannelSuccess(ctx context.Context, arg RecordNotificationChannelSuccessParams) (int64, error)
 	RecordNotificationChannelTerminalFailure(ctx context.Context, arg RecordNotificationChannelTerminalFailureParams) (int64, error)

@@ -36,6 +36,8 @@ type fakeCatalogStore struct {
 	genres       []core.CatalogGenreSummary
 	missingIDs   []string
 	archivedIDs  []string
+	finishErr    error
+	finishBudget time.Duration
 }
 
 func (f *fakeCatalogStore) ClaimLibrarySync(
@@ -289,8 +291,14 @@ func commitCatalogWorkerSeedPage(
 }
 
 func (f *fakeCatalogStore) FinishLibrarySync(
-	_ context.Context, sync core.LibrarySync, now time.Time,
+	ctx context.Context, sync core.LibrarySync, now time.Time,
 ) (core.LibrarySync, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		f.finishBudget = time.Until(deadline)
+	}
+	if f.finishErr != nil {
+		return core.LibrarySync{}, f.finishErr
+	}
 	f.finished = true
 	sync.State = core.LibrarySyncCompleted
 	sync.LeaseToken, sync.Cursor = "", ""
@@ -686,6 +694,45 @@ func TestWorkerFailureDoesNotArchive(t *testing.T) {
 	}
 	if err := worker.runOnce(t.Context()); err == nil || store.finished || store.failedWith == "" {
 		t.Fatalf("failure = %v, finished %t, recorded %q", err, store.finished, store.failedWith)
+	}
+}
+
+// Production: completion timed out rebuilding rollups and the sync stayed
+// running, so nothing recorded the failure and no later pass could start over.
+func TestWorkerRecordsFinishFailure(t *testing.T) {
+	now := time.Date(2026, 11, 2, 19, 33, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	store.finishErr = errors.New("rebuild catalog rollups: timeout: context deadline exceeded")
+	metrics := &fakeCatalogMetrics{}
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: fakeCatalogSource{}, Clock: testutil.NewFakeClock(now), Metrics: metrics,
+		Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); !errors.Is(err, store.finishErr) || store.failedWith == "" || store.finished {
+		t.Fatalf("finish failure = %v, recorded %q, finished %t", err, store.failedWith, store.finished)
+	}
+}
+
+func TestWorkerBoundsFinishByLeaseNotStoreStep(t *testing.T) {
+	now := time.Date(2026, 11, 2, 19, 33, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	worker, err := NewWorker(WorkerConfig{
+		Interval: time.Hour, StoreTimeout: time.Second, LeaseDuration: time.Minute,
+	}, WorkerDependencies{
+		Store: store, Source: fakeCatalogSource{}, Clock: testutil.NewFakeClock(now), Metrics: &fakeCatalogMetrics{},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); err != nil || !store.finished {
+		t.Fatalf("runOnce = %v, finished %t", err, store.finished)
+	}
+	if store.finishBudget <= 30*time.Second || store.finishBudget > time.Minute {
+		t.Fatalf("finish budget = %s, want the one-minute lease", store.finishBudget)
 	}
 }
 

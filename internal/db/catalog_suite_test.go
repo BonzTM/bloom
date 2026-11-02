@@ -49,6 +49,9 @@ func runCatalogEngineTests(t *testing.T, pool *sql.DB, driver config.Driver) {
 	t.Run("sync completion rebuilds catalog rollups", func(t *testing.T) {
 		testCatalogRollupRebuild(t, pool, driver)
 	})
+	t.Run("sync completion clears rollups left on unwatched items", func(t *testing.T) {
+		testCatalogRollupClearsUnwatched(t, pool, driver)
+	})
 	t.Run("catalog backfill keeps open watches saveable", func(t *testing.T) {
 		testCatalogBackfillKeepsWatchesValid(t, pool, driver)
 	})
@@ -263,6 +266,44 @@ first_played_at=NULL,last_played_at=NULL WHERE media_server_id=$1 AND item_id=$2
 		t.Fatalf("FinishLibrarySync(rebuild): %v", err)
 	}
 	assertLibraryItemRollup(t, pool, driver, serverID, item.ItemID, 1, 180, 1, now.Add(time.Hour), now.Add(time.Hour))
+}
+
+// The rebuild only rewrites items that have a watch or a nonzero rollup. An
+// item whose watches are gone still has to fall back to the zero rollup.
+func testCatalogRollupClearsUnwatched(t *testing.T, pool *sql.DB, driver config.Driver) {
+	t.Helper()
+	now := time.Date(2026, 11, 2, 19, 0, 0, 0, time.UTC)
+	serverID := "8b000000-0000-4000-8000-000000000001"
+	createCatalogServer(t, pool, driver, serverID, "Catalog Stale Rollup", now)
+	store, err := db.NewLibraryCatalogStore(pool, driver)
+	if err != nil {
+		t.Fatalf("NewLibraryCatalogStore: %v", err)
+	}
+	sync := claimCatalogSync(t, store, serverID, now)
+	item := catalogSuiteItem(serverID, "stale-item", "Stale", now)
+	if sync, err = store.CommitLibrarySyncPage(t.Context(), sync, []core.LibraryItem{item}, "", now); err != nil {
+		t.Fatalf("CommitLibrarySyncPage: %v", err)
+	}
+	if _, err = store.FinishLibrarySync(t.Context(), sync, now); err != nil {
+		t.Fatalf("FinishLibrarySync: %v", err)
+	}
+	if _, err = pool.ExecContext(t.Context(), `UPDATE library_items SET plays=4,watch_seconds=600,unique_users=2,
+first_played_at=$1,last_played_at=$1 WHERE media_server_id=$2 AND item_id=$3`,
+		migrationTimestamp(driver, now), serverID, item.ItemID); err != nil {
+		t.Fatalf("stale rollup fixture: %v", err)
+	}
+	rebuild := claimCatalogSync(t, store, serverID, now.Add(2*time.Hour))
+	if _, err = store.FinishLibrarySync(t.Context(), rebuild, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("FinishLibrarySync(rebuild): %v", err)
+	}
+	items, err := store.ListCatalogItems(t.Context(), core.CatalogItemQuery{
+		MediaServerID: serverID, LibraryID: "library-1", Sort: core.CatalogSortName,
+		Order: core.SortAscending, Limit: 100,
+	})
+	if err != nil || len(items) != 1 || items[0].Plays != 0 || items[0].WatchSeconds != 0 ||
+		items[0].UniqueUsers != 0 || items[0].FirstPlayedAt != nil || items[0].LastPlayedAt != nil {
+		t.Fatalf("unwatched rollup = %+v, %v; want the zero rollup", items, err)
+	}
 }
 
 func testCatalogDescendantReads(t *testing.T, pool *sql.DB, driver config.Driver) {

@@ -158,6 +158,10 @@ SET plays = (SELECT COUNT(*) FROM watches w
 WHERE library_items.media_server_id = sqlc.arg(media_server_id)
   AND library_items.item_id = sqlc.arg(item_id);
 
+-- Only items with a watch or a nonzero rollup can change: every other item
+-- already holds the zero rollup. Rewriting all of them costs one write per
+-- catalog index per item, and the planner's estimate for a full rewrite pays
+-- for JIT compilation as well.
 -- name: RebuildLibraryItemRollups :exec
 UPDATE library_items
 SET plays = (SELECT COUNT(*) FROM watches w
@@ -185,7 +189,14 @@ SET plays = (SELECT COUNT(*) FROM watches w
                AND NOT EXISTS (SELECT 1 FROM media_server_exclusions e WHERE e.media_server_id = w.media_server_id
                    AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
                      OR (e.kind = 'library' AND e.external_id = library_items.library_id))))
-WHERE library_items.media_server_id = sqlc.arg(media_server_id);
+WHERE library_items.media_server_id = sqlc.arg(media_server_id)
+  AND library_items.item_id IN (
+      SELECT w.item_id FROM watches w WHERE w.media_server_id = sqlc.arg(media_server_id)
+      UNION
+      SELECT p.item_id FROM library_items p
+      WHERE p.media_server_id = sqlc.arg(media_server_id)
+        AND (p.plays <> 0 OR p.watch_seconds <> 0 OR p.unique_users <> 0
+          OR p.first_played_at IS NOT NULL OR p.last_played_at IS NOT NULL));
 
 -- name: CompleteLibrarySync :execrows
 UPDATE library_syncs

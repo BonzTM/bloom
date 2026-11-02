@@ -448,6 +448,13 @@ series name, and the field that failed, and counts it in
 `bloom_library_catalog_items_skipped_total`. Fix the item's metadata in
 Jellyfin, and the next walk stores it.
 
+The walk lists every movie in a library, including movies that Jellyfin shows
+inside a box set. A box set is stored once, under the library that holds it.
+When a walk completes, Bloom rebuilds the play rollups of items that have a
+watch or a nonzero rollup. If completion fails, Bloom logs
+`library catalog sync failed` and records the failure on the sync. The next
+walk retries completion.
+
 Accounts with `stats.read.all` can read catalog coverage, paged library items,
 item details and descendant history, recently added items, genre totals, and
 stale items through the `/api/v1/media-servers/{id}/libraries` and
