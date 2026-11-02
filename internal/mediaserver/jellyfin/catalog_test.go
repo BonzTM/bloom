@@ -32,6 +32,21 @@ func TestCatalogItemsRequestsDeterministicOrdering(t *testing.T) {
 	}
 }
 
+// Production: a movie library returned 1,302 movies and 255 box sets; asking
+// Jellyfin not to collapse box sets returned 1,994 movies.
+func TestCatalogItemsListsMoviesInsideBoxSets(t *testing.T) {
+	t.Parallel()
+	client := newTransportClient(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.URL.Query().Get("collapseBoxSetItems"); got != "false" {
+			t.Fatalf("collapseBoxSetItems = %q, want false", got)
+		}
+		return jsonResponse(http.StatusOK, `{"Items":[],"TotalRecordCount":0,"StartIndex":0}`), nil
+	}))
+	if _, err := client.CatalogItems(t.Context(), "library", 0, core.CatalogPageSize); err != nil {
+		t.Fatalf("CatalogItems: %v", err)
+	}
+}
+
 func TestCatalogRevalidationSurvivesEqualNamePageChanges(t *testing.T) {
 	t.Parallel()
 	const firstID = "00000000-0000-0000-0000-000000000001"

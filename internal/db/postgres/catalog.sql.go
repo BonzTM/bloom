@@ -3328,8 +3328,19 @@ SET plays = (SELECT COUNT(*) FROM watches w
                    AND ((e.kind = 'media_user' AND e.external_id = w.media_user_id)
                      OR (e.kind = 'library' AND e.external_id = library_items.library_id))))
 WHERE library_items.media_server_id = $1
+  AND library_items.item_id IN (
+      SELECT w.item_id FROM watches w WHERE w.media_server_id = $1
+      UNION
+      SELECT p.item_id FROM library_items p
+      WHERE p.media_server_id = $1
+        AND (p.plays <> 0 OR p.watch_seconds <> 0 OR p.unique_users <> 0
+          OR p.first_played_at IS NOT NULL OR p.last_played_at IS NOT NULL))
 `
 
+// Only items with a watch or a nonzero rollup can change: every other item
+// already holds the zero rollup. Rewriting all of them costs one write per
+// catalog index per item, and the planner's estimate for a full rewrite pays
+// for JIT compilation as well.
 func (q *Queries) RebuildLibraryItemRollups(ctx context.Context, mediaServerID string) error {
 	_, err := q.db.ExecContext(ctx, rebuildLibraryItemRollups, mediaServerID)
 	return err
