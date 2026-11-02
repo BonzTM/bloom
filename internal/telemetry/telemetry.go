@@ -197,5 +197,8 @@ func (NopMetrics) AddLibraryCatalogItems(int64) {}
 // AddLibraryCatalogArchived does nothing.
 func (NopMetrics) AddLibraryCatalogArchived(int64) {}
 
+// AddLibraryCatalogSkipped does nothing.
+func (NopMetrics) AddLibraryCatalogSkipped(int64) {}
+
 // SetLibraryCatalogRunning does nothing.
 func (NopMetrics) SetLibraryCatalogRunning(int) {}

@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -86,6 +87,39 @@ func TestMapCatalogPagePreservesUnknownItemTypeAndTicks(t *testing.T) {
 	if item.ItemType != "FutureJellyfinType" || item.Runtime == nil || *item.Runtime != 2500*time.Millisecond ||
 		!item.ValidUpstream() {
 		t.Fatalf("mapped item = %+v", item)
+	}
+}
+
+// A real Jellyfin 12.4 title: the en dash was stored as the C1 control
+// character U+0096. That one item is rejected with its reason; the rest of
+// the page still maps.
+func TestCatalogItemsRejectsOneBadItemAndKeepsThePage(t *testing.T) {
+	t.Parallel()
+	client := newTransportClient(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `{"Items":[`+
+			`{"Id":"00000000-0000-0000-0000-000000000001","Type":"Episode","Name":"Pilot","SeriesName":"Raising Hope"},`+
+			`{"Id":"8afebf13-9c7f-e7c7-a124-5c73135996e8","Type":"Episode","Name":"Burtmizvah \u0096\u00a0The Musical","SeriesName":"Raising Hope"},`+
+			`{"Id":"00000000-0000-0000-0000-000000000003","Type":"Episode","Name":"","SeriesName":"Raising Hope"},`+
+			`{"Id":"00000000-0000-0000-0000-000000000004","Type":"Episode","Name":"Long","RunTimeTicks":-1}`+
+			`],"TotalRecordCount":4,"StartIndex":0}`), nil
+	}))
+	page, err := client.CatalogItems(t.Context(), "library", 0, core.CatalogPageSize)
+	if err != nil {
+		t.Fatalf("CatalogItems: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Name != "Pilot" || page.Consumed() != 4 {
+		t.Fatalf("items = %+v, consumed = %d", page.Items, page.Consumed())
+	}
+	want := []core.LibraryItemRejection{
+		{
+			ItemID: "8afebf13-9c7f-e7c7-a124-5c73135996e8", ItemType: "Episode", Name: "Burtmizvah \u0096\u00a0The Musical",
+			SeriesName: "Raising Hope", Reason: "name contains control character U+0096 at byte 11",
+		},
+		{ItemID: "00000000-0000-0000-0000-000000000003", ItemType: "Episode", SeriesName: "Raising Hope", Reason: "name is empty"},
+		{ItemID: "00000000-0000-0000-0000-000000000004", ItemType: "Episode", Name: "Long", Reason: "runtime ticks are out of range"},
+	}
+	if !slices.Equal(page.Rejected, want) {
+		t.Fatalf("rejected = %+v\nwant %+v", page.Rejected, want)
 	}
 }
 

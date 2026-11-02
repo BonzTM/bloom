@@ -441,6 +441,13 @@ running walk. A shutdown leaves the leased row and checkpoint intact. Lease
 recovery replays the current library from its first page. Items are archived
 only when every library completes under the same sync generation.
 
+An item that Bloom cannot store does not stop the walk. Examples are a title
+with a control character or a production year outside 0-9999. Bloom skips the
+item, logs one `library catalog item skipped` warning with its ID, type, name,
+series name, and the field that failed, and counts it in
+`bloom_library_catalog_items_skipped_total`. Fix the item's metadata in
+Jellyfin, and the next walk stores it.
+
 Accounts with `stats.read.all` can read catalog coverage, paged library items,
 item details and descendant history, recently added items, genre totals, and
 stale items through the `/api/v1/media-servers/{id}/libraries` and

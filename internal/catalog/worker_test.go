@@ -1,12 +1,14 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -381,16 +383,17 @@ func (f fakeCatalogSource) CatalogItems(
 }
 
 type fakeCatalogMetrics struct {
-	items    int64
-	outcomes []string
+	items, skipped int64
+	outcomes       []string
 }
 
 func (f *fakeCatalogMetrics) ObserveLibraryCatalogSync(outcome string, _ float64) {
 	f.outcomes = append(f.outcomes, outcome)
 }
-func (f *fakeCatalogMetrics) AddLibraryCatalogItems(count int64) { f.items += count }
-func (*fakeCatalogMetrics) AddLibraryCatalogArchived(int64)      {}
-func (*fakeCatalogMetrics) SetLibraryCatalogRunning(int)         {}
+func (f *fakeCatalogMetrics) AddLibraryCatalogItems(count int64)   { f.items += count }
+func (*fakeCatalogMetrics) AddLibraryCatalogArchived(int64)        {}
+func (f *fakeCatalogMetrics) AddLibraryCatalogSkipped(count int64) { f.skipped += count }
+func (*fakeCatalogMetrics) SetLibraryCatalogRunning(int)           {}
 
 func TestWorkerCompletesFullWalkAndFillsPersistenceFields(t *testing.T) {
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
@@ -456,6 +459,90 @@ func TestWorkerCommitsFullPageInBoundedChunks(t *testing.T) {
 	}
 	if !slices.Equal(store.cursors[:len(wantCursors)], wantCursors) || !store.finished {
 		t.Fatalf("cursors = %v, finished = %t", store.cursors, store.finished)
+	}
+}
+
+type rejectingCatalogSource struct{ fakeCatalogSource }
+
+// CatalogItems returns one full page whose sixth item the adapter rejected.
+func (rejectingCatalogSource) CatalogItems(
+	ctx context.Context, serverID, libraryID string, start, limit int,
+) (core.LibraryCatalogPage, error) {
+	page, err := fullPageCatalogSource{}.CatalogItems(ctx, serverID, libraryID, start, limit)
+	page.Items = slices.Delete(page.Items, 5, 6)
+	page.Rejected = []core.LibraryItemRejection{{
+		ItemID: "item-005", ItemType: "Episode", Name: "Burtmizvah \u0096\u00a0The Musical", SeriesName: "Raising Hope",
+		Reason: "name contains control character U+0096 at byte 11",
+	}}
+	return page, err
+}
+
+// One item Bloom cannot store is skipped and reported; the walk still
+// finishes the page and the library.
+func TestWorkerSkipsAndReportsRejectedItem(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	metrics := &fakeCatalogMetrics{}
+	var logs bytes.Buffer
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: rejectingCatalogSource{}, Clock: testutil.NewFakeClock(now),
+		Metrics: metrics, Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	wantSizes := []int{catalogCommitChunk, catalogCommitChunk, catalogCommitChunk, catalogCommitChunk - 1}
+	if !slices.Equal(store.commitSizes, wantSizes) || !store.finished || metrics.skipped != 1 {
+		t.Fatalf("commit sizes = %v, finished = %t, skipped = %d", store.commitSizes, store.finished, metrics.skipped)
+	}
+	if got := store.cursors[len(wantSizes)-1]; got != `{"phase":"revalidation"}` {
+		t.Fatalf("last page cursor = %s, want revalidation", got)
+	}
+	for _, want := range []string{
+		`"msg":"library catalog item skipped"`, `"item_id":"item-005"`, `"series_name":"\"Raising Hope\""`,
+		`"name":"\"Burtmizvah \\u0096\\u00a0The Musical\""`, `"reason":"name contains control character U+0096 at byte 11"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("logs missing %s:\n%s", want, logs.String())
+		}
+	}
+}
+
+type allRejectedCatalogSource struct{ fakeCatalogSource }
+
+func (allRejectedCatalogSource) CatalogItems(
+	_ context.Context, _, _ string, start, _ int,
+) (core.LibraryCatalogPage, error) {
+	rejected := make([]core.LibraryItemRejection, 3)
+	for index := range rejected {
+		rejected[index] = core.LibraryItemRejection{ItemID: fmt.Sprintf("item-%d", index), Reason: "name is empty"}
+	}
+	return core.LibraryCatalogPage{StartIndex: start, Total: len(rejected), Rejected: rejected}, nil
+}
+
+// A last page holding only rejected items still checkpoints past the library,
+// so a restart does not replay it.
+func TestWorkerCheckpointsPastAllRejectedPage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	store := catalogWorkerStore(now)
+	metrics := &fakeCatalogMetrics{}
+	worker, err := NewWorker(WorkerConfig{Interval: time.Hour}, WorkerDependencies{
+		Store: store, Source: allRejectedCatalogSource{}, Clock: testutil.NewFakeClock(now),
+		Metrics: metrics, Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.runOnce(t.Context()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	if len(store.cursors) == 0 || store.cursors[0] != `{"phase":"revalidation"}` || metrics.skipped != 3 {
+		t.Fatalf("cursors = %v, skipped = %d", store.cursors, metrics.skipped)
 	}
 }
 

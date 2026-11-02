@@ -97,21 +97,33 @@ func mapCatalogPage(
 	if dto.StartIndex != nil && int(*dto.StartIndex) != startIndex {
 		return core.LibraryCatalogPage{}, errors.New("catalog page start index changed")
 	}
-	items := make([]core.LibraryItem, 0, len(*dto.Items))
+	page := core.LibraryCatalogPage{
+		Items: make([]core.LibraryItem, 0, len(*dto.Items)), StartIndex: startIndex, Total: int(*dto.TotalRecordCount),
+	}
 	for _, value := range *dto.Items {
 		item, err := mapCatalogItem(value, libraryID)
 		if err != nil {
-			return core.LibraryCatalogPage{}, err
+			page.Rejected = append(page.Rejected, rejectCatalogItem(value, err))
+			continue
 		}
-		items = append(items, item)
+		page.Items = append(page.Items, item)
 	}
-	return core.LibraryCatalogPage{Items: items, StartIndex: startIndex, Total: int(*dto.TotalRecordCount)}, nil
+	return page, nil
+}
+
+// rejectCatalogItem records one item Bloom cannot store so the walk can skip
+// it and report why instead of failing the whole page.
+func rejectCatalogItem(dto jellyfinapi.BaseItemDto, cause error) core.LibraryItemRejection {
+	return core.RejectLibraryItem(core.LibraryItem{
+		ItemID: uuidString(dto.Id), ItemType: enumString(dto.Type),
+		Name: stringValue(dto.Name), SeriesName: stringValue(dto.SeriesName),
+	}, cause.Error())
 }
 
 func mapCatalogItem(dto jellyfinapi.BaseItemDto, libraryID string) (core.LibraryItem, error) {
 	runtime, err := optionalDurationFromTicks(dto.RunTimeTicks)
 	if err != nil {
-		return core.LibraryItem{}, err
+		return core.LibraryItem{}, errors.New("runtime ticks are out of range")
 	}
 	genres := []string{}
 	if dto.Genres != nil {
@@ -129,8 +141,8 @@ func mapCatalogItem(dto jellyfinapi.BaseItemDto, libraryID string) (core.Library
 	if item.ItemType == "Movie" || item.ItemType == "Series" {
 		item.TMDBID = catalogTMDBID(dto.ProviderIds)
 	}
-	if !item.ValidUpstream() {
-		return core.LibraryItem{}, errors.New("catalog item fields exceed bounds")
+	if problem := item.UpstreamProblem(); problem != "" {
+		return core.LibraryItem{}, errors.New(problem)
 	}
 	return item, nil
 }

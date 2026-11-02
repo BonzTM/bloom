@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -63,27 +66,103 @@ func (i LibraryItem) Valid() bool {
 }
 
 // ValidUpstream reports whether fields supplied by the media server are safe.
-func (i LibraryItem) ValidUpstream() bool {
-	if !ValidCatalogID(i.ItemID) || !ValidLibraryID(i.LibraryID) ||
-		!validCatalogOptionalID(i.ParentID) || !validCatalogOptionalID(i.SeriesID) ||
-		!validCatalogOptionalID(i.SeasonID) || !validCatalogText(i.ItemType, true) ||
-		!validCatalogText(i.Name, true) || !validCatalogText(i.SeriesName, false) ||
-		!validCatalogTextLimit(i.PrimaryImageTag, MaxCatalogImageTagBytes, false) || !validCatalogGenres(i.Genres) {
-		return false
+func (i LibraryItem) ValidUpstream() bool { return i.UpstreamProblem() == "" }
+
+// UpstreamProblem names the first media-server field Bloom cannot store, or
+// returns "" when every field is safe. The text is bounded and safe to log.
+func (i LibraryItem) UpstreamProblem() string {
+	if problem := i.idProblem(); problem != "" {
+		return problem
 	}
-	if i.TMDBID < 0 || i.TMDBID > MaxCatalogTMDBID || i.TMDBID != 0 && i.ItemType != "Movie" && i.ItemType != "Series" {
-		return false
+	if problem := i.textProblem(); problem != "" {
+		return problem
 	}
-	if i.Runtime != nil && *i.Runtime < 0 || i.ProductionYear != nil && (*i.ProductionYear < 0 || *i.ProductionYear > 9999) ||
-		i.CommunityRating != nil && (*i.CommunityRating < 0 || *i.CommunityRating > 100 || math.IsNaN(*i.CommunityRating) || math.IsInf(*i.CommunityRating, 0)) {
-		return false
+	return i.numberProblem()
+}
+
+func (i LibraryItem) idProblem() string {
+	switch {
+	case !ValidCatalogID(i.ItemID):
+		return "item id is invalid"
+	case !ValidLibraryID(i.LibraryID):
+		return "library id is invalid"
+	case !validCatalogOptionalID(i.ParentID):
+		return "parent id is invalid"
+	case !validCatalogOptionalID(i.SeriesID):
+		return "series id is invalid"
+	case !validCatalogOptionalID(i.SeasonID):
+		return "season id is invalid"
 	}
-	for _, genre := range i.Genres {
-		if !validCatalogText(genre, true) {
-			return false
+	return ""
+}
+
+func (i LibraryItem) textProblem() string {
+	fields := [...]struct {
+		name, value string
+		limit       int
+		required    bool
+	}{
+		{"type", i.ItemType, MaxCatalogTextBytes, true},
+		{"name", i.Name, MaxCatalogTextBytes, true},
+		{"series name", i.SeriesName, MaxCatalogTextBytes, false},
+		{"primary image tag", i.PrimaryImageTag, MaxCatalogImageTagBytes, false},
+	}
+	for _, field := range fields {
+		if problem := catalogTextProblem(field.name, field.value, field.limit, field.required); problem != "" {
+			return problem
 		}
 	}
-	return true
+	return catalogGenresProblem(i.Genres)
+}
+
+func (i LibraryItem) numberProblem() string {
+	switch {
+	case i.TMDBID < 0 || i.TMDBID > MaxCatalogTMDBID:
+		return "tmdb id is out of range"
+	case i.TMDBID != 0 && i.ItemType != "Movie" && i.ItemType != "Series":
+		return "tmdb id is set on an item that is not a movie or series"
+	case i.Runtime != nil && *i.Runtime < 0:
+		return "runtime is negative"
+	case i.ProductionYear != nil && (*i.ProductionYear < 0 || *i.ProductionYear > 9999):
+		return "production year is out of range"
+	case i.CommunityRating != nil && !validCommunityRating(*i.CommunityRating):
+		return "community rating is out of range"
+	}
+	return ""
+}
+
+func validCommunityRating(value float64) bool {
+	return value >= 0 && value <= 100 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func catalogGenresProblem(genres []string) string {
+	if !validCatalogGenres(genres) {
+		return "genres exceed " + strconv.Itoa(MaxCatalogGenres) + " entries or " +
+			strconv.Itoa(MaxCatalogGenresJSONBytes) + " bytes"
+	}
+	for _, genre := range genres {
+		if problem := catalogTextProblem("genre", genre, MaxCatalogTextBytes, true); problem != "" {
+			return problem
+		}
+	}
+	return ""
+}
+
+// catalogTextProblem applies validCatalogTextLimit's rules and says which one failed.
+func catalogTextProblem(field, value string, limit int, required bool) string {
+	switch {
+	case required && value == "":
+		return field + " is empty"
+	case len(value) > limit:
+		return field + " exceeds " + strconv.Itoa(limit) + " bytes"
+	case !utf8.ValidString(value):
+		return field + " is not valid UTF-8"
+	}
+	if index := stringsIndexControl(value); index >= 0 {
+		char, _ := utf8.DecodeRuneInString(value[index:])
+		return fmt.Sprintf("%s contains control character %U at byte %d", field, char, index)
+	}
+	return ""
 }
 
 func validCatalogGenres(genres []string) bool {
@@ -157,8 +236,48 @@ type LibrarySyncLease struct {
 
 // LibraryCatalogPage is one bounded upstream page.
 type LibraryCatalogPage struct {
-	Items             []LibraryItem
+	Items []LibraryItem
+	// Rejected holds the items on this page Bloom could not store. They still
+	// occupy upstream positions, so the walk advances past them.
+	Rejected          []LibraryItemRejection
 	StartIndex, Total int
+}
+
+// Consumed returns how many upstream positions the page covers.
+func (p LibraryCatalogPage) Consumed() int { return len(p.Items) + len(p.Rejected) }
+
+// MaxCatalogRejectionTextBytes bounds each identifying field of a rejection.
+const MaxCatalogRejectionTextBytes = 200
+
+// LibraryItemRejection identifies one upstream catalog item Bloom skipped and
+// says why, so an operator can find and fix it on the media server.
+type LibraryItemRejection struct {
+	ItemID, ItemType, Name, SeriesName, Reason string
+}
+
+// RejectLibraryItem builds a bounded rejection from whatever the media server
+// sent. The identifying fields may themselves be the problem, so each is cut
+// to MaxCatalogRejectionTextBytes and made valid UTF-8.
+func RejectLibraryItem(item LibraryItem, reason string) LibraryItemRejection {
+	return LibraryItemRejection{
+		ItemID: boundedRejectionText(item.ItemID), ItemType: boundedRejectionText(item.ItemType),
+		Name: boundedRejectionText(item.Name), SeriesName: boundedRejectionText(item.SeriesName),
+		Reason: boundedRejectionText(reason),
+	}
+}
+
+// boundedRejectionText repairs invalid UTF-8 first, because repair can grow
+// the text, then cuts it to the bound on a rune boundary.
+func boundedRejectionText(value string) string {
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= MaxCatalogRejectionTextBytes {
+		return value
+	}
+	cut := MaxCatalogRejectionTextBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut]
 }
 
 // LibraryUserData is per-user play state for one catalog item.
