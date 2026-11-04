@@ -63,6 +63,14 @@ contracts) gets an entry here.
 
 ### Fixed
 
+- A page full of posters no longer loses most of its images to `503`
+  responses. An image request waits up to three seconds for one of the four
+  per-server media-server slots, behind at most 64 other waiting calls, before
+  it answers `503`. Other media-server calls still fail at once when the
+  slots are busy.
+- An image request no longer writes the session. It reads the session
+  without extending its idle expiry and sends no cookie, so a page of posters
+  does not write the session store once per image.
 - Large watch histories can be re-imported when the compressed archive remains
   within the upload limit.
 - A request for a series or movie that Sonarr or Radarr already manages

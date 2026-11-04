@@ -214,12 +214,23 @@ func rawCookieNamePresent(header http.Header, name string) bool {
 	return len(values) > maxSessionCookieHeaderValues
 }
 
+// passiveSessionMiddleware marks a route whose session load must not extend
+// the idle expiry. An OIDC callback may lose the atomic flow claim and must
+// not emit a stale cookie; an image request must not write the session store
+// once for every poster on a page.
+func passiveSessionMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), passiveSessionKey, true)))
+	})
+}
+
 func (s *Server) sessionLoader(r *http.Request) *scs.SessionManager {
-	if r.URL.Path != "/api/v1/auth/oidc/callback" {
+	passive, ok := r.Context().Value(passiveSessionKey).(bool)
+	if !ok || !passive {
 		return s.sessions
 	}
-	// A callback may lose the atomic flow claim. Suppress the normal idle-expiry
-	// touch so that loser stays unmodified and cannot emit a stale cookie.
+	// Without the idle-expiry touch the loaded session stays unmodified, so
+	// commitSession neither writes it nor sends a cookie.
 	loader := *s.sessions
 	loader.IdleTimeout = 0
 	return &loader
