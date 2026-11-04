@@ -81,7 +81,7 @@ func requireCachedCall(
 	t *testing.T, cache *adapterCache, id string, config [sha256.Size]byte,
 ) *adapterCall {
 	t.Helper()
-	build := cache.begin(id, "test")
+	build := cache.begin(id, "test", 0)
 	call, found, err := cache.get(build, config)
 	if err != nil || !found || call == nil {
 		t.Fatalf("cache get %q = (%v, %t, %v), want admitted hit", id, call, found, err)
@@ -91,7 +91,7 @@ func requireCachedCall(
 
 func requireCacheMiss(t *testing.T, cache *adapterCache, id string, config [sha256.Size]byte) {
 	t.Helper()
-	build := cache.begin(id, "test")
+	build := cache.begin(id, "test", 0)
 	call, found, err := cache.get(build, config)
 	if err != nil || found || call != nil {
 		t.Fatalf("cache get %q = (%v, %t, %v), want miss", id, call, found, err)

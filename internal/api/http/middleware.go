@@ -24,6 +24,7 @@ const (
 	sessionStateKey
 	permissionsKey
 	authorizationSnapshotKey
+	passiveSessionKey
 )
 
 // requestIDFrom returns the request ID stored in ctx, or "" if absent.

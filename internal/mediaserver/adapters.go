@@ -1,7 +1,10 @@
 package mediaserver
 
 import (
+	"context"
 	"crypto/sha256"
+	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -17,6 +20,10 @@ const (
 	adapterCacheTTL             = 15 * time.Minute
 )
 
+// maxQueuedCallsPerServer bounds the calls that may wait behind busy slots
+// instead of failing at once: one page asks for dozens of images together.
+const maxQueuedCallsPerServer = 64
+
 type adapterEntry struct {
 	adapter core.MediaServerAdapter
 	config  [sha256.Size]byte
@@ -31,6 +38,7 @@ func newAdapterEntry(adapter core.MediaServerAdapter, config [sha256.Size]byte) 
 
 type serverLimiter struct {
 	slots      chan struct{}
+	queued     int
 	references uint64
 	committed  bool
 	deleted    bool
@@ -41,6 +49,7 @@ type adapterCall struct {
 	entry   *adapterEntry
 	limiter *serverLimiter
 	id      string
+	queued  bool
 }
 
 func (c *adapterCall) release() { c.cache.release(c) }
@@ -66,6 +75,7 @@ type adapterBuild struct {
 	operation  string
 	generation uint64
 	limiter    *serverLimiter
+	wait       time.Duration
 }
 
 type adapterBuildState struct {
@@ -94,7 +104,9 @@ func newAdapterCache(clock core.Clock, capacity int, ttl time.Duration) *adapter
 	}
 }
 
-func (c *adapterCache) begin(id, operation string) adapterBuild {
+// begin starts resolving one call. A positive wait lets the call queue for a
+// busy slot; zero fails at once with a saturation error.
+func (c *adapterCache) begin(id, operation string, wait time.Duration) adapterBuild {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	state := c.builds[id]
@@ -102,7 +114,7 @@ func (c *adapterCache) begin(id, operation string) adapterBuild {
 	c.builds[id] = state
 	limiter := c.limiterLocked(id)
 	limiter.references++
-	return adapterBuild{id: id, operation: operation, generation: state.generation, limiter: limiter}
+	return adapterBuild{id: id, operation: operation, generation: state.generation, limiter: limiter, wait: wait}
 }
 
 func (c *adapterCache) limiterLocked(id string) *serverLimiter {
@@ -234,24 +246,82 @@ func (c *adapterCache) admitLocked(build adapterBuild, entry *adapterEntry) (*ad
 		return nil, core.ErrNotFound
 	}
 	build.limiter.committed = true
+	call := &adapterCall{cache: c, entry: entry, limiter: build.limiter, id: build.id}
 	select {
 	case build.limiter.slots <- struct{}{}:
 		entry.active++
-		return &adapterCall{cache: c, entry: entry, limiter: build.limiter, id: build.id}, nil
+		return call, nil
 	default:
+	}
+	if build.wait <= 0 || build.limiter.queued >= maxQueuedCallsPerServer {
 		c.releaseLimiterLocked(build.id, build.limiter)
 		return nil, saturationError(build.operation)
 	}
+	// The queued call pins the entry so it is not closed while it waits.
+	build.limiter.queued++
+	entry.active++
+	call.queued = true
+	return call, nil
+}
+
+// await takes a slot for a queued call, or gives the call up when the wait
+// or the caller's context ends first.
+func (c *adapterCache) await(
+	ctx context.Context, call *adapterCall, operation string, wait time.Duration,
+) (*adapterCall, error) {
+	if !call.queued {
+		return call, nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case call.limiter.slots <- struct{}{}:
+		return c.claim(call)
+	case <-timer.C:
+		c.abandon(call)
+		return nil, saturationError(operation)
+	case <-ctx.Done():
+		c.abandon(call)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, saturationError(operation)
+		}
+		return nil, fmt.Errorf("wait for media server slot: %w", ctx.Err())
+	}
+}
+
+func (c *adapterCache) claim(call *adapterCall) (*adapterCall, error) {
+	c.mu.Lock()
+	call.limiter.queued--
+	call.queued = false
+	deleted := call.limiter.deleted
+	c.mu.Unlock()
+	if deleted {
+		c.release(call)
+		return nil, core.ErrNotFound
+	}
+	return call, nil
+}
+
+func (c *adapterCache) abandon(call *adapterCall) {
+	c.mu.Lock()
+	call.limiter.queued--
+	toClose := c.unpinLocked(call)
+	c.mu.Unlock()
+	closeRetired(toClose)
 }
 
 func (c *adapterCache) release(call *adapterCall) {
 	c.mu.Lock()
 	<-call.limiter.slots
-	call.entry.active--
-	c.releaseLimiterLocked(call.id, call.limiter)
-	toClose := c.closeRetiredLocked(call.entry)
+	toClose := c.unpinLocked(call)
 	c.mu.Unlock()
 	closeRetired(toClose)
+}
+
+func (c *adapterCache) unpinLocked(call *adapterCall) core.MediaServerAdapter {
+	call.entry.active--
+	c.releaseLimiterLocked(call.id, call.limiter)
+	return c.closeRetiredLocked(call.entry)
 }
 
 func (c *adapterCache) finishLocked(build adapterBuild) bool {

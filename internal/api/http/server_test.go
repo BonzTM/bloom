@@ -410,6 +410,17 @@ func TestStreamingRouteRequiresSessionAccount(t *testing.T) {
 	}
 }
 
+func TestPassiveSessionRouteRequiresSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := apiRoute{
+		method: http.MethodGet, path: "/api/v1/passive", access: routePublic,
+		passiveSession: true, handler: (*Server).handleVersion,
+	}
+	if _, err := h.server.routeHandler(route); err == nil {
+		t.Fatal("passive session route without a session was accepted")
+	}
+}
+
 func TestLivez(t *testing.T) {
 	h := newHarness(t)
 	// Liveness must not depend on the database or the readiness flag.

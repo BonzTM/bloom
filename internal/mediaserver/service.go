@@ -16,6 +16,9 @@ import (
 const (
 	credentialPurpose  = "media-server-api-key"
 	dependencyCallTime = 5 * time.Second
+	// imageSlotWait leaves room in the HTTP operation budget for the image
+	// call itself once a slot frees.
+	imageSlotWait = 3 * time.Second
 )
 
 type credentialCipher interface {
@@ -36,7 +39,7 @@ type playbackSessionLister interface {
 func (s *Service) ItemImage(
 	ctx context.Context, id, itemID string, imageType core.ItemImageType, maxWidth int, ifNoneMatch string,
 ) (core.ItemImage, error) {
-	call, err := s.adapter(ctx, id, "item_image")
+	call, err := s.adapterWithin(ctx, id, "item_image", s.imageSlotWait)
 	if err != nil {
 		return core.ItemImage{}, err
 	}
@@ -87,6 +90,7 @@ type Service struct {
 	clock             core.Clock
 	adapters          *adapterCache
 	registrationSlots chan struct{}
+	imageSlotWait     time.Duration
 	playback          PlaybackLifecycle
 	catalogTitles     core.CatalogTitleItems
 }
@@ -117,6 +121,7 @@ func NewService(
 		reader: reader, writer: writer, cipher: cipher, factory: factory, clock: clock,
 		adapters:          newAdapterCache(clock, adapterCacheCapacity, adapterCacheTTL),
 		registrationSlots: make(chan struct{}, maxConcurrentRegistrations),
+		imageSlotWait:     imageSlotWait,
 	}, nil
 }
 
@@ -150,7 +155,7 @@ func (s *Service) Register(
 func (s *Service) persistRegistration(
 	ctx context.Context, record core.MediaServerRecord, adapter core.MediaServerAdapter,
 ) error {
-	build := s.adapters.begin(record.ID, "register")
+	build := s.adapters.begin(record.ID, "register", 0)
 	if err := s.storeRecord(ctx, record); err != nil {
 		s.adapters.cancel(build)
 		closeIdleConnections(adapter)
@@ -558,7 +563,24 @@ func (s *Service) HasTitle(
 }
 
 func (s *Service) adapter(ctx context.Context, id, operation string) (*adapterCall, error) {
-	build := s.adapters.begin(id, operation)
+	return s.adapterWithin(ctx, id, operation, 0)
+}
+
+// adapterWithin resolves a call that may queue up to wait for a busy slot.
+func (s *Service) adapterWithin(
+	ctx context.Context, id, operation string, wait time.Duration,
+) (*adapterCall, error) {
+	call, err := s.resolveAdapter(ctx, id, operation, wait)
+	if err != nil {
+		return nil, err
+	}
+	return s.adapters.await(ctx, call, operation, wait)
+}
+
+func (s *Service) resolveAdapter(
+	ctx context.Context, id, operation string, wait time.Duration,
+) (*adapterCall, error) {
+	build := s.adapters.begin(id, operation, wait)
 	callCtx, cancel := dependencyContext(ctx)
 	record, err := s.reader.GetMediaServer(callCtx, id)
 	cancel()

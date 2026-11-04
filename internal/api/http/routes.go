@@ -34,7 +34,10 @@ type apiRoute struct {
 	oidc            bool
 	optionalAccount bool
 	streaming       bool
-	handler         apiHandler
+	// passiveSession loads the session without extending its idle expiry, so
+	// the request never writes the session back.
+	passiveSession bool
+	handler        apiHandler
 }
 
 var apiRouteInventory = []apiRoute{
@@ -42,7 +45,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodGet, path: "/api/v1/auth/permissions", access: routePublic, handler: (*Server).handlePermissions},
 	{method: http.MethodGet, path: "/api/v1/auth/providers", access: routePublic, handler: (*Server).handleAuthProviders},
 	{method: http.MethodPost, path: "/api/v1/auth/oidc/start", access: routePublic, sessions: true, authRequired: true, oidc: true, handler: (*Server).handleOIDCStart},
-	{method: http.MethodGet, path: "/api/v1/auth/oidc/callback", access: routePublic, sessions: true, authRequired: true, oidc: true, handler: (*Server).handleOIDCCallback},
+	{method: http.MethodGet, path: "/api/v1/auth/oidc/callback", access: routePublic, sessions: true, authRequired: true, oidc: true, passiveSession: true, handler: (*Server).handleOIDCCallback},
 	{method: http.MethodPost, path: "/api/v1/auth/login", access: routePublic, sessions: true, authRequired: true, handler: (*Server).handleLogin},
 	{method: http.MethodPost, path: "/api/v1/auth/logout", access: routeAuthenticated, authRequired: true, handler: (*Server).handleLogout},
 	{method: http.MethodGet, path: "/api/v1/auth/me", access: routeAuthenticated, authRequired: true, snapshot: true, handler: (*Server).handleMe},
@@ -55,7 +58,7 @@ var apiRouteInventory = []apiRoute{
 	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/probe", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleProbeMediaServer},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerLibraries},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/users", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleMediaServerUsers},
-	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn, core.PermissionRequestsCreate}, authRequired: true, handler: (*Server).handleItemImage},
+	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/items/{item_id}/image", access: routePermission, anyPermissions: []core.Permission{core.PermissionStatsReadAll, core.PermissionStatsReadOwn, core.PermissionRequestsReadOwn, core.PermissionRequestsCreate}, authRequired: true, passiveSession: true, handler: (*Server).handleItemImage},
 	{method: http.MethodPost, path: "/api/v1/media-servers/{id}/catalog/sync", access: routePermission, permission: core.PermissionAdminSettings, authRequired: true, handler: (*Server).handleCatalogSync},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/catalog", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogLibraries},
 	{method: http.MethodGet, path: "/api/v1/media-servers/{id}/libraries/{library_id}/items", access: routePermission, permission: core.PermissionStatsReadAll, authRequired: true, handler: (*Server).handleCatalogItems},
@@ -193,6 +196,9 @@ func (r apiRoute) validate() (core.CatalogPermission, error) {
 	}
 	if r.snapshot && !r.usesSessionAccount() {
 		return core.CatalogPermission{}, fmt.Errorf("permission-loading route %q is not authenticated", r.path)
+	}
+	if r.passiveSession && !r.sessions && !r.usesSessionAccount() {
+		return core.CatalogPermission{}, fmt.Errorf("passive session route %q has no session", r.path)
 	}
 	if r.streaming && !r.usesSessionAccount() {
 		return core.CatalogPermission{}, fmt.Errorf("streaming route %q is not authenticated", r.path)
@@ -332,6 +338,9 @@ func (s *Server) routeHandler(route apiRoute) (http.Handler, error) {
 			handler = s.optionalSessionAccountMiddleware(handler)
 		}
 		handler = s.sessionHandler(handler, false)
+	}
+	if route.passiveSession {
+		handler = passiveSessionMiddleware(handler)
 	}
 	if strings.HasPrefix(route.path, "/api/v1/media-servers") {
 		handler = s.mediaServerOperationMiddleware(handler)

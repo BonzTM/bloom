@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -42,6 +43,26 @@ func TestItemImageEndpoint(t *testing.T) {
 	if h.mediaServers.lastItemID != itemImageID || h.mediaServers.lastImageType != core.ItemImagePrimary ||
 		h.mediaServers.lastMaxWidth != 640 || h.mediaServers.lastIfNoneMatch != `"old-etag"` || !h.mediaServers.deadlineSeen {
 		t.Fatalf("image call = %+v", h.mediaServers)
+	}
+}
+
+func TestItemImageDoesNotWriteTheSession(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.mediaServers.image = core.ItemImage{Body: []byte("jpeg-data"), ContentType: "image/jpeg"}
+	cookie := sessionCookie(t, h.login(t, "alice", "secret-password"))
+	h.sessionStore.mu.Lock()
+	h.sessionStore.commitErr = errors.New("session store unavailable")
+	h.sessionStore.mu.Unlock()
+	image := h.request(t, http.MethodGet, itemImagePath+"?type=Primary", "", cookie)
+	if image.Code != http.StatusOK || image.Body.String() != "jpeg-data" {
+		t.Fatalf("image with failing session commits = %d %q", image.Code, image.Body.String())
+	}
+	if setCookie := image.Header().Values("Set-Cookie"); len(setCookie) != 0 {
+		t.Fatalf("image Set-Cookie = %v, want none", setCookie)
+	}
+	me := h.request(t, http.MethodGet, "/api/v1/auth/me", "", cookie)
+	if me.Code != http.StatusInternalServerError {
+		t.Fatalf("auth/me with failing session commits = %d, want 500 from the idle-expiry write", me.Code)
 	}
 }
 

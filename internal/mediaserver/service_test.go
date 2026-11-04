@@ -131,6 +131,9 @@ type fakeAdapter struct {
 	libraryCalls atomic.Int32
 	imageCalls   atomic.Int32
 	closeCalls   atomic.Int32
+	// Image calls block on their own channels so tests can hold the slots.
+	imagesStarted chan struct{}
+	releaseImages chan struct{}
 }
 
 type userListingAdapter struct {
@@ -198,9 +201,9 @@ func (a *fakeAdapter) ItemImage(
 	a.imageCalls.Add(1)
 	_, deadlineSeen := ctx.Deadline()
 	a.deadlineSeen.Store(deadlineSeen)
-	if a.started != nil {
-		a.started <- struct{}{}
-		<-a.release
+	if a.imagesStarted != nil {
+		a.imagesStarted <- struct{}{}
+		<-a.releaseImages
 	}
 	return a.image, a.imageErr
 }
@@ -589,33 +592,168 @@ func TestServiceItemImageMapsMissingAdapterCapabilityToNotFound(t *testing.T) {
 	}
 }
 
-func TestServiceItemImageUsesPerServerBulkhead(t *testing.T) {
+func TestServiceItemImageWaitsForAFreeSlot(t *testing.T) {
+	adapter, service, id := newBlockedImageService(t)
+	errs := make(chan error, maxConcurrentCallsPerServer+1)
+	fillImageSlots(t, service, id, adapter, errs)
+	go func() { errs <- itemImage(context.Background(), service, id) }()
+	waitForQueuedCalls(t, service, id, 1)
+	close(adapter.releaseImages)
+	for range maxConcurrentCallsPerServer + 1 {
+		if err := <-errs; err != nil {
+			t.Errorf("ItemImage: %v", err)
+		}
+	}
+	if got := adapter.imageCalls.Load(); got != maxConcurrentCallsPerServer+1 {
+		t.Fatalf("image calls = %d, want %d", got, maxConcurrentCallsPerServer+1)
+	}
+	assertLimiterIdle(t, service, id)
+}
+
+func TestServiceItemImageSaturatesWhenTheWaitEnds(t *testing.T) {
+	adapter, service, id := newBlockedImageService(t)
+	service.imageSlotWait = 10 * time.Millisecond
+	errs := make(chan error, maxConcurrentCallsPerServer)
+	fillImageSlots(t, service, id, adapter, errs)
+	assertSaturated(t, itemImage(context.Background(), service, id))
+	finishImageSlots(t, adapter, errs)
+	if got := adapter.imageCalls.Load(); got != maxConcurrentCallsPerServer {
+		t.Fatalf("image calls = %d, want %d", got, maxConcurrentCallsPerServer)
+	}
+	assertLimiterIdle(t, service, id)
+}
+
+func TestServiceItemImageSaturatesAtOnceWhenTheQueueIsFull(t *testing.T) {
+	adapter, service, id := newBlockedImageService(t)
+	service.imageSlotWait = time.Hour
+	errs := make(chan error, maxConcurrentCallsPerServer)
+	fillImageSlots(t, service, id, adapter, errs)
+	setQueuedCalls(service, id, maxQueuedCallsPerServer)
+	assertSaturated(t, itemImage(context.Background(), service, id))
+	setQueuedCalls(service, id, 0)
+	finishImageSlots(t, adapter, errs)
+	assertLimiterIdle(t, service, id)
+}
+
+func TestServiceItemImageWaitEndsWithTheCaller(t *testing.T) {
+	adapter, service, id := newBlockedImageService(t)
+	service.imageSlotWait = time.Hour
+	errs := make(chan error, maxConcurrentCallsPerServer)
+	fillImageSlots(t, service, id, adapter, errs)
+	ctx, cancel := context.WithCancel(context.Background())
+	waited := make(chan error, 1)
+	go func() { waited <- itemImage(ctx, service, id) }()
+	waitForQueuedCalls(t, service, id, 1)
+	cancel()
+	if err := <-waited; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled ItemImage error = %v, want context.Canceled", err)
+	}
+	expired, expire := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer expire()
+	assertSaturated(t, itemImage(expired, service, id))
+	finishImageSlots(t, adapter, errs)
+	assertLimiterIdle(t, service, id)
+}
+
+func TestServiceItemImageWaiterStopsWhenTheServerIsDeleted(t *testing.T) {
+	adapter, service, id := newBlockedImageService(t)
+	errs := make(chan error, maxConcurrentCallsPerServer)
+	fillImageSlots(t, service, id, adapter, errs)
+	waited := make(chan error, 1)
+	go func() { waited <- itemImage(context.Background(), service, id) }()
+	waitForQueuedCalls(t, service, id, 1)
+	if _, err := service.Delete(context.Background(), id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	finishImageSlots(t, adapter, errs)
+	if err := <-waited; !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("queued ItemImage after delete = %v, want ErrNotFound", err)
+	}
+	if got := adapter.imageCalls.Load(); got != maxConcurrentCallsPerServer {
+		t.Fatalf("image calls = %d, want %d", got, maxConcurrentCallsPerServer)
+	}
+	service.adapters.mu.Lock()
+	defer service.adapters.mu.Unlock()
+	if _, ok := service.adapters.limiters[id]; ok {
+		t.Fatal("deleted server limiter kept after its last call")
+	}
+}
+
+func newBlockedImageService(t *testing.T) (*fakeAdapter, *Service, string) {
+	t.Helper()
 	adapter := &fakeAdapter{image: core.ItemImage{Body: []byte("image"), ContentType: "image/jpeg"}}
 	store, service := newTestService(t, fakeFactory{adapter: adapter})
 	seedEncryptedRecord(t, store, service)
-	id := store.records[0].ID
-	started, release := make(chan struct{}, maxConcurrentCallsPerServer), make(chan struct{})
-	adapter.started, adapter.release = started, release
-	errs := make(chan error, maxConcurrentCallsPerServer)
+	adapter.imagesStarted = make(chan struct{}, maxConcurrentCallsPerServer+1)
+	adapter.releaseImages = make(chan struct{})
+	return adapter, service, store.records[0].ID
+}
+
+func itemImage(ctx context.Context, service *Service, id string) error {
+	_, err := service.ItemImage(ctx, id, testMediaItemID, core.ItemImagePrimary, 400, "")
+	return err
+}
+
+func fillImageSlots(t *testing.T, service *Service, id string, adapter *fakeAdapter, errs chan<- error) {
+	t.Helper()
 	for range maxConcurrentCallsPerServer {
-		go func() {
-			_, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
-			errs <- err
-		}()
+		go func() { errs <- itemImage(context.Background(), service, id) }()
 	}
 	for range maxConcurrentCallsPerServer {
-		<-started
+		<-adapter.imagesStarted
 	}
-	_, err := service.ItemImage(context.Background(), id, testMediaItemID, core.ItemImagePrimary, 400, "")
-	var mediaErr *core.MediaServerError
-	if !errors.As(err, &mediaErr) || mediaErr.Kind != core.MediaServerSaturated {
-		t.Fatalf("fifth ItemImage error = %#v, want saturation", err)
-	}
-	close(release)
+}
+
+func finishImageSlots(t *testing.T, adapter *fakeAdapter, errs <-chan error) {
+	t.Helper()
+	close(adapter.releaseImages)
 	for range maxConcurrentCallsPerServer {
 		if err := <-errs; err != nil {
 			t.Errorf("admitted ItemImage: %v", err)
 		}
+	}
+}
+
+func waitForQueuedCalls(t *testing.T, service *Service, id string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		service.adapters.mu.Lock()
+		limiter := service.adapters.limiters[id]
+		got := limiter != nil && limiter.queued == want
+		service.adapters.mu.Unlock()
+		if got {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("queued calls never reached %d", want)
+}
+
+func setQueuedCalls(service *Service, id string, queued int) {
+	service.adapters.mu.Lock()
+	defer service.adapters.mu.Unlock()
+	service.adapters.limiters[id].queued = queued
+}
+
+func assertSaturated(t *testing.T, err error) {
+	t.Helper()
+	var mediaErr *core.MediaServerError
+	if !errors.As(err, &mediaErr) || mediaErr.Kind != core.MediaServerSaturated || !mediaErr.Retryable {
+		t.Fatalf("ItemImage error = %#v, want retryable saturation", err)
+	}
+}
+
+func assertLimiterIdle(t *testing.T, service *Service, id string) {
+	t.Helper()
+	service.adapters.mu.Lock()
+	defer service.adapters.mu.Unlock()
+	limiter := service.adapters.limiters[id]
+	if limiter == nil || limiter.queued != 0 || limiter.references != 0 || len(limiter.slots) != 0 {
+		t.Fatalf("limiter = %+v, want idle", limiter)
+	}
+	if item := service.adapters.entries[id]; item == nil || item.entry.active != 0 {
+		t.Fatalf("adapter entry still pinned")
 	}
 }
 
